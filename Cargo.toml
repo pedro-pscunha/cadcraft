@@ -93,8 +93,8 @@ debug = 0
 # PDF backends for craft-pdf: pinned to the same reviewed craft-libs revision as craft-pdf itself
 # (Cargo ignores dependency-local patches).
 [patch.crates-io]
-# Local until the INSERT-owned ATTRIB xdata decode fix is upstream.
-acadrust = { path = "/Users/pedrocunha/repos/ext/acadrust" }
+# Arterra fork of acadrust 0.6.8 with the INSERT-owned ATTRIB xdata decode fix, until upstream.
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "f8594cfcbcb0b8afcf45ff3e29550e4fcd140cd6" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
