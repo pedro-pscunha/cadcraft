@@ -100,6 +100,14 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     (flags, refs)
 }
 
+/// Whether the writer can reproduce every point reference of a read DIMASSOC. Dimensions in
+/// block definitions are not in `Drawing::entity` and are not planned by the association writer.
+pub(crate) fn models_dimassoc(d: &Drawing, dimension: cadcraft_doc::Handle, flags: i64, points: usize) -> bool {
+    let Some(EntityKind::Dimension(dm)) = d.entity(dimension).map(|e| &e.kind) else { return false };
+    let (written_flags, refs) = std_assoc_refs(d, dm);
+    points != 0 && written_flags == flags && refs.len() == points
+}
+
 /// The single standard reference of a radial or diametric dimension: the circle or arc it
 /// measures, by its centre, with associativity flag 2. AutoCAD writes radial and diametric
 /// dimensions that way: the one reference names the geometry, whose radius or diameter the

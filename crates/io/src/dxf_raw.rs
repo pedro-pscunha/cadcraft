@@ -36,10 +36,34 @@ const MODELLED_KEYS: &[&str] = &[
     "ACAD_IMAGE_VARS",
 ];
 
-/// Extension dictionary entries not kept raw: dimension associativity (CADCraft reads and
-/// rewrites it), draw order and annotation scale contexts (written from their own models by the
-/// changes that model them; stale copies would contradict the drawing).
-const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_DIMASSOC", "ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
+/// Extension dictionary entries always written from their models. Dimension associativity is
+/// modelled only when the writer can reproduce every point reference (see [`modelled_xdict_entry`]).
+const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
+
+fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String>) -> bool {
+    let key = up(key);
+    MODELLED_XDICT_KEYS.contains(&key.as_str()) || (key == "ACAD_DIMASSOC" && modelled_assoc.contains(&norm(target)))
+}
+
+/// The dimension a DIMASSOC serves: its 330 after the subclass marker, not its dictionary owner.
+fn dimassoc_dimension<S: AsRef<str>>(tags: impl IntoIterator<Item = (i32, S)>) -> Option<Handle> {
+    tags.into_iter()
+        .skip_while(|(c, v)| *c != 100 || v.as_ref().trim() != "AcDbDimAssoc")
+        .find(|(c, _)| *c == 330)
+        .and_then(|(_, v)| handle(v.as_ref()))
+}
+
+/// Raw associations suppress modelled output even when the reader inferred some links. Like
+/// other foreign data they follow their owner's lifetime, not edits to its geometry: CADCraft
+/// cannot update these unsupported references safely, so it preserves them until the owner is gone.
+pub(crate) fn raw_dimassoc_dimensions(d: &Drawing) -> HashSet<Handle> {
+    d.foreign
+        .objects
+        .iter()
+        .filter(|o| o.kind == "DIMASSOC")
+        .filter_map(|o| dimassoc_dimension(o.tags.iter().map(|r| (r.code, r.value.as_str()))))
+        .collect()
+}
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
 /// (DSTYLE) on dimensions and dimension styles; elsewhere it is kept.
@@ -342,6 +366,16 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &entities, &objects);
+    let modelled_assoc: HashSet<String> = objects
+        .iter()
+        .filter(|(kind, _, _)| kind == "DIMASSOC")
+        .filter_map(|(_, _, t)| {
+            let dimension = dimassoc_dimension(t.iter().map(|t| (t.code, t.str())))?;
+            let flags = val(t, 90)?.trim().parse().ok()?;
+            let points = t.iter().take_while(|t| t.code < 1000).filter(|t| t.code == 1).count();
+            crate::dxf_write::models_dimassoc(d, dimension, flags, points).then(|| head(t).handle).flatten()
+        })
+        .collect();
     // Extension dictionaries of entities and records: owner → dictionary.
     let xdict_of = extension_dictionaries(&tables, &blocks, &entities);
     // Objects by handle: the first of each, and none that has an entity's handle.
@@ -361,7 +395,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
         !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
     };
-    let memo = retained_objects(&objects, &ents, &ids, &by_handle, root.as_deref(), &root_entries, &xdict_of);
+    let memo = retained_objects(&objects, &ents, &ids, &by_handle, &root_entries, &xdict_of, &modelled_assoc);
     let mut f = Foreign::default();
     let mut kept: HashSet<String> = HashSet::new();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
@@ -371,7 +405,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(h) = head(t).handle.and_then(|h| handle(&h)) else { continue };
         let mut tags: Vec<RawTag> = t.iter().map(raw).collect();
         if is_xdict(i) {
-            strip_entries(&mut tags);
+            strip_entries(&mut tags, &modelled_assoc);
         }
         if head(t).owner == root
             && let Some(key) = root_key(&h.hex())
@@ -502,10 +536,11 @@ fn retained_objects(
     entities: &HashMap<String, bool>,
     records: &HashMap<String, ForeignKey>,
     by_handle: &HashMap<String, usize>,
-    root: Option<&str>,
     root_entries: &[(String, String)],
     xdict_of: &HashMap<String, String>,
+    modelled_assoc: &HashSet<String>,
 ) -> HashMap<usize, bool> {
+    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
     let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
     let is_xdict = |index: usize| {
         let Some((_, _, tags)) = objects.get(index) else { return false };
@@ -514,7 +549,7 @@ fn retained_objects(
         !by_handle.contains_key(&owner) && xdict_of.get(&owner) == Some(&handle) && (entities.contains_key(&owner) || records.contains_key(&owner))
     };
     let modelled_entry = |tags: &[Tag], handle: &str| {
-        entries(tags).iter().any(|(key, entry_handle)| entry_handle == handle && MODELLED_XDICT_KEYS.contains(&up(key).as_str()))
+        entries(tags).iter().any(|(key, entry_handle)| entry_handle == handle && modelled_xdict_entry(key, entry_handle, modelled_assoc))
     };
     let mut retained = HashMap::new();
     for index in 0..objects.len() {
@@ -534,7 +569,7 @@ fn retained_objects(
             if by_handle.get(&handle) != Some(&current) {
                 break false;
             }
-            if root == Some(owner.as_str()) {
+            if root.as_deref() == Some(owner.as_str()) {
                 break root_key(&handle).is_some_and(|key| !modelled_key(key));
             }
             if let Some(&parent) = by_handle.get(&owner) {
@@ -545,7 +580,7 @@ fn retained_objects(
                 continue;
             }
             if is_xdict(current) {
-                break entries(tags).iter().any(|(key, _)| !MODELLED_XDICT_KEYS.contains(&up(key).as_str()));
+                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
             }
             break entities.get(&owner) == Some(&true);
         };
@@ -634,11 +669,11 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
 }
 
 /// Drop a dictionary's modelled entries (key and handle) from its groups.
-fn strip_entries(tags: &mut Vec<RawTag>) {
+fn strip_entries(tags: &mut Vec<RawTag>, modelled_assoc: &HashSet<String>) {
     let mut out = Vec::with_capacity(tags.len());
     let mut i = 0;
     while let Some(t) = tags.get(i) {
-        if t.code == 3 && MODELLED_XDICT_KEYS.contains(&up(&t.value).as_str()) && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360)) {
+        if t.code == 3 && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360) && modelled_xdict_entry(&t.value, &n.value, modelled_assoc)) {
             i += 2;
             continue;
         }

@@ -868,8 +868,12 @@ fn table_block_definitions(d: &Drawing, every: &[&Entity], w: &mut W, cx: &mut C
 }
 
 fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut W, cx: &mut Ctx) {
+    let raw = crate::dxf_raw::raw_dimassoc_dimensions(d);
     for st in all_spaces {
         for e in st.iter() {
+            if raw.contains(&e.handle) {
+                continue;
+            }
             if let EntityKind::Dimension(dm) = &e.kind {
                 let (flags, refs) = std_assoc_refs(d, dm);
                 if !refs.is_empty() {
