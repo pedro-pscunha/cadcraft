@@ -152,8 +152,7 @@ mod native {
     /// ends of attribute and vertex lists belong to their insert or polyline, not to a block.
     fn unlisted_entities(doc: &acadrust::CadDocument) -> usize {
         use acadrust::entities::EntityType;
-        let listed: std::collections::HashSet<acadrust::Handle> =
-            doc.block_records.iter().flat_map(|b| b.entity_handles.iter().copied()).collect();
+        let listed: std::collections::HashSet<acadrust::Handle> = doc.block_records.iter().flat_map(|b| b.entity_handles.iter().copied()).collect();
         doc.entities()
             .filter(|e| !matches!(e, EntityType::AttributeEntity(_) | EntityType::Seqend(_) | EntityType::Block(_) | EntityType::BlockEnd(_)))
             .filter(|e| !listed.contains(&e.common().handle))
