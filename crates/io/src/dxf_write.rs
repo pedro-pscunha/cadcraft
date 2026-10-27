@@ -121,7 +121,18 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
     let mut tags = tags_for(d, Version::R2000, dwg);
     bridge_markers(&mut tags);
+    bridge_code_page(&mut tags);
     cadcraft_dxf::ascii_to_ansi_1252(&cadcraft_dxf::write_ascii(&tags))
+}
+
+/// The bridge DXF declares the code page its text is in. A DXF save keeps the code page the
+/// drawing was read with (`ANSI_1251`…), but the bridge encodes Windows-1252: declared as the
+/// other page, `é` would be read back as another letter.
+fn bridge_code_page(tags: &mut [Tag]) {
+    let Some(at) = tags.iter().position(|t| t.code == 9 && t.str().trim().eq_ignore_ascii_case("$DWGCODEPAGE")) else { return };
+    if let Some(t) = tags.get_mut(at + 1).filter(|t| t.code == 3) {
+        *t = Tag::s(3, "ANSI_1252");
+    }
 }
 
 /// Subclass markers the DWG bridge knows by another spelling (it matches them exactly):

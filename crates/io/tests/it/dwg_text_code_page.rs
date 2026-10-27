@@ -33,3 +33,23 @@ fn accented_text_is_stored_as_characters_in_dwg() {
     want.sort();
     assert_eq!(texts, want);
 }
+
+/// A drawing read with another code page (ANSI_1251) keeps it for a DXF save, but the DWG bridge
+/// encodes Windows-1252 and must declare it: declared as 1251, `é` came back as `й` and Cyrillic
+/// stayed `\U+` escapes.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn text_of_a_drawing_with_another_code_page_survives_dwg() {
+    use std::io::Cursor;
+
+    use acadrust::entities::EntityType;
+
+    let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DWGCODEPAGE\n3\nANSI_1251\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
+               0\nTEXT\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n1\n1\nCaf\\U+00E9 \\U+041F\\U+0440\\U+0438\n100\nAcDbText\n\
+               0\nENDSEC\n0\nEOF\n";
+    let d = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let stored = acadrust::DwgReader::from_stream(Cursor::new(dwg)).read().unwrap();
+    let texts: Vec<String> = stored.entities().filter_map(|e| if let EntityType::Text(t) = e { Some(t.value.clone()) } else { None }).collect();
+    assert_eq!(texts, ["Café При"]);
+}
