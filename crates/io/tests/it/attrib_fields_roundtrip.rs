@@ -1,167 +1,11 @@
-//! An INSERT's attributes have fresh handles on save, but keep their field dictionaries,
-//! reactors and other applications' xdata by their role within that INSERT.
+//! An INSERT's attributes keep their own identities through edits, preserving field dictionaries,
+//! reactors and other applications' xdata on the right instance.
 
 use cadcraft_doc::EntityKind;
 use cadcraft_dxf::{Tag, records, sections};
 
 fn field_dxf() -> String {
-    let groups: &[(i32, &str)] = &[
-        (0, "SECTION"),
-        (2, "HEADER"),
-        (9, "$ACADVER"),
-        (1, "AC1032"),
-        (0, "ENDSEC"),
-        (0, "SECTION"),
-        (2, "CLASSES"),
-        (0, "CLASS"),
-        (1, "FIELD"),
-        (2, "AcDbField"),
-        (3, "ObjectDBX Classes"),
-        (90, "0"),
-        (91, "2"),
-        (280, "0"),
-        (281, "0"),
-        (0, "ENDSEC"),
-        (0, "SECTION"),
-        (2, "BLOCKS"),
-        (0, "BLOCK"),
-        (5, "20"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbBlockBegin"),
-        (2, "LABEL"),
-        (70, "2"),
-        (10, "0"),
-        (20, "0"),
-        (3, "LABEL"),
-        (0, "ATTDEF"),
-        (5, "21"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbText"),
-        (10, "0"),
-        (20, "0"),
-        (40, "1"),
-        (1, "default"),
-        (100, "AcDbAttributeDefinition"),
-        (3, "Length"),
-        (2, "LENGTH"),
-        (70, "0"),
-        (0, "ENDBLK"),
-        (5, "22"),
-        (0, "ENDSEC"),
-        (0, "SECTION"),
-        (2, "ENTITIES"),
-        (0, "LINE"),
-        (5, "30"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbLine"),
-        (10, "0"),
-        (20, "0"),
-        (11, "10"),
-        (21, "0"),
-        (0, "INSERT"),
-        (5, "31"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbBlockReference"),
-        (66, "1"),
-        (2, "LABEL"),
-        (10, "0"),
-        (20, "0"),
-        // A preceding attribute with the same tag must not steal the live one's extras.
-        (0, "ATTRIB"),
-        (5, "32"),
-        (330, "31"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbText"),
-        (10, "0"),
-        (20, "0"),
-        (40, "1"),
-        (1, "plain"),
-        (100, "AcDbAttribute"),
-        (2, "LENGTH"),
-        (70, "0"),
-        (0, "ATTRIB"),
-        (5, "33"),
-        (102, "{ACAD_REACTORS"),
-        (330, "43"),
-        (102, "}"),
-        (102, "{ACAD_XDICTIONARY"),
-        (360, "40"),
-        (102, "}"),
-        (330, "31"),
-        (100, "AcDbEntity"),
-        (8, "0"),
-        (100, "AcDbText"),
-        (10, "0"),
-        (20, "0"),
-        (40, "1"),
-        (1, "live"),
-        (100, "AcDbAttribute"),
-        (2, "length"),
-        (70, "0"),
-        (1001, "FOREIGN_FIELDS"),
-        (1000, "attribute data"),
-        (1005, "33"),
-        (0, "SEQEND"),
-        (5, "34"),
-        (330, "31"),
-        (0, "ENDSEC"),
-        (0, "SECTION"),
-        (2, "OBJECTS"),
-        (0, "DICTIONARY"),
-        (5, "C"),
-        (330, "0"),
-        (100, "AcDbDictionary"),
-        (0, "DICTIONARY"),
-        (5, "40"),
-        (330, "33"),
-        (100, "AcDbDictionary"),
-        (280, "1"),
-        (3, "ACAD_FIELD"),
-        (360, "41"),
-        (0, "DICTIONARY"),
-        (5, "41"),
-        (330, "40"),
-        (100, "AcDbDictionary"),
-        (280, "1"),
-        (3, "TEXT"),
-        (360, "42"),
-        (0, "FIELD"),
-        (5, "42"),
-        (330, "41"),
-        (100, "AcDbField"),
-        (1, "_text"),
-        (2, "c=%<\\_FldIdx 0>%m / i=Y%"),
-        (90, "1"),
-        (360, "43"),
-        (97, "0"),
-        (91, "0"),
-        (92, "0"),
-        (94, "0"),
-        (95, "0"),
-        (93, "0"),
-        (0, "FIELD"),
-        (5, "43"),
-        (330, "42"),
-        (100, "AcDbField"),
-        (1, "AcObjProp"),
-        (2, "\\AcObjProp Object(%<\\_ObjIdx 0>%).Length"),
-        (90, "0"),
-        (97, "1"),
-        (331, "30"),
-        (91, "0"),
-        (92, "0"),
-        (94, "0"),
-        (95, "0"),
-        (93, "0"),
-        (0, "ENDSEC"),
-        (0, "EOF"),
-    ];
-    groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+    include_str!("../data/attrib_fields.dxf").to_string()
 }
 
 fn section(dxf: &str, name: &str) -> Vec<(String, Vec<Tag>)> {
@@ -177,9 +21,10 @@ fn val(tags: &[Tag], code: i32) -> String {
 fn assert_fields(dxf: &str) {
     let ents = section(dxf, "ENTITIES");
     let find_attr = |text: &str| &ents.iter().find(|(k, t)| k == "ATTRIB" && val(t, 1) == text).unwrap().1;
-    let plain = find_attr("plain");
+    if let Some((_, plain)) = ents.iter().find(|(k, t)| k == "ATTRIB" && val(t, 1) == "plain") {
+        assert!(!plain.iter().any(|t| t.code == 102 && t.str() == "{ACAD_XDICTIONARY"), "plain attribute stole the live attribute's dictionary");
+    }
     let attr = find_attr("live");
-    assert!(!plain.iter().any(|t| t.code == 102 && t.str() == "{ACAD_XDICTIONARY"));
     assert!(attr.iter().any(|t| t.code == 102 && t.str() == "{ACAD_XDICTIONARY"), "ATTRIB lost its extension dictionary");
     let objs = section(dxf, "OBJECTS");
     let object = |h: String| &objs.iter().find(|(_, t)| val(t, 5) == h).unwrap().1;
@@ -223,6 +68,39 @@ fn attrib_fields_survive_dwg_save() {
     let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
     let dxf = cadcraft_dwg::dwg_to_dxf(&dwg).unwrap();
     assert_fields(&String::from_utf8_lossy(&dxf));
+}
+
+#[test]
+fn deleting_preceding_duplicate_keeps_live_attrib_fields() {
+    edited_attrib_fields(|i| i.attribs.retain(|a| a.text.value != "plain"));
+}
+
+#[test]
+fn reordering_duplicate_attribs_keeps_fields_on_their_owner() {
+    edited_attrib_fields(|i| i.attribs.swap(0, 1));
+}
+
+#[test]
+fn renaming_attrib_keeps_its_fields() {
+    edited_attrib_fields(|i| {
+        for a in &mut i.attribs {
+            a.tag = "RENAMED".into();
+        }
+    });
+}
+
+fn edited_attrib_fields(edit: impl FnOnce(&mut cadcraft_doc::Insert)) {
+    let mut d = cadcraft_io::read_dxf(field_dxf().as_bytes()).unwrap();
+    let h = d.model.iter().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle;
+    d.model.modify(h, |e| {
+        if let EntityKind::Insert(i) = &mut e.kind {
+            edit(i);
+        }
+    });
+    let saved = cadcraft_io::write_dxf(&d);
+    assert_fields(&saved);
+    let back = cadcraft_io::read_dxf(saved.as_bytes()).unwrap();
+    assert_fields(&cadcraft_io::write_dxf(&back));
 }
 
 #[test]

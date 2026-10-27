@@ -205,7 +205,7 @@ fn modelled_key(key: &str) -> bool {
 }
 
 /// The roles of a file's handles (see [`ForeignKey`]): table records and tables by type and
-/// name, blocks by name, attributes by INSERT handle, tag and occurrence, the named object
+/// name, blocks by name, attributes by their persistent handle, the named object
 /// dictionary, its entries, and their entries.
 fn identities(tables: &Recs, blocks: &Recs, entities: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
     let mut out: HashMap<String, ForeignKey> = HashMap::new();
@@ -231,16 +231,10 @@ fn identities(tables: &Recs, blocks: &Recs, entities: &Recs, objects: &Recs) -> 
             _ => {}
         }
     }
-    // ATTRIBs live inside INSERTs in the model and get new handles on save. Their owner's
-    // handle stays the same; count repeated tags independently within each INSERT.
-    let mut occurrences: HashMap<(String, String), usize> = HashMap::new();
+    // ATTRIBs live inside INSERTs, but keep their own identity through tag and order edits.
     for (_, _, t) in blocks.iter().chain(entities).filter(|(k, _, _)| k == "ATTRIB") {
-        let h = head(t);
-        let Some(owner) = h.owner else { continue };
-        let name = up(&val(t, 2).unwrap_or_default());
-        let n = occurrences.entry((owner.clone(), name.clone())).or_default();
-        put(h.handle, ("ATTRIB".into(), format!("{owner}/{name}/{n}")));
-        *n = n.saturating_add(1);
+        let Some(h) = head(t).handle else { continue };
+        put(Some(h.clone()), ("ATTRIB".into(), h));
     }
     let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) else { return out };
     put(head(root).handle, ("NOD".into(), String::new()));

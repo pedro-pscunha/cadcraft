@@ -13,8 +13,8 @@ use crate::{Handle, RawTag};
 /// What a file handle stood for when the object it named is one CADCraft writes itself (under a
 /// new handle on save): a kind and an upper-case name, e.g. `("LAYER", "WALLS")`,
 /// `("TABLE", "LAYER")`, `("BLOCK", "DOOR")`, `("NOD", "")` for the named object dictionary and
-/// `("NOD", "ACAD_GROUP")` for one of its entries. An attribute's role is `("ATTRIB", "31/TAG/0")`:
-/// its INSERT's handle, upper-case tag and zero-based occurrence of that tag in the INSERT.
+/// `("NOD", "ACAD_GROUP")` for one of its entries. An attribute's role is `("ATTRIB", "33")`:
+/// its persistent instance handle, independent of its INSERT, tag and order.
 pub type ForeignKey = (String, String);
 
 /// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
@@ -69,7 +69,7 @@ pub struct Foreign {
     /// Extras of entities, by handle.
     pub entities: BTreeMap<Handle, ForeignExtra>,
     /// Extras of table records (`("LAYER", "WALLS")`), tables (`("TABLE", "LAYER")`) and blocks
-    /// (`("BLOCK", "DOOR")`), and attributes (`("ATTRIB", "31/TAG/0")`), by [`ForeignKey`].
+    /// (`("BLOCK", "DOOR")`), and attributes (`("ATTRIB", "33")`), by [`ForeignKey`].
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,

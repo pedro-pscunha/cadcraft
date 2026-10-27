@@ -330,6 +330,7 @@ mod tests {
     fn right_justified_attdef_is_left_of_alignment_point() {
         let text = text(HAlign::Right, VAlign::Baseline);
         let a = crate::Attrib {
+            handle: None,
             tag: "HELLO".into(),
             text,
             invisible: false,

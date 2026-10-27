@@ -301,7 +301,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
         }
         if !i.attribs.is_empty() {
             for a in &i.attribs {
-                let ah = w.h();
+                let ah = a.handle.map_or_else(|| w.h(), |h| h.hex());
                 w.s(0, "ATTRIB");
                 w.s(5, ah);
                 w.s(330, e.handle.hex());

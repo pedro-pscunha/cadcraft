@@ -102,18 +102,16 @@ impl Interactive for AttdispM {
 /// Properties set on single attributes (layer, colour, …) go back to the definitions', as in AutoCAD.
 pub(super) fn synced(blk: &Block, defs: &[&Attrib], ins: &Insert) -> Vec<Attrib> {
     let m = ins.transform(blk.base.xy());
+    let mut remaining: Vec<&Attrib> = ins.attribs.iter().collect();
     defs.iter()
         .map(|ad| {
             let mut k = EntityKind::Text(ad.text.clone());
             k.transform(&m);
             let mut t = if let EntityKind::Text(t) = k { t } else { ad.text.clone() };
-            t.value = ins
-                .attribs
-                .iter()
-                .find(|a| a.tag.eq_ignore_ascii_case(&ad.tag))
-                .map(|a| a.text.value.clone())
-                .unwrap_or_else(|| ad.text.value.clone());
+            let previous = remaining.iter().position(|a| a.tag.eq_ignore_ascii_case(&ad.tag)).map(|i| remaining.remove(i));
+            t.value = previous.map(|a| a.text.value.clone()).unwrap_or_else(|| ad.text.value.clone());
             Attrib {
+                handle: previous.and_then(|a| a.handle),
                 tag: ad.tag.clone(),
                 text: t,
                 invisible: ad.invisible,

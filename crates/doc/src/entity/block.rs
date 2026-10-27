@@ -5,6 +5,11 @@ use super::{Color, Deserialize, EntityKind, Mat3, Serialize, Vec2, Vec3};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attrib {
+    /// This attribute instance's persistent handle. Unlike its tag or position in an INSERT,
+    /// it survives rename, reorder and synchronization and owns the instance's foreign data.
+    /// New attributes and definitions have none until a file writer assigns one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<crate::Handle>,
     pub tag: String,
     pub text: Text,
     #[serde(default)]

@@ -536,6 +536,7 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
                 text.value.clone_from(&m.read_as);
             }
             attribs.push(Attrib {
+                handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
                 tag: own.s(2).unwrap_or_default(),
                 text,
                 invisible: own.i(70).unwrap_or(0) & 1 != 0,

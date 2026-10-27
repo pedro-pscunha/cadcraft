@@ -36,6 +36,7 @@ fn session() -> Session {
         columns: None,
     };
     let def = Attrib {
+        handle: None,
         tag: "LABEL".into(),
         text,
         invisible: false,
