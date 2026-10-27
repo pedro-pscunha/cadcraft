@@ -6,7 +6,7 @@
 //! named object dictionary, a table record, a block, an entity); references to objects that are
 //! gone are dropped. Commands don't edit it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Handle, RawTag};
 
@@ -99,5 +99,98 @@ impl Foreign {
     /// The entities the data store has records for (their 320 handles).
     pub fn data_store_entities(&self) -> std::collections::BTreeSet<Handle> {
         self.data_store.iter().filter(|t| t.code == 320).filter_map(|t| Handle::parse_hex(t.value.trim())).collect()
+    }
+}
+
+/// An object's owner, excluding the handles in its reactor and extension-dictionary groups.
+fn owner(tags: &[RawTag]) -> Option<Handle> {
+    let mut grouped = false;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        if t.code == 102 {
+            grouped = t.value.trim().starts_with('{');
+        } else if t.code == 330 && !grouped {
+            return Handle::parse_hex(&t.value);
+        }
+    }
+    None
+}
+
+fn remap_tags(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
+    for t in tags {
+        if matches!(t.code, 5 | 105 | 320..=369 | 390..=399 | 480..=481 | 1005)
+            && let Some(new) = Handle::parse_hex(&t.value).and_then(|h| map.get(&h))
+        {
+            t.value = new.hex();
+        }
+    }
+}
+
+fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
+    extra.xdict = extra.xdict.map(|h| map.get(&h).copied().unwrap_or(h));
+    for h in &mut extra.reactors {
+        *h = map.get(h).copied().unwrap_or(*h);
+    }
+    remap_tags(&mut extra.xdata, map);
+    remap_tags(&mut extra.props, map);
+}
+
+impl crate::Drawing {
+    /// Give a copied entity and its attributes independent foreign data. Owned object graphs
+    /// are cloned; internal references follow the copy, while references to other geometry stay.
+    pub fn copy_foreign_data(&mut self, source: Handle, copy: &mut crate::Entity) {
+        let mut roots = BTreeMap::from([(source, copy.handle)]);
+        if let crate::EntityKind::Insert(insert) = &mut copy.kind {
+            for attribute in &mut insert.attribs {
+                if let Some(old) = attribute.handle {
+                    let new = self.new_handle();
+                    attribute.handle = Some(new);
+                    roots.insert(old, new);
+                }
+            }
+        }
+        let mut children: BTreeMap<Handle, Vec<Handle>> = BTreeMap::new();
+        for object in &self.foreign.objects {
+            if let Some(parent) = owner(&object.tags) {
+                children.entry(parent).or_default().push(object.handle);
+            }
+        }
+        let mut owned = BTreeSet::new();
+        let mut pending: Vec<_> = roots.keys().map(|h| (*h, 0usize)).collect();
+        while let Some((parent, depth)) = pending.pop() {
+            if depth >= 64 {
+                continue;
+            }
+            for child in children.get(&parent).into_iter().flatten() {
+                if owned.insert(*child) {
+                    pending.push((*child, depth + 1));
+                }
+            }
+        }
+        let mut map = roots.clone();
+        for old in &owned {
+            map.insert(*old, self.new_handle());
+        }
+        remap_tags(&mut copy.common.xdata, &map);
+        let original = self.foreign.clone();
+        let foreign = std::sync::Arc::make_mut(&mut self.foreign);
+        for object in original.objects.iter().filter(|o| owned.contains(&o.handle)) {
+            let Some(handle) = map.get(&object.handle).copied() else { continue };
+            let mut cloned = ForeignObject { handle, ..object.clone() };
+            remap_tags(&mut cloned.tags, &map);
+            foreign.objects.push(cloned);
+        }
+        for (old, new) in roots {
+            if let Some(mut extra) = original.entities.get(&old).cloned() {
+                remap_extra(&mut extra, &map);
+                foreign.entities.insert(new, extra);
+            }
+            if let Some(mut extra) = original.records.get(&("ATTRIB".into(), old.hex())).cloned() {
+                remap_extra(&mut extra, &map);
+                foreign.records.insert(("ATTRIB".into(), new.hex()), extra);
+            }
+            if original.targets.get(&old).is_some_and(|role| role.0 == "ATTRIB") {
+                foreign.targets.insert(new, ("ATTRIB".into(), new.hex()));
+            }
+        }
     }
 }

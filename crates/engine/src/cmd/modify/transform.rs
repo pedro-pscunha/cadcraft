@@ -11,6 +11,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             let Some(e) = d.entity(*h).map(|e| (**e).clone()) else { continue };
             let nh = d.new_handle();
             let mut ne = Entity { handle: nh, ..e };
+            d.copy_foreign_data(*h, &mut ne);
             ne.kind.transform(m);
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);

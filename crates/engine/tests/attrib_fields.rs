@@ -33,6 +33,57 @@ fn assert_live_fields(s: &Session) {
     assert_eq!(back.foreign.objects.iter().filter(|o| o.kind == "FIELD").count(), 2);
 }
 
+fn assert_copy_graphs(text: &str, copies: usize) {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let secs = sections(&tags);
+    let ents = records(&secs.iter().find(|s| s.name == "ENTITIES").unwrap().tags);
+    let attrs: Vec<_> = ents.iter().filter(|(k, t)| k == "ATTRIB" && val(t, 1) == "live").map(|(_, t)| t).collect();
+    assert_eq!(attrs.len(), copies);
+    let handles: std::collections::HashSet<_> = attrs.iter().map(|a| val(a, 5)).collect();
+    assert_eq!(handles.len(), copies, "each copied attribute needs its own identity");
+    let dictionaries: std::collections::HashSet<_> = attrs.iter().map(|a| val(a, 360)).collect();
+    assert_eq!(dictionaries.len(), copies, "owners must never share an extension dictionary");
+    let objs = records(&secs.iter().find(|s| s.name == "OBJECTS").unwrap().tags);
+    assert_eq!(objs.iter().filter(|(k, _)| k == "FIELD").count(), copies * 2);
+    let object = |h: String| &objs.iter().find(|(_, t)| val(t, 5) == h).unwrap().1;
+    for a in attrs {
+        assert_eq!(val(a, 1005), val(a, 5), "copied xdata points to its own attribute");
+        let dict = object(val(a, 360));
+        assert_eq!(val(dict, 330), val(a, 5));
+        let field_dict = object(val(dict, 360));
+        assert_eq!(val(field_dict, 330), val(dict, 5));
+        let parent = object(val(field_dict, 360));
+        assert_eq!(val(parent, 330), val(field_dict, 5));
+        let child = object(val(parent, 360));
+        assert_eq!(val(child, 330), val(parent, 5));
+        assert_eq!(val(child, 331), "30", "external geometry is not cloned with the attribute");
+        assert!(a.iter().any(|t| t.code == 330 && t.str() == val(child, 5)), "reactor follows the cloned FIELD");
+    }
+}
+
+#[test]
+fn copied_insert_owns_a_distinct_attribute_field_graph() {
+    let mut s = session();
+    s.execute("copy", &json!({"handles":["31"], "delta":[20,0]})).unwrap();
+    assert_copy_graphs(&cadcraft_io::write_dxf(s.doc().unwrap()), 2);
+}
+
+#[test]
+fn copied_attribute_fields_survive_erasing_original_and_reopening() {
+    let mut s = session();
+    s.execute("copy", &json!({"handles":["31"], "delta":[20,0]})).unwrap();
+    s.execute("erase", &json!({"handles":["31"]})).unwrap();
+    let saved = cadcraft_io::write_dxf(s.doc().unwrap());
+    let tags = cadcraft_dxf::parse(saved.as_bytes()).unwrap();
+    assert!(!tags.iter().any(|t| t.code == 5 && t.str() == "33"), "the copy must not reuse the original attribute's handle");
+    assert_copy_graphs(&saved, 1);
+    let d = cadcraft_io::read_dxf(saved.as_bytes()).unwrap();
+    assert_copy_graphs(&cadcraft_io::write_dxf(&d), 1);
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let d = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+    assert_copy_graphs(&cadcraft_io::write_dxf(&d), 1);
+}
+
 #[test]
 fn attsync_keeps_live_attribute_fields() {
     let mut s = session();
