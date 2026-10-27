@@ -104,6 +104,27 @@ mod native {
         }
         let mut notes = read_notes(&outcome.stats);
         let mut doc = outcome.document;
+        // The DXF writer writes the entities each block record lists. When a damaged record (the
+        // model space's, say) loses its list, the entities it owned are read but never written,
+        // and the skipped-records note doesn't count them (acadrust 0.6.8).
+        // A model space record whose name is damaged is written as an ordinary block: the
+        // drawing opens with an empty model space.
+        let has_model = doc.block_records.iter().any(|b| b.name.eq_ignore_ascii_case("*Model_Space"));
+        if !has_model && notes.is_empty() {
+            notes.push(
+                "DWG: the model space record couldn't be read and its entities were left out of model space; \
+                 saving over the original file would lose them"
+                    .to_string(),
+            );
+        }
+        let unlisted = unlisted_entities(&doc);
+        if unlisted > 0 && notes.is_empty() {
+            let (s, were, them) = if unlisted == 1 { ("y", "was", "it") } else { ("ies", "were", "them") };
+            notes.push(format!(
+                "DWG: {unlisted} entit{s} that no block of the file lists couldn't be read and {were} left out; \
+                 saving over the original file would lose {them}"
+            ));
+        }
         current_style_names(&mut doc);
         table_merges(&mut doc);
         table_style_rows(&mut doc, false);
@@ -125,6 +146,18 @@ mod native {
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
         Ok((add_header_vars(out.buf, &doc.header), notes))
+    }
+
+    /// Entities that no block record lists, so the DXF writer leaves them out. Attributes and the
+    /// ends of attribute and vertex lists belong to their insert or polyline, not to a block.
+    fn unlisted_entities(doc: &acadrust::CadDocument) -> usize {
+        use acadrust::entities::EntityType;
+        let listed: std::collections::HashSet<acadrust::Handle> =
+            doc.block_records.iter().flat_map(|b| b.entity_handles.iter().copied()).collect();
+        doc.entities()
+            .filter(|e| !matches!(e, EntityType::AttributeEntity(_) | EntityType::Seqend(_) | EntityType::Block(_) | EntityType::BlockEnd(_)))
+            .filter(|e| !listed.contains(&e.common().handle))
+            .count()
     }
 
     /// Most record types named in the skipped-records note.
