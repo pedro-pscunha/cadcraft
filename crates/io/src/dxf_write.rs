@@ -115,11 +115,12 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
-/// version's (MULTILEADER from 2007).
-pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> String {
+/// version's (MULTILEADER from 2007). Its text is in the code page it declares (ANSI_1252), so
+/// the bridge stores `São` as `São`, not as the escape `S\U+00E3o`.
+pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
     let mut tags = tags_for(d, Version::R2000, dwg);
     bridge_markers(&mut tags);
-    cadcraft_dxf::write_ascii(&tags)
+    cadcraft_dxf::ascii_to_ansi_1252(&cadcraft_dxf::write_ascii(&tags))
 }
 
 /// Subclass markers the DWG bridge knows by another spelling (it matches them exactly):
