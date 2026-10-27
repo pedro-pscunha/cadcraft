@@ -4,7 +4,8 @@
 //! It is kept as the file's own DXF groups, with the file's handles. The file reader fills it and
 //! the writer puts it back, pointing references at whatever now has the referenced role (the
 //! named object dictionary, a table record, a block, an entity); references to objects that are
-//! gone are dropped. Commands don't edit it.
+//! gone are dropped. Copies clone owned graphs; explicit dimension association commands retire
+//! raw associations they replace. Other commands leave the kept data alone.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -115,6 +116,64 @@ fn owner(tags: &[RawTag]) -> Option<Handle> {
     None
 }
 
+fn owned_objects(objects: &[ForeignObject], roots: impl IntoIterator<Item = Handle>) -> BTreeSet<Handle> {
+    let mut children: BTreeMap<Handle, Vec<Handle>> = BTreeMap::new();
+    for object in objects {
+        if let Some(parent) = owner(&object.tags) {
+            children.entry(parent).or_default().push(object.handle);
+        }
+    }
+    let mut owned = BTreeSet::new();
+    let mut pending: Vec<_> = roots.into_iter().map(|h| (h, 0usize)).collect();
+    while let Some((parent, depth)) = pending.pop() {
+        if depth >= 64 {
+            continue;
+        }
+        for child in children.get(&parent).into_iter().flatten() {
+            if owned.insert(*child) {
+                pending.push((*child, depth + 1));
+            }
+        }
+    }
+    owned
+}
+
+fn strip_edges(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeSet<Handle>) {
+    let gone = |t: &RawTag| Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h));
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(t) = tags.get(i) {
+        if dictionary && t.code == 3 && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360) && gone(n)) {
+            i += 2;
+            continue;
+        }
+        if t.code == 102 && t.value.trim() == "{ACAD_REACTORS" {
+            let start = i;
+            i += 1;
+            let mut reactors = Vec::new();
+            while let Some(r) = tags.get(i) {
+                if r.code == 102 {
+                    break;
+                }
+                if !gone(r) {
+                    reactors.push(r.clone());
+                }
+                i += 1;
+            }
+            if !reactors.is_empty() {
+                out.extend(tags.get(start).cloned());
+                out.extend(reactors);
+                out.extend(tags.get(i).cloned());
+            }
+            i += usize::from(tags.get(i).is_some());
+            continue;
+        }
+        out.push(t.clone());
+        i += 1;
+    }
+    *tags = out;
+}
+
 fn remap_tags(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
     for t in tags {
         if matches!(t.code, 5 | 105 | 320..=369 | 390..=399 | 480..=481 | 1005)
@@ -135,6 +194,59 @@ fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
 }
 
 impl crate::Drawing {
+    /// Retire a dimension's raw association after an explicit association command. Remove the
+    /// owned graph and its dictionary/reactor edges, but keep unrelated extension-dictionary data.
+    /// Returns whether a raw association was present.
+    pub fn retire_raw_dimassoc(&mut self, dimension: Handle) -> bool {
+        let roots: BTreeSet<_> = self
+            .foreign
+            .objects
+            .iter()
+            .filter(|o| o.kind == "DIMASSOC")
+            .filter_map(|o| {
+                let target = o
+                    .tags
+                    .iter()
+                    .skip_while(|t| t.code != 100 || t.value.trim() != "AcDbDimAssoc")
+                    .find(|t| t.code == 330)
+                    .and_then(|t| Handle::parse_hex(&t.value));
+                (target == Some(dimension)).then_some(o.handle)
+            })
+            .collect();
+        if roots.is_empty() {
+            return false;
+        }
+        let mut removed = owned_objects(&self.foreign.objects, roots.iter().copied());
+        removed.extend(roots);
+        let dictionary = self.foreign.entities.get(&dimension).and_then(|x| x.xdict);
+        let foreign = std::sync::Arc::make_mut(&mut self.foreign);
+        for object in &mut foreign.objects {
+            strip_edges(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+        }
+        if let Some(dictionary) = dictionary {
+            let empty = foreign
+                .objects
+                .iter()
+                .find(|o| o.handle == dictionary)
+                .is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
+            let has_other_children = foreign.objects.iter().any(|o| owner(&o.tags) == Some(dictionary) && !removed.contains(&o.handle));
+            if empty && !has_other_children {
+                removed.insert(dictionary);
+            }
+        }
+        foreign.objects.retain(|o| !removed.contains(&o.handle));
+        for object in &mut foreign.objects {
+            strip_edges(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+        }
+        for extra in foreign.entities.values_mut().chain(foreign.records.values_mut()) {
+            extra.xdict = extra.xdict.filter(|h| !removed.contains(h));
+            extra.reactors.retain(|h| !removed.contains(h));
+        }
+        foreign.entities.retain(|_, extra| !extra.is_empty());
+        foreign.records.retain(|_, extra| !extra.is_empty());
+        true
+    }
+
     /// Give a copied entity and its attributes independent foreign data. Owned object graphs
     /// are cloned; internal references follow the copy, while references to other geometry stay.
     pub fn copy_foreign_data(&mut self, source: Handle, copy: &mut crate::Entity) {
@@ -148,24 +260,7 @@ impl crate::Drawing {
                 }
             }
         }
-        let mut children: BTreeMap<Handle, Vec<Handle>> = BTreeMap::new();
-        for object in &self.foreign.objects {
-            if let Some(parent) = owner(&object.tags) {
-                children.entry(parent).or_default().push(object.handle);
-            }
-        }
-        let mut owned = BTreeSet::new();
-        let mut pending: Vec<_> = roots.keys().map(|h| (*h, 0usize)).collect();
-        while let Some((parent, depth)) = pending.pop() {
-            if depth >= 64 {
-                continue;
-            }
-            for child in children.get(&parent).into_iter().flatten() {
-                if owned.insert(*child) {
-                    pending.push((*child, depth + 1));
-                }
-            }
-        }
+        let owned = owned_objects(&self.foreign.objects, roots.keys().copied());
         let mut map = roots.clone();
         for old in &owned {
             map.insert(*old, self.new_handle());

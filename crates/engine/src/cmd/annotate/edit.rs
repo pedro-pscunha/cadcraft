@@ -75,6 +75,7 @@ pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let mut n = 0;
     let d = s.doc_mut()?;
     for (h, a) in plan {
+        d.retire_raw_dimassoc(h);
         points += a.len();
         n += usize::from(!a.is_empty());
         let _ = d.modify_entity(h, |e| {
@@ -91,14 +92,16 @@ pub(super) fn run_disassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     let mut n = 0;
     for h in &hs {
+        let mut changed = d.retire_raw_dimassoc(*h);
         let _ = d.modify_entity(*h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind
                 && !dm.assoc.is_empty()
             {
                 dm.assoc.clear();
-                n += 1;
+                changed = true;
             }
         });
+        n += usize::from(changed);
     }
     Ok(json!({ "disassociated": n, "message": format!("{n} disassociated.") }))
 }
