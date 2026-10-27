@@ -263,20 +263,26 @@ fn unescape_unicode(s: &str) -> String {
 /// for a character the code page can't hold (acadrust 0.6.8, as the DXF Reference describes the
 /// escape) would otherwise keep `S\U+00E3o` as the text.
 pub fn ascii_to_ansi_1252(text: &str) -> Vec<u8> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = Vec::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     let mut buf = [0u8; 4];
-    while let Some(&c) = chars.get(i) {
-        if let Some(ch) = escape_at(&chars, i).and_then(char::from_u32) {
-            let (bytes, _, unmappable) = encoding_rs::WINDOWS_1252.encode(ch.encode_utf8(&mut buf));
-            if !unmappable && bytes.len() == 1 {
-                out.extend_from_slice(&bytes);
+    while let Some(&b) = bytes.get(i) {
+        // `\U+XXXX` is ASCII: read it from the bytes, without a copy of the text as chars.
+        let unit = (b == b'\\' && bytes.get(i + 1..i + 3) == Some(b"U+"))
+            .then(|| bytes.get(i + 3..i + 7))
+            .flatten()
+            .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|h| u32::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok());
+        if let Some(ch) = unit.and_then(char::from_u32) {
+            let (enc, _, unmappable) = encoding_rs::WINDOWS_1252.encode(ch.encode_utf8(&mut buf));
+            if !unmappable && enc.len() == 1 {
+                out.extend_from_slice(&enc);
                 i += 7;
                 continue;
             }
         }
-        out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+        out.push(b);
         i += 1;
     }
     out
