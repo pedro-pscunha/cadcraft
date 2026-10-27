@@ -365,9 +365,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         .filter(|(kind, _, _)| kind == "DIMASSOC")
         .filter_map(|(_, _, t)| {
             let dimension = dimassoc_dimension(t.iter().map(|t| (t.code, t.str())))?;
-            let flags = val(t, 90)?.trim().parse().ok()?;
-            let points = t.iter().take_while(|t| t.code < 1000).filter(|t| t.code == 1).count();
-            crate::dxf_write::models_dimassoc(d, dimension, flags, points).then(|| head(t).handle).flatten()
+            crate::dxf_write::models_dimassoc(d, dimension, t).then(|| head(t).handle).flatten()
         })
         .collect();
     // Extension dictionaries of entities and records: owner → dictionary.

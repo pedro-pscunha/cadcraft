@@ -704,28 +704,7 @@ fn write_associative_objects(w: &mut W, cx: &Ctx) {
         w.s(5, a.handle.clone());
         w.group("ACAD_REACTORS", 330, &[&a.xdict]);
         w.s(330, a.xdict.clone());
-        w.s(100, "AcDbDimAssoc");
-        w.s(330, dh);
-        w.i(90, a.flags);
-        w.i(70, 0);
-        w.i(71, 0);
-        for r in &a.refs {
-            w.s(1, "AcDbOsnapPointRef");
-            w.i(72, r.osnap);
-            w.s(331, r.main.hex());
-            w.i(73, if r.segment > 0 { 2 } else { 0 });
-            w.i(91, r.segment);
-            w.s(301, "");
-            w.f(40, r.param);
-            w.p(10, r.point);
-            if let Some(o) = r.other {
-                w.s(332, o.hex());
-                w.i(74, 0);
-                w.i(92, 0);
-                w.s(302, "");
-            }
-            w.i(75, 0);
-        }
+        w.t.extend(super::assoc::dimassoc_tags(*dim, a.flags, &a.refs));
     }
 }
 

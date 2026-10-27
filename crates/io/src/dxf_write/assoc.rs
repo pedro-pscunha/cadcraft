@@ -1,5 +1,6 @@
 use super::ctx::OsnapRef;
-use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, EntityKind, LwPolyline};
+use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, EntityKind, Handle, LwPolyline};
+use cadcraft_dxf::{Kind, Tag, kind_of};
 
 /// Whether a DIMASSOC point reference to `k` names a point of it without naming a segment:
 /// true for objects made of one curve. Polylines are referenced by segment ([`polyline_vertex_ref`]);
@@ -100,12 +101,67 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     (flags, refs)
 }
 
-/// Whether the writer can reproduce every point reference of a read DIMASSOC. Dimensions in
-/// block definitions are not in `Drawing::entity` and are not planned by the association writer.
-pub(crate) fn models_dimassoc(d: &Drawing, dimension: cadcraft_doc::Handle, flags: i64, points: usize) -> bool {
+/// The exact subclass payload the writer emits. Classification uses the same serialization so
+/// flags, snap kinds, handle paths, subentity markers and parameters cannot silently diverge.
+pub(super) fn dimassoc_tags(dimension: Handle, flags: i64, refs: &[OsnapRef]) -> Vec<Tag> {
+    let mut tags = vec![Tag::s(100, "AcDbDimAssoc"), Tag::s(330, dimension.hex()), Tag::i(90, flags), Tag::i(70, 0), Tag::i(71, 0)];
+    for r in refs {
+        tags.extend([
+            Tag::s(1, "AcDbOsnapPointRef"),
+            Tag::i(72, r.osnap),
+            Tag::s(331, r.main.hex()),
+            Tag::i(73, if r.segment > 0 { 2 } else { 0 }),
+            Tag::i(91, r.segment),
+            Tag::s(301, ""),
+            Tag::f(40, r.param),
+            Tag::f(10, r.point.x),
+            Tag::f(20, r.point.y),
+            Tag::f(30, r.point.z),
+        ]);
+        if let Some(other) = r.other {
+            tags.extend([Tag::s(332, other.hex()), Tag::i(74, 0), Tag::i(92, 0), Tag::s(302, "")]);
+        }
+        tags.push(Tag::i(75, 0));
+    }
+    tags
+}
+
+fn same_tag(a: &Tag, b: &Tag) -> bool {
+    if a.code != b.code {
+        return false;
+    }
+    let kind = kind_of(a.code);
+    let (a, b) = (a.str(), b.str());
+    match kind {
+        Kind::Real => a.trim().parse::<f64>().ok().zip(b.trim().parse::<f64>().ok()).is_some_and(|(a, b)| a.is_finite() && a == b),
+        Kind::Int16 | Kind::Int32 | Kind::Int64 | Kind::Bool => {
+            a.trim().parse::<i64>().ok().zip(b.trim().parse::<i64>().ok()).is_some_and(|(a, b)| a == b)
+        }
+        Kind::Hex => Handle::parse_hex(&a).zip(Handle::parse_hex(&b)).is_some_and(|(a, b)| a == b),
+        Kind::Str => a == b,
+    }
+}
+
+/// Whether the complete DIMASSOC can be written unchanged from the model. This deliberately
+/// keeps unfamiliar or omitted groups raw rather than guessing equivalent defaults. Block
+/// dimensions are not in `Drawing::entity` and are not planned by the association writer.
+pub(crate) fn models_dimassoc(d: &Drawing, dimension: Handle, source: &[Tag]) -> bool {
     let Some(EntityKind::Dimension(dm)) = d.entity(dimension).map(|e| &e.kind) else { return false };
-    let (written_flags, refs) = std_assoc_refs(d, dm);
-    points != 0 && written_flags == flags && refs.len() == points
+    let (flags, refs) = std_assoc_refs(d, dm);
+    let Some(start) = source.iter().position(|t| t.code == 100 && t.str() == "AcDbDimAssoc") else { return false };
+    let header = source.get(..start).unwrap_or(&[]);
+    let dictionary = header.iter().rev().find(|t| t.code == 330).and_then(|t| Handle::parse_hex(&t.str()));
+    if header.iter().any(|t| match t.code {
+        5 => false,
+        330 => Handle::parse_hex(&t.str()) != dictionary,
+        102 => !matches!(t.str().as_str(), "{ACAD_REACTORS" | "}"),
+        _ => true,
+    }) {
+        return false;
+    }
+    let expected = dimassoc_tags(dimension, flags, &refs);
+    let actual = source.get(start..).unwrap_or(&[]);
+    !refs.is_empty() && actual.len() == expected.len() && actual.iter().zip(&expected).all(|(a, b)| same_tag(a, b))
 }
 
 /// The single standard reference of a radial or diametric dimension: the circle or arc it

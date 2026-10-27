@@ -115,7 +115,7 @@ fn association_dxf(in_block: bool, osnaps: [i64; 2]) -> String {
         (70, "0"),
         (71, "0"),
     ]);
-    for osnap in osnaps {
+    for (slot, osnap) in osnaps.into_iter().enumerate() {
         groups.extend([
             (1, "AcDbOsnapPointRef".into()),
             (72, osnap.to_string()),
@@ -123,8 +123,8 @@ fn association_dxf(in_block: bool, osnaps: [i64; 2]) -> String {
             (73, "0".into()),
             (91, "0".into()),
             (301, "".into()),
-            (40, "0".into()),
-            (10, "0".into()),
+            (40, if osnap == 1 { "1" } else { "0" }.into()),
+            (10, if slot == 1 { "10" } else { "0" }.into()),
             (20, "0".into()),
             (30, "0".into()),
             (75, "0".into()),
@@ -204,6 +204,59 @@ fn unsupported_dimassoc_survives_dwg_save() {
     for osnaps in [[8, 8], [13, 8]] {
         roundtrip(false, osnaps, true);
     }
+}
+
+fn payload(dxf: &str) -> Vec<(i32, String)> {
+    let objs = section(dxf, "OBJECTS");
+    let assoc = &objs.iter().find(|(k, _)| k == "DIMASSOC").unwrap().1;
+    assoc.iter().skip_while(|t| t.code != 100 || t.str() != "AcDbDimAssoc").map(|t| (t.code, t.str())).collect()
+}
+
+fn assert_raw_semantics(source: &str, dwg: bool) {
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(d.foreign.objects.iter().any(|o| o.kind == "DIMASSOC"), "equal flags/count do not prove the association is reproducible");
+    let saved = cadcraft_io::write_dxf(&d);
+    assert_eq!(payload(&saved), payload(source));
+    if dwg {
+        let bytes = cadcraft_io::write(&d, "x.dwg").unwrap();
+        let back = cadcraft_dwg::dwg_to_dxf(&bytes).unwrap();
+        assert_eq!(payload(&String::from_utf8_lossy(&back)), payload(source));
+    }
+}
+
+#[test]
+fn trans_space_dimassoc_keeps_its_original_semantics() {
+    let source = association_dxf(false, [13, 1])
+        .replace("100\nAcDbDimension\n", "67\n1\n100\nAcDbDimension\n")
+        .replace("90\n3\n70\n0\n71\n0\n", "90\n3\n70\n1\n71\n0\n");
+    assert_raw_semantics(&source, true);
+}
+
+#[test]
+fn rotated_dimassoc_keeps_its_original_semantics() {
+    let source = association_dxf(false, [13, 1]).replace("90\n3\n70\n0\n71\n0\n", "90\n3\n70\n0\n71\n1\n");
+    assert_raw_semantics(&source, true);
+}
+
+#[test]
+fn quadrant_dimassoc_is_not_rewritten_as_nearest() {
+    let source = association_dxf(false, [5, 5]).replace(
+        "0\nLINE\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n11\n10\n21\n0\n",
+        "0\nCIRCLE\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbCircle\n10\n0\n20\n0\n40\n10\n",
+    );
+    assert_raw_semantics(&source, true);
+}
+
+#[test]
+fn dimassoc_keeps_parameters_the_inferred_snap_does_not_reproduce() {
+    let source = association_dxf(false, [13, 1]).replace("40\n0\n10\n0\n", "40\n0.25\n10\n0\n");
+    assert_raw_semantics(&source, true);
+}
+
+#[test]
+fn dimassoc_keeps_handle_paths_and_subentity_markers() {
+    let source = association_dxf(false, [13, 1]).replace("331\n30\n73\n0\n91\n0\n301\n\n", "331\n30\n331\n30\n73\n1\n91\n1\n301\nnested-path\n");
+    assert_raw_semantics(&source, false);
 }
 
 #[test]
