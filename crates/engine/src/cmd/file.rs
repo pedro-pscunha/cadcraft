@@ -545,6 +545,9 @@ pub fn not_saved_as(d: &Drawing, version: Version) -> std::collections::BTreeMap
             if MODELER_TYPES.iter().any(|t| u.dxf_type.eq_ignore_ascii_case(t)) && stored.contains(&e.handle) {
                 continue;
             }
+            if cadcraft_doc::foreign::DWG_KEEPS_UNKNOWN.iter().any(|t| u.dxf_type.trim().eq_ignore_ascii_case(t)) {
+                continue;
+            }
             let n = out.entry(u.dxf_type.clone()).or_insert(0);
             *n = n.saturating_add(1);
         }

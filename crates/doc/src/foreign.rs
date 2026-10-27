@@ -16,6 +16,12 @@ use crate::{Handle, RawTag};
 /// `("NOD", "ACAD_GROUP")` for one of its entries.
 pub type ForeignKey = (String, String);
 
+/// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
+/// the DWG bridge reads their DXF groups into entities of its own and writes them, and a round
+/// trip through DWG keeps them (`crates/io/tests/it/unknown_entity_block.rs`). Other unmodelled types are
+/// left out of a DWG save, and the save says so.
+pub const DWG_KEEPS_UNKNOWN: &[&str] = &["ARC_DIMENSION", "OLE2FRAME"];
+
 /// A non-graphical object of a type or role CADCraft does not model.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForeignObject {

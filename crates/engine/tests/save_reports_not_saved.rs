@@ -15,7 +15,8 @@ fn unknown(kind: &str) -> EntityKind {
 fn save_lists_the_entities_the_file_does_not_keep() {
     set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     let mut d = Drawing::new_imperial();
-    for k in ["MLINE", "3DSOLID", "MLINE"] {
+    // ARC_DIMENSION and OLE2FRAME are kept as read, and the DWG writer keeps them too: not listed.
+    for k in ["MLINE", "3DSOLID", "MLINE", "ARC_DIMENSION", "OLE2FRAME"] {
         d.add(&Space::Model, Common::default(), unknown(k)).unwrap();
     }
     let mut b = Block::new("Part");

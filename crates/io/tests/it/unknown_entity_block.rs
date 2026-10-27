@@ -124,3 +124,68 @@ fn arc_dimension_keeps_its_dimension_block_through_dwg() {
     assert_eq!(dims.len(), 1, "{dims:?}");
     assert!(dims.iter().all(|n| n.starts_with("*D") && blocks.contains(n)), "{dims:?} not in {blocks:?}");
 }
+
+/// An OLE2FRAME (an embedded object, such as an Excel table) with `n` bytes of data, in 127-byte
+/// 310 groups as AutoCAD writes them.
+fn ole_dxf(data: &[u8]) -> String {
+    let hex: String = data.iter().map(|b| format!("{b:02X}")).collect();
+    let mut groups: Vec<(i32, String)> = [
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "OLE2FRAME"),
+        (5, "40"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbOle2Frame"),
+        (70, "2"),
+        (3, "Microsoft Excel Worksheet"),
+        (10, "0"),
+        (20, "50"),
+        (30, "0"),
+        (11, "80"),
+        (21, "0"),
+        (31, "0"),
+        (71, "2"),
+        (72, "0"),
+    ]
+    .iter()
+    .map(|(c, v)| (*c, v.to_string()))
+    .collect();
+    groups.push((90, data.len().to_string()));
+    for chunk in hex.as_bytes().chunks(254) {
+        groups.push((310, String::from_utf8_lossy(chunk).into_owned()));
+    }
+    groups.extend([(1, "OLE"), (0, "ENDSEC"), (0, "EOF")].iter().map(|(c, v)| (*c, v.to_string())));
+    groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+}
+
+/// The 310 data of the first OLE2FRAME of an ASCII DXF.
+fn ole_data(dxf: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
+    let mut inside = false;
+    let mut out = String::new();
+    for pair in lines.chunks(2) {
+        let [code, value] = pair else { break };
+        if *code == "0" {
+            if inside {
+                break;
+            }
+            inside = *value == "OLE2FRAME";
+        } else if inside && *code == "310" {
+            out.push_str(value);
+        }
+    }
+    out
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn ole_frame_keeps_its_data_through_dwg() {
+    let data: Vec<u8> = (0..700u32).map(|i| (i * 37 % 251) as u8).collect();
+    let source = ole_dxf(&data);
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let back = String::from_utf8_lossy(&cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).into_owned();
+    assert_eq!(ole_data(&back), ole_data(&source));
+    assert_eq!(ole_data(&source).len(), 1400);
+}
