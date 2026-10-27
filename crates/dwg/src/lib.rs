@@ -110,7 +110,7 @@ mod native {
         // A model space record whose name is damaged is written as an ordinary block: the
         // drawing opens with an empty model space.
         let has_model = doc.block_records.iter().any(|b| b.name.eq_ignore_ascii_case("*Model_Space"));
-        if !has_model && notes.is_empty() {
+        if !has_model {
             notes.push(
                 "DWG: the model space record couldn't be read and its entities were left out of model space; \
                  saving over the original file would lose them"
@@ -118,7 +118,7 @@ mod native {
             );
         }
         let unlisted = unlisted_entities(&doc);
-        if unlisted > 0 && notes.is_empty() {
+        if unlisted > 0 {
             let (s, were, them) = if unlisted == 1 { ("y", "was", "it") } else { ("ies", "were", "them") };
             notes.push(format!(
                 "DWG: {unlisted} entit{s} that no block of the file lists couldn't be read and {were} left out; \
