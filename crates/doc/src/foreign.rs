@@ -13,7 +13,8 @@ use crate::{Handle, RawTag};
 /// What a file handle stood for when the object it named is one CADCraft writes itself (under a
 /// new handle on save): a kind and an upper-case name, e.g. `("LAYER", "WALLS")`,
 /// `("TABLE", "LAYER")`, `("BLOCK", "DOOR")`, `("NOD", "")` for the named object dictionary and
-/// `("NOD", "ACAD_GROUP")` for one of its entries.
+/// `("NOD", "ACAD_GROUP")` for one of its entries. An attribute's role is `("ATTRIB", "31/TAG/0")`:
+/// its INSERT's handle, upper-case tag and zero-based occurrence of that tag in the INSERT.
 pub type ForeignKey = (String, String);
 
 /// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
@@ -33,15 +34,15 @@ pub struct ForeignObject {
     pub tags: Vec<RawTag>,
 }
 
-/// What an entity, table record or block carries beyond what CADCraft models.
+/// What an entity, table record, block or attribute carries beyond what CADCraft models.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForeignExtra {
     /// Its extension dictionary (one of [`Foreign::objects`]).
     pub xdict: Option<Handle>,
     /// Objects of [`Foreign::objects`] that react to it (persistent reactors).
     pub reactors: Vec<Handle>,
-    /// Other applications' extended data of a table record or block: groups from `1001` on. An
-    /// entity's is part of the entity ([`crate::Common::xdata`]), so it follows the entity's copies.
+    /// Other applications' extended data of a table record, block or attribute: groups from
+    /// `1001` on. An entity's is part of the entity ([`crate::Common::xdata`]), so it follows its copies.
     pub xdata: Vec<RawTag>,
     /// The colour book colour (group 430) and the true colour (group 420) it was read with: it is
     /// written back while the colour is unchanged.
@@ -68,7 +69,7 @@ pub struct Foreign {
     /// Extras of entities, by handle.
     pub entities: BTreeMap<Handle, ForeignExtra>,
     /// Extras of table records (`("LAYER", "WALLS")`), tables (`("TABLE", "LAYER")`) and blocks
-    /// (`("BLOCK", "DOOR")`), by [`ForeignKey`].
+    /// (`("BLOCK", "DOOR")`), and attributes (`("ATTRIB", "31/TAG/0")`), by [`ForeignKey`].
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,

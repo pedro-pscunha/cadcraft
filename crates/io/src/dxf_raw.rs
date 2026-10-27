@@ -3,7 +3,7 @@
 //! dictionaries, persistent reactors, colour book colours and other unmodelled entity properties.
 //!
 //! Reading ([`read`]) keeps the data with the file's handles in [`Drawing::foreign`], plus the
-//! role of every handle it refers to that CADCraft writes itself (a table record, a block, the
+//! role of every handle it refers to that CADCraft writes itself (a table record, a block, an attribute, the
 //! named object dictionary…). Writing ([`finish`]) runs over the finished tag list: it places the
 //! entities of types CADCraft doesn't model among the written ones (the entity writer leaves them
 //! out), puts the data back on the records that still exist and points each reference at what now
@@ -181,8 +181,9 @@ fn modelled_key(key: &str) -> bool {
 }
 
 /// The roles of a file's handles (see [`ForeignKey`]): table records and tables by type and
-/// name, blocks by name, the named object dictionary, its entries, and their entries.
-fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
+/// name, blocks by name, attributes by INSERT handle, tag and occurrence, the named object
+/// dictionary, its entries, and their entries.
+fn identities(tables: &Recs, blocks: &Recs, entities: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
     let mut out: HashMap<String, ForeignKey> = HashMap::new();
     let mut put = |h: Option<String>, k: ForeignKey| {
         if let Some(h) = h {
@@ -205,6 +206,17 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             "ENDBLK" => put(head(t).handle, ("ENDBLK".into(), block.clone())),
             _ => {}
         }
+    }
+    // ATTRIBs live inside INSERTs in the model and get new handles on save. Their owner's
+    // handle stays the same; count repeated tags independently within each INSERT.
+    let mut occurrences: HashMap<(String, String), usize> = HashMap::new();
+    for (_, _, t) in blocks.iter().chain(entities).filter(|(k, _, _)| k == "ATTRIB") {
+        let h = head(t);
+        let Some(owner) = h.owner else { continue };
+        let name = up(&val(t, 2).unwrap_or_default());
+        let n = occurrences.entry((owner.clone(), name.clone())).or_default();
+        put(h.handle, ("ATTRIB".into(), format!("{owner}/{name}/{n}")));
+        *n = n.saturating_add(1);
     }
     let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) else { return out };
     put(head(root).handle, ("NOD".into(), String::new()));
@@ -329,7 +341,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let (classes, tables, blocks, entities, objects) = (get("CLASSES"), get("TABLES"), get("BLOCKS"), get("ENTITIES"), get("OBJECTS"));
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
-    let ids = identities(&tables, &blocks, &objects);
+    let ids = identities(&tables, &blocks, &entities, &objects);
     // Extension dictionaries of entities and records: owner → dictionary.
     let xdict_of = extension_dictionaries(&tables, &blocks, &entities);
     // Objects by handle: the first of each, and none that has an entity's handle.
@@ -369,7 +381,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         kept.insert(h.hex());
         f.objects.push(ForeignObject { handle: h, kind: kind.clone(), tags });
     }
-    // Extras of entities, tables, table records and blocks.
+    // Extras of entities, tables, table records, blocks and attributes.
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
     for (kind, _, t) in blocks.iter().chain(&entities) {
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
@@ -389,9 +401,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
-    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")) {
+    for (kind, _, t) in tables.iter().chain(blocks.iter().chain(&entities).filter(|(k, _, _)| matches!(k.as_str(), "BLOCK" | "ATTRIB"))) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
-        let x = extra(kind, t, kind == "BLOCK", false, &kept);
+        let x = extra(kind, t, matches!(kind.as_str(), "BLOCK" | "ATTRIB"), false, &kept);
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
         }
@@ -813,15 +825,11 @@ impl Map<'_> {
 }
 
 /// The extras of a written record, if the drawing keeps any for it.
-fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag], block: &str) -> Option<Cow<'a, ForeignExtra>> {
+fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag], ids: &HashMap<String, ForeignKey>) -> Option<Cow<'a, ForeignExtra>> {
     match (rec.sec.as_str(), rec.kind.as_str()) {
-        ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".to_string(), block.to_string())).map(Cow::Borrowed),
+        ("TABLES", _) | ("BLOCKS", "BLOCK") | ("ENTITIES" | "BLOCKS", "ATTRIB") => f.records.get(ids.get(&head(body).handle?)?).map(Cow::Borrowed),
         ("BLOCKS", "ENDBLK") => None,
         ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, handle(&head(body).handle?)?),
-        ("TABLES", kind) => {
-            let name = up(&val(body, 2).unwrap_or_default());
-            f.records.get(&(kind.to_string(), name)).map(Cow::Borrowed)
-        }
         _ => None,
     }
 }
@@ -860,10 +868,11 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let by_sec = |name: &str| -> Recs {
         recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
     };
-    let (tables, blocks, objects) = (by_sec("TABLES"), by_sec("BLOCKS"), by_sec("OBJECTS"));
+    let (tables, blocks, entities, objects) = (by_sec("TABLES"), by_sec("BLOCKS"), by_sec("ENTITIES"), by_sec("OBJECTS"));
+    let ids = identities(&tables, &blocks, &entities, &objects);
     let mut roles: HashMap<ForeignKey, String> = HashMap::new();
-    for (h, k) in identities(&tables, &blocks, &objects) {
-        roles.entry(k).or_insert(h);
+    for (h, k) in &ids {
+        roles.entry(k.clone()).or_insert_with(|| h.clone());
     }
     let mut written: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
     // The written CLASSES as numbered (500 for the first): the writer's own, then the kept ones it
@@ -897,13 +906,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let root_keys: HashSet<String> =
         objects.iter().find(|(_, s, _)| Some(*s) == root).map(|(_, _, t)| entries(t).into_iter().map(|(k, _)| up(&k)).collect()).unwrap_or_default();
     // Extension dictionaries that go on a written record (one without its own).
-    let mut block = String::new();
     let mut attached: HashSet<String> = HashSet::new();
     for r in &recs {
-        if r.kind == "BLOCK" {
-            block = up(&val(body(r), 2).unwrap_or_default());
-        }
-        if let Some(x) = extra_for(f, &xd, r, body(r), &block)
+        if let Some(x) = extra_for(f, &xd, r, body(r), &ids)
             && let Some(xd) = x.xdict
             && head(body(r)).xdict.is_none()
         {
@@ -965,12 +970,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let entities: HashSet<String> = all_entities(d).map(|e| e.handle.hex()).filter(|h| written.contains(h)).collect();
     let map = Map { f, alive, raw: objs.keys().cloned().collect(), roles, entities };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().map(|o| o.tags.len() + 1).sum::<usize>());
-    let mut block = String::new();
     for r in &recs {
         let b = body(r);
-        if r.kind == "BLOCK" {
-            block = up(&val(b, 2).unwrap_or_default());
-        }
         if r.kind == "ENDSEC" && r.sec == "CLASSES" {
             for c in f.classes.iter().filter(|c| c.iter().find(|t| t.code == 1).is_some_and(|n| !class_names.contains(&up(&n.value)))) {
                 out.push(Tag::s(0, "CLASS"));
@@ -999,7 +1000,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             record(&map, &ur, ub, x.as_deref(), true, false, &mut out);
         }
         out.extend(tags.get(r.start).cloned());
-        let x = extra_for(f, &xd, r, b, &block);
+        let x = extra_for(f, &xd, r, b, &ids);
         if x.is_none() && Some(r.start) != root {
             out.extend(b.iter().cloned());
             continue;
