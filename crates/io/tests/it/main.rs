@@ -64,6 +64,7 @@ mod table_cellstyle_roundtrip;
 mod tables_objects_roundtrip;
 mod text_left_justify;
 mod tolerance_roundtrip;
+mod unknown_entity_block;
 mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;

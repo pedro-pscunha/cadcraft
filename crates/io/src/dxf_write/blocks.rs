@@ -27,6 +27,9 @@ pub(super) fn dim_block_plan(d: &Drawing) -> DimBlockPlan {
         }
         EntityKind::MLeader(m) => used.extend(m.block.as_ref().map(|b| b.block.to_ascii_uppercase())),
         EntityKind::Dimension(dm) if dims => used.extend(dm.block.as_ref().map(|n| n.to_ascii_uppercase())),
+        // An entity of a type CADCraft doesn't model is written back as read, so the block its
+        // group 2 names (an ARC_DIMENSION's `*D` block) stays as read too.
+        EntityKind::Unknown(u) => used.extend(u.tags.iter().filter(|t| t.code == 2).map(|t| t.value.trim().to_ascii_uppercase())),
         _ => {}
     };
     for e in spaces.iter().flat_map(|s| s.iter()) {
