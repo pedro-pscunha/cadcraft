@@ -135,6 +135,16 @@ fn changed_inferred_attachments_invalidate_raw_association_at_save_boundary() {
 }
 
 #[test]
+fn model_only_dimensions_keep_partial_reassociation() {
+    let mut s = Session::new();
+    s.execute("line", &json!({"points":[[1000,1000],[1010,1000]]})).unwrap();
+    let dim = s.execute("dimlinear", &json!({"p1":[1000,1000],"p2":[1020,1000],"at":[1005,1005]})).unwrap()["handle"].as_str().unwrap().to_string();
+    let result = s.execute("dimreassociate", &json!({"handles":[dim]})).unwrap();
+    assert_eq!(result["associated"], 1, "{result}");
+    assert_eq!(result["points"], 1, "the supported partial attachment must be restored");
+}
+
+#[test]
 fn audit_attachment_drop_retires_the_raw_association() {
     let (mut s, _, line, raw) = session_with_snaps([13, 8]);
     s.doc_mut().unwrap().remove_entity(Handle::parse_hex(&line).unwrap());

@@ -75,7 +75,7 @@ pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
                     DimKind::Radius | DimKind::Diameter => &["defpt", "p15"],
                     DimKind::Ordinate { .. } => &["p13"],
                 };
-                if points.iter().all(|point| links.iter().any(|link| link.point == *point)) {
+                if !d.has_raw_dimassoc(*h) || points.iter().all(|point| links.iter().any(|link| link.point == *point)) {
                     plan.push((*h, links));
                 }
             }
