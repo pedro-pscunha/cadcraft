@@ -351,7 +351,9 @@ impl Session {
         }
         // A command outside undo that changed the drawing (UNDO, which swapped it for an earlier
         // one) records no undo step, as in `execute`.
-        if find_command(&run.id).is_some_and(|c| !c.undoable) && self.state().is_ok_and(|st| !Arc::ptr_eq(&run.before, &st.doc)) {
+        if Self::restores_snapshot(&run.id)
+            || find_command(&run.id).is_some_and(|c| !c.undoable) && self.state().is_ok_and(|st| !Arc::ptr_eq(&run.before, &st.doc))
+        {
             self.pending_window = None;
             return;
         }

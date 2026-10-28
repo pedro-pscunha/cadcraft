@@ -1,6 +1,10 @@
 use super::{Arc, EngineError, Result, Session, Snapshot, Value, cmd, find_command};
 
 impl Session {
+    pub(super) fn restores_snapshot(id: &str) -> bool {
+        matches!(id, "u" | "undo" | "redo" | "mredo")
+    }
+
     // ---------------- programmatic execution ----------------
 
     /// Run a command with JSON parameters (no dialogs). Records undo when the drawing changes.
@@ -37,8 +41,11 @@ impl Session {
             (Some(m), Ok(_)) => Err(EngineError::Other(m)),
             (_, r) => r,
         };
+        // Restoring a snapshot is not an edit of its targets. Never run mutation passes or
+        // produce new edit warnings from the reverse delta between undo/redo snapshots.
+        let restoring = Self::restores_snapshot(spec.id);
         // Opening or closing the Block Editor swaps the whole drawing: nothing in it changed.
-        if self.state().is_ok_and(|s| s.block_edit.is_some()) == editing {
+        if !restoring && self.state().is_ok_and(|s| s.block_edit.is_some()) == editing {
             self.after_command(before.as_ref().map(|b| &b.0), before.as_ref().map(|b| b.2), spec.undoable && result.is_ok());
         }
         let result = match (result, &before) {
@@ -46,7 +53,8 @@ impl Session {
             (r, _) => r,
         };
         let result = result.map(|mut value| {
-            if let Some((before, _, uid)) = &before
+            if !restoring
+                && let Some((before, _, uid)) = &before
                 && let Ok(st) = self.state()
                 && st.uid == *uid
                 && let Some(note) = crate::assoc::unupdated_note(&st.doc, Some(before))

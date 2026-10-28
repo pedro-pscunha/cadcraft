@@ -350,6 +350,40 @@ fn incomplete_reassociation_leaves_raw_and_model_unchanged() {
 }
 
 #[test]
+fn undo_and_redo_restore_raw_warning_and_document_snapshots_exactly() {
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |bytes, name| cadcraft_io::read(bytes, name).map_err(|e| e.to_string()),
+        write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    for (undo, redo) in [("u", "redo"), ("undo", "mredo")] {
+        let (mut s, dim, line, _) = session();
+        let h = Handle::parse_hex(&dim).unwrap();
+        let original = s.state().unwrap().doc.clone();
+        assert!(!s.state().unwrap().is_dirty());
+        s.execute("move", &json!({"handles":[line],"delta":[2,0]})).unwrap();
+        let edited = s.state().unwrap().doc.clone();
+        assert!(edited.raw_dimassoc_unupdated(h));
+        let notes = s.log.iter().filter(|line| line.contains("associative dimensions keep")).count();
+        assert_eq!(notes, 1);
+        let result = s.execute(undo, &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&s.state().unwrap().doc, &original), "{undo} reprocessed a restored snapshot");
+        assert!(!s.state().unwrap().is_dirty());
+        assert!(!s.doc().unwrap().raw_dimassoc_unupdated(h));
+        assert!(result.get("warnings").is_none(), "undo emitted a new edit warning");
+        let bytes = s.execute("document.bytes", &json!({"format":"dxf"})).unwrap();
+        assert!(bytes.get("warnings").is_none(), "undo must restore the clean save-warning state");
+        let result = s.execute(redo, &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&s.state().unwrap().doc, &edited), "{redo} reprocessed a restored snapshot");
+        assert!(s.doc().unwrap().raw_dimassoc_unupdated(h));
+        assert!(result.get("warnings").is_none(), "redo emitted a new edit warning");
+        assert_eq!(s.log.iter().filter(|line| line.contains("associative dimensions keep")).count(), notes);
+        let bytes = s.execute("document.bytes", &json!({"format":"dxf"})).unwrap();
+        assert!(bytes["warnings"].to_string().contains(&dim), "redo must restore the pending save-warning state");
+    }
+}
+
+#[test]
 fn an_over_budget_object_path_keeps_all_dependencies_for_change_detection() {
     let (mut s, dim, _, _) = session_with_shape([13, 1], true);
     let mut extra = Vec::new();
