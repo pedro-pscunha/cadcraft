@@ -17,7 +17,7 @@ enum TargetKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RawDimAssoc {
-    owner_type: String,
+    owner_type: Option<String>,
     inferred: Vec<DimAssoc>,
     references: Vec<point::Binding>,
     unupdated: bool,
@@ -123,17 +123,23 @@ impl Drawing {
             })
             .collect();
         if records.is_empty() {
+            if !self.foreign.raw_dimassocs.is_empty() {
+                std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs.clear();
+            }
             return;
         }
         let attribute_owners: HashMap<_, _> =
             entities(self).flat_map(|e| e.kind.attributes().iter().filter_map(move |a| a.handle.map(|h| (h, e.handle)))).collect();
         let mut snapshots = BTreeMap::new();
         for (dimension, refs, references) in records {
-            let Some(owner) = self.entity_including_blocks(dimension) else { continue };
-            let inferred = match &owner.kind {
-                EntityKind::Dimension(d) => d.assoc.clone(),
-                _ => Vec::new(),
-            };
+            let owner = self.entity_including_blocks(dimension);
+            let owner_type = owner.map(|e| e.kind.dxf_name().to_string());
+            let inferred = owner
+                .map(|e| match &e.kind {
+                    EntityKind::Dimension(d) => d.assoc.clone(),
+                    _ => Vec::new(),
+                })
+                .unwrap_or_default();
             let targets = refs
                 .into_iter()
                 .filter_map(|h| {
@@ -144,8 +150,7 @@ impl Drawing {
                     Some((h, kind))
                 })
                 .collect();
-            snapshots
-                .insert(dimension, RawDimAssoc { owner_type: owner.kind.dxf_name().to_string(), inferred, references, unupdated: false, targets });
+            snapshots.insert(dimension, RawDimAssoc { owner_type, inferred, references, unupdated: false, targets });
         }
         std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs = snapshots;
     }
@@ -162,7 +167,7 @@ impl Drawing {
                         EntityKind::Dimension(d) => d.assoc.as_slice(),
                         _ => &[],
                     };
-                    owner.kind.dxf_name().eq_ignore_ascii_case(&snapshot.owner_type)
+                    snapshot.owner_type.as_deref().is_some_and(|name| owner.kind.dxf_name().eq_ignore_ascii_case(name))
                         && inferred == snapshot.inferred
                         && snapshot.targets.iter().all(|(target, kind)| match kind {
                             TargetKind::Entity(name) => {

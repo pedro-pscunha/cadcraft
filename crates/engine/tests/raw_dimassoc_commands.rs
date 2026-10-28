@@ -135,6 +135,52 @@ fn changed_inferred_attachments_invalidate_raw_association_at_save_boundary() {
 }
 
 #[test]
+fn arc_length_reassociation_uses_only_the_public_endpoint_slots() {
+    let mut s = Session::new();
+    s.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    s.execute("line", &json!({"points":[[5,5],[6,5]]})).unwrap();
+    let h = s.execute("dimlinear", &json!({"p1":[0,0],"p2":[10,0],"at":[5,5]})).unwrap()["handle"].as_str().unwrap().to_string();
+    s.doc_mut()
+        .unwrap()
+        .modify_entity(Handle::parse_hex(&h).unwrap(), |e| {
+            if let cadcraft_engine::doc::EntityKind::Dimension(dm) = &mut e.kind {
+                dm.kind = cadcraft_engine::doc::DimKind::ArcLength;
+                dm.p15 = cadcraft_engine::geom::Vec3::new(5.0, 5.0, 0.0);
+            }
+        })
+        .unwrap();
+    let result = s.execute("dimreassociate", &json!({"handles":[h]})).unwrap();
+    assert_eq!(result["points"], 2, "ArcLength must use the same slots in reassociation and standard output: {result}");
+}
+
+#[test]
+fn raw_association_with_missing_dimension_is_tracked_and_retired_at_save() {
+    let (s, _, _, _) = session();
+    let mut tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let mut payload = false;
+    let mut in_assoc = false;
+    for t in &mut tags {
+        if t.code == 0 {
+            in_assoc = t.str() == "DIMASSOC";
+            payload = false;
+        }
+        if in_assoc && t.code == 100 {
+            payload = true;
+        }
+        if in_assoc && payload && t.code == 330 {
+            *t = Tag::s(330, "2BEEF");
+            payload = false;
+        }
+    }
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert!(d.has_raw_dimassoc(Handle(0x2BEEF)), "raw classification must not depend on whether its owner resolves");
+    assert!(
+        objects(&cadcraft_io::write_dxf(&d)).iter().all(|(kind, _)| kind != "DIMASSOC"),
+        "missing owner must retire, not resurrect, the orphan association"
+    );
+}
+
+#[test]
 fn model_only_dimensions_keep_partial_reassociation() {
     let mut s = Session::new();
     s.execute("line", &json!({"points":[[1000,1000],[1010,1000]]})).unwrap();

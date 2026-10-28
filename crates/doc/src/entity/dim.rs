@@ -21,6 +21,20 @@ pub enum DimKind {
     ArcLength,
 }
 
+impl DimKind {
+    /// Public association slots in DIMASSOC flag order. Radial dimensions serialize their two
+    /// model points through one circle reference; ArcLength is an aligned public dimension.
+    pub fn association_points(self) -> &'static [&'static str] {
+        match self {
+            Self::Linear { .. } | Self::Aligned | Self::ArcLength => &["p13", "p14"],
+            Self::Angular => &["p13", "p14", "defpt", "p15"],
+            Self::Angular3P => &["p13", "p14", "p15"],
+            Self::Radius | Self::Diameter => &["defpt", "p15"],
+            Self::Ordinate { .. } => &["p13"],
+        }
+    }
+}
+
 /// A dimension. Definition points follow DXF: `defpt` (10: dimension line point),
 /// `p13`/`p14` (extension origins), `p15`/`p16` (arc/angle points), `text_mid` (11).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

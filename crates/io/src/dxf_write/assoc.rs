@@ -52,15 +52,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension, scope: Option<&EntityS
     if matches!(dm.kind, DimKind::Radius | DimKind::Diameter) {
         return radial_ref(d, &dm.assoc, scope);
     }
-    let slots: &[&str] = match dm.kind {
-        DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "defpt", "p15"],
-        DimKind::Angular3P => &["p13", "p14", "p15"],
-        // Saved as an aligned dimension (`dim_xdata` marks it): its extension origins are the arc ends.
-        DimKind::ArcLength => &["p13", "p14"],
-        DimKind::Ordinate { .. } => &["p13"],
-        DimKind::Radius | DimKind::Diameter => &[],
-    };
+    let slots = dm.kind.association_points();
     let mut flags = 0;
     let mut refs = Vec::new();
     for (slot, name) in slots.iter().enumerate() {

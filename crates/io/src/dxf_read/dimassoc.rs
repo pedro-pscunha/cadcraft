@@ -26,14 +26,7 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
         }
         return;
     }
-    let slots: &[&str] = match dm.kind {
-        DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "defpt", "p15"],
-        DimKind::Angular3P => &["p13", "p14", "p15"],
-        DimKind::ArcLength => &["p13", "p14"],
-        DimKind::Ordinate { .. } => &["p13"],
-        DimKind::Radius | DimKind::Diameter => return,
-    };
+    let slots = dm.kind.association_points();
     let flags = T(tail).i(90).unwrap_or(0);
     let used: Vec<&str> = slots.iter().enumerate().filter(|(i, _)| flags & (1 << i) != 0).map(|(_, s)| *s).collect();
     // Point references start at each `1 AcDbOsnapPointRef`.

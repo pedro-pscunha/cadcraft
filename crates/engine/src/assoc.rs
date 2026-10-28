@@ -165,7 +165,6 @@ fn circle_at(d: &Drawing, space: &Space, c: Vec2, r: Option<f64>) -> Option<Hand
 /// (DIMREASSOCIATE).
 pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> {
     let mut links = match dm.kind {
-        DimKind::Linear { .. } | DimKind::Aligned => auto_assoc(d, space, &[("p13", dm.p13.xy()), ("p14", dm.p14.xy())]),
         DimKind::Radius => {
             let (c, p) = (dm.defpt.xy(), dm.p15.xy());
             match circle_at(d, space, c, Some(c.dist(p))) {
@@ -187,9 +186,11 @@ pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> 
                 None => Vec::new(),
             }
         }
-        DimKind::Angular3P | DimKind::ArcLength => auto_assoc(d, space, &[("p13", dm.p13.xy()), ("p14", dm.p14.xy()), ("p15", dm.p15.xy())]),
-        DimKind::Angular => auto_assoc(d, space, &[("p13", dm.p13.xy()), ("p14", dm.p14.xy()), ("defpt", dm.defpt.xy()), ("p15", dm.p15.xy())]),
-        DimKind::Ordinate { .. } => auto_assoc(d, space, &[("p13", dm.p13.xy())]),
+        _ => auto_assoc(
+            d,
+            space,
+            &dm.kind.association_points().iter().filter_map(|name| def_point(dm, name).map(|point| (*name, point.xy()))).collect::<Vec<_>>(),
+        ),
     };
     // Coincident endpoints are ambiguous. Do not switch a still-valid existing attachment
     // (notably the second angular leg's origin) to an earlier object at the same point.

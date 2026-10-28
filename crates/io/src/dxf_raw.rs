@@ -45,18 +45,6 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
     MODELLED_XDICT_KEYS.contains(&key.as_str()) || (key == "ACAD_DIMASSOC" && modelled_assoc.contains(&norm(target)))
 }
 
-/// Raw associations suppress modelled output; inferred links are a guard, not a partially usable
-/// model association. Commands and saving retire stale snapshots through
-/// [`Drawing::retire_raw_dimassocs`]. Other edits preserve their opaque source semantics.
-pub(crate) fn raw_dimassoc_dimensions(d: &Drawing) -> HashSet<Handle> {
-    d.foreign
-        .objects
-        .iter()
-        .filter(|o| o.kind == "DIMASSOC")
-        .filter_map(|o| dimassoc_reference(o.tags.iter().map(|r| (r.code, r.value.as_str()))).map(|(_, h)| h))
-        .collect()
-}
-
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
 /// (DSTYLE) on dimensions and dimension styles; elsewhere it is kept.
 const OWN_APPS: &[&str] = &["CADCRAFT", "ACADANNOTATIVE", "ACCMTRANSPARENCY", "ACAECLAYERSTANDARD"];
@@ -134,7 +122,7 @@ struct Head {
 }
 
 fn head(tags: &[Tag]) -> Head {
-    let mut h = Head::default();
+    let mut h = Head { owner: cadcraft_doc::foreign::object_owner(tags.iter().map(|t| (t.code, t.str()))).map(Handle::hex), ..Head::default() };
     let mut group: Option<String> = None;
     for t in tags.iter().take_while(|t| t.code < 1000) {
         match (t.code, group.as_deref()) {
@@ -149,7 +137,6 @@ fn head(tags: &[Tag]) -> Head {
             }
             (_, Some(_)) => {}
             (5 | 105, None) if h.handle.is_none() => h.handle = Some(norm(&t.str())),
-            (330, None) if h.owner.is_none() => h.owner = Some(norm(&t.str())),
             _ => {}
         }
     }
@@ -370,7 +357,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(h) = head(t).handle.and_then(|h| handle(&h)) else { continue };
         let mut tags: Vec<RawTag> = t.iter().map(raw).collect();
         if is_xdict(i) {
-            strip_entries(&mut tags, &modelled_assoc);
+            cadcraft_doc::foreign::strip_dictionary_entries(&mut tags, |key, target| modelled_xdict_entry(key, target, &modelled_assoc));
         }
         if head(t).owner == root
             && let Some(key) = root_key(&h.hex())
@@ -636,21 +623,6 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
     out.push(Tag::s(0, "ENDSEC"));
     let at = tags.iter().rposition(|t| t.code == 0 && t.str() == "EOF").unwrap_or(tags.len());
     tags.splice(at..at, out);
-}
-
-/// Drop a dictionary's modelled entries (key and handle) from its groups.
-fn strip_entries(tags: &mut Vec<RawTag>, modelled_assoc: &HashSet<String>) {
-    let mut out = Vec::with_capacity(tags.len());
-    let mut i = 0;
-    while let Some(t) = tags.get(i) {
-        if t.code == 3 && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360) && modelled_xdict_entry(&t.value, &n.value, modelled_assoc)) {
-            i += 2;
-            continue;
-        }
-        out.push(t.clone());
-        i += 1;
-    }
-    *tags = out;
 }
 
 /// An entity of a type CADCraft doesn't model, as read, with its handle, owner, space and layer

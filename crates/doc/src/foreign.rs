@@ -201,15 +201,29 @@ fn owned_indices(objects: &[ForeignObject], index: &BTreeMap<Handle, Vec<usize>>
     owned
 }
 
+/// Remove whole dictionary key/pointer pairs selected by their key and target text.
+pub fn strip_dictionary_entries(tags: &mut Vec<RawTag>, remove: impl Fn(&str, &str) -> bool) {
+    let mut out = Vec::with_capacity(tags.len());
+    let mut i = 0;
+    while let Some(t) = tags.get(i) {
+        if t.code == 3 && tags.get(i + 1).is_some_and(|next| matches!(next.code, 350 | 360) && remove(&t.value, &next.value)) {
+            i += 2;
+            continue;
+        }
+        out.push(t.clone());
+        i += 1;
+    }
+    *tags = out;
+}
+
 fn drop_references_to(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeSet<Handle>) {
+    if dictionary {
+        strip_dictionary_entries(tags, |_, target| Handle::parse_hex(target).is_some_and(|h| removed.contains(&h)));
+    }
     let gone = |t: &RawTag| Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h));
     let mut out = Vec::new();
     let mut i = 0;
     while let Some(t) = tags.get(i) {
-        if dictionary && t.code == 3 && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360) && gone(n)) {
-            i += 2;
-            continue;
-        }
         if t.code == 102 && t.value.trim() == "{ACAD_REACTORS" {
             let start = i;
             i += 1;

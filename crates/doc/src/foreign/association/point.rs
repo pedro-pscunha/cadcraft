@@ -155,13 +155,7 @@ pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Bind
             })
             .collect();
     }
-    let slots: &[&str] = match dm.kind {
-        DimKind::Linear { .. } | DimKind::Aligned | DimKind::ArcLength => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "defpt", "p15"],
-        DimKind::Angular3P => &["p13", "p14", "p15"],
-        DimKind::Ordinate { .. } => &["p13"],
-        DimKind::Radius | DimKind::Diameter => &[],
-    };
+    let slots = dm.kind.association_points();
     let used: Vec<_> = slots.iter().enumerate().filter(|(i, _)| flags & (1 << i) != 0).map(|(_, s)| *s).collect();
     if refs.len() != used.len() {
         return fallback();

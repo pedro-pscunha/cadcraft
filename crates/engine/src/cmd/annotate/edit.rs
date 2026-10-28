@@ -68,13 +68,7 @@ pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
         for h in &hs {
             if let Some(EntityKind::Dimension(dm)) = d.entity(*h).map(|e| &e.kind) {
                 let links = crate::assoc::reassociate(d, &space, dm);
-                let points: &[&str] = match dm.kind {
-                    DimKind::Linear { .. } | DimKind::Aligned | DimKind::ArcLength => &["p13", "p14"],
-                    DimKind::Angular => &["p13", "p14", "defpt", "p15"],
-                    DimKind::Angular3P => &["p13", "p14", "p15"],
-                    DimKind::Radius | DimKind::Diameter => &["defpt", "p15"],
-                    DimKind::Ordinate { .. } => &["p13"],
-                };
+                let points = dm.kind.association_points();
                 if !d.has_raw_dimassoc(*h) || points.iter().all(|point| links.iter().any(|link| link.point == *point)) {
                     plan.push((*h, links));
                 }
