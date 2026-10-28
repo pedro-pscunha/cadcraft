@@ -70,7 +70,7 @@ pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
                 let links = crate::assoc::reassociate(d, &space, dm);
                 let points: &[&str] = match dm.kind {
                     DimKind::Linear { .. } | DimKind::Aligned | DimKind::ArcLength => &["p13", "p14"],
-                    DimKind::Angular => &["p13", "p14", "p15", "p16"],
+                    DimKind::Angular => &["p13", "p14", "defpt", "p15"],
                     DimKind::Angular3P => &["p13", "p14", "p15"],
                     DimKind::Radius | DimKind::Diameter => &["defpt", "p15"],
                     DimKind::Ordinate { .. } => &["p13"],

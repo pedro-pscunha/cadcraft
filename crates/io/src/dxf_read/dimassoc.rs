@@ -3,7 +3,7 @@ use super::{Arc, AssocSnap, Circle, DimAssoc, DimKind, Dimension, Drawing, Entit
 
 /// Associativity from a DIMASSOC object (files from other writers). The dimension kind decides
 /// which definition points the references name, in the order AutoCAD writes them: `p13`/`p14`
-/// for linear, aligned and arc-length dimensions, both ends of both lines (`p13`..`p16`) for
+/// for linear, aligned and arc-length dimensions, both ends of both lines (`p13`/`p14`, `defpt`/`p15`) for
 /// angular dimensions, the three points of an angular-3-point dimension, `p13` for ordinate
 /// dimensions, and for radial or diametric dimensions the single circle reference
 /// ([`radial_links`]). CADCraft's own xdata links, when present, win.
@@ -28,7 +28,7 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
     }
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "p15", "p16"],
+        DimKind::Angular => &["p13", "p14", "defpt", "p15"],
         DimKind::Angular3P => &["p13", "p14", "p15"],
         DimKind::ArcLength => &["p13", "p14"],
         DimKind::Ordinate { .. } => &["p13"],

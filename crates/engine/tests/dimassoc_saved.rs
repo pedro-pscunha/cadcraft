@@ -122,6 +122,15 @@ fn the_issue_repro_saves_every_associated_dimension_with_dimassoc() {
         assert!(!refs.is_empty(), "{what}: the DIMASSOC has point references");
         assert!(refs.iter().all(|r| string(r, 331).is_some()), "{what}: every reference names geometry");
     }
+    let angular_record = dimassoc(&text, angular).unwrap();
+    assert_eq!(int(&angular_record, 90), Some(15), "both ends of both angular legs must be associated");
+    let angular_refs = point_refs(&angular_record);
+    assert_eq!(angular_refs.len(), 4, "p16 is an arc location, not the fourth attached leg endpoint");
+    assert_eq!(
+        angular_refs.iter().map(|r| string(r, 331).unwrap()).collect::<Vec<_>>(),
+        vec![l1.hex(), l1.hex(), l2.hex(), l2.hex()],
+        "angular attachments must use p13/p14 and defpt/p15"
+    );
     // The radial and diametric dimensions name the circle by its centre.
     for (h, what) in [(diameter, "diameter"), (radius, "radius")] {
         let refs = point_refs(&dimassoc(&text, h).unwrap());

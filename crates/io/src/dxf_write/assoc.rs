@@ -46,7 +46,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     }
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
-        DimKind::Angular => &["p13", "p14", "p15", "p16"],
+        DimKind::Angular => &["p13", "p14", "defpt", "p15"],
         DimKind::Angular3P => &["p13", "p14", "p15"],
         // Saved as an aligned dimension (`dim_xdata` marks it): its extension origins are the arc ends.
         DimKind::ArcLength => &["p13", "p14"],
@@ -59,6 +59,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
         let Some(a) = dm.assoc.iter().find(|a| a.point == *name) else { continue };
         let Some(ent) = d.entity(a.handle) else { continue };
         let point = match *name {
+            "defpt" => dm.defpt,
             "p13" => dm.p13,
             "p14" => dm.p14,
             "p15" => dm.p15,
