@@ -94,8 +94,8 @@ debug = 0
 # (Cargo ignores dependency-local patches).
 [patch.crates-io]
 # Arterra fork of acadrust 0.6.8 (INSERT-owned ATTRIB xdata, polyline vertex properties, AcDs
-# bodies listed in two tables), until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "74aa5f480b9a50cea3a3e9e6ed707be76955619d" }
+# bodies listed in two tables, clockwise hatch arc edges), until upstream.
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "cde5a1a2cce1f946a6019ae71a27ba966b53b7f8" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
