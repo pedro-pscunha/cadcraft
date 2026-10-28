@@ -308,8 +308,9 @@ fn commit_block(nd: &mut Drawing, r: &RefEdit) -> Result<usize> {
     let mut moved = Vec::new();
     for i in r.items.iter().filter(|i| i.source.is_none()) {
         if let Some(c) = nd.entity(i.copy).map(|c| (**c).clone()) {
-            let h = nd.new_handle();
-            ents.push(to_block(&inv, &c, h));
+            // REFSET relocates an existing object, not a copy. Keep the graph root identity
+            // so xdict/FIELD/DIMASSOC ownership and references move with it.
+            ents.push(to_block(&inv, &c, c.handle));
             moved.push(i.copy);
         }
     }

@@ -10,6 +10,62 @@ fn attribute_session() -> Session {
 }
 
 #[test]
+fn refset_moves_identity_and_owned_metadata_into_the_definition() {
+    use cadcraft_engine::doc::{RawTag, foreign::ForeignObject};
+    let mut s = attribute_session();
+    let d = s.doc_mut().unwrap();
+    let dict = d.new_handle();
+    let record = d.new_handle();
+    let tag = |code, value: String| RawTag { code, value };
+    let foreign = std::sync::Arc::make_mut(&mut d.foreign);
+    foreign.entities.entry(Handle(0x31)).or_default().xdict = Some(dict);
+    foreign.objects.push(ForeignObject {
+        handle: dict,
+        kind: "DICTIONARY".into(),
+        tags: vec![
+            tag(5, dict.hex()),
+            tag(330, "31".into()),
+            tag(100, "AcDbDictionary".into()),
+            tag(3, "TRANSFER_PROBE".into()),
+            tag(350, record.hex()),
+        ],
+    });
+    foreign.objects.push(ForeignObject {
+        handle: record,
+        kind: "XRECORD".into(),
+        tags: vec![tag(5, record.hex()), tag(330, dict.hex()), tag(100, "AcDbXrecord".into()), tag(1, "transfer-probe".into())],
+    });
+    let line = s.execute("line", &json!({"points":[[100,100],[110,100]]})).unwrap()["handles"][0].clone();
+    let insert = s.execute("block", &json!({"name":"EDIT","handles":[line],"base":[0,0]})).unwrap()["insert"].clone();
+    s.execute("refedit", &json!({"handle":insert})).unwrap();
+    s.execute("refset", &json!({"add":["30","31"]})).unwrap();
+    s.execute("refclose", &json!({"save":true})).unwrap();
+    let block = s.doc().unwrap().block("EDIT").unwrap();
+    for h in [Handle(0x30), Handle(0x31)] {
+        assert!(block.entities.contains(h), "REFSET relocation must retain identity {h:?}");
+    }
+    for dwg in [false, true] {
+        let bytes = if dwg { cadcraft_io::write(s.doc().unwrap(), "x.dwg").unwrap() } else { cadcraft_io::write_dxf(s.doc().unwrap()).into_bytes() };
+        let back = cadcraft_io::read(&bytes, if dwg { "x.dwg" } else { "x.dxf" }).unwrap();
+        assert_eq!(back.foreign.objects.iter().filter(|o| o.kind == "FIELD").count(), 2);
+        assert_eq!(
+            back.foreign.objects.iter().filter(|o| o.kind == "XRECORD" && o.tags.iter().any(|t| t.code == 1 && t.value == "transfer-probe")).count(),
+            1,
+            "DWG={dwg}: entity-owned dictionary lost"
+        );
+        assert!(
+            back.foreign
+                .objects
+                .iter()
+                .filter(|o| o.kind == "FIELD")
+                .flat_map(|o| &o.tags)
+                .any(|t| t.code == 331 && Handle::parse_hex(&t.value) == Some(Handle(0x30))),
+            "DWG={dwg}: FIELD lost its moved geometry target"
+        );
+    }
+}
+
+#[test]
 fn blockreplace_assigns_new_attribute_identities_before_the_command_returns() {
     let mut s = attribute_session();
     let d = s.doc_mut().unwrap();
