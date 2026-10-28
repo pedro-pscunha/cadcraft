@@ -350,6 +350,33 @@ fn incomplete_reassociation_leaves_raw_and_model_unchanged() {
 }
 
 #[test]
+fn an_over_budget_object_path_keeps_all_dependencies_for_change_detection() {
+    let (mut s, dim, _, _) = session_with_shape([13, 1], true);
+    let mut extra = Vec::new();
+    for i in 0..9 {
+        extra.push(s.execute("line", &json!({"points":[[100+i,0],[101+i,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string());
+    }
+    let mut tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let mut in_assoc = false;
+    let at = tags
+        .iter()
+        .position(|t| {
+            if t.code == 0 {
+                in_assoc = t.str() == "DIMASSOC";
+            }
+            in_assoc && t.code == 331
+        })
+        .unwrap();
+    tags.splice(at + 1..at + 1, extra.iter().map(|h| Tag::s(331, h)));
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    s.open_drawing(d, "long-path.dxf", None);
+    let before = s.doc().unwrap().entity(Handle::parse_hex(&dim).unwrap()).unwrap().kind.clone();
+    let result = s.execute("move", &json!({"handles":[extra.last().unwrap()],"delta":[2,0]})).unwrap();
+    assert_eq!(s.doc().unwrap().entity(Handle::parse_hex(&dim).unwrap()).unwrap().kind, before);
+    assert!(result["warnings"].to_string().contains(&dim), "the tenth path object changed without a warning: {result}");
+}
+
+#[test]
 fn dictionary_variants_are_pruned_after_retirement_and_dimension_only_copy() {
     for kind in ["DICTIONARY", "dictionary", "ACDBDICTIONARYWDFLT", " acdbdictionarywdflt "] {
         for copy in [false, true] {

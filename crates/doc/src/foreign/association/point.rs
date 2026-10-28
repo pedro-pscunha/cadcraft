@@ -44,7 +44,12 @@ impl PointRef {
         let value = |code| tags.iter().find(|t| t.code == code).map(|t| t.value.trim());
         let integer = |code| value(code).and_then(|v| v.parse::<i64>().ok());
         let real = |code| value(code).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite());
-        let path = |code| tags.iter().filter(|t| t.code == code).take(9).map(|t| Handle::parse_hex(&t.value)).collect::<Option<Vec<_>>>();
+        let path = |code| {
+            let path = tags.iter().filter(|t| t.code == code).take(9).map(|t| Handle::parse_hex(&t.value)).collect::<Option<Vec<_>>>()?;
+            // Reject over-budget semantics rather than truncating dependencies. The caller's
+            // opaque fallback keeps every handle for change detection, including the tail.
+            (path.len() <= 8).then_some(path)
+        };
         let cached = real(10)
             .zip(real(20))
             .zip(real(30))
