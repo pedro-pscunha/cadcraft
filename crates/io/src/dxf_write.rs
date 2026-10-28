@@ -25,6 +25,8 @@ mod header;
 mod layout;
 mod objects;
 mod sections;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use assoc::dimassoc_reproducible;
 #[cfg(test)]
@@ -54,11 +56,13 @@ struct W {
 impl W {
     fn new(d: &Drawing) -> Self {
         let first = d.handseed.max(0x100).checked_add(0x1000).unwrap_or(0x100);
-        let used = std::iter::once(&d.model)
+        let used: HashSet<_> = std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
             .chain(d.blocks.values().map(|b| &b.entities))
             .flat_map(|s| s.iter().map(|e| e.handle))
             .collect();
+        #[cfg(test)]
+        tests::SCANNED.with(|count| count.set(count.get().saturating_add(used.len())));
         Self { t: Vec::new(), next: first, first, used, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() }
     }
 
@@ -178,7 +182,8 @@ fn bridge_markers(tags: &mut [Tag]) {
 /// VERTEXes, gives its first). Handles of objects outside the entity (owner, styles) are left
 /// out. AutoLISP's `entget` is built on it.
 pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
-    let mut w = W::new(d);
+    // One record is not a file: no global handle reservation is needed for entget.
+    let mut w = W::default();
     let cx = Ctx { target: Version::R2018, ..Ctx::default() };
     let paper = d.space_of(e.handle).is_some_and(|s| !matches!(s, cadcraft_doc::Space::Model));
     entity(&mut w, d, e, "0", paper, &cx);
