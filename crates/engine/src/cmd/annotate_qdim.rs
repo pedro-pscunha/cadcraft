@@ -175,6 +175,10 @@ fn nearest(pts: &[Vec2], q: Vec2, tol: f64) -> Option<usize> {
 }
 
 pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
+    // Bound raw parsing work before selection-set normalization removes duplicate arguments.
+    if p.get("handles").and_then(Value::as_array).is_some_and(|handles| handles.len() > MAX_CHAIN) {
+        return Err(bad("qdim", format!("at most {MAX_CHAIN} objects per call")));
+    }
     let hs = targets(s, p)?;
     if hs.len() > MAX_CHAIN {
         return Err(bad("qdim", format!("at most {MAX_CHAIN} objects per call")));
