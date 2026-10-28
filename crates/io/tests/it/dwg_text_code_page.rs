@@ -51,6 +51,49 @@ fn mtext_escaped_unicode_looking_text_survives_dwg() {
     assert!(back.model.iter().any(|e| matches!(&e.kind,cadcraft_doc::EntityKind::MText(t) if t.contents==literal)));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn unicode_dwg_targets_retain_multibyte_and_other_source_code_pages() {
+    let text = "日本 中文 한글 Ł Café";
+    let source = format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nTEXT\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n1\n1\n{text}\n100\nAcDbText\n0\nENDSEC\n0\nEOF\n"
+    );
+    for (page, canonical) in [
+        ("ANSI_932", "ANSI_932"),
+        ("ANSI_936", "GB2312"),
+        ("ANSI_949", "KOREAN"),
+        ("ANSI_950", "BIG5"),
+        ("DOS437", "DOS437"),
+        ("ISO8859-2", "ISO8859-2"),
+        ("UTF-8", "UTF-8"),
+    ] {
+        for version in [cadcraft_dxf::Version::R2010, cadcraft_dxf::Version::R2013, cadcraft_dxf::Version::R2018] {
+            let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+            d.header.set_str("DWGCODEPAGE", page);
+            let bytes = cadcraft_io::write_with(&d, "x.dwg", &cadcraft_io::SaveOptions { version: Some(version), binary: false }).unwrap();
+            let native = acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes)).read().unwrap();
+            assert_eq!(native.header.code_page, canonical, "{page} / {version:?}: source code-page metadata was replaced");
+            let values: Vec<_> = native
+                .entities()
+                .filter_map(|e| if let acadrust::entities::EntityType::Text(t) = e { Some(t.value.as_str()) } else { None })
+                .collect();
+            assert_eq!(values, [text], "{page} / {version:?}: header preservation must not corrupt Unicode text");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn r2007_backend_keeps_unicode_text_but_uses_1252_metadata() {
+    let mut d=cadcraft_io::read_dxf("0\nSECTION\n2\nENTITIES\n0\nTEXT\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n1\n1\n日本\n100\nAcDbText\n0\nENDSEC\n0\nEOF\n".as_bytes()).unwrap();
+    d.header.set_str("DWGCODEPAGE", "ANSI_932");
+    let bytes =
+        cadcraft_io::write_with(&d, "x.dwg", &cadcraft_io::SaveOptions { version: Some(cadcraft_dxf::Version::R2007), binary: false }).unwrap();
+    let native = acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes)).read().unwrap();
+    assert_eq!(native.header.code_page, "ANSI_1252", "update the save note policy when the backend gains metadata support");
+    assert!(native.entities().any(|e| matches!(e,acadrust::entities::EntityType::Text(t) if t.value=="日本")));
+}
+
 /// A drawing read with another supported single-byte page keeps that page in the DWG bridge.
 /// Representable Cyrillic is encoded as bytes; the unrepresentable `é` remains an escape.
 #[cfg(not(target_arch = "wasm32"))]

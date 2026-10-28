@@ -87,6 +87,28 @@ fn blockreplace_assigns_new_attribute_identities_before_the_command_returns() {
 }
 
 #[test]
+fn legacy_dwg_code_page_fallback_is_reported_but_unicode_metadata_is_preserved() {
+    use cadcraft_engine::cmd::file::{IoHooks, set_io, set_write_as};
+    set_io(IoHooks {
+        read: |b, n| cadcraft_io::read(b, n).map_err(|e| e.to_string()),
+        write: |d, n| cadcraft_io::write(d, n).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    set_write_as(|d, n, options| {
+        cadcraft_io::write_with(d, n, &cadcraft_io::SaveOptions { version: options.version, binary: options.binary }).map_err(|e| e.to_string())
+    });
+    let mut s = Session::new();
+    s.doc_mut().unwrap().header.set_str("DWGCODEPAGE", "ANSI_932");
+    for version in ["2004", "2007"] {
+        let legacy = s.execute("document.bytes", &json!({"format":"dwg","version":version})).unwrap();
+        let warning = legacy["warnings"].to_string();
+        assert!(warning.contains("ANSI_932") && warning.contains("ANSI_1252"), "{version}: metadata fallback must be visible: {warning}");
+    }
+    let unicode = s.execute("document.bytes", &json!({"format":"dwg","version":"2018"})).unwrap();
+    assert!(unicode.get("warnings").is_none(), "preserved metadata must not produce a fallback warning");
+}
+
+#[test]
 fn derived_geometry_remaps_self_referencing_xdata() {
     let mut failures = Vec::new();
     for command in ["offset", "break", "trim", "fillet", "chamfer", "join", "ncopy"] {

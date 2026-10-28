@@ -492,12 +492,13 @@ mod native {
     /// Convert DXF bytes into a DWG file of the DXF's version, and at least AutoCAD 2004
     /// (AC1018).
     pub fn dxf_to_dwg(dxf: &[u8]) -> Result<Vec<u8>, String> {
-        convert(dxf, None)
+        convert(dxf, None, None)
     }
 
     /// Convert DXF bytes into a DWG file of `version`, a code from [`super::VERSIONS`] ("AC1032"),
-    /// whatever version the DXF declares.
-    pub fn dxf_to_dwg_as(dxf: &[u8], version: &str) -> Result<Vec<u8>, String> {
+    /// whatever version the DXF declares. `source_code_page` restores drawing metadata after
+    /// decoding the bridge bytes, only when the target's strings are Unicode (2007+).
+    pub fn dxf_to_dwg_as(dxf: &[u8], version: &str, source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
         let v = match version.trim().to_ascii_uppercase().as_str() {
             "AC1015" => acadrust::DxfVersion::AC1015,
             "AC1018" => acadrust::DxfVersion::AC1018,
@@ -507,7 +508,7 @@ mod native {
             "AC1032" => acadrust::DxfVersion::AC1032,
             _ => return Err(super::unsupported(version)),
         };
-        convert(dxf, Some(v))
+        convert(dxf, Some(v), source_code_page)
     }
 
     /// The current dimension and text styles' names from their handles: a DWG stores the
@@ -544,7 +545,7 @@ mod native {
         }
     }
 
-    fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<Vec<u8>, String> {
+    fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>, source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
         // Reject a pathologically large DXF before handing it to the third-party decoder, which
         // allocates tables and section buffers from the input's declared sizes and cannot be
         // interrupted once it starts (CWE-789). This bounds the large-input variant; the decoder
@@ -567,6 +568,13 @@ mod native {
             // only the DWG is newer.
             None if doc.version < MIN_DWG_VERSION => doc.version = MIN_DWG_VERSION,
             None => {}
+        }
+        // The bridge may use 1252 for transport, but Unicode DWG strings do not depend on it.
+        // Restore source metadata only after decoding; relabelling the input bytes corrupts text.
+        if doc.version >= acadrust::DxfVersion::AC1021
+            && let Some(page) = source_code_page
+        {
+            doc.header.code_page = page.to_string();
         }
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
@@ -700,7 +708,7 @@ pub fn dxf_to_dwg(_dxf: &[u8]) -> Result<Vec<u8>, String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
 #[cfg(target_arch = "wasm32")]
-pub fn dxf_to_dwg_as(_dxf: &[u8], _version: &str) -> Result<Vec<u8>, String> {
+pub fn dxf_to_dwg_as(_dxf: &[u8], _version: &str, _source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
 

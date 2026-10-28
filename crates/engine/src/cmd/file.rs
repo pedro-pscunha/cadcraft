@@ -519,7 +519,7 @@ fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
         report_not_saved(s, &mut r, &lost);
     }
     if is_drawing_file(&format!("drawing.{fmt}")) {
-        report_associations(s, &mut r);
+        report_save_notes(s, &mut r, &format!("drawing.{fmt}"), version);
     }
     Ok(r)
 }
@@ -589,10 +589,30 @@ fn report_not_saved(s: &mut Session, r: &mut Value, lost: &std::collections::BTr
     }
 }
 
-fn report_associations(s: &mut Session, result: &mut Value) {
-    if let Some(note) = s.doc().ok().and_then(|d| crate::assoc::unupdated_note(d, None)) {
-        s.echo(&note);
-        result["warnings"] = json!([note]);
+fn report_save_notes(s: &mut Session, result: &mut Value, path: &str, version: Version) {
+    let mut notes: Vec<_> = s.doc().ok().and_then(|d| crate::assoc::unupdated_note(d, None)).into_iter().collect();
+    if drops_unknown(path)
+        && version <= Version::R2007
+        && let Ok(d) = s.doc()
+    {
+        let source = d.header.str("DWGCODEPAGE", "ANSI_1252");
+        // The current 2007 backend fixes its file-header index to 1252. Later Unicode
+        // writers preserve source metadata; legacy writers must match transport bytes.
+        let written = if version == Version::R2007 { "ANSI_1252" } else { cadcraft_dxf::single_byte_code_page(&source) };
+        if !source.trim().eq_ignore_ascii_case(written) {
+            let label: String = source.chars().take(32).map(|c| if c.is_ascii_control() { ' ' } else { c }).collect();
+            notes.push(if version == Version::R2007 {
+                format!("DWG: the 2007 writer uses {written} code-page metadata instead of {label}; Unicode text is preserved")
+            } else {
+                format!("DWG: code page {label} was written as {written}; characters outside that page use Unicode escapes")
+            });
+        }
+    }
+    if !notes.is_empty() {
+        for note in &notes {
+            s.echo(note);
+        }
+        result["warnings"] = json!(notes);
     }
 }
 
@@ -607,7 +627,7 @@ fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> R
         report_not_saved(s, &mut r, &lost);
     }
     if is_drawing_file(&path) {
-        report_associations(s, &mut r);
+        report_save_notes(s, &mut r, &path, version);
     }
     Ok(r)
 }

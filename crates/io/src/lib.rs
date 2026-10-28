@@ -99,7 +99,10 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
         // gradients, so a drawing from an R2000 DXF doesn't lose them by default.
         "dwg" if !opts.binary => {
             let version = opts.version.unwrap_or_else(|| version.max(Version::R2004));
-            cadcraft_dwg::dxf_to_dwg_as(&dxf_write::dwg_bridge(d, version), version.code()).map_err(IoError::Format)
+            let page = d.header.str("DWGCODEPAGE", "ANSI_1252");
+            let page = page.trim();
+            let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
+            cadcraft_dwg::dxf_to_dwg_as(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)
         }
         e if opts.binary => Err(IoError::Format(format!("binary output is for DXF files, not `{e}`"))),
         _ => write_framed(d, name, None),
