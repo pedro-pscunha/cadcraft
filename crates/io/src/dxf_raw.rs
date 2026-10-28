@@ -144,10 +144,8 @@ fn head(tags: &[Tag]) -> Head {
                 h.has_reactors |= group.as_deref() == Some("ACAD_REACTORS");
             }
             (_, Some("ACAD_REACTORS")) => h.reactors.push(norm(&t.str())),
-            (_, Some("ACAD_XDICTIONARY")) => {
-                if h.xdict.is_none() {
-                    h.xdict = Some(norm(&t.str()));
-                }
+            (_, Some("ACAD_XDICTIONARY")) if h.xdict.is_none() => {
+                h.xdict = Some(norm(&t.str()));
             }
             (_, Some(_)) => {}
             (5 | 105, None) if h.handle.is_none() => h.handle = Some(norm(&t.str())),
@@ -906,6 +904,41 @@ fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag]) -> Optio
     }
 }
 
+/// Plan standalone/merged xdict ownership separately from writing their object graphs.
+fn plan_xdict_attachments(
+    f: &Foreign,
+    xd: &XdataOf,
+    recs: &[Rec],
+    tags: &[Tag],
+    roles: &HashMap<ForeignKey, String>,
+    objects: &HashMap<String, &ForeignObject>,
+    owners: &HashMap<String, String>,
+) -> (HashSet<String>, HashMap<String, String>) {
+    let mut attached = HashSet::new();
+    let mut merged = HashMap::new();
+    for r in recs {
+        let body = tags.get(r.start + 1..r.end).unwrap_or(&[]);
+        if let Some(x) = extra_for(f, xd, r, body)
+            && let Some(dictionary) = x.xdict
+        {
+            let old = dictionary.hex();
+            let header = head(body);
+            let owned = owners.get(&old).is_some_and(|owner| {
+                let current = handle(owner).and_then(|h| f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
+                header.handle.as_ref() == Some(current)
+            });
+            if !(owned && objects.get(&old).is_some_and(|o| is_dictionary(&o.kind))) {
+                continue;
+            }
+            attached.insert(old.clone());
+            if let Some(written) = header.xdict {
+                merged.insert(old, written);
+            }
+        }
+    }
+    (attached, merged)
+}
+
 /// Entities' own xdata ([`cadcraft_doc::Common::xdata`]), by handle.
 type XdataOf<'a> = HashMap<Handle, &'a [RawTag]>;
 
@@ -994,29 +1027,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         .iter()
         .filter_map(|o| Some((o.handle.hex(), cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())))?.hex())))
         .collect();
-    // Extension dictionaries that go on a written record, or merge into its modelled dictionary.
-    let mut attached: HashSet<String> = HashSet::new();
-    // A modelled xdict and its retained foreign entries are one dictionary, not competing owners.
-    let mut merged: HashMap<String, String> = HashMap::new();
-    for r in &recs {
-        if let Some(x) = extra_for(f, &xd, r, body(r))
-            && let Some(xd) = x.xdict
-        {
-            let old = xd.hex();
-            let header = head(body(r));
-            let owned = owners.get(&old).is_some_and(|owner| {
-                let current = handle(owner).and_then(|h| f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
-                header.handle.as_ref() == Some(current)
-            });
-            if !owned || !objs.get(&old).is_some_and(|o| is_dictionary(&o.kind)) {
-                continue;
-            }
-            attached.insert(old.clone());
-            if let Some(written) = header.xdict {
-                merged.insert(old, written);
-            }
-        }
-    }
+    let (mut attached, merged) = plan_xdict_attachments(f, &xd, &recs, tags, &roles, &objs, &owners);
     for (_, t) in planned.values().flatten() {
         let header = head(t.get(1..).unwrap_or(&[]));
         let x = header.handle.as_ref().and_then(|h| handle(h)).and_then(|h| entity_extra(f, &xd, h));
