@@ -298,15 +298,17 @@ pub(crate) fn points_param(p: &Value, key: &str) -> Option<Vec<Vec2>> {
 pub(crate) fn targets(s: &Session, p: &Value) -> Result<Vec<Handle>> {
     let handle = |v: &Value| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle));
     let not_handle = |key: &str, v: &Value| EngineError::Other(format!("`{key}`: {v} is not an object handle (a hex string such as \"1A2\")"));
-    match p.get("handles") {
-        None | Some(Value::Null) => {}
-        Some(Value::Array(a)) => return a.iter().map(|v| handle(v).ok_or_else(|| not_handle("handles", v))).collect(),
+    let mut handles: Vec<Handle> = match p.get("handles") {
+        None | Some(Value::Null) => match p.get("handle") {
+            None | Some(Value::Null) => s.selection(),
+            Some(v) => vec![handle(v).ok_or_else(|| not_handle("handle", v))?],
+        },
+        Some(Value::Array(a)) => a.iter().map(|v| handle(v).ok_or_else(|| not_handle("handles", v))).collect::<Result<_>>()?,
         Some(v) => return Err(EngineError::Other(format!("`handles` must be an array of object handles, got {v}"))),
-    }
-    match p.get("handle") {
-        None | Some(Value::Null) => Ok(s.selection()),
-        Some(v) => Ok(vec![handle(v).ok_or_else(|| not_handle("handle", v))?]),
-    }
+    };
+    let mut seen = std::collections::HashSet::new();
+    handles.retain(|h| seen.insert(*h));
+    Ok(handles)
 }
 pub(crate) fn ok() -> Result<Value> {
     Ok(Value::Null)
