@@ -142,22 +142,22 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
-/// version's (MULTILEADER from 2007). Its text is in the code page it declares (ANSI_1252), so
-/// the bridge stores `São` as `São`, not as the escape `S\U+00E3o`.
+/// version's (MULTILEADER from 2007). Its text is in the Windows single-byte page it declares,
+/// so the bridge stores representable characters rather than their literal Unicode escapes.
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
     let mut tags = tags_for(d, Version::R2000, dwg);
+    let page = cadcraft_dxf::single_byte_code_page(&d.header.str("DWGCODEPAGE", "ANSI_1252"));
     bridge_markers(&mut tags);
-    bridge_code_page(&mut tags);
-    cadcraft_dxf::ascii_to_ansi_1252(&cadcraft_dxf::write_ascii(&tags))
+    bridge_code_page(&mut tags, page);
+    cadcraft_dxf::ascii_to_code_page(&cadcraft_dxf::write_ascii(&tags), page)
 }
 
-/// The bridge DXF declares the code page its text is in. A DXF save keeps the code page the
-/// drawing was read with (`ANSI_1251`…), but the bridge encodes Windows-1252: declared as the
-/// other page, `é` would be read back as another letter.
-fn bridge_code_page(tags: &mut [Tag]) {
+/// Declare the page used for the bridge bytes, including the explicit 1252 fallback when the
+/// source uses a page outside the supported Windows single-byte set.
+fn bridge_code_page(tags: &mut [Tag], page: &str) {
     let Some(at) = tags.iter().position(|t| t.code == 9 && t.str().trim().eq_ignore_ascii_case("$DWGCODEPAGE")) else { return };
     if let Some(t) = tags.get_mut(at + 1).filter(|t| t.code == 3) {
-        *t = Tag::s(3, "ANSI_1252");
+        *t = Tag::s(3, page);
     }
 }
 

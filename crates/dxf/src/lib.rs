@@ -167,7 +167,7 @@ const BINARY_SENTINEL: &[u8] = b"AutoCAD Binary DXF\r\n\x1a\0";
 pub const MAX_TAGS: usize = 50_000_000;
 
 mod codepage;
-pub use codepage::decode_code_page;
+pub use codepage::{decode_code_page, single_byte_code_page};
 
 /// Parse a DXF file (ASCII or binary).
 pub fn parse(bytes: &[u8]) -> Result<Vec<Tag>> {
@@ -257,12 +257,13 @@ fn unescape_unicode(s: &str) -> String {
     out
 }
 
-/// ASCII DXF text (from [`write_ascii`]) as bytes in the Windows-1252 code page (`ANSI_1252`,
-/// the code page that text declares): each `\U+XXXX` escape of a character that code page holds
-/// becomes its byte, and the others stay escapes. Readers that decode a pre-R2007 escape only
-/// for a character the code page can't hold (acadrust 0.6.8, as the DXF Reference describes the
-/// escape) would otherwise keep `S\U+00E3o` as the text.
-pub fn ascii_to_ansi_1252(text: &str) -> Vec<u8> {
+/// ASCII DXF text (from [`write_ascii`]) as bytes in [`single_byte_code_page`]'s selected page.
+/// Each `\U+XXXX` escape of a character that page holds becomes its byte; others stay escapes.
+/// The caller must declare the selected page in `$DWGCODEPAGE`. Readers that decode a
+/// pre-R2007 escape only for a character the page can't hold (acadrust 0.6.8) would otherwise
+/// keep representable escapes as text.
+pub fn ascii_to_code_page(text: &str, code_page: &str) -> Vec<u8> {
+    let encoding = codepage::windows_page(code_page).map_or(encoding_rs::WINDOWS_1252, |(_, encoding)| encoding);
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -275,7 +276,7 @@ pub fn ascii_to_ansi_1252(text: &str) -> Vec<u8> {
             .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
             .and_then(|h| u32::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok());
         if let Some(ch) = unit.and_then(char::from_u32) {
-            let (enc, _, unmappable) = encoding_rs::WINDOWS_1252.encode(ch.encode_utf8(&mut buf));
+            let (enc, _, unmappable) = encoding.encode(ch.encode_utf8(&mut buf));
             if !unmappable && enc.len() == 1 {
                 out.extend_from_slice(&enc);
                 i += 7;

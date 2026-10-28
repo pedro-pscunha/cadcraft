@@ -1,5 +1,5 @@
 //! Text with accents keeps its characters in a DWG save. The DWG bridge reads our R2000 DXF, whose
-//! text is in its declared code page (ANSI_1252): a character that code page holds is written as
+//! text is in its declared Windows single-byte page: a character that page holds is written as
 //! its byte, because the bridge keeps a `\U+XXXX` escape of such a character as text (acadrust
 //! 0.6.8) and the DWG then stored `S\U+00E3o` instead of `São`. Other characters stay escapes,
 //! which the bridge decodes.
@@ -34,9 +34,8 @@ fn accented_text_is_stored_as_characters_in_dwg() {
     assert_eq!(texts, want);
 }
 
-/// A drawing read with another code page (ANSI_1251) keeps it for a DXF save, but the DWG bridge
-/// encodes Windows-1252 and must declare it: declared as 1251, `é` came back as `й` and Cyrillic
-/// stayed `\U+` escapes.
+/// A drawing read with another supported single-byte page keeps that page in the DWG bridge.
+/// Representable Cyrillic is encoded as bytes; the unrepresentable `é` remains an escape.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn text_of_a_drawing_with_another_code_page_survives_dwg() {
@@ -49,6 +48,8 @@ fn text_of_a_drawing_with_another_code_page_survives_dwg() {
                0\nENDSEC\n0\nEOF\n";
     let d = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
     let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let roundtrip = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+    assert_eq!(roundtrip.header.str("DWGCODEPAGE", ""), "ANSI_1251", "a supported single-byte drawing page must not be replaced with 1252");
     let stored = acadrust::DwgReader::from_stream(Cursor::new(dwg)).read().unwrap();
     let texts: Vec<String> = stored.entities().filter_map(|e| if let EntityType::Text(t) = e { Some(t.value.clone()) } else { None }).collect();
     assert_eq!(texts, ["Café При"]);
