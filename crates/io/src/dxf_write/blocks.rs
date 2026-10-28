@@ -8,7 +8,8 @@ use super::{
 pub(super) struct DimBlockPlan {
     /// Dimension (model or paper space) → the read block whose name and handles it reuses.
     pub(super) reuse: HashMap<Handle, std::sync::Arc<Block>>,
-    /// Upper-case names of `*D` blocks not written as ordinary blocks.
+    /// Upper-case names of dimension blocks (`*D`, or named ones only dimensions use) not written
+    /// as ordinary blocks.
     pub(super) skip: std::collections::HashSet<String>,
 }
 
@@ -40,12 +41,19 @@ pub(super) fn dim_block_plan(d: &Drawing) -> DimBlockPlan {
     for e in d.blocks.values().flat_map(|b| b.entities.iter()) {
         note(e, true, &mut used);
     }
-    let skip = d.blocks.keys().filter(|n| is_dim_block(n)).map(|n| n.to_ascii_uppercase()).filter(|n| !used.contains(n)).collect();
+    // A dimension's graphics block can have any name (another program wrote `DIMBLOCK1-…`): a
+    // block that only dimensions use is theirs, like a `*D` block.
+    let dim_refs: std::collections::HashSet<String> = spaces
+        .iter()
+        .flat_map(|s| s.iter())
+        .filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { dm.block.as_ref().map(|n| n.to_ascii_uppercase()) } else { None })
+        .collect();
+    let skip = d.blocks.keys().map(|n| n.to_ascii_uppercase()).filter(|n| (is_dim_block(n) || dim_refs.contains(n)) && !used.contains(n)).collect();
     let mut plan = DimBlockPlan { reuse: HashMap::new(), skip };
     let mut claimed = std::collections::HashSet::new();
     for e in spaces.iter().flat_map(|s| s.iter()) {
         let EntityKind::Dimension(dm) = &e.kind else { continue };
-        let Some(b) = dm.block.as_deref().filter(|n| is_dim_block(n)).and_then(|n| d.block(n)) else { continue };
+        let Some(b) = dm.block.as_deref().and_then(|n| d.block(n)) else { continue };
         let key = b.name.to_ascii_uppercase();
         if plan.skip.contains(&key) && claimed.insert(key) {
             plan.reuse.insert(e.handle, b.clone());

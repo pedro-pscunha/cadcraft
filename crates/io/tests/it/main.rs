@@ -15,6 +15,7 @@ mod dim_block_resave_roundtrip;
 mod dim_block_text;
 mod dim_clone_insert_point;
 mod dim_marks_roundtrip;
+mod dim_named_block;
 mod dimassoc_foreign_roundtrip;
 mod dimstyle_vars_roundtrip;
 mod dimtfill_roundtrip;
