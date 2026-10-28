@@ -298,6 +298,72 @@ fn complete_dimassoc_is_written_once_from_model() {
 }
 
 #[test]
+fn only_declared_owner_can_attach_a_raw_extension_dictionary() {
+    let mut source = association_dxf(false, [8, 8]);
+    let start = source.find("0\nDIMENSION\n").unwrap();
+    let end = source.find("0\nENDSEC\n0\nSECTION\n2\nOBJECTS\n").unwrap();
+    let duplicate = source[start..end].replace("5\n40\n", "5\n41\n");
+    assert_eq!(duplicate.matches("5\n41\n").count(), 1, "fixture must make a distinct second owner");
+    source.insert_str(end, &duplicate);
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    let entities = section(&text, "ENTITIES");
+    let owner = &entities.iter().find(|(k, t)| k == "DIMENSION" && val(t, 5) == "40").unwrap().1;
+    let other = &entities.iter().find(|(k, t)| k == "DIMENSION" && val(t, 5) == "41").unwrap().1;
+    assert!(!val(owner, 360).is_empty(), "valid declared owner lost its dictionary");
+    assert!(val(other, 360).is_empty(), "a second entity claimed another entity's extension dictionary");
+}
+
+#[test]
+fn modelled_dimension_dictionary_merges_foreign_entries_reactors_and_xdata() {
+    let source = association_dxf(false, [13, 1]);
+    assert_eq!(source.matches("0\nDICTIONARY\n5\n50\n330\n40\n").count(), 1);
+    assert_eq!(source.matches("3\nACAD_DIMASSOC\n360\n51\n0\nDIMASSOC\n").count(), 1);
+    let source = source
+        .replace("0\nDICTIONARY\n5\n50\n330\n40\n", "0\nDICTIONARY\n5\n50\n102\n{ACAD_REACTORS\n330\n52\n102\n}\n330\n40\n")
+        .replace(
+            "3\nACAD_DIMASSOC\n360\n51\n0\nDIMASSOC\n",
+            "3\nACAD_DIMASSOC\n360\n51\n3\nFOREIGN_KEEP\n350\n52\n1001\nFOREIGN_DICT\n1000\ndictionary data\n1005\n52\n0\nDIMASSOC\n",
+        )
+        .replace("0\nENDSEC\n0\nEOF\n", "0\nXRECORD\n5\n52\n330\n50\n100\nAcDbXrecord\n280\n1\n1\npayload\n0\nENDSEC\n0\nEOF\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(d.foreign.objects.iter().all(|o| o.kind != "DIMASSOC"), "fixture must exercise a regenerated modelled association");
+    let check = |text: &str| {
+        let entities = section(text, "ENTITIES");
+        let dimension = &entities.iter().find(|(k, _)| k == "DIMENSION").unwrap().1;
+        let objects = section(text, "OBJECTS");
+        let children: Vec<_> = objects.iter().filter(|(k, t)| k == "XRECORD" && val(t, 1) == "payload").collect();
+        assert_eq!(children.len(), 1, "modelled xdict discarded or duplicated the foreign entry's object");
+        let child = &children[0].1;
+        let dictionaries: Vec<_> = objects.iter().filter(|(k, t)| k == "DICTIONARY" && val(t, 5) == val(dimension, 360)).collect();
+        assert_eq!(dictionaries.len(), 1, "modelled and raw extension dictionaries were written twice");
+        let dictionary = &dictionaries[0].1;
+        assert_eq!(
+            cadcraft_doc::foreign::object_owner(dictionary.iter().map(|t| (t.code, t.str()))),
+            Handle::parse_hex(&val(dimension, 5)),
+            "merged dictionary owner is not the written dimension"
+        );
+        assert_eq!(val(child, 330), val(dictionary, 5), "foreign child owner did not follow the modelled dictionary");
+        for key in ["ACAD_DIMASSOC", "FOREIGN_KEEP"] {
+            assert_eq!(dictionary.iter().filter(|t| t.code == 3 && t.str() == key).count(), 1, "merged dictionary key {key} is absent or duplicated");
+        }
+        assert_eq!(objects.iter().filter(|(k, _)| k == "DIMASSOC").count(), 1, "merge replaced the modelled association or wrote it twice");
+        assert!(dictionary.iter().any(|t| t.code == 330 && t.str() == val(child, 5)), "foreign dictionary reactor disappeared");
+        assert_eq!(val(dictionary, 1001), "FOREIGN_DICT", "foreign dictionary xdata disappeared");
+        assert_eq!(val(dictionary, 1005), val(child, 5), "dictionary xdata reference was not remapped");
+        assert!(
+            dictionary.iter().rposition(|t| t.code == 3).unwrap() < dictionary.iter().position(|t| t.code == 1001).unwrap(),
+            "entries were appended after xdata"
+        );
+    };
+    let text = cadcraft_io::write_dxf(&d);
+    check(&text);
+    check(&cadcraft_io::write_dxf(&cadcraft_io::read_dxf(text.as_bytes()).unwrap()));
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    check(&String::from_utf8_lossy(&cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()));
+}
+
+#[test]
 fn raw_dimassoc_follows_owner_lifetime_like_other_foreign_data() {
     let mut d = cadcraft_io::read_dxf(association_dxf(false, [8, 8]).as_bytes()).unwrap();
     let dim = Handle(0x40);

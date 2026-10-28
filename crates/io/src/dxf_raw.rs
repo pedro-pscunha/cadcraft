@@ -733,8 +733,9 @@ struct Map<'a> {
     f: &'a Foreign,
     /// Kept objects that are written: file handle → new handle.
     alive: HashMap<String, String>,
-    /// Kept objects, written or not (file handles).
-    raw: HashSet<String>,
+    /// Kept objects, written or not, and their original owners.
+    objects: HashMap<String, &'a ForeignObject>,
+    owners: HashMap<String, String>,
     /// Role → handle in the written file.
     roles: HashMap<ForeignKey, String>,
     /// Entities in the written file.
@@ -749,7 +750,7 @@ impl Map<'_> {
         if v.is_empty() || v == "0" {
             return Some("0".into());
         }
-        if self.raw.contains(&v) {
+        if self.objects.contains_key(&v) {
             return self.alive.get(&v).cloned();
         }
         let h = handle(&v)?;
@@ -757,6 +758,11 @@ impl Map<'_> {
             return self.roles.get(role).cloned();
         }
         self.entities.contains(&v).then_some(v)
+    }
+
+    fn owns_xdict(&self, dictionary: &str, owner: &str) -> bool {
+        self.objects.get(dictionary).is_some_and(|o| is_dictionary(&o.kind))
+            && self.owners.get(dictionary).and_then(|h| self.get(h)).is_some_and(|h| h == owner)
     }
 
     /// A kept group with its handle remapped (a dangling one becomes null).
@@ -810,6 +816,10 @@ impl Map<'_> {
                     hs.push(n.value.clone());
                     i += 1;
                 }
+                if name == "ACAD_XDICTIONARY" {
+                    let owner = self.get(&o.handle.hex());
+                    hs.retain(|h| owner.as_ref().is_some_and(|owner| self.owns_xdict(&norm(h), owner)));
+                }
                 self.handle_group(out, &name, code, &hs);
                 continue;
             }
@@ -829,6 +839,60 @@ impl Map<'_> {
             out.push(self.group(r));
         }
     }
+}
+
+/// Keep the raw dictionary's metadata but give modelled keys their newly written values.
+/// The raw dictionary is aliased to this written handle, so every child/foreign pointer shares
+/// the same owner. Values here are already remapped: generated references must not be remapped twice.
+fn merge_xdict(map: &Map<'_>, foreign: &ForeignObject, written: &[Tag]) -> Vec<Tag> {
+    let mut raw = Vec::new();
+    map.object(foreign, &mut raw);
+    let pairs: Vec<_> = written
+        .windows(2)
+        .filter_map(|p| match p {
+            [key, target] if key.code == 3 && matches!(target.code, 350 | 360) => Some((key, target)),
+            _ => None,
+        })
+        .collect();
+    let keys: HashSet<_> = pairs.iter().map(|(key, _)| up(&key.str())).collect();
+    let mut merged = Vec::with_capacity(raw.len() + pairs.len() * 2);
+    let mut i = 0;
+    while let Some(t) = raw.get(i) {
+        if t.code == 3 && keys.contains(&up(&t.str())) && raw.get(i + 1).is_some_and(|p| matches!(p.code, 350 | 360)) {
+            i += 2;
+            continue;
+        }
+        merged.push(t.clone());
+        i += 1;
+    }
+    let at = merged.iter().position(|t| t.code == 1001).unwrap_or(merged.len());
+    merged.splice(at..at, pairs.into_iter().flat_map(|(key, target)| [key.clone(), target.clone()]));
+    let mut in_reactors = false;
+    let mut seen = HashSet::new();
+    for t in merged.iter().take_while(|t| t.code < 1000) {
+        if t.code == 102 {
+            in_reactors = t.str().trim() == "{ACAD_REACTORS";
+        } else if in_reactors && is_pointer(t.code) {
+            seen.insert(norm(&t.str()));
+        }
+    }
+    let needed: Vec<_> = head(written).reactors.into_iter().filter(|h| h != "0" && seen.insert(h.clone())).map(|h| Tag::s(330, h)).collect();
+    if !needed.is_empty() {
+        let closing = merged
+            .iter()
+            .position(|t| t.code == 102 && t.str().trim() == "{ACAD_REACTORS")
+            .and_then(|start| merged.iter().enumerate().skip(start + 1).find(|(_, t)| t.code == 102).map(|(i, _)| i));
+        if let Some(at) = closing {
+            merged.splice(at..at, needed);
+        } else {
+            let at = merged.iter().position(|t| t.code == 5).map_or(1, |i| i + 1);
+            let mut group = vec![Tag::s(102, "{ACAD_REACTORS")];
+            group.extend(needed);
+            group.push(Tag::s(102, "}"));
+            merged.splice(at..at, group);
+        }
+    }
+    merged
 }
 
 /// The extras of a written record, if the drawing keeps any for it.
@@ -913,29 +977,48 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, s, _)| *s);
     let root_keys: HashSet<String> =
         objects.iter().find(|(_, s, _)| Some(*s) == root).map(|(_, _, t)| entries(t).into_iter().map(|(k, _)| up(&k)).collect()).unwrap_or_default();
-    // Extension dictionaries that go on a written record (one without its own).
-    let mut attached: HashSet<String> = HashSet::new();
-    for r in &recs {
-        if let Some(x) = extra_for(f, &xd, r, body(r))
-            && let Some(xd) = x.xdict
-            && head(body(r)).xdict.is_none()
-        {
-            attached.insert(xd.hex());
-        }
-    }
-    for (_, t) in planned.values().flatten() {
-        let x = head(t.get(1..).unwrap_or(&[])).handle.and_then(|h| handle(&h)).and_then(|h| entity_extra(f, &xd, h));
-        attached.extend(x.and_then(|x| x.xdict).map(Handle::hex));
-    }
-    // Which kept objects are written: those whose owner chain ends at a written owner.
     let objs: HashMap<String, &ForeignObject> = f.objects.iter().map(|o| (o.handle.hex(), o)).collect();
-    let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
-    let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
     let owners: HashMap<String, String> = f
         .objects
         .iter()
-        .filter_map(|o| Some((o.handle.hex(), head(&o.tags.iter().take_while(|t| t.code < 1000).map(tag).collect::<Vec<_>>()).owner?)))
+        .filter_map(|o| Some((o.handle.hex(), cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())))?.hex())))
         .collect();
+    // Extension dictionaries that go on a written record, or merge into its modelled dictionary.
+    let mut attached: HashSet<String> = HashSet::new();
+    // A modelled xdict and its retained foreign entries are one dictionary, not competing owners.
+    let mut merged: HashMap<String, String> = HashMap::new();
+    for r in &recs {
+        if let Some(x) = extra_for(f, &xd, r, body(r))
+            && let Some(xd) = x.xdict
+        {
+            let old = xd.hex();
+            let header = head(body(r));
+            let owned = owners.get(&old).is_some_and(|owner| {
+                let current = handle(owner).and_then(|h| f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
+                header.handle.as_ref() == Some(current)
+            });
+            if !owned || !objs.get(&old).is_some_and(|o| is_dictionary(&o.kind)) {
+                continue;
+            }
+            attached.insert(old.clone());
+            if let Some(written) = header.xdict {
+                merged.insert(old, written);
+            }
+        }
+    }
+    for (_, t) in planned.values().flatten() {
+        let header = head(t.get(1..).unwrap_or(&[]));
+        let x = header.handle.as_ref().and_then(|h| handle(h)).and_then(|h| entity_extra(f, &xd, h));
+        if let Some(dictionary) = x.and_then(|x| x.xdict).map(Handle::hex)
+            && owners.get(&dictionary) == header.handle.as_ref()
+            && objs.get(&dictionary).is_some_and(|o| is_dictionary(&o.kind))
+        {
+            attached.insert(dictionary);
+        }
+    }
+    // Which kept objects are written: those whose owner chain ends at a written owner.
+    let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
+    let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
     let mut alive_memo: HashMap<String, bool> = HashMap::new();
     for o in f.objects.iter().filter(|o| is_proxy(&o.kind) && renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str())))).is_none()) {
         alive_memo.insert(o.handle.hex(), false);
@@ -972,11 +1055,16 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let mut next = seed(tags).max(max_handle(tags).saturating_add(1));
     let mut alive: HashMap<String, String> = HashMap::new();
     for o in f.objects.iter().filter(|o| alive_memo.get(&o.handle.hex()) == Some(&true)) {
-        alive.insert(o.handle.hex(), format!("{next:X}"));
-        next = next.saturating_add(1);
+        if let Some(written) = merged.get(&o.handle.hex()) {
+            alive.insert(o.handle.hex(), written.clone());
+        } else {
+            alive.insert(o.handle.hex(), format!("{next:X}"));
+            next = next.saturating_add(1);
+        }
     }
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
-    let map = Map { f, alive, raw: objs.keys().cloned().collect(), roles, entities };
+    let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
+    let map = Map { f, alive, objects: objs, owners, roles, entities };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().map(|o| o.tags.len() + 1).sum::<usize>());
     for r in &recs {
         let b = body(r);
@@ -987,7 +1075,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             }
         }
         if r.kind == "ENDSEC" && r.sec == "OBJECTS" {
-            for o in f.objects.iter().filter(|o| map.alive.contains_key(&o.handle.hex())) {
+            for o in f.objects.iter().filter(|o| map.alive.contains_key(&o.handle.hex()) && !merged.contains_key(&o.handle.hex())) {
                 let number = is_proxy(&o.kind).then(|| renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str()))))).flatten();
                 match number {
                     Some(n) => {
@@ -1006,6 +1094,13 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             let x = head(ub).handle.and_then(|h| handle(&h)).and_then(|h| entity_extra(f, &xd, h));
             out.push(zero.clone());
             record(&map, &ur, ub, x.as_deref(), true, false, &mut out);
+        }
+        if r.sec == "OBJECTS"
+            && is_dictionary(&r.kind)
+            && let Some(old) = head(b).handle.and_then(|h| merged_into.get(&h))
+        {
+            out.extend(merge_xdict(&map, old, b));
+            continue;
         }
         out.extend(tags.get(r.start).cloned());
         let x = extra_for(f, &xd, r, b);
@@ -1143,6 +1238,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             }
             if h.xdict.is_none()
                 && let Some(xd) = x.xdict
+                && h.handle.as_ref().is_some_and(|owner| map.owns_xdict(&xd.hex(), owner))
             {
                 map.handle_group(out, "ACAD_XDICTIONARY", 360, &[xd.hex()]);
             }
