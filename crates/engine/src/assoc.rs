@@ -215,7 +215,7 @@ pub fn radial_assoc(d: &Drawing, h: Handle, diameter: bool, defpt: Vec2, p15: Ve
 }
 
 fn src_changed(before: &Drawing, after: &Drawing, h: Handle) -> bool {
-    match (before.entity(h), after.entity(h)) {
+    match (before.entity_including_blocks(h), after.entity_including_blocks(h)) {
         (Some(x), Some(y)) => !Arc::ptr_eq(x, y) && x.kind != y.kind,
         (Some(_), None) => true,
         _ => false,
@@ -281,20 +281,52 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     nd
 }
 
+fn recompute_raw(h: Handle, dm: &Dimension, before: &Drawing, after: &Drawing) -> Dimension {
+    let mut active = dm.clone();
+    active
+        .assoc
+        .retain(|a| src_changed(before, after, a.handle) || matches!(a.snap, AssocSnap::Intersection {other} if src_changed(before,after,other)));
+    let mut updated = recompute(&active, Some(dm), before, after);
+    if !after.raw_dimassoc_targets(h).all(|target| src_changed(before, after, target)) {
+        for name in POINTS {
+            if !active.assoc.iter().any(|a| a.point == *name)
+                && let Some(original) = def_point(dm, name)
+                && let Some(point) = def_point_mut(&mut updated, name)
+            {
+                *point = original;
+            }
+        }
+        updated.text_mid = dm.text_mid;
+    }
+    updated.assoc = dm.assoc.clone();
+    if updated != *dm {
+        updated.block = None;
+        updated.measurement = cadcraft_render::dimension_in(after, &updated).measurement;
+    }
+    updated
+}
+
 /// After a change: update every associative dimension whose objects changed.
 /// Returns the number of dimensions updated.
 pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
     let stale = after.stale_raw_dimassocs();
     let retired = if stale.is_empty() { 0 } else { Arc::make_mut(after).retire_raw_dimassocs(&stale).len() };
     let mut changes: Vec<(Handle, Dimension)> = Vec::new();
+    let mut blocked = std::collections::BTreeSet::new();
     {
         let d: &Drawing = after;
         let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities));
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
-                // Retained bytes need not freeze a completely understood semantic link.
-                if dm.assoc.is_empty() || d.has_raw_dimassoc(e.handle) && !d.raw_dimassoc_can_update(e.handle) {
+                // Only changed references need evaluation; unchanged opaque points stay put.
+                if d.has_raw_dimassoc(e.handle) && !d.raw_dimassoc_can_update(e.handle, |target| src_changed(before, d, target)) {
+                    if d.raw_dimassoc_targets(e.handle).any(|target| src_changed(before, d, target)) {
+                        blocked.insert(e.handle);
+                    }
+                    continue;
+                }
+                if dm.assoc.is_empty() {
                     continue;
                 }
                 let touched = dm.assoc.iter().any(|a| {
@@ -307,17 +339,18 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
                     Some(EntityKind::Dimension(p)) => Some(p),
                     _ => None,
                 };
-                let nd = recompute(dm, prev, before, d);
+                let nd = if d.has_raw_dimassoc(e.handle) { recompute_raw(e.handle, dm, before, d) } else { recompute(dm, prev, before, d) };
                 if nd != *dm {
                     changes.push((e.handle, nd));
                 }
             }
         }
     }
-    if changes.is_empty() {
+    if changes.is_empty() && blocked.is_empty() {
         return retired;
     }
     let d = Arc::make_mut(after);
+    d.mark_raw_dimassocs_unupdated(&blocked);
     let n = changes.len();
     for (h, nd) in changes {
         let _ = d.modify_entity(h, |e| e.kind = EntityKind::Dimension(nd));
@@ -327,15 +360,17 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
 
 /// A visible warning for opaque links, either all of them at save or those touched by an edit.
 pub(crate) fn unupdated_note(d: &Drawing, before: Option<&Drawing>) -> Option<String> {
-    let n = d
+    let dimensions: Vec<_> = d
         .raw_dimassoc_dimensions()
         .filter(|h| {
-            !d.raw_dimassoc_can_update(*h)
+            d.raw_dimassoc_unupdated(*h)
                 && d.entity_including_blocks(*h).is_some_and(|e| matches!(e.kind, EntityKind::Dimension(_)))
                 && before.is_none_or(|before| d.raw_dimassoc_targets(*h).any(|target| src_changed(before, d, target)))
         })
-        .count();
-    (n > 0).then(|| format!("{n} associative dimensions keep their AutoCAD link but were not updated"))
+        .map(|h| h.hex())
+        .collect();
+    (!dimensions.is_empty())
+        .then(|| format!("{} associative dimensions keep their AutoCAD link but were not updated: {}", dimensions.len(), dimensions.join(", ")))
 }
 
 /// The post-command pass: called by `Session::execute` and when an interactive command

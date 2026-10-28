@@ -142,7 +142,9 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
         },
         2 => AssocSnap::Mid,
         3 | 4 => AssocSnap::Center,
-        5 | 10 => match &e.kind {
+        // Autodesk: 5 is Quadrant; 8 is Perpendicular and 10 is Nearest. The latter
+        // depend on semantics we do not evaluate, so they must stay preserved and opaque.
+        5 => match &e.kind {
             EntityKind::Circle(Circle { center, .. }) | EntityKind::Arc(Arc { center, .. }) => {
                 let v = at - center.xy();
                 AssocSnap::OnCircle { angle: v.y.atan2(v.x) }
@@ -152,4 +154,18 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
         6 => AssocSnap::Intersection { other: other.filter(|o| d.entity(*o).is_some())? },
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn nearest_and_perpendicular_are_not_inferred_as_fixed_circle_points() {
+        let mut d = Drawing::new_metric();
+        let h = d.add(&cadcraft_doc::Space::Model, Default::default(), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 10.0 })).unwrap();
+        for code in [8, 10] {
+            assert!(infer_snap(&d, code, h, None, Vec2::new(10.0, 0.0), None).is_none(), "unsupported Autodesk osnap {code}");
+        }
+        assert!(matches!(infer_snap(&d, 5, h, None, Vec2::new(10.0, 0.0), None), Some(AssocSnap::OnCircle { .. })));
+    }
 }

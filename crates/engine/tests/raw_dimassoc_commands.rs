@@ -179,8 +179,86 @@ fn unsupported_raw_associations_report_command_and_save_notes() {
     }
 }
 
+fn mixed_session(last_point: bool, unsupported: i64) -> (Session, String, String, String) {
+    let (mut s, dim, line, _) = session_with_shape([13, unsupported], true);
+    let other = s.execute("line", &json!({"points":[[5,0],[10,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let mut tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    let mut in_assoc = false;
+    let mut point = 0;
+    let mut insertion = None;
+    for (i, t) in tags.iter_mut().enumerate() {
+        if t.code == 0 {
+            in_assoc = t.str() == "DIMASSOC";
+        } else if in_assoc {
+            if t.code == 72 {
+                point += 1;
+            }
+            if point == 2 && t.code == 331 {
+                *t = Tag::s(331, &other);
+            }
+            if point == 2 && t.code == 75 && last_point {
+                *t = Tag::i(75, 1);
+                insertion = Some(i + 1);
+            }
+        }
+    }
+    if let Some(i) = insertion {
+        tags.splice(
+            i..i,
+            [
+                Tag::s(1, "AcDbOsnapPointRef"),
+                Tag::i(72, 13),
+                Tag::s(331, &line),
+                Tag::i(73, 2),
+                Tag::i(91, 0),
+                Tag::f(40, 0.0),
+                Tag::f(10, 0.0),
+                Tag::f(20, 0.0),
+                Tag::f(30, 2e50),
+                Tag::i(75, 0),
+            ],
+        );
+    }
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    s.open_drawing(d, "mixed.dxf", None);
+    (s, dim, line, other)
+}
+
 #[test]
-fn opaque_raw_associations_do_not_follow_only_the_inferred_subset() {
+fn only_changed_references_need_evaluation_and_last_point_dependencies_count() {
+    for unsupported in [8, 10] {
+        for (move_first, move_other, last, follows) in
+            [(true, false, false, true), (false, true, false, false), (true, true, false, false), (true, false, true, false)]
+        {
+            let (mut s, dim, line, other) = mixed_session(last, unsupported);
+            let mut handles = Vec::new();
+            if move_first {
+                handles.push(line);
+            }
+            if move_other {
+                handles.push(other);
+            }
+            let result = s.execute("move", &json!({"handles":handles,"delta":[2,0]})).unwrap();
+            let cadcraft_engine::doc::EntityKind::Dimension(model) = &s.doc().unwrap().entity(Handle::parse_hex(&dim).unwrap()).unwrap().kind else {
+                panic!("dimension")
+            };
+            if follows {
+                assert_eq!(
+                    (model.p13.x, model.p14.x, model.measurement),
+                    (2.0, 10.0, 8.0),
+                    "unchanged unsupported point must stay where AutoCAD put it"
+                );
+                assert!(result.get("warnings").is_none(), "{result}");
+            } else {
+                assert_eq!((model.p13.x, model.p14.x, model.measurement), (0.0, 10.0, 10.0));
+                assert!(result["warnings"].to_string().contains(&dim), "warning must identify dimension {dim}: {result}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_changed_reference_freezes_the_whole_dimension() {
     let (mut s, dim, line, raw) = session_with_snaps([13, 8]);
     let dim = Handle::parse_hex(&dim).unwrap();
     let before = s.doc().unwrap().entity(dim).unwrap().kind.clone();
