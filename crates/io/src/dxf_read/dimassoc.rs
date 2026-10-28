@@ -1,5 +1,5 @@
 use super::common::T;
-use super::{Arc, AssocSnap, Circle, DimAssoc, DimKind, Dimension, Drawing, EntityKind, Handle, Tag, Vec2, Vec3};
+use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, EntityKind, Handle, Tag, Vec2, Vec3};
 
 /// Associativity from a DIMASSOC object (files from other writers). The dimension kind decides
 /// which definition points the references name, in the order AutoCAD writes them: `p13`/`p14`
@@ -38,7 +38,7 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
         let r = T(tail.get(s + 1..end).unwrap_or(&[]));
         let Some(main) = r.s(331).and_then(|h| Handle::parse_hex(&h)) else { continue };
         let other = r.s(332).and_then(|h| Handle::parse_hex(&h));
-        let at = r.p(10).xy();
+        let Some(at) = dm.definition_point(point).map(|p| p.xy()) else { continue };
         // A polyline's segment (subentity type 73 = 2, edge; 91 its 1-based index).
         let segment = r.i(91).filter(|k| *k >= 1 && r.i(73) == Some(2));
         if let Some(snap) = infer_snap(d, r.i(72).unwrap_or(0), main, other, at, segment) {
@@ -93,41 +93,56 @@ fn circle_centre(d: &Drawing, h: Handle) -> Option<Vec2> {
     }
 }
 
-/// A CADCraft snap from a DIMASSOC object snap type and point, and for a polyline the segment
-/// the point is an end of: AutoCAD writes no usable point there (10/20 are 0, #1049), the segment
-/// and the osnap (1 its end, 13 its start) name the vertex. For a line or arc the osnap alone
-/// says which end: 13 is the start and 1 the end, whatever the stored point (the point is
-/// 0,0,0 for curves, and choosing by distance gave the wrong end for arcs). A point entity has
-/// only one position, so both codes mean it.
+/// Endpoint identity comes from the dimension's own definition point, never the point-ref
+/// cache (which may be absent or stale after a move). Ambiguous/off-curve identities stay raw.
+fn endpoint(a: Vec2, b: Vec2, at: Vec2) -> Option<AssocSnap> {
+    let (da, db) = (a.dist(at), b.dist(at));
+    let tolerance = 1e-6 * (1.0 + a.dist(b));
+    if da.min(db) > tolerance || da == db {
+        return None;
+    }
+    Some(if da < db { AssocSnap::Start } else { AssocSnap::End })
+}
+
 fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: Vec2, segment: Option<i64>) -> Option<AssocSnap> {
     let e = d.entity(main)?;
     if let (EntityKind::LwPolyline(p), Some(k), 1 | 13) = (&e.kind, segment, osnap) {
         let n = p.vertices.len();
         let segments = if p.closed { n } else { n.saturating_sub(1) };
-        let k = usize::try_from(k).ok().filter(|k| *k <= segments)?;
-        let index = if osnap == 13 { k - 1 } else { k % n };
+        let k = usize::try_from(k).ok().filter(|k| *k >= 1 && *k <= segments)?;
+        let index = if osnap == 13 {
+            k - 1
+        } else {
+            match endpoint(p.vertices.get(k - 1)?.p, p.vertices.get(k % n)?.p, at)? {
+                AssocSnap::Start => k - 1,
+                AssocSnap::End => k % n,
+                _ => return None,
+            }
+        };
         return Some(AssocSnap::Vertex { index });
     }
     Some(match osnap {
         1 | 13 => match &e.kind {
-            // AutoCAD names a curve's start with 13 and its end with 1 (the stored point is 0,0,0).
-            // Other writers use 1 for either end of a line with the point stored: take the nearer.
             EntityKind::Line(l) => {
-                if osnap == 13 || (at != Vec2::ZERO && l.a.xy().dist(at) <= l.b.xy().dist(at)) {
-                    AssocSnap::Start
-                } else {
-                    AssocSnap::End
-                }
-            }
-            EntityKind::Arc(_) => {
                 if osnap == 13 {
                     AssocSnap::Start
                 } else {
-                    AssocSnap::End
+                    endpoint(l.a.xy(), l.b.xy(), at)?
+                }
+            }
+            EntityKind::Arc(a) => {
+                if osnap == 13 {
+                    AssocSnap::Start
+                } else {
+                    let arc = cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end);
+                    endpoint(arc.start_point(), arc.end_point(), at)?
                 }
             }
             EntityKind::LwPolyline(p) => {
-                let index = p.vertices.iter().enumerate().min_by(|x, y| x.1.p.dist(at).total_cmp(&y.1.p.dist(at))).map(|(i, _)| i)?;
+                let (index, vertex) = p.vertices.iter().enumerate().min_by(|x, y| x.1.p.dist(at).total_cmp(&y.1.p.dist(at)))?;
+                if vertex.p.dist(at) > 1e-6 * (1.0 + at.x.abs().max(at.y.abs())) {
+                    return None;
+                }
                 AssocSnap::Vertex { index }
             }
             EntityKind::Point(_) => AssocSnap::Start,
@@ -135,16 +150,22 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
         },
         2 => AssocSnap::Mid,
         3 | 4 => AssocSnap::Center,
-        // Autodesk: 5 is Quadrant; 8 is Perpendicular and 10 is Nearest. The latter
-        // depend on semantics we do not evaluate, so they must stay preserved and opaque.
-        5 => match &e.kind {
-            EntityKind::Circle(Circle { center, .. }) | EntityKind::Arc(Arc { center, .. }) => {
-                let v = at - center.xy();
-                AssocSnap::OnCircle { angle: v.y.atan2(v.x) }
+        // Autodesk: 5 Quadrant, 8 Perpendicular, 10 Nearest. Do not infer 8 or 10.
+        5 => {
+            let (center, radius) = match &e.kind {
+                EntityKind::Circle(c) => (c.center, c.radius),
+                EntityKind::Arc(a) => (a.center, a.radius),
+                _ => return None,
+            };
+            let v = at - center.xy();
+            let angle = v.y.atan2(v.x);
+            let quarter = angle / std::f64::consts::FRAC_PI_2;
+            if radius <= 0.0 || (v.len() - radius).abs() > 1e-6 * (1.0 + radius.abs()) || (quarter - quarter.round()).abs() > 1e-6 {
+                return None;
             }
-            _ => return None,
-        },
-        6 => AssocSnap::Intersection { other: other.filter(|o| d.entity(*o).is_some())? },
+            AssocSnap::OnCircle { angle: quarter.round() * std::f64::consts::FRAC_PI_2 }
+        }
+        6 => AssocSnap::Intersection { other: other.filter(|h| d.entity(*h).is_some())? },
         _ => return None,
     })
 }
@@ -152,6 +173,7 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadcraft_doc::Circle;
     #[test]
     fn nearest_and_perpendicular_are_not_inferred_as_fixed_circle_points() {
         let mut d = Drawing::new_metric();

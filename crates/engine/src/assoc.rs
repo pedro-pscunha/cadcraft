@@ -10,19 +10,6 @@ use cadcraft_geom::{Vec2, Vec3};
 /// Definition point names in the order they are tried.
 const POINTS: [&str; 5] = ["defpt", "p13", "p14", "p15", "p16"];
 
-/// A definition point of a dimension by name.
-pub fn def_point(d: &Dimension, name: &str) -> Option<Vec3> {
-    Some(match name {
-        "defpt" => d.defpt,
-        "p13" => d.p13,
-        "p14" => d.p14,
-        "p15" => d.p15,
-        "p16" => d.p16,
-        "text" => d.text_mid,
-        _ => return None,
-    })
-}
-
 fn def_point_mut<'a>(d: &'a mut Dimension, name: &str) -> Option<&'a mut Vec3> {
     Some(match name {
         "defpt" => &mut d.defpt,
@@ -189,13 +176,13 @@ pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> 
         _ => auto_assoc(
             d,
             space,
-            &dm.kind.association_points().iter().filter_map(|name| def_point(dm, name).map(|point| (*name, point.xy()))).collect::<Vec<_>>(),
+            &dm.kind.association_points().iter().filter_map(|name| dm.definition_point(name).map(|point| (*name, point.xy()))).collect::<Vec<_>>(),
         ),
     };
     // Coincident endpoints are ambiguous. Do not switch a still-valid existing attachment
     // (notably the second angular leg's origin) to an earlier object at the same point.
     for previous in &dm.assoc {
-        if snap_point(d, previous).zip(def_point(dm, &previous.point)).is_some_and(|(snap, point)| close(snap, point.xy()))
+        if snap_point(d, previous).zip(dm.definition_point(&previous.point)).is_some_and(|(snap, point)| close(snap, point.xy()))
             && let Some(link) = links.iter_mut().find(|link| link.point == previous.point)
         {
             *link = previous.clone();
@@ -247,7 +234,7 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     let mut moved: Vec<String> = Vec::new();
     let was = prev.unwrap_or(dm);
     nd.assoc.retain(|a| {
-        let Some(old) = def_point(was, &a.point) else { return false };
+        let Some(old) = was.definition_point(&a.point) else { return false };
         // Only follow if the point sat on the object before the change.
         if let Some(prev) = snap_point(before, a)
             && !close(prev, old.xy())
@@ -257,7 +244,7 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
         snap_point(after, a).is_some()
     });
     for a in &nd.assoc {
-        if let (Some(p), Some(old)) = (snap_point(after, a), def_point(dm, &a.point)) {
+        if let (Some(p), Some(old)) = (snap_point(after, a), dm.definition_point(&a.point)) {
             deltas.push(p - old.xy());
             moved.push(a.point.clone());
         }
@@ -305,7 +292,7 @@ fn recompute_raw(h: Handle, dm: &Dimension, before: &Drawing, after: &Drawing) -
     if !after.raw_dimassoc_targets(h).all(|target| src_changed(before, after, target)) {
         for name in POINTS {
             if !active.assoc.iter().any(|a| a.point == *name)
-                && let Some(original) = def_point(dm, name)
+                && let Some(original) = dm.definition_point(name)
                 && let Some(point) = def_point_mut(&mut updated, name)
             {
                 *point = original;

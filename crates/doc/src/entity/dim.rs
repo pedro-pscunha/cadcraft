@@ -78,6 +78,21 @@ pub struct Dimension {
     pub marks: DimMarks,
 }
 
+impl Dimension {
+    /// Definition points by their DXF/model association slot name.
+    pub fn definition_point(&self, name: &str) -> Option<Vec3> {
+        Some(match name {
+            "defpt" => self.defpt,
+            "p13" => self.p13,
+            "p14" => self.p14,
+            "p15" => self.p15,
+            "p16" => self.p16,
+            "text" => self.text_mid,
+            _ => return None,
+        })
+    }
+}
+
 /// What dimension edits add to a dimension's drawing: DIMEDIT Oblique, DIMJOGLINE, DIMJOGGED,
 /// DIMBREAK and DIMINSPECT.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

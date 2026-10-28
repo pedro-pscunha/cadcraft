@@ -91,7 +91,7 @@ impl PointRef {
                 let segments = if poly.closed { n } else { n.saturating_sub(1) };
                 self.subentity == 2
                     && segment <= segments
-                    && ((self.osnap == 13 && segment - 1 == *index) || (self.osnap == 1 && n > 0 && segment % n == *index))
+                    && ((self.osnap == 13 && segment - 1 == *index) || (self.osnap == 1 && n > 0 && (segment - 1 == *index || segment % n == *index)))
             }
             AssocSnap::OnCircle { angle } => {
                 self.osnap == 5 && {
