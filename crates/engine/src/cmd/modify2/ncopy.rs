@@ -7,52 +7,64 @@ use super::{
 // NCOPY
 // =====================================================================================
 
+struct NestedLeaf {
+    entity: Entity,
+    /// The INSERT path distinguishes repeated occurrences of the same definition's handles.
+    occurrence: Vec<Handle>,
+}
+
 /// The leaf objects of a block reference in world coordinates (nested references expanded).
-fn nested_leaves(d: &cadcraft_doc::Drawing, ins: &cadcraft_doc::Insert, m: &Mat3, depth: usize, out: &mut Vec<Entity>) {
-    if depth >= MAX_BLOCK_DEPTH || out.len() >= MAX_GEN {
+fn nested_leaves(d: &cadcraft_doc::Drawing, ins: &cadcraft_doc::Insert, m: &Mat3, path: &mut Vec<Handle>, out: &mut Vec<NestedLeaf>) {
+    if path.len() > MAX_BLOCK_DEPTH || out.len() >= MAX_GEN {
         return;
     }
     let Some(b) = d.block(&ins.block) else { return };
     let mm = m.then_before(ins.transform(b.base.xy()));
     for e in b.entities.iter() {
         match &e.kind {
-            EntityKind::Insert(inner) => nested_leaves(d, inner, &mm, depth + 1, out),
+            EntityKind::Insert(inner) => {
+                path.push(e.handle);
+                nested_leaves(d, inner, &mm, path, out);
+                path.pop();
+            }
             EntityKind::AttDef(_) => {}
             k => {
                 let mut copy = (**e).clone();
                 copy.kind = k.clone();
                 copy.kind.transform(&mm);
-                out.push(copy);
+                out.push(NestedLeaf { entity: copy, occurrence: path.clone() });
             }
         }
     }
 }
 
-fn leaves_of(s: &Session, h: Handle) -> Result<Vec<Entity>> {
+fn leaves_of(s: &Session, h: Handle) -> Result<Vec<NestedLeaf>> {
     let e = curves::entity(s, h)?;
     let EntityKind::Insert(ins) = &e.kind else { return Err(other("Select a block reference.")) };
     let mut out = Vec::new();
-    nested_leaves(s.doc()?, ins, &Mat3::IDENTITY, 0, &mut out);
+    nested_leaves(s.doc()?, ins, &Mat3::IDENTITY, &mut vec![h], &mut out);
     Ok(out)
 }
 
-fn nearest_leaf(leaves: Vec<Entity>, p: Vec2) -> Option<Entity> {
-    leaves.into_iter().min_by(|a, b| curves::kind_distance(&a.kind, p).total_cmp(&curves::kind_distance(&b.kind, p)))
+fn nearest_leaf(leaves: Vec<NestedLeaf>, p: Vec2) -> Option<NestedLeaf> {
+    leaves.into_iter().min_by(|a, b| curves::kind_distance(&a.entity.kind, p).total_cmp(&curves::kind_distance(&b.entity.kind, p)))
 }
 
-fn place_copies(s: &mut Session, items: &[Entity], delta: Vec2) -> Result<Vec<Handle>> {
+fn place_copies(s: &mut Session, items: &[NestedLeaf], delta: Vec2) -> Result<Vec<Handle>> {
     let space = s.space();
     let m = Mat3::translate(delta);
-    let sets = items
-        .iter()
-        .map(|source| {
-            let mut copy = source.clone();
-            copy.kind.transform(&m);
-            vec![copy]
-        })
-        .collect();
+    let mut sets: std::collections::BTreeMap<&[Handle], Vec<Entity>> = Default::default();
+    let mut selected = std::collections::HashSet::new();
+    for source in items {
+        if !selected.insert((source.occurrence.as_slice(), source.entity.handle)) {
+            continue;
+        }
+        let mut copy = source.entity.clone();
+        copy.kind.transform(&m);
+        sets.entry(&source.occurrence).or_default().push(copy);
+    }
     let d = s.doc_mut()?;
-    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(sets.into_values().collect(), cadcraft_doc::DuplicationSource::SameDrawing);
     let store = d.space_mut(&space).ok_or_else(|| other("no such space"))?;
     let mut out = Vec::with_capacity(copies.len());
     for copy in copies {
@@ -65,7 +77,7 @@ fn place_copies(s: &mut Session, items: &[Entity], delta: Vec2) -> Result<Vec<Ha
 pub(super) fn run_ncopy(s: &mut Session, p: &Value) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("ncopy", "`handle` (block reference) is required"))?;
     let leaves = leaves_of(s, h)?;
-    let items: Vec<Entity> = match point_param(p, "pick") {
+    let items: Vec<NestedLeaf> = match point_param(p, "pick") {
         Some(q) => nearest_leaf(leaves, q).into_iter().collect(),
         None => leaves,
     };
@@ -83,7 +95,7 @@ pub(super) fn run_ncopy(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[derive(Default)]
 pub(super) struct NcopyM {
-    items: Vec<Entity>,
+    items: Vec<NestedLeaf>,
     selecting_done: bool,
     base: Option<Vec2>,
 }
@@ -109,7 +121,7 @@ impl Interactive for NcopyM {
                 Input::Point(p) => {
                     let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                     let leaf = nearest_leaf(leaves_of(s, h)?, p).ok_or_else(|| other("Nothing nested there."))?;
-                    s.echo(format!("Nested object: {}", leaf.kind.type_name()));
+                    s.echo(format!("Nested object: {}", leaf.entity.kind.type_name()));
                     if self.items.len() < MAX_GEN {
                         self.items.push(leaf);
                     }
@@ -156,7 +168,7 @@ impl Interactive for NcopyM {
             .iter()
             .take(500)
             .map(|entity| {
-                let mut k = entity.kind.clone();
+                let mut k = entity.entity.kind.clone();
                 k.transform(&m);
                 k
             })
