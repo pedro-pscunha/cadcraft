@@ -437,17 +437,7 @@ fn attribs(d: &Drawing, ins: &Insert, values: &[(String, String)]) -> Vec<Attrib
         k.transform(&m);
         let EntityKind::Text(mut text) = k else { continue };
         text.value = value.clone();
-        out.push(Attrib {
-            handle: None,
-            tag: ad.tag.clone(),
-            text,
-            invisible: ad.invisible,
-            constant: false,
-            prompt: String::new(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        });
+        out.push(Attrib { invisible: ad.invisible, ..Attrib::new(ad.tag.clone(), text) });
     }
     out
 }

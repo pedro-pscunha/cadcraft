@@ -20,17 +20,7 @@ fn attrib(tag: &str, modes: AttribModes) -> Attrib {
         halign: HAlign::Left,
         valign: VAlign::Baseline,
     };
-    Attrib {
-        handle: None,
-        tag: tag.into(),
-        text,
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes,
-    }
+    Attrib { modes, ..Attrib::new(tag, text) }
 }
 
 const ALL: AttribModes = AttribModes { verify: true, preset: true, lock_position: true };

@@ -24,17 +24,7 @@ fn text(x: f64, value: &str) -> Text {
 }
 
 fn attrib(tag: &str, x: f64, props: AttribProps) -> Attrib {
-    Attrib {
-        handle: None,
-        tag: tag.into(),
-        text: text(x, tag),
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props,
-        multiline: None,
-        modes: Default::default(),
-    }
+    Attrib { props, ..Attrib::new(tag, text(x, tag)) }
 }
 
 /// Block TAGS with definitions OWN (layer 0), DEFLAYER (layer TXT) and RED (layer 0, red),

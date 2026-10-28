@@ -269,17 +269,7 @@ fn block_definition_properties_and_constant_attdefs_roundtrip() {
         halign: HAlign::Left,
         valign: VAlign::Baseline,
     };
-    let attdef = |tag: &str, invisible: bool, constant: bool| Attrib {
-        handle: None,
-        tag: tag.into(),
-        text: text.clone(),
-        invisible,
-        constant,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    };
+    let attdef = |tag: &str, invisible: bool, constant: bool| Attrib { invisible, constant, ..Attrib::new(tag, text.clone()) };
     for (i, a) in [attdef("COMPANY", false, true), attdef("SECRET", true, true), attdef("SHEET", false, false)].into_iter().enumerate() {
         b.entities.push(Entity::new(Handle(0x500 + i as u64), EntityKind::AttDef(a)));
     }
@@ -1043,7 +1033,12 @@ fn damaged_dwg_opens_partially_and_says_what_it_left_out() {
             assert_eq!(d.read_notes.len(), 1, "{} lines read, no note", d.entity_count());
         }
         if let [note] = d.read_notes.as_slice() {
-            assert!(note.starts_with("DWG: ") && note.contains(" couldn't be read and "), "{note}");
+            assert!(
+                note.starts_with("DWG: ")
+                    && (note.contains(" couldn't be read and ")
+                        || (note.contains(" that no block of the file lists ") && note.contains(" left out; "))),
+                "{note}"
+            );
             assert!(note.ends_with("saving over the original file would lose it") || note.ends_with("would lose them"), "{note}");
             partial += 1;
         }
@@ -1471,31 +1466,11 @@ fn intl_sample() -> Drawing {
         }),
     )
     .unwrap();
-    let def = Attrib {
-        handle: None,
-        tag: "图号".into(),
-        text: intl_text("默认"),
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    };
+    let def = Attrib::new("图号", intl_text("默认"));
     let mut b = Block::new(&block);
     b.entities.push(Entity::new(Handle(0x50), EntityKind::AttDef(def)));
     d.blocks.insert(block.clone(), std::sync::Arc::new(b));
-    let att = Attrib {
-        handle: None,
-        tag: "图号".into(),
-        text: intl_text(INTL),
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    };
+    let att = Attrib::new("图号", intl_text(INTL));
     d.add(
         &Space::Model,
         on,
@@ -1746,19 +1721,7 @@ fn attdef_prompt_survives_dxf_roundtrip() {
         halign: HAlign::Left,
         valign: VAlign::Baseline,
     };
-    let attdef = |prompt: &str| {
-        EntityKind::AttDef(Attrib {
-            handle: None,
-            tag: "TAG1".into(),
-            text: text.clone(),
-            invisible: false,
-            constant: false,
-            prompt: prompt.into(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        })
-    };
+    let attdef = |prompt: &str| EntityKind::AttDef(Attrib { prompt: prompt.into(), ..Attrib::new("TAG1", text.clone()) });
     d.add(&Space::Model, Default::default(), attdef("Enter value")).unwrap();
     d.add(&Space::Model, Default::default(), attdef("")).unwrap();
     let back = roundtrip(&d);

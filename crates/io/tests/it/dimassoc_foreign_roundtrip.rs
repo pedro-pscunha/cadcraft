@@ -240,9 +240,10 @@ fn assert_raw_semantics(source: &str, dwg: bool) {
 
 #[test]
 fn trans_space_dimassoc_keeps_its_original_semantics() {
-    let source = association_dxf(false, [13, 1])
-        .replace("100\nAcDbDimension\n", "67\n1\n100\nAcDbDimension\n")
-        .replace("90\n3\n70\n0\n71\n0\n", "90\n3\n70\n1\n71\n0\n");
+    let source = association_dxf(false, [13, 1]);
+    assert_eq!(source.matches("100\nAcDbDimension\n").count(), 1, "fixture must move exactly one dimension into paper space");
+    assert_eq!(source.matches("90\n3\n70\n0\n71\n0\n").count(), 1, "fixture must set exactly one trans-space flag");
+    let source = source.replace("100\nAcDbDimension\n", "67\n1\n100\nAcDbDimension\n").replace("90\n3\n70\n0\n71\n0\n", "90\n3\n70\n1\n71\n0\n");
     assert_raw_semantics(&source, true);
 }
 

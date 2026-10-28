@@ -101,26 +101,22 @@ fn visible_attributes_of_a_missing_block_still_count() {
     // The renderer draws the attributes of a reference whose definition is missing, so they are
     // extents and selection targets, as with an empty definition. The insertion point still isn't.
     let attrib = |invisible: bool| Attrib {
-        handle: None,
-        tag: "TAG".into(),
-        text: Text {
-            insert: Vec3::new(1000.0, 1000.0, 0.0),
-            align_pt: None,
-            height: 10.0,
-            value: "hello".into(),
-            rotation: 0.0,
-            width_factor: 1.0,
-            oblique: 0.0,
-            style: "Standard".into(),
-            halign: HAlign::Left,
-            valign: VAlign::Baseline,
-        },
         invisible,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
+        ..Attrib::new(
+            "TAG",
+            Text {
+                insert: Vec3::new(1000.0, 1000.0, 0.0),
+                align_pt: None,
+                height: 10.0,
+                value: "hello".into(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".into(),
+                halign: HAlign::Left,
+                valign: VAlign::Baseline,
+            },
+        )
     };
     let ins = |block: &str, attribs: Vec<Attrib>| {
         Entity::new(
@@ -439,10 +435,9 @@ fn block_entity_on_undefined_layer_counts() {
 fn attdef_in_block_is_ignored_in_insert_extents() {
     let attdef = Entity::new(
         Handle(2),
-        EntityKind::AttDef(Attrib {
-            handle: None,
-            tag: "TAG".into(),
-            text: Text {
+        EntityKind::AttDef(Attrib::new(
+            "TAG",
+            Text {
                 insert: Vec3::new(5000.0, 5000.0, 0.0),
                 align_pt: None,
                 height: 1.0,
@@ -454,13 +449,7 @@ fn attdef_in_block_is_ignored_in_insert_extents() {
                 halign: HAlign::Left,
                 valign: VAlign::Baseline,
             },
-            invisible: false,
-            constant: false,
-            prompt: String::new(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        }),
+        )),
     );
     let d = drawing_with_block(attdef);
     assert_eq!(extents_pair(&d), (Vec2::ZERO, Vec2::new(1.0, 1.0)));

@@ -163,14 +163,11 @@ pub(super) fn attdef(tags: &[Tag], c: &Common) -> Attrib {
         text.value.clone_from(&m.read_as);
     }
     Attrib {
-        handle: None,
-        tag: own.s(2).unwrap_or_default(),
-        text,
         invisible: own.i(70).unwrap_or(0) & 1 != 0,
         constant: own.i(70).unwrap_or(0) & 2 != 0,
         prompt: own.s(3).unwrap_or_default(),
-        props: Default::default(),
         multiline,
         modes: attrib_modes(own.0),
+        ..Attrib::new(own.s(2).unwrap_or_default(), text)
     }
 }

@@ -121,7 +121,7 @@ mod native {
         if unlisted > 0 {
             let (s, were, them) = if unlisted == 1 { ("y", "was", "it") } else { ("ies", "were", "them") };
             notes.push(format!(
-                "DWG: {unlisted} entit{s} that no block of the file lists couldn't be read and {were} left out; \
+                "DWG: {unlisted} entit{s} that no block of the file lists {were} left out; \
                  saving over the original file would lose {them}"
             ));
         }

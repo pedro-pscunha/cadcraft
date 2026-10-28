@@ -248,15 +248,10 @@ pub(crate) fn insert_with(
             }
             t.value = attedit::value_for(values, &ad.tag).unwrap_or_else(|| ad.text.value.clone());
             ins.attribs.push(Attrib {
-                handle: None,
-                tag: ad.tag.clone(),
-                text: t,
                 invisible: ad.invisible,
-                constant: false,
-                prompt: String::new(),
-                props: Default::default(),
                 multiline: ad.multiline.as_ref().map(|ml| ml.transformed(&m)),
                 modes: ad.modes.for_reference(),
+                ..Attrib::new(ad.tag.clone(), t)
             });
         }
     }
@@ -314,26 +309,23 @@ fn run_insert(s: &mut Session, p: &Value) -> Result<Value> {
 fn attdef_kind(s: &Session, tag: &str, prompt: &str, default: &str, at: Vec2, height: f64, invisible: bool) -> EntityKind {
     let style = s.doc().map(|d| d.header.str("TEXTSTYLE", "Standard")).unwrap_or_else(|_| "Standard".into());
     EntityKind::AttDef(Attrib {
-        handle: None,
-        tag: tag.to_ascii_uppercase(),
-        text: Text {
-            insert: v3(at),
-            align_pt: None,
-            height,
-            value: default.into(),
-            rotation: 0.0,
-            width_factor: 1.0,
-            oblique: 0.0,
-            style,
-            halign: HAlign::Left,
-            valign: VAlign::Baseline,
-        },
         invisible,
-        constant: false,
         prompt: prompt.into(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
+        ..Attrib::new(
+            tag.to_ascii_uppercase(),
+            Text {
+                insert: v3(at),
+                align_pt: None,
+                height,
+                value: default.into(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style,
+                halign: HAlign::Left,
+                valign: VAlign::Baseline,
+            },
+        )
     })
 }
 

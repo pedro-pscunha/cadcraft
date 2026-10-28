@@ -35,17 +35,8 @@ fn session() -> Session {
         line_spacing_exact: false,
         columns: None,
     };
-    let def = Attrib {
-        handle: None,
-        tag: "LABEL".into(),
-        text,
-        invisible: false,
-        constant: false,
-        prompt: "Site".into(),
-        props: Default::default(),
-        multiline: Some(MultilineAttrib { mtext, read_as: "SITE\nNAME".into() }),
-        modes: Default::default(),
-    };
+    let def =
+        Attrib { prompt: "Site".into(), multiline: Some(MultilineAttrib { mtext, read_as: "SITE\nNAME".into() }), ..Attrib::new("LABEL", text) };
     let mut b = Block::new("TAG");
     let h = d.new_handle();
     b.entities.push(Entity { handle: h, common: Common::default(), kind: EntityKind::AttDef(def) });

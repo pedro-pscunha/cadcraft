@@ -24,17 +24,7 @@ fn references_take_lock_position_from_the_definition() {
         valign: Default::default(),
     };
     let modes = AttribModes { verify: true, preset: true, lock_position: true };
-    let def = Attrib {
-        handle: None,
-        tag: "MARK".into(),
-        text,
-        invisible: false,
-        constant: false,
-        prompt: "Mark".into(),
-        props: Default::default(),
-        multiline: None,
-        modes,
-    };
+    let def = Attrib { prompt: "Mark".into(), modes, ..Attrib::new("MARK", text) };
     let mut b = Block::new("TAG");
     let h = d.new_handle();
     b.entities.push(Entity::new(h, EntityKind::AttDef(def)));

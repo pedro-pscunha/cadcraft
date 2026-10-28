@@ -112,14 +112,10 @@ pub(super) fn synced(blk: &Block, defs: &[&Attrib], ins: &Insert) -> Vec<Attrib>
             t.value = previous.map(|a| a.text.value.clone()).unwrap_or_else(|| ad.text.value.clone());
             Attrib {
                 handle: previous.and_then(|a| a.handle),
-                tag: ad.tag.clone(),
-                text: t,
                 invisible: ad.invisible,
-                constant: false,
-                prompt: String::new(),
-                props: Default::default(),
                 multiline: ad.multiline.as_ref().map(|ml| ml.transformed(&m)),
                 modes: ad.modes.for_reference(),
+                ..Attrib::new(ad.tag.clone(), t)
             }
         })
         .collect()

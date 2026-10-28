@@ -761,10 +761,9 @@ fn transparent_solid_hatch_blends_with_the_line_under_it() {
 }
 
 fn attrib(tag: &str) -> cadcraft_doc::Attrib {
-    cadcraft_doc::Attrib {
-        handle: None,
-        tag: tag.into(),
-        text: cadcraft_doc::Text {
+    cadcraft_doc::Attrib::new(
+        tag,
+        cadcraft_doc::Text {
             insert: Vec3::new(1.0, 1.0, 0.0),
             align_pt: None,
             height: 1.0,
@@ -776,13 +775,7 @@ fn attrib(tag: &str) -> cadcraft_doc::Attrib {
             halign: Default::default(),
             valign: Default::default(),
         },
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    }
+    )
 }
 
 /// A block "B" with a line (layer 0, ByLayer) and an attribute definition with `def`'s

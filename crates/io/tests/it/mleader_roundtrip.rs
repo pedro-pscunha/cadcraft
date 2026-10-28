@@ -89,20 +89,7 @@ fn spline_leader_with_block_content_and_attributes() {
         halign: HAlign::default(),
         valign: VAlign::default(),
     };
-    blk.entities.push(Entity::new(
-        Handle(0x201),
-        EntityKind::AttDef(Attrib {
-            handle: None,
-            tag: "NUM".into(),
-            text: tag_text,
-            invisible: false,
-            constant: false,
-            prompt: "Number".into(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        }),
-    ));
+    blk.entities.push(Entity::new(Handle(0x201), EntityKind::AttDef(Attrib { prompt: "Number".into(), ..Attrib::new("NUM", tag_text) })));
     d.blocks.insert(blk.name.clone(), std::sync::Arc::new(blk));
     let mut ins = insert("BUBBLE", Vec3::new(12.0, 3.0, 0.0));
     // The attribute placed like its definition under the block reference.
@@ -113,17 +100,7 @@ fn spline_leader_with_block_content_and_attributes() {
     k.transform(&xf);
     let EntityKind::Text(mut placed) = k else { unreachable!() };
     placed.value = "42".into();
-    ins.attribs.push(Attrib {
-        handle: None,
-        tag: "NUM".into(),
-        text: placed,
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    });
+    ins.attribs.push(Attrib::new("NUM", placed));
     let m = MLeader {
         leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.0, 5.0, 0.0), Vec3::new(8.0, 4.0, 0.0)]],
         landing: Vec3::new(10.0, 3.0, 0.0),

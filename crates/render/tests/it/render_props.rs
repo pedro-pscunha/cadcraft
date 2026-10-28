@@ -113,17 +113,7 @@ fn text(x: f64, value: &str) -> Text {
 }
 
 fn attdef(handle: u64, tag: &str, x: f64, common: Common) -> Entity {
-    let a = Attrib {
-        handle: None,
-        tag: tag.into(),
-        text: text(x, tag),
-        invisible: false,
-        constant: false,
-        prompt: String::new(),
-        props: Default::default(),
-        multiline: None,
-        modes: Default::default(),
-    };
+    let a = Attrib::new(tag, text(x, tag));
     Entity { common, ..Entity::new(Handle(handle), EntityKind::AttDef(a)) }
 }
 
@@ -149,17 +139,7 @@ fn attributes_draw_with_their_own_properties() {
     blk.entities.push(attdef(0x13, "OWN", 30.0, Common { color: Color::Index(6), lineweight: Lineweight::Mm100(70), ..on("TXT") }));
     d.blocks.insert(blk.name.clone(), Arc::new(blk));
     let attribs = [("bylayer", 0.0), ("ByBlock", 10.0), ("LAYER0", 20.0), ("OWN", 30.0), ("NODEF", 40.0)]
-        .map(|(tag, x)| Attrib {
-            handle: None,
-            tag: tag.into(),
-            text: text(x, "X"),
-            invisible: false,
-            constant: false,
-            prompt: String::new(),
-            props: Default::default(),
-            multiline: None,
-            modes: Default::default(),
-        })
+        .map(|(tag, x)| Attrib::new(tag, text(x, "X")))
         .to_vec();
     let ins = Insert {
         block: "TAGS".into(),

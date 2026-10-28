@@ -5,8 +5,10 @@ use cadcraft_engine::Session;
 use serde_json::json;
 
 fn session() -> Session {
-    let source = include_str!("../../io/tests/data/attrib_fields.dxf")
-        .replace("1\nplain\n100\nAcDbAttribute\n2\nLENGTH\n", "1\nplain\n100\nAcDbAttribute\n2\nPLAIN\n");
+    let source = include_str!("../../io/tests/data/attrib_fields.dxf");
+    let preceding = "1\nplain\n100\nAcDbAttribute\n2\nLENGTH\n";
+    assert_eq!(source.matches(preceding).count(), 1, "fixture must rename exactly the preceding plain attribute, not its ATTDEF or live peer");
+    let source = source.replace(preceding, "1\nplain\n100\nAcDbAttribute\n2\nPLAIN\n");
     let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
     let mut s = Session::new();
     s.open_drawing(d, "fields.dxf", None);
@@ -82,6 +84,20 @@ fn copied_attribute_fields_survive_erasing_original_and_reopening() {
     let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
     let d = cadcraft_io::read(&dwg, "x.dwg").unwrap();
     assert_copy_graphs(&cadcraft_io::write_dxf(&d), 1);
+}
+
+#[test]
+fn properties_do_not_expose_decimal_attribute_identity() {
+    let mut s = session();
+    let properties = s.execute("properties", &json!({"handles":["31"]})).unwrap();
+    assert_eq!(properties["count"], 1, "fixture INSERT must be selected");
+    let attributes = properties["objects"][0]["geometry"]["attribs"].as_array().expect("INSERT attribute properties");
+    assert_eq!(attributes.len(), 2, "fixture attributes must be serialized");
+    assert!(attributes.iter().any(|a| a["text"]["value"] == "live"), "live attribute must be in the response");
+    assert!(
+        attributes.iter().all(|a| a.get("handle").is_none()),
+        "internal attribute identities must not appear as decimal properties: {properties}"
+    );
 }
 
 #[test]
