@@ -14,6 +14,7 @@ pub(super) struct BlockNamespace {
     pub(super) source: String,
     pub(super) target: String,
     pub(super) handles: BTreeMap<Handle, Handle>,
+    pub(super) source_owned: BTreeSet<Handle>,
 }
 
 pub(super) fn block_role(key: &ForeignKey, name: &str) -> bool {
@@ -21,9 +22,17 @@ pub(super) fn block_role(key: &ForeignKey, name: &str) -> bool {
 }
 
 impl BlockNamespace {
+    pub(super) fn close_map(copy: Option<&Self>, map: &mut std::borrow::Cow<'_, BTreeMap<Handle, Handle>>) {
+        if let Some(copy) = copy {
+            for old in &copy.source_owned {
+                map.to_mut().entry(*old).or_insert(Handle(0));
+            }
+        }
+    }
+
     pub(super) fn capture(copy: Option<&mut Self>, map: &BTreeMap<Handle, Handle>) {
         if let Some(copy) = copy {
-            copy.handles.extend(map.iter().map(|(old, new)| (*old, *new)));
+            copy.handles.extend(map.iter().filter(|(_, new)| new.0 != 0).map(|(old, new)| (*old, *new)));
         }
     }
 
@@ -75,7 +84,12 @@ impl Drawing {
             foreign.objects.retain(|o| !target_namespace.contains(&o.handle));
             foreign.records.retain(|key, _| !block_role(key, target));
         }
-        let mut copy = BlockNamespace { source: source.to_string(), target: target.to_string(), handles: BTreeMap::new() };
+        let mut copy = BlockNamespace {
+            source: source.to_string(),
+            target: target.to_string(),
+            handles: BTreeMap::new(),
+            source_owned: original_namespace.clone(),
+        };
         let entities = self.duplicate_entity_sets(vec![entities], DuplicationSource::SameDrawing, &BTreeMap::new(), Some(&mut copy));
         let foreign = Arc::make_mut(&mut self.foreign);
         foreign.objects.retain(|o| !original_namespace.contains(&o.handle));

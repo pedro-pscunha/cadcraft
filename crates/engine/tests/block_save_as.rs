@@ -298,8 +298,7 @@ fn save_as_clones_named_record_metadata_and_restores_the_original_graph() {
     }
 }
 
-#[test]
-fn save_as_clones_dynamic_record_graphs_and_their_controlled_handles() {
+fn dynamic_source() -> Session {
     use cadcraft_engine::doc::{RawTag, foreign::ForeignObject};
     let mut s = Session::new();
     let h = line(&mut s, 0);
@@ -358,6 +357,12 @@ fn save_as_clones_dynamic_record_graphs_and_their_controlled_handles() {
             (95, "0".into()),
         ],
     ));
+    s
+}
+
+#[test]
+fn save_as_clones_dynamic_record_graphs_and_their_controlled_handles() {
+    let mut s = dynamic_source();
     s.execute("bedit", &json!({"name":"ORIGINAL"})).unwrap();
     s.execute("bsaveas", &json!({"name":"COPY"})).unwrap();
     s.execute("bclose", &json!({"save":true})).unwrap();
@@ -379,6 +384,123 @@ fn save_as_clones_dynamic_record_graphs_and_their_controlled_handles() {
     let descriptor = s.execute("blocks.dynamic", &json!({"name":"RENAMED"})).unwrap();
     assert_eq!(descriptor["parameters"].as_array().unwrap().len(), 1, "RENAME lost name-keyed block data");
     assert_file_unique(s.doc().unwrap());
+}
+
+fn field_references_in(d: &Drawing, name: &str) -> BTreeSet<Handle> {
+    let ids = identities(d, name);
+    let owners: BTreeMap<_, _> = d
+        .foreign
+        .objects
+        .iter()
+        .filter_map(|o| cadcraft_engine::doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str()))).map(|owner| (o.handle, owner)))
+        .collect();
+    let mut references = BTreeSet::new();
+    for field in d.foreign.objects.iter().filter(|o| o.kind == "FIELD") {
+        let mut root = field.handle;
+        for _ in 0..64 {
+            if let Some(parent) = owners.get(&root) {
+                root = *parent;
+            } else {
+                break;
+            }
+        }
+        if ids.contains(&root) {
+            references.extend(field.tags.iter().filter(|t| t.code == 331).filter_map(|t| Handle::parse_hex(&t.value)));
+        }
+    }
+    references
+}
+
+#[test]
+fn erased_source_roots_do_not_escape_copy_fields_but_external_references_survive() {
+    let mut expected = Vec::new();
+    for copying in [false, true] {
+        let mut s = attribute_source();
+        let external = line(&mut s, 9);
+        let erased = s.doc().unwrap().block("ORIGINAL").unwrap().entities.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).unwrap().handle;
+        s.execute("bedit", &json!({"name":"ORIGINAL"})).unwrap();
+        s.execute("erase", &json!({"handles":[erased.hex()]})).unwrap();
+        let nested = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle;
+        s.doc_mut()
+            .unwrap()
+            .modify_entity(nested, |e| {
+                e.common.xdata.extend([
+                    cadcraft_engine::doc::RawTag { code: 1001, value: "EXTERNAL_PROBE".into() },
+                    cadcraft_engine::doc::RawTag { code: 1005, value: external.hex() },
+                ]);
+            })
+            .unwrap();
+        if copying {
+            s.execute("bsaveas", &json!({"name":"COPY"})).unwrap();
+        } else {
+            s.execute("bsave", &json!({})).unwrap();
+        }
+        s.execute("bclose", &json!({"save":true})).unwrap();
+        for (format, d) in roundtrips(&s).into_iter().enumerate() {
+            let name = if copying { "COPY" } else { "ORIGINAL" };
+            let refs = field_references_in(&d, name);
+            assert!(!refs.is_empty(), "fixture must retain the surviving FIELD references");
+            if copying {
+                assert_eq!(refs, expected[format], "copy FIELD rebound to restored ORIGINAL instead of matching plain BSAVE");
+            } else {
+                expected.push(refs);
+            }
+            let nested = d.block(name).unwrap().entities.iter().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap();
+            assert!(
+                nested.common.xdata.iter().any(|t| t.code == 1005 && Handle::parse_hex(&t.value) == Some(external)),
+                "legitimate external reference was removed"
+            );
+        }
+    }
+}
+
+#[test]
+fn erased_source_roots_do_not_escape_copied_dynamic_graphs() {
+    let mut expected = Vec::new();
+    for copying in [false, true] {
+        let mut s = dynamic_source();
+        let erased = s.doc().unwrap().block("ORIGINAL").unwrap().entities.iter().next().unwrap().handle;
+        s.execute("bedit", &json!({"name":"ORIGINAL"})).unwrap();
+        s.execute("erase", &json!({"handles":[erased.hex()]})).unwrap();
+        if copying {
+            s.execute("bsaveas", &json!({"name":"COPY"})).unwrap();
+        } else {
+            s.execute("bsave", &json!({})).unwrap();
+        }
+        s.execute("bclose", &json!({"save":true})).unwrap();
+        for (format, d) in roundtrips(&s).into_iter().enumerate() {
+            let key = ("BLOCK_RECORD".into(), if copying { "COPY".into() } else { "ORIGINAL".into() });
+            let dictionary = d.foreign.records.get(&key).unwrap().xdict.unwrap();
+            let mut owned = BTreeSet::from([dictionary]);
+            for _ in 0..64 {
+                let before = owned.len();
+                for object in &d.foreign.objects {
+                    if cadcraft_engine::doc::foreign::object_owner(object.tags.iter().map(|t| (t.code, t.value.as_str())))
+                        .is_some_and(|h| owned.contains(&h))
+                    {
+                        owned.insert(object.handle);
+                    }
+                }
+                if before == owned.len() {
+                    break;
+                }
+            }
+            let refs: BTreeSet<_> = d
+                .foreign
+                .objects
+                .iter()
+                .filter(|o| owned.contains(&o.handle))
+                .flat_map(|o| &o.tags)
+                .filter(|t| matches!(t.code, 331 | 332))
+                .filter_map(|t| Handle::parse_hex(&t.value))
+                .collect();
+            if copying {
+                assert_eq!(refs, expected[format], "copy dynamic graph controls a restored original entity");
+            } else {
+                expected.push(refs);
+            }
+        }
+    }
 }
 
 #[test]

@@ -301,9 +301,9 @@ fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: Du
                 dimension.assoc.clear();
             }
             dimension.assoc.retain(|link| {
-                map.contains_key(&link.handle)
+                map.get(&link.handle).is_some_and(|h| h.0 != 0)
                     && match link.snap {
-                        crate::AssocSnap::Intersection { other } => map.contains_key(&other),
+                        crate::AssocSnap::Intersection { other } => map.get(&other).is_some_and(|h| h.0 != 0),
                         _ => true,
                     }
             });
@@ -320,6 +320,7 @@ fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: Du
                     .sources
                     .iter()
                     .filter_map(|h| map.get(h).copied().or_else(|| (source == DuplicationSource::SameDrawing).then_some(*h)))
+                    .filter(|h| h.0 != 0)
                     .collect();
             }
         }
@@ -496,6 +497,9 @@ impl crate::Drawing {
                     }
                 }
             }
+            // A deleted member of the source definition is not a legitimate external
+            // reference just because BSAVEAS restores that member in ORIGINAL.
+            BlockNamespace::close_map(namespace.as_deref(), &mut map);
             if !has_metadata {
                 for entity in &mut entities {
                     remap_model(&mut entity.kind, &map, source, false);
