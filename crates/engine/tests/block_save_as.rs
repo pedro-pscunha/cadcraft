@@ -516,6 +516,25 @@ fn rename_is_not_allowed_to_split_the_active_editor_namespace() {
 }
 
 #[test]
+fn rename_during_single_insert_refedit_is_refused_without_losing_the_edit() {
+    let mut s = Session::new();
+    let h = line(&mut s, 0);
+    let insert = block(&mut s, "A", &[h]);
+    assert_eq!(s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Insert(_))).count(), 1);
+    s.execute("refedit", &json!({"handle":insert})).unwrap();
+    let working = s.doc().unwrap().refedit.as_ref().unwrap().items[0].copy;
+    s.execute("move", &json!({"handles":[working.hex()],"delta":[2,0]})).unwrap();
+    let before = s.state().unwrap().doc.clone();
+    let result = s.execute("rename", &json!({"table":"block","from":"A","to":"B"}));
+    assert!(result.is_err(), "RENAME escaped the one-insert working-set guard");
+    assert!(Arc::ptr_eq(&before, &s.state().unwrap().doc));
+    s.execute("refclose", &json!({"save":true})).unwrap();
+    assert!(s.doc().unwrap().block("B").is_none());
+    let EntityKind::Line(line) = &s.doc().unwrap().block("A").unwrap().entities.iter().next().unwrap().kind else { panic!("line") };
+    assert!((line.a.x - 2.0).abs() < 1e-9);
+}
+
+#[test]
 fn wblock_from_editor_block_redefinition_and_external_rename_keep_unique_identities() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |b, n| cadcraft_io::read(b, n).map_err(|e| e.to_string()),

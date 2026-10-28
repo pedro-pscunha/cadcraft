@@ -39,8 +39,8 @@ fn repoint(d: &mut Drawing, uses: &dyn Fn(&EntityKind) -> bool, fix: &dyn Fn(&mu
 /// Rename a block definition; inserts everywhere (nested ones and those with attributes
 /// included), INSNAME and dimension-style arrowheads follow.
 pub(super) fn block(s: &mut Session, from: &str, to: &str) -> Result<()> {
-    if s.state()?.block_edit.is_some() {
-        return Err(bad("rename", "close the Block Editor before renaming block definitions; BSAVEAS creates a separate block"));
+    if s.state()?.block_edit.is_some() || s.doc()?.refedit.is_some() {
+        return Err(bad("rename", "close the Block Editor or REFEDIT before renaming block definitions; BSAVEAS creates a separate block"));
     }
     let to = to.trim().to_string();
     if !valid_name(&to) {
