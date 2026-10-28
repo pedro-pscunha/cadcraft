@@ -518,6 +518,9 @@ fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     if drops_unknown(&format!("drawing.{fmt}")) {
         report_not_saved(s, &mut r, &lost);
     }
+    if is_drawing_file(&format!("drawing.{fmt}")) {
+        report_associations(s, &mut r);
+    }
     Ok(r)
 }
 
@@ -586,6 +589,13 @@ fn report_not_saved(s: &mut Session, r: &mut Value, lost: &std::collections::BTr
     }
 }
 
+fn report_associations(s: &mut Session, result: &mut Value) {
+    if let Some(note) = s.doc().ok().and_then(|d| crate::assoc::unupdated_note(d, None)) {
+        s.echo(&note);
+        result["warnings"] = json!([note]);
+    }
+}
+
 /// Save, then report the entities the file couldn't keep (nothing is dropped silently).
 fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> Result<Value>) -> Result<Value> {
     // What the file will hold depends on the version it is saved as (the data store from 2013).
@@ -595,6 +605,9 @@ fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> R
     let mut r = run(s, p)?;
     if r.get("path").and_then(Value::as_str).is_some_and(drops_unknown) {
         report_not_saved(s, &mut r, &lost);
+    }
+    if is_drawing_file(&path) {
+        report_associations(s, &mut r);
     }
     Ok(r)
 }

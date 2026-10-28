@@ -45,6 +45,18 @@ impl Session {
             (Ok(v), Some((doc, sel, uid))) if spec.undoable => self.refuse_non_finite(Some(*uid), doc, sel, spec.id).map(|()| v),
             (r, _) => r,
         };
+        let result = result.map(|mut value| {
+            if let Some((before, _, uid)) = &before
+                && let Ok(st) = self.state()
+                && st.uid == *uid
+                && let Some(note) = crate::assoc::unupdated_note(&st.doc, Some(before))
+                && let Some(object) = value.as_object_mut()
+                && let Some(notes) = object.entry("warnings").or_insert_with(|| Value::Array(Vec::new())).as_array_mut()
+            {
+                notes.push(Value::String(note));
+            }
+            value
+        });
         let grouped = self.lisp_groups_undo();
         if spec.undoable
             && let Some((doc, sel, uid)) = before

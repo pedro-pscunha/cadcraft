@@ -276,6 +276,7 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     }
     if nd != *dm {
         nd.block = None;
+        nd.measurement = cadcraft_render::dimension_in(after, &nd).measurement;
     }
     nd
 }
@@ -292,8 +293,8 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
-                // Raw DIMASSOC is opaque and authoritative; inferred links are a guard only.
-                if dm.assoc.is_empty() || d.has_raw_dimassoc(e.handle) {
+                // Retained bytes need not freeze a completely understood semantic link.
+                if dm.assoc.is_empty() || d.has_raw_dimassoc(e.handle) && !d.raw_dimassoc_can_update(e.handle) {
                     continue;
                 }
                 let touched = dm.assoc.iter().any(|a| {
@@ -324,6 +325,19 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
     n + retired
 }
 
+/// A visible warning for opaque links, either all of them at save or those touched by an edit.
+pub(crate) fn unupdated_note(d: &Drawing, before: Option<&Drawing>) -> Option<String> {
+    let n = d
+        .raw_dimassoc_dimensions()
+        .filter(|h| {
+            !d.raw_dimassoc_can_update(*h)
+                && d.entity_including_blocks(*h).is_some_and(|e| matches!(e.kind, EntityKind::Dimension(_)))
+                && before.is_none_or(|before| d.raw_dimassoc_targets(*h).any(|target| src_changed(before, d, target)))
+        })
+        .count();
+    (n > 0).then(|| format!("{n} associative dimensions keep their AutoCAD link but were not updated"))
+}
+
 /// The post-command pass: called by `Session::execute` and when an interactive command
 /// finishes. `uid` (when known) is the document the command started in.
 pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid: Option<u64>) {
@@ -335,6 +349,7 @@ pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid:
     {
         update(&mut st.doc, before);
         notes = crate::cmd::hatch::refill_associative(&mut st.doc, before);
+        notes.extend(unupdated_note(&st.doc, Some(before)));
     }
     notes.into_iter().for_each(|n| s.echo(n));
 }

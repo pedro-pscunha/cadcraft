@@ -1,12 +1,13 @@
-//! Opaque raw associations have one authority. Inferred model links are a guard snapshot, not
-//! a partially usable association: the engine leaves their cached geometry alone. Raw data is
-//! retired when those links change, its owner goes, or an initially resolved target goes/changes
-//! type. Originally unresolved input references remain opaque rather than being guessed valid.
+//! Raw association bytes remain authoritative. Fully supported semantic references can follow
+//! geometry; incomplete or unsupported references stay opaque and are reported by the engine.
+//! Raw data retires when links change, its owner goes, or a resolved target goes/changes type.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::dimassoc_reference;
 use crate::{AssocSnap, DimAssoc, Drawing, Entity, EntityKind, Handle};
+
+mod point;
 
 #[derive(Clone, Debug, PartialEq)]
 enum TargetKind {
@@ -18,6 +19,7 @@ enum TargetKind {
 pub(crate) struct RawDimAssoc {
     owner_type: String,
     inferred: Vec<DimAssoc>,
+    evaluable: bool,
     targets: BTreeMap<Handle, TargetKind>,
 }
 
@@ -61,6 +63,21 @@ impl Drawing {
         self.foreign.raw_dimassocs.contains_key(&dimension)
     }
 
+    /// Whether every preserved point reference has a supported, matching model link.
+    pub fn raw_dimassoc_can_update(&self, dimension: Handle) -> bool {
+        self.foreign.raw_dimassocs.get(&dimension).is_some_and(|snapshot| snapshot.evaluable)
+    }
+
+    /// Dimensions with retained raw association records.
+    pub fn raw_dimassoc_dimensions(&self) -> impl Iterator<Item = Handle> + '_ {
+        self.foreign.raw_dimassocs.keys().copied()
+    }
+
+    /// Initially resolved targets, used to report unsupported links affected by an edit.
+    pub fn raw_dimassoc_targets(&self, dimension: Handle) -> impl Iterator<Item = Handle> + '_ {
+        self.foreign.raw_dimassocs.get(&dimension).into_iter().flat_map(|snapshot| snapshot.targets.keys().copied())
+    }
+
     /// Capture the inference/target snapshot after reading raw DIMASSOC records.
     pub fn remember_raw_dimassocs(&mut self) {
         let records: Vec<_> = self
@@ -71,7 +88,11 @@ impl Drawing {
             .filter_map(|o| {
                 let (_, dimension) = dimassoc_reference(o.tags.iter().map(|t| (t.code, t.value.as_str())))?;
                 let refs: BTreeSet<_> = o.tags.iter().filter(|t| matches!(t.code, 331 | 332)).filter_map(|t| Handle::parse_hex(&t.value)).collect();
-                Some((dimension, refs))
+                let evaluable = self.entity_including_blocks(dimension).is_some_and(|e| match &e.kind {
+                    EntityKind::Dimension(dm) => point::evaluable(self, dm, &o.tags),
+                    _ => false,
+                });
+                Some((dimension, refs, evaluable))
             })
             .collect();
         if records.is_empty() {
@@ -80,7 +101,7 @@ impl Drawing {
         let attribute_owners: HashMap<_, _> =
             entities(self).flat_map(|e| e.kind.attributes().iter().filter_map(move |a| a.handle.map(|h| (h, e.handle)))).collect();
         let mut snapshots = BTreeMap::new();
-        for (dimension, refs) in records {
+        for (dimension, refs, evaluable) in records {
             let Some(owner) = self.entity_including_blocks(dimension) else { continue };
             let inferred = match &owner.kind {
                 EntityKind::Dimension(d) => d.assoc.clone(),
@@ -96,7 +117,7 @@ impl Drawing {
                     Some((h, kind))
                 })
                 .collect();
-            snapshots.insert(dimension, RawDimAssoc { owner_type: owner.kind.dxf_name().to_string(), inferred, targets });
+            snapshots.insert(dimension, RawDimAssoc { owner_type: owner.kind.dxf_name().to_string(), inferred, evaluable, targets });
         }
         std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs = snapshots;
     }

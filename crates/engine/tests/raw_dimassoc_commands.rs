@@ -10,6 +10,10 @@ fn session() -> (Session, String, String, Handle) {
 }
 
 fn session_with_snaps(snaps: [i64; 2]) -> (Session, String, String, Handle) {
+    session_with_shape(snaps, false)
+}
+
+fn session_with_shape(snaps: [i64; 2], autocad: bool) -> (Session, String, String, Handle) {
     let mut s = Session::new();
     let line = s.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
     let dim = s.execute("dimlinear", &json!({"object":line, "at":[5,5]})).unwrap()["handle"].as_str().unwrap().to_string();
@@ -35,7 +39,24 @@ fn session_with_snaps(snaps: [i64; 2]) -> (Session, String, String, Handle) {
         } else if in_assoc && tag.code == 72 {
             *tag = Tag::i(72, snaps[point]);
             point += 1;
+        } else if in_assoc && autocad {
+            match tag.code {
+                10 | 20 => *tag = Tag::f(tag.code, 0.0),
+                30 => *tag = Tag::f(30, 2e50),
+                73 => *tag = Tag::i(73, 2),
+                91 => *tag = Tag::i(91, 1),
+                _ => {}
+            }
         }
+    }
+    if autocad {
+        let mut in_assoc = false;
+        tags.retain(|t| {
+            if t.code == 0 {
+                in_assoc = t.str() == "DIMASSOC";
+            }
+            !(in_assoc && t.code == 301)
+        });
     }
     assert_eq!(point, 2, "fixture must replace exactly two DIMASSOC point references");
     let original = objects(&source);
@@ -119,6 +140,43 @@ fn audit_attachment_drop_retires_the_raw_association() {
     s.doc_mut().unwrap().remove_entity(Handle::parse_hex(&line).unwrap());
     s.execute("audit", &json!({"fix":true})).unwrap();
     assert_retired(&s, raw);
+}
+
+#[test]
+fn autocad_endpoint_references_follow_geometry_without_rewriting_raw_bytes() {
+    let (mut s, dim, line, raw) = session_with_shape([13, 1], true);
+    let h = Handle::parse_hex(&dim).unwrap();
+    let original = s.doc().unwrap().foreign.objects.iter().find(|o| o.handle == raw).unwrap().tags.clone();
+    s.execute("move", &json!({"handles":[line],"delta":[2,0]})).unwrap();
+    let cadcraft_engine::doc::EntityKind::Dimension(model) = &s.doc().unwrap().entity(h).unwrap().kind else { panic!("dimension") };
+    assert_eq!((model.p13.x, model.p14.x, model.measurement), (2.0, 12.0, 10.0));
+    s.execute("lengthen", &json!({"handle":line,"pick":[12,0],"delta":3})).unwrap();
+    let cadcraft_engine::doc::EntityKind::Dimension(model) = &s.doc().unwrap().entity(h).unwrap().kind else { panic!("dimension") };
+    assert_eq!((model.p13.x, model.p14.x, model.measurement), (2.0, 15.0, 13.0));
+    assert_eq!(s.doc().unwrap().foreign.objects.iter().find(|o| o.handle == raw).unwrap().tags, original);
+    for text in saved(&s) {
+        let objects = objects(&text);
+        let assoc = &objects.iter().find(|(kind, _)| kind == "DIMASSOC").unwrap().1;
+        assert_eq!(assoc.iter().filter(|t| t.code == 331).map(Tag::str).collect::<Vec<_>>(), [line.clone(), line.clone()]);
+    }
+}
+
+#[test]
+fn unsupported_raw_associations_report_command_and_save_notes() {
+    let (mut s, _, line, _) = session_with_shape([13, 8], true);
+    let result = s.execute("move", &json!({"handles":[line],"delta":[2,0]})).unwrap();
+    let note = "1 associative dimensions keep their AutoCAD link but were not updated";
+    assert!(result["warnings"].to_string().contains(note), "{result}");
+    assert!(s.log.iter().any(|line| line.contains(note)), "{:?}", s.log);
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |bytes, name| cadcraft_io::read(bytes, name).map_err(|e| e.to_string()),
+        write: |drawing, name| cadcraft_io::write(drawing, name).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    for format in ["dxf", "dwg"] {
+        let result = s.execute("document.bytes", &json!({"format":format})).unwrap();
+        assert!(result["warnings"].to_string().contains(note), "save did not report unsupported association");
+    }
 }
 
 #[test]

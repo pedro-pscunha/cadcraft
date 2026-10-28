@@ -108,7 +108,7 @@ pub struct Foreign {
     pub dictionary: Vec<(String, Handle)>,
     /// Extras of entities and attribute instances, by their document handle.
     pub entities: BTreeMap<Handle, ForeignExtra>,
-    /// Guard snapshots for opaque DIMASSOC records; inferred links are not evaluated by the engine.
+    /// Guard snapshots for retained DIMASSOC records, including semantic evaluability.
     pub(crate) raw_dimassocs: BTreeMap<Handle, RawDimAssoc>,
     /// Extras of table records (`("LAYER", "WALLS")`), tables (`("TABLE", "LAYER")`) and blocks
     /// (`("BLOCK", "DOOR")`), by [`ForeignKey`].
