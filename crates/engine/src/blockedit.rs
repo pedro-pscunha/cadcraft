@@ -14,6 +14,7 @@
 //! objects and authoring elements. Its objects are edited where they are; BSAVE keeps the
 //! changes as the drawing's, BCLOSE without saving puts the drawing back as it was.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use cadcraft_doc::{Drawing, EntityKind, EntityStore};
@@ -144,10 +145,9 @@ impl BlockEdit {
         }
         let host = &self.host.doc;
         let mut d = editor.clone();
-        // When the block is saved under another name, the edited block keeps the drawing's
-        // description and block `name` gets the description changed in the editor.
+        // Saving as another block leaves the complete original definition unchanged.
         if !name.eq_ignore_ascii_case(&self.name) {
-            keep_description(&mut d, host, &self.name);
+            restore_original(&mut d, host, &self.name);
         }
         d.model = host.model.clone();
         d.layouts = host.layouts.clone();
@@ -180,18 +180,10 @@ impl BlockEdit {
     }
 }
 
-/// Give block `name` of `d` the description `host` has for it, or, when `host` has no such block,
-/// drop the empty definition a description gives a block the editor started and never saved.
-fn keep_description(d: &mut Drawing, host: &Drawing, name: &str) {
-    match host.block(name) {
-        Some(h) => {
-            if let Some((_, b)) = d.blocks.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(name))
-                && b.description != h.description
-            {
-                Arc::make_mut(b).description = h.description.clone();
-            }
-        }
-        None => d.blocks.retain(|k, b| !(k.eq_ignore_ascii_case(name) && b.entities.is_empty())),
+fn restore_original(d: &mut Drawing, host: &Drawing, name: &str) {
+    d.blocks.retain(|key, _| !key.eq_ignore_ascii_case(name));
+    if let Some(block) = host.block(name) {
+        d.blocks.insert(block.name.clone(), block.clone());
     }
 }
 
@@ -290,37 +282,49 @@ impl DocState {
 
     /// Save the Block Editor's objects into the block (BSAVE), or into a new block `as_name`
     /// (BSAVEAS), which the editor then edits. One undo step in the drawing.
-    pub fn save_block_editor(&mut self, as_name: Option<&str>) -> Result<()> {
+    pub fn save_block_editor(&mut self, as_name: Option<&str>) -> Result<BTreeMap<cadcraft_doc::Handle, cadcraft_doc::Handle>> {
         let Some(be) = &self.block_edit else { return Err(EngineError::Other("The Block Editor is not open.".into())) };
         let name = as_name.unwrap_or(&be.name).to_string();
-        let d = be.compose(&self.doc, &name)?;
-        let original = d.block(&name).map(|b| b.entities.clone()).unwrap_or_default();
-        let name = d.block(&name).map(|b| b.name.clone()).unwrap_or(name);
-        // When BSAVEAS saves the block under another name, the editor's drawing and each undo and
-        // redo step get the block as saved and the edited block as the drawing has it, so a later
-        // save and the description shown start from them after an undo too.
-        if !name.eq_ignore_ascii_case(&be.name)
-            && let Some(b) = d.block(&name).cloned()
-        {
-            let was = be.name.clone();
-            let reconcile = |doc: &mut Arc<Drawing>| {
-                let editor = Arc::make_mut(doc);
-                keep_description(editor, &d, &was);
-                editor.blocks.retain(|k, _| !k.eq_ignore_ascii_case(&name));
-                editor.blocks.insert(name.clone(), b.clone());
-            };
-            reconcile(&mut self.doc);
-            for step in self.undo.iter_mut().chain(self.redo.iter_mut()) {
-                reconcile(&mut step.doc);
+        let source = be.name.clone();
+        let copying = !name.eq_ignore_ascii_case(&source);
+        if be.current && copying {
+            return Err(EngineError::Other("The current drawing cannot be saved as a block from the Block Editor; use WBLOCK or BLOCK.".into()));
+        }
+        let (editor, handles) = if copying {
+            let mut editor = (*self.doc).clone();
+            let entities = editor.model.iter().map(|e| (**e).clone()).collect();
+            let copy = editor.duplicate_block_content(entities, &source, &name, &be.host.doc)?;
+            editor.model = EntityStore::new();
+            for entity in copy.entities {
+                editor.model.push(entity);
+            }
+            (Arc::new(editor), copy.handles)
+        } else {
+            (self.doc.clone(), BTreeMap::new())
+        };
+        let d = be.compose(&editor, &name)?;
+        let original = d.block(&name).map(|block| block.entities.clone()).unwrap_or_default();
+        let name = d.block(&name).map(|block| block.name.clone()).unwrap_or(name);
+        self.doc = editor;
+        if copying {
+            // BSAVEAS opens a fresh editing namespace. Old history cannot safely belong to it.
+            self.undo.clear();
+            self.redo.clear();
+            self.undo_ctl = Default::default();
+            self.selection = self.selection.iter().filter_map(|h| handles.get(h).copied()).collect();
+            self.previous_selection = self.previous_selection.iter().filter_map(|h| handles.get(h).copied()).collect();
+            let editor = Arc::make_mut(&mut self.doc);
+            restore_original(editor, &d, &source);
+            if let Some(block) = d.block(&name) {
+                editor.blocks.insert(block.name.clone(), block.clone());
             }
         }
-        // Commit-time retirement/pending state belongs to both views. A later save must not
-        // resurrect host records from an older editor Foreign snapshot.
+        // Commit-time retirement/pending state belongs to both views.
         if !Arc::ptr_eq(&self.doc.foreign, &d.foreign) {
             Arc::make_mut(&mut self.doc).foreign = d.foreign.clone();
         }
         let editor = self.doc.clone();
-        let Some(be) = &mut self.block_edit else { return Ok(()) };
+        let Some(be) = &mut self.block_edit else { return Ok(handles) };
         let before = be.host.doc.clone();
         let selection = be.host.selection.clone();
         be.host.push_undo(Snapshot { label: UNDO_LABEL.into(), doc: before, selection });
@@ -330,7 +334,7 @@ impl DocState {
         be.saved = editor;
         be.name = name;
         self.revision += 1;
-        Ok(())
+        Ok(handles)
     }
 
     /// Close the Block Editor (BCLOSE), saving its changes into the block first when `save`.

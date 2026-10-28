@@ -12,6 +12,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{Entity, EntityKind, Handle, RawTag};
 
 mod association;
+mod block_copy;
+pub use block_copy::BlockContentCopy;
+use block_copy::{BlockNamespace, block_role};
 #[cfg(test)]
 mod tests;
 use association::RawDimAssoc;
@@ -265,6 +268,14 @@ fn remap_tags(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
     }
 }
 
+fn has_entity_metadata(foreign: &Foreign, entities: &[Vec<Entity>]) -> bool {
+    entities.iter().flatten().any(|entity| {
+        foreign.entities.contains_key(&entity.handle)
+            || matches!(entity.kind, EntityKind::Unknown(_))
+            || entity.kind.attributes().iter().filter_map(|a| a.handle).any(|h| foreign.entities.contains_key(&h))
+    })
+}
+
 fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
     extra.xdict = extra.xdict.and_then(|h| map.get(&h).copied());
     extra.reactors = extra.reactors.iter().filter_map(|h| map.get(h).copied()).collect();
@@ -399,50 +410,81 @@ impl crate::Drawing {
     /// External drawings contribute model data only. Raw dimension associations are copied only
     /// when all their geometry is in the same set; dictionaries/reactors never retain old owners.
     pub fn duplicate_entities(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource) -> Vec<Entity> {
-        self.duplicate_entity_sets(sets, source, &BTreeMap::new())
+        self.duplicate_entity_sets(sets, source, &BTreeMap::new(), None)
     }
 
     /// Give merged geometry a new identity and its chosen source's owned metadata. References
     /// to any consumed entity follow the result, without adopting those entities' metadata.
     pub fn merge_entity(&mut self, entity: Entity, consumed: &[Handle]) -> crate::Result<Entity> {
         let aliases = consumed.iter().map(|h| (*h, entity.handle)).collect();
-        self.duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases)
+        self.duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases, None)
             .pop()
             .ok_or_else(|| crate::DocError::Invalid("merged entity was not created".into()))
     }
 
-    fn duplicate_entity_sets(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource, aliases: &BTreeMap<Handle, Handle>) -> Vec<Entity> {
+    fn allocate_copy_roots(&mut self, entities: &mut [Entity]) -> BTreeMap<Handle, Handle> {
+        let mut roots = BTreeMap::new();
+        for entity in entities {
+            let old = entity.handle;
+            entity.handle = self.new_handle();
+            if old.0 != 0 {
+                roots.insert(old, entity.handle);
+            }
+            if let EntityKind::AttDef(definition) = &mut entity.kind {
+                definition.handle = None;
+            }
+            for attribute in entity.kind.attributes_mut() {
+                let old = attribute.handle;
+                let new = self.new_handle();
+                attribute.handle = Some(new);
+                if let Some(old) = old {
+                    roots.insert(old, new);
+                }
+            }
+        }
+        roots
+    }
+
+    fn duplicate_entity_sets(
+        &mut self,
+        sets: Vec<Vec<Entity>>,
+        source: DuplicationSource,
+        aliases: &BTreeMap<Handle, Handle>,
+        mut namespace: Option<&mut BlockNamespace>,
+    ) -> Vec<Entity> {
+        let named_roles: Vec<_> = namespace
+            .as_ref()
+            .map(|copy| {
+                self.foreign.targets.iter().filter(|(_, key)| block_role(key, &copy.source)).map(|(h, key)| (*h, copy.target_key(key))).collect()
+            })
+            .unwrap_or_default();
+        let named_records: Vec<_> = namespace
+            .as_ref()
+            .map(|copy| {
+                self.foreign
+                    .records
+                    .iter()
+                    .filter(|(key, _)| block_role(key, &copy.source))
+                    .map(|(key, extra)| (copy.target_key(key), extra.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let has_metadata = source == DuplicationSource::SameDrawing
             && !self.foreign.is_empty()
-            && sets.iter().flatten().any(|e| {
-                self.foreign.entities.contains_key(&e.handle)
-                    || matches!(e.kind, EntityKind::Unknown(_))
-                    || e.kind.attributes().iter().filter_map(|a| a.handle).any(|h| self.foreign.entities.contains_key(&h))
-            });
+            && (!named_roles.is_empty() || !named_records.is_empty() || has_entity_metadata(&self.foreign, &sets));
         let index = if has_metadata { owner_index(&self.foreign.objects) } else { BTreeMap::new() };
         let mut added_objects = Vec::new();
         let mut added_extras = Vec::new();
         let mut added_snapshots = Vec::new();
+        let mut added_records = Vec::new();
+        let mut added_targets = Vec::new();
         let mut out = Vec::new();
         for mut entities in sets {
-            let mut roots = BTreeMap::new();
-            for entity in &mut entities {
-                let old = entity.handle;
-                entity.handle = self.new_handle();
-                if old.0 != 0 {
-                    roots.insert(old, entity.handle);
-                }
-                if let EntityKind::AttDef(definition) = &mut entity.kind {
-                    definition.handle = None;
-                }
-                for attribute in entity.kind.attributes_mut() {
-                    let old = attribute.handle;
-                    let new = self.new_handle();
-                    attribute.handle = Some(new);
-                    if let Some(old) = old {
-                        roots.insert(old, new);
-                    }
-                }
+            let mut roots = self.allocate_copy_roots(&mut entities);
+            for (old, key) in &named_roles {
+                let new = self.new_handle();
+                roots.insert(*old, new);
+                added_targets.push((new, key.clone()));
             }
             // Reference aliases are many-to-one; only real copied roots own cloned graphs.
             let mut map = std::borrow::Cow::Borrowed(&roots);
@@ -459,6 +501,7 @@ impl crate::Drawing {
                     remap_model(&mut entity.kind, &map, source, false);
                     remap_xdata(&mut entity.common.xdata, &map, source);
                 }
+                BlockNamespace::capture(namespace.as_deref_mut(), &map);
                 out.extend(entities);
                 continue;
             }
@@ -530,6 +573,12 @@ impl crate::Drawing {
                     }
                 }
             }
+            for (key, extra) in &named_records {
+                let mut extra = extra.clone();
+                remap_extra(&mut extra, &map);
+                added_records.push((key.clone(), extra));
+            }
+            BlockNamespace::capture(namespace.as_deref_mut(), &map);
             let discarded: BTreeSet<_> = discarded_dimensions.iter().filter_map(|h| roots.get(h).copied()).collect();
             for entity in &mut entities {
                 remap_model(&mut entity.kind, &map, source, discarded.contains(&entity.handle));
@@ -537,11 +586,13 @@ impl crate::Drawing {
             }
             out.extend(entities);
         }
-        if !added_objects.is_empty() || !added_extras.is_empty() {
+        if !added_objects.is_empty() || !added_extras.is_empty() || !added_records.is_empty() || !added_targets.is_empty() {
             let foreign = std::sync::Arc::make_mut(&mut self.foreign);
             foreign.objects.extend(added_objects);
             foreign.entities.extend(added_extras);
             foreign.raw_dimassocs.extend(added_snapshots);
+            foreign.records.extend(added_records);
+            foreign.targets.extend(added_targets);
         }
         out
     }

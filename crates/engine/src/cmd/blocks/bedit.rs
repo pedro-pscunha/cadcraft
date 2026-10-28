@@ -22,7 +22,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(BeditM))),
         CommandSpec::new("bsave", "Save Block", run_bsave).params("{} → {block}").enabled(editing).noundo(),
         CommandSpec::new("bsaveas", "Save Block As", run_bsaveas)
-            .params("{name, replace?: bool (redefine an existing block of that name)} → {block}")
+            .params("{name, replace?: bool (redefine an existing block of that name)} → {block}. A different name creates fresh block identities and resets editor Undo/Redo history; host Undo is retained.")
             .enabled(editing_a_block)
             .noundo()
             .interactive(|_| Ok(Box::new(BsaveasM::default()))),
@@ -198,9 +198,16 @@ fn run_bsaveas(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("bsaveas", "`name` is required"))?.trim().to_string();
     check_save_as(s, &name, bool_or(p, "replace", false))?;
     let before = host_snapshot(s)?;
-    s.state_mut()?.save_block_editor(Some(&name))?;
+    let copying = s.state()?.block_editor().is_some_and(|source| !source.eq_ignore_ascii_case(&name));
+    let handles = s.state_mut()?.save_block_editor(Some(&name))?;
+    if copying {
+        s.last_dim = s.last_dim.and_then(|h| handles.get(&h).copied());
+    }
     let name = s.state()?.block_editor().unwrap_or_default().to_string();
     s.echo(format!("Block \"{name}\" saved; the Block Editor now edits it."));
+    if copying {
+        s.echo("Editor Undo/Redo history reset for the new block.");
+    }
     commit_result(s, &before, json!({ "block": name }))
 }
 
