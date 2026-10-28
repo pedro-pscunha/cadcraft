@@ -94,6 +94,49 @@ fn writer_backstop_rejects_duplicate_and_writer_range_attribute_handles() {
     assert_unique_file(&cadcraft_io::write_dxf(&d), "writer backstop");
 }
 
+fn private_seed_source() -> String {
+    let source = include_str!("../data/attrib_fields.dxf");
+    assert_eq!(source.matches("100\nAcDbDictionary\n0\nDICTIONARY\n5\n40\n").count(), 1);
+    source
+        .replace("100\nAcDbDictionary\n0\nDICTIONARY\n5\n40\n", "100\nAcDbDictionary\n3\nCADCRAFT_HANDSEED\n350\nFE\n0\nDICTIONARY\n5\n40\n")
+        .replace("0\nENDSEC\n0\nEOF\n", "0\nXRECORD\n5\nFE\n330\nC\n100\nAcDbXrecord\n280\n1\n1\n100\n0\nENDSEC\n0\nEOF\n")
+}
+
+#[test]
+fn repaired_attribute_identity_does_not_consume_an_unread_foreign_object_handle() {
+    let source = private_seed_source()
+        .replace("0\nATTRIB\n5\n32\n", "0\nATTRIB\n5\n30\n")
+        .replace("5\n43\n", "5\n100\n")
+        .replace("330\n43\n", "330\n100\n")
+        .replace("360\n43\n", "360\n100\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert_eq!(
+        d.foreign.objects.iter().filter(|o| o.kind == "FIELD").count(),
+        2,
+        "repair allocated an attribute over the valid child FIELD's identity"
+    );
+    let i = d.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i) } else { None }).unwrap();
+    assert!(i.attribs.iter().all(|a| a.handle != Some(Handle(0x100))), "retained input object identity was reused");
+}
+
+#[test]
+fn referenced_symbol_roles_are_reserved_and_emitted_before_remapping() {
+    let source = private_seed_source().replace("0\nATTRIB\n5\n32\n","0\nATTRIB\n5\n30\n")
+        .replace("0\nSECTION\n2\nBLOCKS\n","0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nAPPID\n5\nFF\n70\n1\n0\nAPPID\n5\n100\n2\nAPPDOM\n70\n0\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nBLOCKS\n")
+        .replace("3\nACAD_FIELD\n360\n41\n0\nDICTIONARY\n","3\nACAD_FIELD\n360\n41\n1001\nAPPDOM\n1005\n100\n0\nDICTIONARY\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(d.foreign.targets.contains_key(&Handle(0x100)), "fixture must reference the APPID's input identity");
+    let i = d.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i) } else { None }).unwrap();
+    assert!(i.attribs.iter().all(|a| a.handle != Some(Handle(0x100))), "repair reused a retained role identity");
+    let text = cadcraft_io::write_dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let records: Vec<_> = sections(&tags).into_iter().flat_map(|s| records(&s.tags)).collect();
+    let app = &records.iter().find(|(k, t)| k == "APPID" && t.iter().any(|t| t.code == 2 && t.str() == "APPDOM")).unwrap().1;
+    let handle = app.iter().find(|t| t.code == 5).unwrap().str();
+    let dict = &records.iter().find(|(k, t)| k == "DICTIONARY" && t.iter().any(|t| t.code == 1001 && t.str() == "APPDOM")).unwrap().1;
+    assert_eq!(dict.iter().find(|t| t.code == 1005).unwrap().str(), handle, "late APPID planning turned a live symbol reference into null");
+}
+
 #[test]
 fn adding_an_insert_allocates_every_attribute_before_writing() {
     let mut d = drawing();

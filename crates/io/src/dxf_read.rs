@@ -133,14 +133,14 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
-    d.allocate_missing_attribute_handles();
     crate::dxf_raw::read(&secs, &mut d);
-    // Unlike rebuilt table records, kept objects still use their input identities in foreign
-    // references. New document identities must not alias them before the writer remaps them.
-    let kept: Vec<_> = d.foreign.objects.iter().map(|o| o.handle).collect();
+    // Read kept objects and symbol roles before repairing missing identities: both still use
+    // their input namespace in foreign references until writing remaps them.
+    let kept: Vec<_> = d.foreign.objects.iter().map(|o| o.handle).chain(d.foreign.targets.keys().copied()).collect();
     for h in kept {
         d.bump_handseed(h);
     }
+    d.allocate_missing_attribute_handles();
     d.remember_raw_dimassocs();
     d.skipped_records = skipped;
     Ok(d)
