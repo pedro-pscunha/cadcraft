@@ -362,7 +362,7 @@ impl crate::Drawing {
         for dictionary in retired.iter().filter_map(|h| self.foreign.entities.get(h).and_then(|x| x.xdict)) {
             let object = by_handle.get(&dictionary).and_then(|i| self.foreign.objects.get(*i));
             let empty = object.is_some_and(|o| {
-                o.kind == "DICTIONARY"
+                is_dictionary(&o.kind)
                     && !o.tags.iter().any(|t| t.code >= 1000)
                     && o.tags.iter().enumerate().filter(|(_, t)| t.code == 3).all(|(i, _)| {
                         o.tags
@@ -466,7 +466,7 @@ impl crate::Drawing {
             let parents: BTreeSet<_> = objects.iter().filter_map(|o| owner(&o.tags)).collect();
             for dictionary in dictionaries {
                 let empty =
-                    by_handle.get(&dictionary).is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
+                    by_handle.get(&dictionary).is_some_and(|o| is_dictionary(&o.kind) && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
                 if empty && !parents.contains(&dictionary) {
                     dropped.insert(dictionary);
                 }

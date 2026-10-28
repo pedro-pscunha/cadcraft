@@ -350,6 +350,29 @@ fn incomplete_reassociation_leaves_raw_and_model_unchanged() {
 }
 
 #[test]
+fn dictionary_variants_are_pruned_after_retirement_and_dimension_only_copy() {
+    for kind in ["DICTIONARY", "dictionary", "ACDBDICTIONARYWDFLT", " acdbdictionarywdflt "] {
+        for copy in [false, true] {
+            let (mut s, dim, _, _) = session();
+            let h = Handle::parse_hex(&dim).unwrap();
+            let dict = s.doc().unwrap().foreign.entities.get(&h).unwrap().xdict.unwrap();
+            std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().foreign).objects.iter_mut().find(|o| o.handle == dict).unwrap().kind = kind.into();
+            if copy {
+                let result = s.execute("copy", &json!({"handles":[dim],"delta":[20,0]})).unwrap();
+                let cloned = Handle::parse_hex(result["handles"][0].as_str().unwrap()).unwrap();
+                assert!(
+                    s.doc().unwrap().foreign.entities.get(&cloned).is_none_or(|e| e.xdict.is_none()),
+                    "{kind}: empty copied dictionary remains attached"
+                );
+            } else {
+                s.execute("dimdisassociate", &json!({"handles":[dim]})).unwrap();
+                assert!(s.doc().unwrap().foreign.objects.iter().all(|o| o.handle != dict), "{kind}: retired association left an empty dictionary");
+            }
+        }
+    }
+}
+
+#[test]
 fn copying_a_raw_dimension_without_its_geometry_drops_the_cloned_association() {
     let (mut s, dim, _, _) = session();
     let copy = s.execute("copy", &json!({"handles":[dim], "delta":[20,0]})).unwrap()["handles"][0].as_str().unwrap().to_string();
