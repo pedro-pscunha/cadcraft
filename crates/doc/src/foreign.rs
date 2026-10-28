@@ -14,8 +14,8 @@ use crate::{Handle, RawTag};
 /// What a file handle stood for when the object it named is one CADCraft writes itself (under a
 /// new handle on save): a kind and an upper-case name, e.g. `("LAYER", "WALLS")`,
 /// `("TABLE", "LAYER")`, `("BLOCK", "DOOR")`, `("NOD", "")` for the named object dictionary and
-/// `("NOD", "ACAD_GROUP")` for one of its entries. An attribute's role is `("ATTRIB", "33")`:
-/// its persistent instance handle, independent of its INSERT, tag and order.
+/// `("NOD", "ACAD_GROUP")` for one of its entries. Entity and attribute instances retain their
+/// handles and do not need roles.
 pub type ForeignKey = (String, String);
 
 /// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
@@ -67,10 +67,10 @@ pub struct Foreign {
     pub objects: Vec<ForeignObject>,
     /// Entries of the named object dictionary that CADCraft doesn't write itself: (key, object).
     pub dictionary: Vec<(String, Handle)>,
-    /// Extras of entities, by handle.
+    /// Extras of entities and attribute instances, by their document handle.
     pub entities: BTreeMap<Handle, ForeignExtra>,
     /// Extras of table records (`("LAYER", "WALLS")`), tables (`("TABLE", "LAYER")`) and blocks
-    /// (`("BLOCK", "DOOR")`), and attributes (`("ATTRIB", "33")`), by [`ForeignKey`].
+    /// (`("BLOCK", "DOOR")`), by [`ForeignKey`].
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,
@@ -278,13 +278,6 @@ impl crate::Drawing {
             if let Some(mut extra) = original.entities.get(&old).cloned() {
                 remap_extra(&mut extra, &map);
                 foreign.entities.insert(new, extra);
-            }
-            if let Some(mut extra) = original.records.get(&("ATTRIB".into(), old.hex())).cloned() {
-                remap_extra(&mut extra, &map);
-                foreign.records.insert(("ATTRIB".into(), new.hex()), extra);
-            }
-            if original.targets.get(&old).is_some_and(|role| role.0 == "ATTRIB") {
-                foreign.targets.insert(new, ("ATTRIB".into(), new.hex()));
             }
         }
     }

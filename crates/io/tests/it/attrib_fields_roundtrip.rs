@@ -71,6 +71,18 @@ fn attrib_fields_survive_dwg_save() {
 }
 
 #[test]
+fn attribute_extras_use_handle_keys_without_attribute_roles() {
+    let d = cadcraft_io::read_dxf(field_dxf().as_bytes()).unwrap();
+    let extra = d.foreign.entities.get(&cadcraft_doc::Handle(0x33)).expect("attribute extras are keyed by Handle");
+    assert!(extra.xdict.is_some(), "extension dictionary belongs to the attribute handle");
+    assert!(!extra.xdata.is_empty(), "attribute xdata stays with its handle-keyed extras");
+    assert!(
+        d.foreign.records.keys().chain(d.foreign.targets.values()).all(|key| key.0 != "ATTRIB"),
+        "attributes must not use identity-to-itself roles"
+    );
+}
+
+#[test]
 fn deleting_preceding_duplicate_keeps_live_attrib_fields() {
     edited_attrib_fields(|i| i.attribs.retain(|a| a.text.value != "plain"));
 }
