@@ -10,15 +10,15 @@ use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, EntityKind, Handle
 pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
     let Some((start, dim_h)) = cadcraft_doc::foreign::dimassoc_reference(tags.iter().map(|t| (t.code, t.str()))) else { return };
     let tail = tags.get(start..).unwrap_or(&[]);
-    let Some(EntityKind::Dimension(dm)) = d.entity(dim_h).map(|e| &e.kind) else { return };
+    let Some(EntityKind::Dimension(dm)) = d.entity_including_blocks(dim_h).map(|e| &e.kind) else { return };
     if !dm.assoc.is_empty() {
         return;
     }
     // A radial or diametric dimension names its circle once, by its centre.
     if matches!(dm.kind, DimKind::Radius | DimKind::Diameter) {
-        let links = radial_links(d, dm, tail);
+        let links = radial_links(d, dim_h, dm, tail);
         if !links.is_empty() {
-            let _ = d.modify_entity(dim_h, |e| {
+            let _ = d.modify_entity_including_blocks(dim_h, |e| {
                 if let EntityKind::Dimension(dm) = &mut e.kind {
                     dm.assoc = links;
                 }
@@ -41,12 +41,12 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
         let Some(at) = dm.definition_point(point).map(|p| p.xy()) else { continue };
         // A polyline's segment (subentity type 73 = 2, edge; 91 its 1-based index).
         let segment = r.i(91).filter(|k| *k >= 1 && r.i(73) == Some(2));
-        if let Some(snap) = infer_snap(d, r.i(72).unwrap_or(0), main, other, at, segment) {
+        if let Some(snap) = infer_snap(d, dim_h, r.i(72).unwrap_or(0), main, other, at, segment) {
             links.push(DimAssoc { point: (*point).to_string(), handle: main, snap });
         }
     }
     if !links.is_empty() {
-        let _ = d.modify_entity(dim_h, |e| {
+        let _ = d.modify_entity_including_blocks(dim_h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind {
                 dm.assoc = links;
             }
@@ -57,7 +57,7 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
 /// Associations of a radial or diametric dimension from its one standard reference: the circle
 /// or arc it measures, by its centre (osnap 3). The definition points are then on that circle,
 /// so the dimension follows its radius or diameter.
-fn radial_links(d: &Drawing, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
+fn radial_links(d: &Drawing, owner: Handle, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
     let starts: Vec<usize> = tail.iter().enumerate().filter(|(_, x)| x.code == 1 && x.str() == "AcDbOsnapPointRef").map(|(i, _)| i).take(8).collect();
     for (k, s) in starts.iter().enumerate() {
         let end = starts.get(k + 1).copied().unwrap_or(tail.len());
@@ -66,7 +66,7 @@ fn radial_links(d: &Drawing, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
             continue;
         }
         let Some(handle) = r.s(331).and_then(|h| Handle::parse_hex(&h)) else { continue };
-        let Some(centre) = circle_centre(d, handle) else { continue };
+        let Some(centre) = circle_centre(d, owner, handle) else { continue };
         let on = |point: &str, p: Vec3| {
             let angle = centre.angle_to(p.xy());
             angle.is_finite().then(|| DimAssoc { point: point.into(), handle, snap: AssocSnap::OnCircle { angle } })
@@ -85,8 +85,8 @@ fn radial_links(d: &Drawing, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
 
 /// The planar centre of a circle or arc, or `None` for any other entity: the point a radial or
 /// diametric dimension's single DIMASSOC reference names.
-fn circle_centre(d: &Drawing, h: Handle) -> Option<Vec2> {
-    match &d.entity(h)?.kind {
+fn circle_centre(d: &Drawing, owner: Handle, h: Handle) -> Option<Vec2> {
+    match &d.association_entity(owner, h)?.kind {
         EntityKind::Circle(c) => Some(c.center.xy()),
         EntityKind::Arc(a) => Some(a.center.xy()),
         _ => None,
@@ -104,8 +104,8 @@ fn endpoint(a: Vec2, b: Vec2, at: Vec2) -> Option<AssocSnap> {
     Some(if da < db { AssocSnap::Start } else { AssocSnap::End })
 }
 
-fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: Vec2, segment: Option<i64>) -> Option<AssocSnap> {
-    let e = d.entity(main)?;
+fn infer_snap(d: &Drawing, owner: Handle, osnap: i64, main: Handle, other: Option<Handle>, at: Vec2, segment: Option<i64>) -> Option<AssocSnap> {
+    let e = d.association_entity(owner, main)?;
     if let (EntityKind::LwPolyline(p), Some(k), 1 | 13) = (&e.kind, segment, osnap) {
         let n = p.vertices.len();
         let segments = if p.closed { n } else { n.saturating_sub(1) };
@@ -165,7 +165,7 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
             }
             AssocSnap::OnCircle { angle: quarter.round() * std::f64::consts::FRAC_PI_2 }
         }
-        6 => AssocSnap::Intersection { other: other.filter(|h| d.entity(*h).is_some())? },
+        6 => AssocSnap::Intersection { other: other.filter(|h| d.association_entity(owner, *h).is_some())? },
         _ => return None,
     })
 }
@@ -179,8 +179,8 @@ mod tests {
         let mut d = Drawing::new_metric();
         let h = d.add(&cadcraft_doc::Space::Model, Default::default(), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 10.0 })).unwrap();
         for code in [8, 10] {
-            assert!(infer_snap(&d, code, h, None, Vec2::new(10.0, 0.0), None).is_none(), "unsupported Autodesk osnap {code}");
+            assert!(infer_snap(&d, h, code, h, None, Vec2::new(10.0, 0.0), None).is_none(), "unsupported Autodesk osnap {code}");
         }
-        assert!(matches!(infer_snap(&d, 5, h, None, Vec2::new(10.0, 0.0), None), Some(AssocSnap::OnCircle { .. })));
+        assert!(matches!(infer_snap(&d, h, 5, h, None, Vec2::new(10.0, 0.0), None), Some(AssocSnap::OnCircle { .. })));
     }
 }

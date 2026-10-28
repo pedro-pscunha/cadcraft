@@ -10,6 +10,16 @@ use cadcraft_geom::{Vec2, Vec3};
 /// Definition point names in the order they are tried.
 const POINTS: [&str; 5] = ["defpt", "p13", "p14", "p15", "p16"];
 
+#[derive(Clone, Copy, PartialEq)]
+enum UpdateScope {
+    Drawing,
+    EditorModel,
+}
+
+fn scope(st: &crate::DocState) -> UpdateScope {
+    if st.block_edit.as_ref().is_some_and(|edit| !edit.current) { UpdateScope::EditorModel } else { UpdateScope::Drawing }
+}
+
 fn def_point_mut<'a>(d: &'a mut Dimension, name: &str) -> Option<&'a mut Vec3> {
     Some(match name {
         "defpt" => &mut d.defpt,
@@ -28,6 +38,10 @@ fn arc_geom(a: &cadcraft_doc::Arc) -> cadcraft_geom::Arc {
 /// Resolve supported snap semantics in the engine's model/layout scope, not block-local space.
 pub fn snap_point(d: &Drawing, a: &DimAssoc) -> Option<Vec2> {
     cadcraft_doc::association_point(a, |h| d.entity(h).map(|e| e.as_ref()))
+}
+
+fn snap_in(d: &Drawing, owner: Handle, link: &DimAssoc) -> Option<Vec2> {
+    cadcraft_doc::association_point(link, |target| d.association_entity(owner, target).map(|e| e.as_ref()))
 }
 
 fn close(a: Vec2, b: Vec2) -> bool {
@@ -228,7 +242,7 @@ fn src_changed(before: &Drawing, after: &Drawing, h: Handle) -> bool {
 /// no longer hold (the object was erased, or the point had been moved off the object before
 /// this change) are dropped.
 /// `prev` is the dimension as it was before the change (when it existed).
-pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, after: &Drawing) -> Dimension {
+pub fn recompute(owner: Handle, dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, after: &Drawing) -> Dimension {
     let mut nd = dm.clone();
     let mut deltas: Vec<Vec2> = Vec::new();
     let mut moved: Vec<String> = Vec::new();
@@ -236,21 +250,21 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     nd.assoc.retain(|a| {
         let Some(old) = was.definition_point(&a.point) else { return false };
         // Only follow if the point sat on the object before the change.
-        if let Some(prev) = snap_point(before, a)
+        if let Some(prev) = snap_in(before, owner, a)
             && !close(prev, old.xy())
         {
             return false;
         }
-        snap_point(after, a).is_some()
+        snap_in(after, owner, a).is_some()
     });
     for a in &nd.assoc {
-        if let (Some(p), Some(old)) = (snap_point(after, a), dm.definition_point(&a.point)) {
+        if let (Some(p), Some(old)) = (snap_in(after, owner, a), dm.definition_point(&a.point)) {
             deltas.push(p - old.xy());
             moved.push(a.point.clone());
         }
     }
     for a in nd.assoc.clone() {
-        if let (Some(p), Some(slot)) = (snap_point(after, &a), def_point_mut(&mut nd, &a.point)) {
+        if let (Some(p), Some(slot)) = (snap_in(after, owner, &a), def_point_mut(&mut nd, &a.point)) {
             slot.x = p.x;
             slot.y = p.y;
         }
@@ -300,7 +314,7 @@ fn recompute_raw(h: Handle, dm: &Dimension, links: &[DimAssoc], before: &Drawing
                 return None;
             }
             let old = dm.definition_point(&link.point)?.xy();
-            Some((link.point.as_str(), old, snap_point(after, link)?))
+            Some((link.point.as_str(), old, snap_in(after, h, link)?))
         })
         .collect();
     let points = points?;
@@ -336,14 +350,25 @@ fn recompute_raw(h: Handle, dm: &Dimension, links: &[DimAssoc], before: &Drawing
 /// After a change: update every associative dimension whose objects changed.
 /// Returns the number of dimensions updated.
 pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
-    let stale = after.stale_raw_dimassocs();
+    update_in_scope(after, before, UpdateScope::Drawing)
+}
+
+fn update_in_scope(after: &mut Arc<Drawing>, before: &Drawing, scope: UpdateScope) -> usize {
+    let stale = if scope == UpdateScope::Drawing {
+        after.stale_raw_dimassocs()
+    } else {
+        let owners = before.model.iter().chain(after.model.iter()).map(|e| e.handle).collect();
+        after.stale_raw_dimassocs_for(&owners)
+    };
     let retired = if stale.is_empty() { 0 } else { Arc::make_mut(after).retire_raw_dimassocs(&stale).len() };
     let mut changes: Vec<(Handle, Dimension)> = Vec::new();
     let mut blocked = std::collections::BTreeSet::new();
     let mut completed = std::collections::BTreeSet::new();
     {
         let d: &Drawing = after;
-        let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities));
+        let stores = std::iter::once(&d.model)
+            .chain(d.layouts.iter().filter(|_| scope == UpdateScope::Drawing).map(|layout| &layout.entities))
+            .chain(d.blocks.values().filter(|_| scope == UpdateScope::Drawing).map(|block| &block.entities));
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
@@ -382,11 +407,11 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
                 if !touched {
                     continue;
                 }
-                let prev = match before.entity(e.handle).map(|x| &x.kind) {
+                let prev = match before.entity_including_blocks(e.handle).map(|x| &x.kind) {
                     Some(EntityKind::Dimension(p)) => Some(p),
                     _ => None,
                 };
-                let nd = recompute(dm, prev, before, d);
+                let nd = recompute(e.handle, dm, prev, before, d);
                 if nd != *dm {
                     changes.push((e.handle, nd));
                 }
@@ -404,17 +429,27 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
     d.complete_raw_dimassoc_updates(&completed);
     let n = changes.len();
     for (h, nd) in changes {
-        let _ = d.modify_entity(h, |e| e.kind = EntityKind::Dimension(nd));
+        let _ = d.modify_entity_including_blocks(h, |e| e.kind = EntityKind::Dimension(nd));
     }
     n + retired
 }
 
 /// A visible warning for opaque links, either all of them at save or those touched by an edit.
 pub(crate) fn unupdated_note(d: &Drawing, before: Option<&Drawing>) -> Option<String> {
+    unupdated_note_in_scope(d, before, UpdateScope::Drawing)
+}
+
+pub(crate) fn unupdated_note_for_session(s: &crate::Session, before: Option<&Drawing>) -> Option<String> {
+    let st = s.state().ok()?;
+    unupdated_note_in_scope(&st.doc, before, scope(st))
+}
+
+fn unupdated_note_in_scope(d: &Drawing, before: Option<&Drawing>, scope: UpdateScope) -> Option<String> {
     let dimensions: Vec<_> = d
         .raw_dimassoc_dimensions()
         .filter(|h| {
-            d.raw_dimassoc_unupdated(*h)
+            (scope == UpdateScope::Drawing || d.model.contains(*h))
+                && d.raw_dimassoc_unupdated(*h)
                 && d.entity_including_blocks(*h).is_some_and(|e| matches!(e.kind, EntityKind::Dimension(_)))
                 && before.is_none_or(|before| d.raw_dimassoc_targets(*h).any(|target| src_changed(before, d, target)))
         })
@@ -433,9 +468,10 @@ pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid:
         && uid.is_none_or(|u| u == st.uid)
         && !Arc::ptr_eq(before, &st.doc)
     {
-        update(&mut st.doc, before);
+        let scope = scope(st);
+        update_in_scope(&mut st.doc, before, scope);
         notes = crate::cmd::hatch::refill_associative(&mut st.doc, before);
-        notes.extend(unupdated_note(&st.doc, Some(before)));
+        notes.extend(unupdated_note_in_scope(&st.doc, Some(before), scope));
     }
     notes.into_iter().for_each(|n| s.echo(n));
 }

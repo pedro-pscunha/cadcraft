@@ -11,12 +11,15 @@ pub(super) struct Binding {
 }
 
 impl Binding {
-    pub(super) fn update_links(&self, d: &Drawing, changed: &impl Fn(Handle) -> bool) -> Option<Vec<DimAssoc>> {
+    pub(super) fn update_links(&self, d: &Drawing, owner: Handle, changed: &impl Fn(Handle) -> bool) -> Option<Vec<DimAssoc>> {
         if !self.pending && !self.targets.iter().any(|h| changed(*h)) {
             return Some(Vec::new());
         }
         let links = self.links.as_ref()?;
-        links.iter().all(|link| crate::association_point(link, |h| d.entity_including_blocks(h).map(|e| e.as_ref())).is_some()).then(|| links.clone())
+        links
+            .iter()
+            .all(|link| crate::association_point(link, |h| d.association_entity(owner, h).map(|e| e.as_ref())).is_some())
+            .then(|| links.clone())
     }
     pub(super) fn is_pending(&self) -> bool {
         self.pending
@@ -100,11 +103,11 @@ impl PointRef {
         self.path.iter().chain(&self.other).copied().chain(self.last.iter().flat_map(|last| last.targets())).collect()
     }
 
-    fn matches(&self, d: &Drawing, link: &DimAssoc) -> bool {
+    fn matches(&self, d: &Drawing, owner: Handle, link: &DimAssoc) -> bool {
         if !supported_osnap(self.osnap)
             || self.last.is_some()
             || self.path.as_slice() != [link.handle]
-            || !crate::association_supported(link, |h| d.entity_including_blocks(h).map(|e| e.as_ref()))
+            || !crate::association_supported(link, |h| d.association_entity(owner, h).map(|e| e.as_ref()))
         {
             return false;
         }
@@ -163,7 +166,7 @@ fn parsed(tags: &[RawTag]) -> Option<(i64, Vec<PointRef>)> {
     Some((integer(90).unwrap_or(0), refs))
 }
 
-pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Binding> {
+pub(super) fn bindings(d: &Drawing, owner: Handle, dm: &Dimension, tags: &[RawTag]) -> Vec<Binding> {
     let fallback = || {
         vec![Binding {
             links: None,
@@ -184,7 +187,7 @@ pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Bind
                     && r.path.len() == 1
                     && dm.assoc.len() == 2
                     && dm.assoc.iter().all(|a| {
-                        r.path.as_slice() == [a.handle] && crate::association_supported(a, |h| d.entity_including_blocks(h).map(|e| e.as_ref()))
+                        r.path.as_slice() == [a.handle] && crate::association_supported(a, |h| d.association_entity(owner, h).map(|e| e.as_ref()))
                     }))
                 .then(|| dm.assoc.clone()),
                 pending: false,
@@ -200,7 +203,7 @@ pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Bind
     refs.iter()
         .zip(used)
         .map(|(r, point)| Binding {
-            links: dm.assoc.iter().find(|a| a.point == point).filter(|a| r.matches(d, a)).map(|a| vec![a.clone()]),
+            links: dm.assoc.iter().find(|a| a.point == point).filter(|a| r.matches(d, owner, a)).map(|a| vec![a.clone()]),
             pending: false,
             targets: r.targets(),
         })

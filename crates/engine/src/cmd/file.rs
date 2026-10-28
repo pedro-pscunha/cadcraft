@@ -512,7 +512,7 @@ fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let fmt = str_param(p, "format").unwrap_or("dxf");
     let opts = save_options("document.bytes", p)?;
     let version = opts.version.unwrap_or_else(|| drawing_version(s, &format!("drawing.{fmt}")));
-    let lost = not_saved_as(s.doc()?, version);
+    let lost = not_saved_as(s.state()?.drawing(), version);
     let bytes = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
     let mut r = json!({ "data": base64_encode(&bytes), "bytes": bytes.len() });
     if drops_unknown(&format!("drawing.{fmt}")) {
@@ -590,12 +590,12 @@ fn report_not_saved(s: &mut Session, r: &mut Value, lost: &std::collections::BTr
 }
 
 fn report_save_notes(s: &mut Session, result: &mut Value, path: &str, version: Version) {
-    let mut notes: Vec<_> = s.doc().ok().and_then(|d| crate::assoc::unupdated_note(d, None)).into_iter().collect();
+    let mut notes: Vec<_> = s.state().ok().and_then(|st| crate::assoc::unupdated_note(st.drawing(), None)).into_iter().collect();
     if drops_unknown(path)
         && version <= Version::R2007
-        && let Ok(d) = s.doc()
+        && let Ok(st) = s.state()
     {
-        let source = d.header.str("DWGCODEPAGE", "ANSI_1252");
+        let source = st.drawing().header.str("DWGCODEPAGE", "ANSI_1252");
         // The current 2007 backend fixes its file-header index to 1252. Later Unicode
         // writers preserve source metadata; legacy writers must match transport bytes.
         let written = if version == Version::R2007 { "ANSI_1252" } else { cadcraft_dxf::single_byte_code_page(&source) };
@@ -621,7 +621,7 @@ fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> R
     // What the file will hold depends on the version it is saved as (the data store from 2013).
     let path = str_param(p, "path").map(str::to_string).or_else(|| s.state().ok().and_then(|st| st.path.clone())).unwrap_or_default();
     let version = save_options("save", p).ok().and_then(|o| o.version).unwrap_or_else(|| drawing_version(s, &path));
-    let lost = s.doc().map(|d| not_saved_as(d, version)).unwrap_or_default();
+    let lost = s.state().map(|st| not_saved_as(st.drawing(), version)).unwrap_or_default();
     let mut r = run(s, p)?;
     if r.get("path").and_then(Value::as_str).is_some_and(drops_unknown) {
         report_not_saved(s, &mut r, &lost);

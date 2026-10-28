@@ -338,6 +338,18 @@ impl Drawing {
         self.entity(h).or_else(|| self.blocks.values().find_map(|b| b.entities.get(h)))
     }
 
+    /// Resolve a reference in its owner's coordinate database, never by falling back from a
+    /// block-local reference to an unrelated model/layout record.
+    pub fn association_entity(&self, owner: Handle, target: Handle) -> Option<&std::sync::Arc<Entity>> {
+        if self.model.contains(owner) {
+            return self.model.get(target);
+        }
+        if let Some(layout) = self.layouts.iter().find(|layout| layout.entities.contains(owner)) {
+            return layout.entities.get(target);
+        }
+        self.blocks.values().find(|block| block.entities.contains(owner)).and_then(|block| block.entities.get(target))
+    }
+
     pub fn space_of(&self, h: Handle) -> Option<Space> {
         if self.model.contains(h) {
             return Some(Space::Model);
@@ -349,6 +361,15 @@ impl Drawing {
         let store = self.space_mut(&sp).ok_or(DocError::NoEntity(h))?;
         if store.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
     }
+    /// Modify a globally unique record in model/layout space or a block definition.
+    pub fn modify_entity_including_blocks<F: FnOnce(&mut Entity)>(&mut self, h: Handle, f: F) -> Result<()> {
+        if self.space_of(h).is_some() {
+            return self.modify_entity(h, f);
+        }
+        let block = self.blocks.values_mut().find(|block| block.entities.contains(h)).ok_or(DocError::NoEntity(h))?;
+        if std::sync::Arc::make_mut(block).entities.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
+    }
+
     pub fn remove_entity(&mut self, h: Handle) -> Option<std::sync::Arc<Entity>> {
         let sp = self.space_of(h)?;
         self.space_mut(&sp)?.remove(h)

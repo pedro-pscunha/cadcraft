@@ -172,7 +172,11 @@ impl BlockEdit {
         b.base.y = self.base.y;
         b.entities = entities;
         d.blocks.insert(key, Arc::new(b));
-        Ok(d)
+        // Rejoin the real database before validating dependencies. Host annotations may
+        // reference edited definition entities that are hidden from the projection.
+        let mut composed = Arc::new(d);
+        crate::assoc::update(&mut composed, host);
+        Ok(Arc::unwrap_or_clone(composed))
     }
 }
 
@@ -309,6 +313,11 @@ impl DocState {
             for step in self.undo.iter_mut().chain(self.redo.iter_mut()) {
                 reconcile(&mut step.doc);
             }
+        }
+        // Commit-time retirement/pending state belongs to both views. A later save must not
+        // resurrect host records from an older editor Foreign snapshot.
+        if !Arc::ptr_eq(&self.doc.foreign, &d.foreign) {
+            Arc::make_mut(&mut self.doc).foreign = d.foreign.clone();
         }
         let editor = self.doc.clone();
         let Some(be) = &mut self.block_edit else { return Ok(()) };

@@ -63,7 +63,18 @@ impl RawDimAssoc {
 impl Drawing {
     /// An embedded attribute instance and the entity whose transform owns it, in any store.
     pub fn attribute_instance(&self, handle: Handle) -> Option<(&Entity, &Attrib)> {
-        entities(self).find_map(|owner| owner.kind.attributes().iter().find(|a| a.handle == Some(handle)).map(|attribute| (owner, attribute)))
+        // REFEDIT projections intentionally retain attribute identity; they are not a second
+        // persistent owner of the source attribute. Resolve the original database instance.
+        let projections: BTreeSet<_> = self
+            .refedit
+            .iter()
+            .flat_map(|edit| {
+                edit.items.iter().filter(|item| item.source.is_some()).map(|item| item.copy).chain(edit.ghosts.iter().map(|(copy, _)| *copy))
+            })
+            .collect();
+        entities(self)
+            .filter(|owner| !projections.contains(&owner.handle))
+            .find_map(|owner| owner.kind.attributes().iter().find(|a| a.handle == Some(handle)).map(|attribute| (owner, attribute)))
     }
 
     /// Whether the preserved raw association, rather than an inferred subset, owns this dimension.
@@ -82,7 +93,7 @@ impl Drawing {
         let snapshot = self.foreign.raw_dimassocs.get(&dimension)?;
         let mut links = Vec::new();
         for reference in &snapshot.references {
-            links.extend(reference.update_links(self, &changed)?);
+            links.extend(reference.update_links(self, dimension, &changed)?);
         }
         Some(links)
     }
@@ -148,7 +159,7 @@ impl Drawing {
                 let references = self
                     .entity_including_blocks(dimension)
                     .map(|e| match &e.kind {
-                        EntityKind::Dimension(dm) => point::bindings(self, dm, &o.tags),
+                        EntityKind::Dimension(dm) => point::bindings(self, dimension, dm, &o.tags),
                         _ => Vec::new(),
                     })
                     .unwrap_or_default();
@@ -191,9 +202,20 @@ impl Drawing {
     /// Raw associations invalidated by model edits or loss/type change of resolved targets.
     /// Shared by the command boundary and the pure save boundary, including non-engine callers.
     pub fn stale_raw_dimassocs(&self) -> BTreeSet<Handle> {
+        self.stale_raw_dimassocs_matching(|_| true)
+    }
+
+    /// Validate only the owners of an active database projection. Hidden host owners must not
+    /// be interpreted as erased just because they are outside the editor's model store.
+    pub fn stale_raw_dimassocs_for(&self, owners: &BTreeSet<Handle>) -> BTreeSet<Handle> {
+        self.stale_raw_dimassocs_matching(|h| owners.contains(&h))
+    }
+
+    fn stale_raw_dimassocs_matching(&self, includes: impl Fn(Handle) -> bool) -> BTreeSet<Handle> {
         self.foreign
             .raw_dimassocs
             .iter()
+            .filter(|(h, _)| includes(**h))
             .filter_map(|(h, snapshot)| {
                 let valid = self.entity_including_blocks(*h).is_some_and(|owner| {
                     let inferred = match &owner.kind {
@@ -206,7 +228,9 @@ impl Drawing {
                             TargetKind::Entity(name) => {
                                 self.entity_including_blocks(*target).is_some_and(|e| e.kind.dxf_name().eq_ignore_ascii_case(name))
                             }
-                            TargetKind::Attribute(owner) => self.attribute_instance(*target).is_some_and(|(entity, _)| entity.handle == *owner),
+                            TargetKind::Attribute(owner) => self
+                                .entity_including_blocks(*owner)
+                                .is_some_and(|entity| entity.kind.attributes().iter().any(|a| a.handle == Some(*target))),
                         })
                 });
                 (!valid).then_some(*h)

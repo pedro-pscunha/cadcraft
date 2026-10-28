@@ -156,11 +156,26 @@ fn run_bedit(s: &mut Session, p: &Value) -> Result<Value> {
     open(s, name, create)
 }
 
+fn host_snapshot(s: &Session) -> Result<std::sync::Arc<Drawing>> {
+    let st = s.state()?;
+    Ok(st.block_edit.as_ref().map_or(&st.doc, |edit| &edit.host.doc).clone())
+}
+
+fn commit_result(s: &mut Session, before: &Drawing, mut result: Value) -> Result<Value> {
+    let after = host_snapshot(s)?;
+    if let Some(note) = crate::assoc::unupdated_note(&after, Some(before)) {
+        s.echo(&note);
+        result["warnings"] = json!([note]);
+    }
+    Ok(result)
+}
+
 fn run_bsave(s: &mut Session, _p: &Value) -> Result<Value> {
+    let before = host_snapshot(s)?;
     s.state_mut()?.save_block_editor(None)?;
     let name = s.state()?.block_editor().unwrap_or_default().to_string();
     s.echo(format!("Block \"{name}\" saved."));
-    Ok(json!({ "block": name }))
+    commit_result(s, &before, json!({ "block": name }))
 }
 
 /// Check a BSAVEAS name: valid, and not another existing block unless `replace`.
@@ -182,13 +197,15 @@ fn check_save_as(s: &Session, name: &str, replace: bool) -> Result<()> {
 fn run_bsaveas(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("bsaveas", "`name` is required"))?.trim().to_string();
     check_save_as(s, &name, bool_or(p, "replace", false))?;
+    let before = host_snapshot(s)?;
     s.state_mut()?.save_block_editor(Some(&name))?;
     let name = s.state()?.block_editor().unwrap_or_default().to_string();
     s.echo(format!("Block \"{name}\" saved; the Block Editor now edits it."));
-    Ok(json!({ "block": name }))
+    commit_result(s, &before, json!({ "block": name }))
 }
 
 fn close(s: &mut Session, save: bool) -> Result<Value> {
+    let before = host_snapshot(s)?;
     let st = s.state()?;
     let name = st.block_editor().unwrap_or_default().to_string();
     let saved = save && st.block_unsaved();
@@ -196,7 +213,7 @@ fn close(s: &mut Session, save: bool) -> Result<Value> {
     if saved {
         s.echo(format!("Block \"{name}\" saved."));
     }
-    Ok(json!({ "block": name, "saved": saved }))
+    commit_result(s, &before, json!({ "block": name, "saved": saved }))
 }
 
 fn run_bclose(s: &mut Session, p: &Value) -> Result<Value> {

@@ -57,7 +57,8 @@ impl Session {
                 && let Some((before, _, uid)) = &before
                 && let Ok(st) = self.state()
                 && st.uid == *uid
-                && let Some(note) = crate::assoc::unupdated_note(&st.doc, Some(before))
+                && st.block_edit.is_some() == editing
+                && let Some(note) = crate::assoc::unupdated_note_for_session(self, Some(before))
                 && let Some(object) = value.as_object_mut()
                 && let Some(notes) = object.entry("warnings").or_insert_with(|| Value::Array(Vec::new())).as_array_mut()
             {
