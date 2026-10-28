@@ -283,29 +283,54 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     nd
 }
 
-fn recompute_raw(h: Handle, dm: &Dimension, before: &Drawing, after: &Drawing) -> Dimension {
-    let mut active = dm.clone();
-    active
-        .assoc
-        .retain(|a| src_changed(before, after, a.handle) || matches!(a.snap, AssocSnap::Intersection {other} if src_changed(before,after,other)));
-    let mut updated = recompute(&active, Some(dm), before, after);
-    if !after.raw_dimassoc_targets(h).all(|target| src_changed(before, after, target)) {
+fn vertex_topology_changed(before: &Drawing, after: &Drawing, handle: Handle) -> bool {
+    match (before.entity_including_blocks(handle).map(|e| &e.kind), after.entity_including_blocks(handle).map(|e| &e.kind)) {
+        (Some(EntityKind::LwPolyline(a)), Some(EntityKind::LwPolyline(b))) => a.vertices.len() != b.vertices.len() || a.closed != b.closed,
+        _ => false,
+    }
+}
+
+/// Evaluate the entire changed set before mutating a point. Unlike model reassociation this
+/// never drops an unresolved link and then resurrects its association list after partial work.
+fn recompute_raw(h: Handle, dm: &Dimension, links: &[DimAssoc], before: &Drawing, after: &Drawing) -> Option<Dimension> {
+    let points: Option<Vec<_>> = links
+        .iter()
+        .map(|link| {
+            if matches!(link.snap, AssocSnap::Vertex { .. }) && vertex_topology_changed(before, after, link.handle) {
+                return None;
+            }
+            let old = dm.definition_point(&link.point)?.xy();
+            Some((link.point.as_str(), old, snap_point(after, link)?))
+        })
+        .collect();
+    let points = points?;
+    let mut updated = dm.clone();
+    for (name, _, position) in &points {
+        let point = def_point_mut(&mut updated, name)?;
+        point.x = position.x;
+        point.y = position.y;
+    }
+    if after.raw_dimassoc_targets(h).all(|target| src_changed(before, after, target))
+        && let Some(delta) = points.first().map(|(_, old, new)| *new - *old)
+        && delta.len() > 0.0
+        && points.iter().all(|(_, old, new)| (*new - *old).dist(delta) <= 1e-9 * (1.0 + delta.len()))
+    {
         for name in POINTS {
-            if !active.assoc.iter().any(|a| a.point == *name)
-                && let Some(original) = dm.definition_point(name)
+            if !dm.kind.association_points().contains(&name)
                 && let Some(point) = def_point_mut(&mut updated, name)
             {
-                *point = original;
+                point.x += delta.x;
+                point.y += delta.y;
             }
         }
-        updated.text_mid = dm.text_mid;
+        updated.text_mid.x += delta.x;
+        updated.text_mid.y += delta.y;
     }
-    updated.assoc = dm.assoc.clone();
+    updated.measurement = cadcraft_render::dimension_in(after, &updated).measurement;
     if updated != *dm {
         updated.block = None;
-        updated.measurement = cadcraft_render::dimension_in(after, &updated).measurement;
     }
-    updated
+    Some(updated)
 }
 
 /// After a change: update every associative dimension whose objects changed.
@@ -315,16 +340,36 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
     let retired = if stale.is_empty() { 0 } else { Arc::make_mut(after).retire_raw_dimassocs(&stale).len() };
     let mut changes: Vec<(Handle, Dimension)> = Vec::new();
     let mut blocked = std::collections::BTreeSet::new();
+    let mut completed = std::collections::BTreeSet::new();
     {
         let d: &Drawing = after;
         let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities));
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
-                // Only changed references need evaluation; unchanged opaque points stay put.
-                if d.has_raw_dimassoc(e.handle) && !d.raw_dimassoc_can_update(e.handle, |target| src_changed(before, d, target)) {
-                    if d.raw_dimassoc_targets(e.handle).any(|target| src_changed(before, d, target)) {
-                        blocked.insert(e.handle);
+                if d.has_raw_dimassoc(e.handle) {
+                    // A copied/new raw dimension already arrives with its transformed cache;
+                    // creation is not a geometry edit relative to a pre-existing raw owner.
+                    if before.entity_including_blocks(e.handle).is_none()
+                        || !d.raw_dimassoc_targets(e.handle).any(|target| src_changed(before, d, target))
+                    {
+                        continue;
+                    }
+                    let updated = d
+                        .raw_dimassoc_update_links(e.handle, |target| src_changed(before, d, target))
+                        .and_then(|links| recompute_raw(e.handle, dm, &links, before, d));
+                    match updated {
+                        Some(updated) => {
+                            if d.raw_dimassoc_unupdated(e.handle) {
+                                completed.insert(e.handle);
+                            }
+                            if updated != *dm {
+                                changes.push((e.handle, updated));
+                            }
+                        }
+                        None => {
+                            blocked.insert(e.handle);
+                        }
                     }
                     continue;
                 }
@@ -341,18 +386,22 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
                     Some(EntityKind::Dimension(p)) => Some(p),
                     _ => None,
                 };
-                let nd = if d.has_raw_dimassoc(e.handle) { recompute_raw(e.handle, dm, before, d) } else { recompute(dm, prev, before, d) };
+                let nd = recompute(dm, prev, before, d);
                 if nd != *dm {
                     changes.push((e.handle, nd));
                 }
             }
         }
     }
-    if changes.is_empty() && blocked.is_empty() {
+    if changes.is_empty() && blocked.is_empty() && completed.is_empty() {
         return retired;
     }
+    let changed_targets = blocked.iter().flat_map(|h| after.raw_dimassoc_targets(*h)).filter(|h| src_changed(before, after, *h)).collect();
+    let invalid_vertices =
+        blocked.iter().flat_map(|h| after.raw_dimassoc_targets(*h)).filter(|h| vertex_topology_changed(before, after, *h)).collect();
     let d = Arc::make_mut(after);
-    d.mark_raw_dimassocs_unupdated(&blocked);
+    d.mark_raw_dimassocs_unupdated(&blocked, &changed_targets, &invalid_vertices);
+    d.complete_raw_dimassoc_updates(&completed);
     let n = changes.len();
     for (h, nd) in changes {
         let _ = d.modify_entity(h, |e| e.kind = EntityKind::Dimension(nd));

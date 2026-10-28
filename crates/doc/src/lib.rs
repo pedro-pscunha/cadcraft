@@ -24,7 +24,7 @@ mod tables;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use array::*;
-pub use association::association_point;
+pub use association::{association_point, association_supported};
 pub use cadcraft_color as color;
 pub use cadcraft_geom as geom;
 pub use constraint::*;

@@ -5,16 +5,45 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Binding {
-    evaluable: bool,
+    links: Option<Vec<DimAssoc>>,
+    pending: bool,
     targets: BTreeSet<Handle>,
 }
 
 impl Binding {
-    pub(super) fn can_update(&self, changed: &impl Fn(Handle) -> bool) -> bool {
-        self.evaluable || !self.targets.iter().any(|h| changed(*h))
+    pub(super) fn update_links(&self, d: &Drawing, changed: &impl Fn(Handle) -> bool) -> Option<Vec<DimAssoc>> {
+        if !self.pending && !self.targets.iter().any(|h| changed(*h)) {
+            return Some(Vec::new());
+        }
+        let links = self.links.as_ref()?;
+        links.iter().all(|link| crate::association_point(link, |h| d.entity_including_blocks(h).map(|e| e.as_ref())).is_some()).then(|| links.clone())
     }
+    pub(super) fn is_pending(&self) -> bool {
+        self.pending
+    }
+    pub(super) fn targets(&self) -> impl Iterator<Item = Handle> + '_ {
+        self.targets.iter().copied()
+    }
+    pub(super) fn complete(&mut self) {
+        self.pending = false;
+    }
+    pub(super) fn mark_pending(&mut self, changed: &BTreeSet<Handle>, invalid_vertices: &BTreeSet<Handle>) {
+        self.pending |= self.targets.iter().any(|h| changed.contains(h));
+        if self.links.iter().flatten().any(|link| matches!(link.snap, AssocSnap::Vertex { .. }) && invalid_vertices.contains(&link.handle)) {
+            // Ordinal vertex identities cannot survive topology changes without a remap.
+            self.links = None;
+            self.pending = true;
+        }
+    }
+
     pub(super) fn remap(&mut self, map: &BTreeMap<Handle, Handle>) {
         self.targets = self.targets.iter().map(|h| map.get(h).copied().unwrap_or(*h)).collect();
+        for link in self.links.iter_mut().flatten() {
+            link.handle = map.get(&link.handle).copied().unwrap_or(link.handle);
+            if let AssocSnap::Intersection { other } = &mut link.snap {
+                *other = map.get(other).copied().unwrap_or(*other);
+            }
+        }
     }
 }
 
@@ -75,7 +104,7 @@ impl PointRef {
         if !supported_osnap(self.osnap)
             || self.last.is_some()
             || self.path.as_slice() != [link.handle]
-            || crate::association_point(link, |h| d.entity_including_blocks(h).map(|e| e.as_ref())).is_none()
+            || !crate::association_supported(link, |h| d.entity_including_blocks(h).map(|e| e.as_ref()))
         {
             return false;
         }
@@ -137,7 +166,8 @@ fn parsed(tags: &[RawTag]) -> Option<(i64, Vec<PointRef>)> {
 pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Binding> {
     let fallback = || {
         vec![Binding {
-            evaluable: false,
+            links: None,
+            pending: false,
             targets: tags.iter().filter(|t| matches!(t.code, 331 | 332)).filter_map(|t| Handle::parse_hex(&t.value)).collect(),
         }]
     };
@@ -149,13 +179,15 @@ pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Bind
         return refs
             .iter()
             .map(|r| Binding {
-                evaluable: matches!(r.osnap, 3 | 4)
+                links: (matches!(r.osnap, 3 | 4)
                     && r.last.is_none()
                     && r.path.len() == 1
                     && dm.assoc.len() == 2
                     && dm.assoc.iter().all(|a| {
-                        r.path.as_slice() == [a.handle] && crate::association_point(a, |h| d.entity_including_blocks(h).map(|e| e.as_ref())).is_some()
-                    }),
+                        r.path.as_slice() == [a.handle] && crate::association_supported(a, |h| d.entity_including_blocks(h).map(|e| e.as_ref()))
+                    }))
+                .then(|| dm.assoc.clone()),
+                pending: false,
                 targets: r.targets(),
             })
             .collect();
@@ -167,7 +199,11 @@ pub(super) fn bindings(d: &Drawing, dm: &Dimension, tags: &[RawTag]) -> Vec<Bind
     }
     refs.iter()
         .zip(used)
-        .map(|(r, point)| Binding { evaluable: dm.assoc.iter().find(|a| a.point == point).is_some_and(|a| r.matches(d, a)), targets: r.targets() })
+        .map(|(r, point)| Binding {
+            links: dm.assoc.iter().find(|a| a.point == point).filter(|a| r.matches(d, a)).map(|a| vec![a.clone()]),
+            pending: false,
+            targets: r.targets(),
+        })
         .collect()
 }
 

@@ -20,7 +20,6 @@ pub(crate) struct RawDimAssoc {
     owner_type: Option<String>,
     inferred: Vec<DimAssoc>,
     references: Vec<point::Binding>,
-    unupdated: bool,
     targets: BTreeMap<Handle, TargetKind>,
 }
 
@@ -72,27 +71,51 @@ impl Drawing {
         self.foreign.raw_dimassocs.contains_key(&dimension)
     }
 
-    /// Every changed point reference must be evaluable, including its LastPointRef dependencies.
+    /// Every changed point reference must resolve against the current geometry.
     pub fn raw_dimassoc_can_update(&self, dimension: Handle, changed: impl Fn(Handle) -> bool) -> bool {
-        self.foreign
-            .raw_dimassocs
-            .get(&dimension)
-            .is_some_and(|snapshot| !snapshot.unupdated && snapshot.references.iter().all(|r| r.can_update(&changed)))
+        self.raw_dimassoc_update_links(dimension, changed).is_some()
+    }
+
+    /// Preflight the whole raw record before returning any changed links. Supported semantics
+    /// are retained at import, but geometric solvability is checked anew on every edit.
+    pub fn raw_dimassoc_update_links(&self, dimension: Handle, changed: impl Fn(Handle) -> bool) -> Option<Vec<DimAssoc>> {
+        let snapshot = self.foreign.raw_dimassocs.get(&dimension)?;
+        let mut links = Vec::new();
+        for reference in &snapshot.references {
+            links.extend(reference.update_links(self, &changed)?);
+        }
+        Some(links)
     }
 
     /// A prior unsupported change left the preserved dimension's cached geometry stale.
     pub fn raw_dimassoc_unupdated(&self, dimension: Handle) -> bool {
-        self.foreign.raw_dimassocs.get(&dimension).is_some_and(|snapshot| snapshot.unupdated)
+        self.foreign.raw_dimassocs.get(&dimension).is_some_and(|snapshot| snapshot.references.iter().any(|reference| reference.is_pending()))
     }
 
-    /// Keep the warning until explicit reassociation/disassociation replaces the raw record.
-    pub fn mark_raw_dimassocs_unupdated(&mut self, dimensions: &BTreeSet<Handle>) {
+    /// Record every reference left stale by an atomic failure, not only the failed one.
+    pub fn mark_raw_dimassocs_unupdated(&mut self, dimensions: &BTreeSet<Handle>, changed: &BTreeSet<Handle>, invalid_vertices: &BTreeSet<Handle>) {
         if dimensions.is_empty() {
             return;
         }
         for (h, snapshot) in &mut std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs {
             if dimensions.contains(h) {
-                snapshot.unupdated = true;
+                for reference in &mut snapshot.references {
+                    reference.mark_pending(changed, invalid_vertices);
+                }
+            }
+        }
+    }
+
+    /// Clear pending state only after the entire current/pending set was evaluated and applied.
+    pub fn complete_raw_dimassoc_updates(&mut self, dimensions: &BTreeSet<Handle>) {
+        if dimensions.is_empty() {
+            return;
+        }
+        for (h, snapshot) in &mut std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs {
+            if dimensions.contains(h) {
+                for reference in &mut snapshot.references {
+                    reference.complete();
+                }
             }
         }
     }
@@ -102,9 +125,14 @@ impl Drawing {
         self.foreign.raw_dimassocs.keys().copied()
     }
 
-    /// Initially resolved targets, used to report unsupported links affected by an edit.
+    /// All reference dependencies, including unresolved source handles. Resolution guards are
+    /// separate: a later-created target must not silently bind without change detection.
     pub fn raw_dimassoc_targets(&self, dimension: Handle) -> impl Iterator<Item = Handle> + '_ {
-        self.foreign.raw_dimassocs.get(&dimension).into_iter().flat_map(|snapshot| snapshot.targets.keys().copied())
+        self.foreign
+            .raw_dimassocs
+            .get(&dimension)
+            .into_iter()
+            .flat_map(|snapshot| snapshot.references.iter().flat_map(|reference| reference.targets()))
     }
 
     /// Capture the inference/target snapshot after reading raw DIMASSOC records.
@@ -155,7 +183,7 @@ impl Drawing {
                     Some((h, kind))
                 })
                 .collect();
-            snapshots.insert(dimension, RawDimAssoc { owner_type, inferred, references, unupdated: false, targets });
+            snapshots.insert(dimension, RawDimAssoc { owner_type, inferred, references, targets });
         }
         std::sync::Arc::make_mut(&mut self.foreign).raw_dimassocs = snapshots;
     }

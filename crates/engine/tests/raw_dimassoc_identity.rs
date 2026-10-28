@@ -84,6 +84,86 @@ fn native_source(circle: bool) -> (Session, Handle, Handle) {
     (s, h, target)
 }
 
+fn reopen_raw(s: &mut Session, dim: Handle) {
+    let mut tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+    without_private_links(&mut tags);
+    let mut inside = false;
+    tags.retain(|t| {
+        if t.code == 0 {
+            inside = t.str() == "DIMASSOC";
+        }
+        !(inside && t.code == 301)
+    });
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert!(d.has_raw_dimassoc(dim));
+    s.open_drawing(d, "raw.dxf", None);
+}
+
+#[test]
+fn a_newly_unresolvable_intersection_freezes_every_point_and_warns() {
+    let mut s = Session::new();
+    let horizontal = s.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let vertical = s.execute("line", &json!({"points":[[5,-5],[5,5]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let dim = s.execute("dimlinear", &json!({"p1":[5,0],"p2":[5,5],"at":[10,2]})).unwrap()["handle"].as_str().unwrap().to_string();
+    let h = Handle::parse_hex(&dim).unwrap();
+    let a = Handle::parse_hex(&horizontal).unwrap();
+    let b = Handle::parse_hex(&vertical).unwrap();
+    s.doc_mut()
+        .unwrap()
+        .modify_entity(h, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind {
+                dm.assoc = vec![
+                    DimAssoc { point: "p13".into(), handle: a, snap: AssocSnap::Intersection { other: b } },
+                    DimAssoc { point: "p14".into(), handle: b, snap: AssocSnap::End },
+                ]
+            }
+        })
+        .unwrap();
+    reopen_raw(&mut s, h);
+    let before = s.doc().unwrap().entity(h).unwrap().kind.clone();
+    let result = s.execute("rotate", &json!({"handles":[vertical],"base":[5,0],"angle":90})).unwrap();
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before, "a failed intersection must not partly update the endpoint");
+    assert!(result["warnings"].to_string().contains(&dim), "unresolvable changed reference was silent: {result}");
+    let restored = s.execute("rotate", &json!({"handles":[vertical],"base":[5,0],"angle":-90})).unwrap();
+    assert!(!s.doc().unwrap().raw_dimassoc_unupdated(h), "a transient unsolvable intersection must recover when every pending reference resolves");
+    assert!(restored.get("warnings").is_none());
+    s.execute("move", &json!({"handles":[vertical],"delta":[2,0]})).unwrap();
+    let EntityKind::Dimension(dm) = &s.doc().unwrap().entity(h).unwrap().kind else { panic!("dimension") };
+    assert!((dm.p13.x - 7.0).abs() < 1e-9 && (dm.p14.x - 7.0).abs() < 1e-9, "recovered raw links did not follow");
+}
+
+#[test]
+fn deleted_polyline_vertices_are_not_repaired_by_ordinal_or_partial_evaluation() {
+    for vertex in [1, 2] {
+        let mut s = Session::new();
+        let poly = s.execute("pline", &json!({"vertices":[[0,0],[5,0],[10,0]]})).unwrap()["handle"].as_str().unwrap().to_string();
+        let other = s.execute("line", &json!({"points":[[75,0],[80,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+        let dim = s.execute("dimlinear", &json!({"p1":[vertex*5,0],"p2":[80,0],"at":[40,5]})).unwrap()["handle"].as_str().unwrap().to_string();
+        let h = Handle::parse_hex(&dim).unwrap();
+        let p = Handle::parse_hex(&poly).unwrap();
+        let o = Handle::parse_hex(&other).unwrap();
+        s.doc_mut()
+            .unwrap()
+            .modify_entity(h, |e| {
+                if let EntityKind::Dimension(dm) = &mut e.kind {
+                    dm.assoc = vec![
+                        DimAssoc { point: "p13".into(), handle: p, snap: AssocSnap::Vertex { index: vertex } },
+                        DimAssoc { point: "p14".into(), handle: o, snap: AssocSnap::End },
+                    ]
+                }
+            })
+            .unwrap();
+        reopen_raw(&mut s, h);
+        let before = s.doc().unwrap().entity(h).unwrap().kind.clone();
+        let result = s.execute("grip.option", &json!({"handle":poly,"index":vertex*2,"option":"removeVertex"})).unwrap();
+        assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before, "deleted vertex {vertex} must leave the whole dimension frozen");
+        assert!(result["warnings"].to_string().contains(&dim), "deleted vertex {vertex} was silently reused: {result}");
+        let again = s.execute("move", &json!({"handles":[p.hex()],"delta":[2,0]})).unwrap();
+        assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before, "an invalidated ordinal must not bind to a later vertex");
+        assert!(again["warnings"].to_string().contains(&dim));
+    }
+}
+
 #[test]
 fn quadrant_identity_uses_the_dimension_point_when_the_cache_is_absent() {
     let (mut s, dim, target) = native_source(true);
