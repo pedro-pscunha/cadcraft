@@ -171,10 +171,6 @@ fn owned_indices(objects: &[ForeignObject], index: &BTreeMap<Handle, Vec<usize>>
     owned
 }
 
-fn owned_objects(objects: &[ForeignObject], roots: impl IntoIterator<Item = Handle>) -> BTreeSet<Handle> {
-    owned_indices(objects, &owner_index(objects), roots).into_iter().filter_map(|i| objects.get(i).map(|o| o.handle)).collect()
-}
-
 fn drop_references_to(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeSet<Handle>) {
     let gone = |t: &RawTag| Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h));
     let mut out = Vec::new();
@@ -277,49 +273,65 @@ fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: Du
 }
 
 impl crate::Drawing {
-    /// Retire a dimension's raw association after an explicit association command. Remove the
-    /// owned graph and its dictionary/reactor edges, but keep unrelated extension-dictionary data.
-    /// Returns whether a raw association was present.
-    pub fn retire_raw_dimassoc(&mut self, dimension: Handle) -> bool {
+    /// Retire raw associations for one command's set of dimensions. Index ownership once and
+    /// rewrite only objects that reference a removed handle; unrelated raw storage stays intact.
+    /// Returns the dimensions that actually had a raw association.
+    pub fn retire_raw_dimassocs(&mut self, dimensions: &BTreeSet<Handle>) -> BTreeSet<Handle> {
+        if dimensions.is_empty() {
+            return BTreeSet::new();
+        }
+        let mut retired = BTreeSet::new();
         let roots: BTreeSet<_> = self
             .foreign
             .objects
             .iter()
             .filter(|o| o.kind == "DIMASSOC")
             .filter_map(|o| {
-                let target = o
-                    .tags
-                    .iter()
-                    .skip_while(|t| t.code != 100 || t.value.trim() != "AcDbDimAssoc")
-                    .find(|t| t.code == 330)
-                    .and_then(|t| Handle::parse_hex(&t.value));
-                (target == Some(dimension)).then_some(o.handle)
+                let (_, dimension) = dimassoc_reference(o.tags.iter().map(|t| (t.code, t.value.as_str())))?;
+                if !dimensions.contains(&dimension) {
+                    return None;
+                }
+                retired.insert(dimension);
+                Some(o.handle)
             })
             .collect();
         if roots.is_empty() {
-            return false;
+            return retired;
         }
-        let mut removed = owned_objects(&self.foreign.objects, roots.iter().copied());
+        let index = owner_index(&self.foreign.objects);
+        let by_handle: BTreeMap<_, _> = self.foreign.objects.iter().enumerate().map(|(i, o)| (o.handle, i)).collect();
+        let mut removed: BTreeSet<_> = owned_indices(&self.foreign.objects, &index, roots.iter().copied())
+            .into_iter()
+            .filter_map(|i| self.foreign.objects.get(i).map(|o| o.handle))
+            .collect();
         removed.extend(roots);
-        let dictionary = self.foreign.entities.get(&dimension).and_then(|x| x.xdict);
-        let foreign = std::sync::Arc::make_mut(&mut self.foreign);
-        for object in &mut foreign.objects {
-            drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
-        }
-        if let Some(dictionary) = dictionary {
-            let empty = foreign
-                .objects
-                .iter()
-                .find(|o| o.handle == dictionary)
-                .is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
-            let has_other_children = foreign.objects.iter().any(|o| owner(&o.tags) == Some(dictionary) && !removed.contains(&o.handle));
-            if empty && !has_other_children {
+        for dictionary in retired.iter().filter_map(|h| self.foreign.entities.get(h).and_then(|x| x.xdict)) {
+            let object = by_handle.get(&dictionary).and_then(|i| self.foreign.objects.get(*i));
+            let empty = object.is_some_and(|o| {
+                o.kind == "DICTIONARY"
+                    && !o.tags.iter().any(|t| t.code >= 1000)
+                    && o.tags.iter().enumerate().filter(|(_, t)| t.code == 3).all(|(i, _)| {
+                        o.tags
+                            .get(i + 1)
+                            .is_some_and(|t| matches!(t.code, 350 | 360) && Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h)))
+                    })
+            });
+            let has_children =
+                index.get(&dictionary).into_iter().flatten().filter_map(|i| self.foreign.objects.get(*i)).any(|o| !removed.contains(&o.handle));
+            if empty && !has_children {
                 removed.insert(dictionary);
             }
         }
+        let foreign = std::sync::Arc::make_mut(&mut self.foreign);
         foreign.objects.retain(|o| !removed.contains(&o.handle));
         for object in &mut foreign.objects {
-            drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+            if object
+                .tags
+                .iter()
+                .any(|t| matches!(t.code,320..=369|390..=399|480..=481|1005) && Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h)))
+            {
+                drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+            }
         }
         for extra in foreign.entities.values_mut().chain(foreign.records.values_mut()) {
             extra.xdict = extra.xdict.filter(|h| !removed.contains(h));
@@ -327,7 +339,7 @@ impl crate::Drawing {
         }
         foreign.entities.retain(|_, extra| !extra.is_empty());
         foreign.records.retain(|_, extra| !extra.is_empty());
-        true
+        retired
     }
 
     /// Duplicate entity sets with fresh entity and attribute identities. Each inner vector is

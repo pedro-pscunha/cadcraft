@@ -74,8 +74,8 @@ pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let mut points = 0;
     let mut n = 0;
     let d = s.doc_mut()?;
+    d.retire_raw_dimassocs(&plan.iter().map(|(h, _)| *h).collect());
     for (h, a) in plan {
-        d.retire_raw_dimassoc(h);
         points += a.len();
         n += usize::from(!a.is_empty());
         let _ = d.modify_entity(h, |e| {
@@ -91,8 +91,9 @@ pub(super) fn run_disassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = dims_of(s, &targets(s, p)?);
     let d = s.doc_mut()?;
     let mut n = 0;
+    let retired = d.retire_raw_dimassocs(&hs.iter().copied().collect());
     for h in &hs {
-        let mut changed = d.retire_raw_dimassoc(*h);
+        let mut changed = retired.contains(h);
         let _ = d.modify_entity(*h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind
                 && !dm.assoc.is_empty()

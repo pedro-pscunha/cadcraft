@@ -55,7 +55,7 @@ fn dimassoc_dimension<S: AsRef<str>>(tags: impl IntoIterator<Item = (i32, S)>) -
 
 /// Raw associations suppress modelled output even when the reader inferred some links. Unrelated
 /// geometry edits preserve them because CADCraft cannot update unsupported references safely.
-/// Explicit association commands retire them through [`Drawing::retire_raw_dimassoc`]; deleting
+/// Explicit association commands retire them through [`Drawing::retire_raw_dimassocs`]; deleting
 /// their owner drops them like other foreign data.
 pub(crate) fn raw_dimassoc_dimensions(d: &Drawing) -> HashSet<Handle> {
     d.foreign

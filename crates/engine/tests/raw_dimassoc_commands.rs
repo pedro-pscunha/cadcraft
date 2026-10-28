@@ -151,6 +151,46 @@ fn unrelated_dimension_edits_keep_the_raw_association() {
 }
 
 #[test]
+fn one_command_retires_all_selected_raw_associations() {
+    let (mut s, dim, line, _) = session();
+    let copy = s.execute("copy", &json!({"handles":[line, dim],"delta":[20,0]})).unwrap()["handles"][1].as_str().unwrap().to_string();
+    let result = s.execute("dimdisassociate", &json!({"handles":[dim,copy]})).unwrap();
+    assert_eq!(result["disassociated"], 2, "both raw-only associations must be counted once");
+    assert!(s.doc().unwrap().foreign.objects.iter().all(|o| o.kind != "DIMASSOC"), "one batch left an association behind");
+    for text in saved(&s) {
+        assert!(objects(&text).iter().all(|(kind, _)| kind != "DIMASSOC"), "retired batch reappeared after save/reopen");
+    }
+}
+
+#[test]
+fn retiring_associations_does_not_rewrite_unrelated_object_storage() {
+    let (mut s, dim, _, _) = session();
+    let d = s.doc_mut().unwrap();
+    let dimension = Handle::parse_hex(&dim).unwrap();
+    let dictionary = d.foreign.entities.get(&dimension).unwrap().xdict.unwrap();
+    let keep = d.new_handle();
+    let f = std::sync::Arc::make_mut(&mut d.foreign);
+    f.objects
+        .iter_mut()
+        .find(|o| o.handle == dictionary)
+        .unwrap()
+        .tags
+        .extend([RawTag { code: 3, value: "KEEP".into() }, RawTag { code: 350, value: keep.hex() }]);
+    let mut tags = Vec::with_capacity(2048);
+    tags.extend([
+        RawTag { code: 5, value: keep.hex() },
+        RawTag { code: 330, value: dictionary.hex() },
+        RawTag { code: 100, value: "AcDbXrecord".into() },
+        RawTag { code: 1, value: "unrelated".into() },
+    ]);
+    f.objects.push(cadcraft_engine::doc::foreign::ForeignObject { handle: keep, kind: "XRECORD".into(), tags });
+    assert_eq!(std::sync::Arc::strong_count(&d.foreign), 1, "capacity check must not be confounded by legitimate undo copy-on-write");
+    d.retire_raw_dimassocs(&std::collections::BTreeSet::from([dimension]));
+    let kept = d.foreign.objects.iter().find(|o| o.handle == keep).unwrap();
+    assert!(kept.tags.capacity() >= 2048, "unrelated object tags were reallocated by association retirement");
+}
+
+#[test]
 fn retiring_raw_dimassoc_keeps_unrelated_dictionary_entries() {
     let (mut s, dim, _, raw) = session();
     let d = s.doc_mut().unwrap();
