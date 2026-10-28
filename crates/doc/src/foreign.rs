@@ -399,6 +399,19 @@ impl crate::Drawing {
     /// External drawings contribute model data only. Raw dimension associations are copied only
     /// when all their geometry is in the same set; dictionaries/reactors never retain old owners.
     pub fn duplicate_entities(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource) -> Vec<Entity> {
+        self.duplicate_entity_sets(sets, source, &BTreeMap::new())
+    }
+
+    /// Give merged geometry a new identity and its chosen source's owned metadata. References
+    /// to any consumed entity follow the result, without adopting those entities' metadata.
+    pub fn merge_entity(&mut self, entity: Entity, consumed: &[Handle]) -> crate::Result<Entity> {
+        let aliases = consumed.iter().map(|h| (*h, entity.handle)).collect();
+        self.duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases)
+            .pop()
+            .ok_or_else(|| crate::DocError::Invalid("merged entity was not created".into()))
+    }
+
+    fn duplicate_entity_sets(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource, aliases: &BTreeMap<Handle, Handle>) -> Vec<Entity> {
         let has_metadata = source == DuplicationSource::SameDrawing
             && !self.foreign.is_empty()
             && sets.iter().flatten().any(|e| {
@@ -431,10 +444,20 @@ impl crate::Drawing {
                     }
                 }
             }
+            // Reference aliases are many-to-one; only real copied roots own cloned graphs.
+            let mut map = std::borrow::Cow::Borrowed(&roots);
+            if !aliases.is_empty() {
+                let map = map.to_mut();
+                for (old, source) in aliases {
+                    if let Some(new) = roots.get(source) {
+                        map.insert(*old, *new);
+                    }
+                }
+            }
             if !has_metadata {
                 for entity in &mut entities {
-                    remap_model(&mut entity.kind, &roots, source, false);
-                    remap_xdata(&mut entity.common.xdata, &roots, source);
+                    remap_model(&mut entity.kind, &map, source, false);
+                    remap_xdata(&mut entity.common.xdata, &map, source);
                 }
                 out.extend(entities);
                 continue;
@@ -472,7 +495,7 @@ impl crate::Drawing {
                 }
             }
             objects.retain(|o| !dropped.contains(&o.handle));
-            let mut map = roots.clone();
+            let mut map = map.into_owned();
             for object in &objects {
                 map.insert(object.handle, self.new_handle());
             }

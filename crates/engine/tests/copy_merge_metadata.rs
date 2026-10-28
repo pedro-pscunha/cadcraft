@@ -164,3 +164,132 @@ fn ncopy_preserves_raw_association_when_geometry_is_another_leaf() {
         );
     }
 }
+
+fn owned_probe(s: &mut Session, owner: Handle, target: Handle, marker: &str) {
+    use cadcraft_engine::doc::foreign::ForeignObject;
+    let d = s.doc_mut().unwrap();
+    let dictionary = d.new_handle();
+    let record = d.new_handle();
+    let tag = |code, value: String| RawTag { code, value };
+    let foreign = Arc::make_mut(&mut d.foreign);
+    foreign.entities.entry(owner).or_default().xdict = Some(dictionary);
+    foreign.objects.extend([
+        ForeignObject {
+            handle: dictionary,
+            kind: "DICTIONARY".into(),
+            tags: vec![
+                tag(5, dictionary.hex()),
+                tag(330, owner.hex()),
+                tag(100, "AcDbDictionary".into()),
+                tag(3, "MERGE_PROBE".into()),
+                tag(350, record.hex()),
+            ],
+        },
+        ForeignObject {
+            handle: record,
+            kind: "XRECORD".into(),
+            tags: vec![
+                tag(5, record.hex()),
+                tag(330, dictionary.hex()),
+                tag(100, "AcDbXrecord".into()),
+                tag(1, marker.into()),
+                tag(340, target.hex()),
+                tag(341, owner.hex()),
+            ],
+        },
+    ]);
+}
+
+fn join_sources() -> (Session, Handle, Handle, Handle) {
+    let mut s = Session::new();
+    let a = line(&mut s, [[0.0, 0.0], [1.0, 0.0]]);
+    let b = line(&mut s, [[1.0, 0.0], [1.0, 1.0]]);
+    let external = line(&mut s, [[100.0, 0.0], [101.0, 0.0]]);
+    probe(&mut s, a, "A", b);
+    s.doc_mut()
+        .unwrap()
+        .modify_entity(a, |e| e.common.xdata.extend([RawTag { code: 1005, value: a.hex() }, RawTag { code: 1005, value: external.hex() }]))
+        .unwrap();
+    (s, a, b, external)
+}
+
+fn assert_merged_references(d: &Drawing, joined: Handle, external: Handle) {
+    let references: Vec<_> =
+        d.entity(joined).unwrap().common.xdata.iter().filter(|t| t.code == 1005).map(|t| Handle::parse_hex(&t.value).unwrap()).collect();
+    assert_eq!(references, [joined, joined, external], "JOIN must map every consumed identity to the result, without remapping unrelated geometry");
+}
+
+#[test]
+fn join_remaps_all_consumed_xdata_identities_without_foreign_storage() {
+    let (mut s, a, b, external) = join_sources();
+    let joined = handle(&s.execute("join", &json!({"handles":[a.hex(), b.hex()]})).unwrap()["handle"]);
+    let d = s.doc().unwrap();
+    assert!(d.entity(a).is_none() && d.entity(b).is_none());
+    assert_merged_references(d, joined, external);
+}
+
+fn assert_merged_graph(d: &Drawing, joined: Handle) {
+    let dictionary = d.foreign.entities.get(&joined).unwrap().xdict.unwrap();
+    let dict = d.foreign.objects.iter().find(|o| o.handle == dictionary).unwrap();
+    assert!(dict.tags.iter().any(|t| t.code == 330 && Handle::parse_hex(&t.value) == Some(joined)), "merged dictionary must belong to the result");
+    let record = dict.tags.iter().find(|t| t.code == 350).map(|t| Handle::parse_hex(&t.value).unwrap()).unwrap();
+    let record = d.foreign.objects.iter().find(|o| o.handle == record).unwrap();
+    assert!(
+        record.tags.iter().any(|t| t.code == 1 && t.value == "A"),
+        "JOIN must clone only the chosen source's graph, not another consumed object's graph"
+    );
+    for code in [340, 341] {
+        assert!(
+            record.tags.iter().any(|t| t.code == code && Handle::parse_hex(&t.value) == Some(joined)),
+            "JOIN's owned graph must remap consumed references {code}"
+        );
+    }
+}
+
+#[test]
+fn join_remaps_owned_graph_without_adopting_other_consumed_metadata() {
+    let (mut s, a, b, external) = join_sources();
+    owned_probe(&mut s, a, b, "A");
+    owned_probe(&mut s, b, a, "B");
+    let joined = handle(&s.execute("join", &json!({"handles":[a.hex(), b.hex()]})).unwrap()["handle"]);
+    let d = s.doc().unwrap();
+    assert_merged_references(d, joined, external);
+    assert_merged_graph(d, joined);
+    assert_eq!(
+        d.foreign.objects.iter().filter(|o| o.tags.iter().any(|t| t.code == 1 && t.value == "B")).count(),
+        1,
+        "consumed aliases are reference mappings, not extra metadata roots"
+    );
+    for extension in ["dxf", "dwg"] {
+        let name = format!("join.{extension}");
+        let bytes = cadcraft_io::write(d, &name).unwrap();
+        let saved = cadcraft_io::read(&bytes, &name).unwrap();
+        assert_merged_references(&saved, joined, external);
+        assert_merged_graph(&saved, joined);
+    }
+}
+
+#[test]
+fn breaking_one_source_still_gives_each_piece_its_own_identity() {
+    let mut s = Session::new();
+    let a = line(&mut s, [[0.0, 0.0], [10.0, 0.0]]);
+    let external = line(&mut s, [[100.0, 0.0], [110.0, 0.0]]);
+    probe(&mut s, a, "A", a);
+    s.doc_mut().unwrap().modify_entity(a, |e| e.common.xdata.push(RawTag { code: 1005, value: external.hex() })).unwrap();
+    let r = s.execute("break", &json!({"handle":a.hex(), "p1":[3,0], "p2":[7,0]})).unwrap();
+    assert_eq!(r["handles"].as_array().unwrap().len(), 2);
+    for h in r["handles"].as_array().unwrap().iter().map(handle) {
+        let references: Vec<_> = s
+            .doc()
+            .unwrap()
+            .entity(h)
+            .unwrap()
+            .common
+            .xdata
+            .iter()
+            .filter(|t| t.code == 1005)
+            .map(|t| Handle::parse_hex(&t.value).unwrap())
+            .collect();
+        assert_eq!(references, [h, external], "independent derived pieces must not use JOIN's many-to-one mapping");
+    }
+}

@@ -117,6 +117,16 @@ pub(crate) fn push_derived(s: &mut Session, space: &Space, source: &Entity, kind
     push_derived_entities(s, space, source, vec![kind])?.into_iter().next().ok_or_else(|| other("derived entity was not created"))
 }
 
+/// One result replaces all consumed identities, but inherits only the chosen source's metadata.
+pub(crate) fn push_merged(s: &mut Session, space: &Space, source: &Entity, kind: EntityKind, consumed: &[Handle]) -> Result<Handle> {
+    let d = s.doc_mut()?;
+    d.ensure_layer(&source.common.layer);
+    let copy = d.merge_entity(Entity { kind, ..source.clone() }, consumed)?;
+    let handle = copy.handle;
+    d.space_mut(space).ok_or_else(|| other("no such space"))?.push(copy);
+    Ok(handle)
+}
+
 // =====================================================================================
 // PEDIT
 // =====================================================================================

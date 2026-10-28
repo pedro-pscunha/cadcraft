@@ -201,7 +201,7 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
         doc.remove_entity(*h);
     }
     let source = source.ok_or_else(|| EngineError::Other("joined geometry has no source".into()))?;
-    let nh = crate::cmd::modify2::push_derived(s, &space, &source, lwpoly(vs, closed))?;
+    let nh = crate::cmd::modify2::push_merged(s, &space, &source, lwpoly(vs, closed), &used)?;
     s.set_selection(Vec::new());
     Ok(Some(nh))
 }
