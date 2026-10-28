@@ -396,6 +396,7 @@ impl Session {
             && let Ok(st) = self.state_mut()
             && uid.is_none_or(|uid| uid == st.uid)
             && !Arc::ptr_eq(before, &st.doc)
+            && st.doc.has_missing_attribute_handles()
         {
             Arc::make_mut(&mut st.doc).allocate_missing_attribute_handles();
         }

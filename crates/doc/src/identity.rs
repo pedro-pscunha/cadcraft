@@ -47,6 +47,16 @@ fn fill_store(store: &mut EntityStore, allocate: &mut impl FnMut() -> Handle) {
 }
 
 impl Drawing {
+    /// Check completion without copy-on-write: command exit must not clone a restored clean
+    /// drawing merely to discover that every instance already has its identity.
+    pub fn has_missing_attribute_handles(&self) -> bool {
+        std::iter::once(&self.model)
+            .chain(self.layouts.iter().map(|layout| &layout.entities))
+            .chain(self.blocks.values().map(|block| &block.entities))
+            .flat_map(|store| store.iter())
+            .any(|entity| entity.kind.attributes().iter().any(|attribute| attribute.handle.is_none()))
+    }
+
     /// Allocate identities for newly created attribute instances before they enter the database.
     pub fn allocate_attribute_handles(&mut self, kind: &mut EntityKind) {
         fill(kind, &mut || self.new_handle());
