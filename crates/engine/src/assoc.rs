@@ -218,8 +218,22 @@ pub fn radial_assoc(d: &Drawing, h: Handle, diameter: bool, defpt: Vec2, p15: Ve
 fn src_changed(before: &Drawing, after: &Drawing, h: Handle) -> bool {
     match (before.entity_including_blocks(h), after.entity_including_blocks(h)) {
         (Some(x), Some(y)) => !Arc::ptr_eq(x, y) && x.kind != y.kind,
-        (Some(_), None) => true,
-        _ => false,
+        (Some(_), None) | (None, Some(_)) => true,
+        (None, None) => match (before.attribute_instance(h), after.attribute_instance(h)) {
+            (Some((x, a)), Some((y, b))) => {
+                let base_changed = |i: &cadcraft_doc::Insert| before.block(&i.block).map(|b| b.base) != after.block(&i.block).map(|b| b.base);
+                x.handle != y.handle
+                    || a != b
+                    || x.kind != y.kind
+                    || match &x.kind {
+                        EntityKind::Insert(i) => base_changed(i),
+                        EntityKind::MLeader(m) => m.block.as_ref().is_some_and(base_changed),
+                        _ => false,
+                    }
+            }
+            (Some(_), None) | (None, Some(_)) => true,
+            (None, None) => false,
+        },
     }
 }
 

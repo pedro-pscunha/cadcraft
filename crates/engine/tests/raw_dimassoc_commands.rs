@@ -350,6 +350,52 @@ fn incomplete_reassociation_leaves_raw_and_model_unchanged() {
 }
 
 #[test]
+fn embedded_attribute_edits_and_owner_moves_count_as_reference_changes() {
+    for edit in ["move", "attedit"] {
+        let d = cadcraft_io::read_dxf(include_bytes!("../../io/tests/data/attrib_fields.dxf")).unwrap();
+        let mut s = Session::new();
+        s.open_drawing(d, "attributes.dxf", None);
+        let dim = s.execute("dimlinear", &json!({"object":"30","at":[5,5]})).unwrap()["handle"].as_str().unwrap().to_string();
+        s.execute("dimreassociate", &json!({"handles":[dim]})).unwrap();
+        let mut tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+        let mut own = false;
+        tags.retain(|t| {
+            if t.code == 0 {
+                own = false;
+            }
+            if t.code == 1001 {
+                own = t.str() == "CADCRAFT";
+            }
+            !own
+        });
+        let mut in_assoc = false;
+        for t in &mut tags {
+            if t.code == 0 {
+                in_assoc = t.str() == "DIMASSOC";
+            } else if in_assoc {
+                if t.code == 72 {
+                    *t = Tag::i(72, 8);
+                }
+                if t.code == 331 {
+                    *t = Tag::s(331, "33");
+                }
+            }
+        }
+        let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+        s.open_drawing(d, "attribute-ref.dxf", None);
+        let h = Handle::parse_hex(&dim).unwrap();
+        let before = s.doc().unwrap().entity(h).unwrap().kind.clone();
+        let result = if edit == "move" {
+            s.execute(edit, &json!({"handles":["31"],"delta":[2,0]})).unwrap()
+        } else {
+            s.execute(edit, &json!({"handle":"31","values":{"LENGTH":"changed"}})).unwrap()
+        };
+        assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before);
+        assert!(result["warnings"].to_string().contains(&dim), "{edit} changed an ATTRIB reference without a warning: {result}");
+    }
+}
+
+#[test]
 fn undo_and_redo_restore_raw_warning_and_document_snapshots_exactly() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |bytes, name| cadcraft_io::read(bytes, name).map_err(|e| e.to_string()),

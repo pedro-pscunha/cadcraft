@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::dimassoc_reference;
-use crate::{AssocSnap, DimAssoc, Drawing, Entity, EntityKind, Handle};
+use crate::{AssocSnap, Attrib, DimAssoc, Drawing, Entity, EntityKind, Handle};
 
 mod point;
 
@@ -62,6 +62,11 @@ impl RawDimAssoc {
 }
 
 impl Drawing {
+    /// An embedded attribute instance and the entity whose transform owns it, in any store.
+    pub fn attribute_instance(&self, handle: Handle) -> Option<(&Entity, &Attrib)> {
+        entities(self).find_map(|owner| owner.kind.attributes().iter().find(|a| a.handle == Some(handle)).map(|attribute| (owner, attribute)))
+    }
+
     /// Whether the preserved raw association, rather than an inferred subset, owns this dimension.
     pub fn has_raw_dimassoc(&self, dimension: Handle) -> bool {
         self.foreign.raw_dimassocs.contains_key(&dimension)
@@ -173,9 +178,7 @@ impl Drawing {
                             TargetKind::Entity(name) => {
                                 self.entity_including_blocks(*target).is_some_and(|e| e.kind.dxf_name().eq_ignore_ascii_case(name))
                             }
-                            TargetKind::Attribute(owner) => {
-                                self.entity_including_blocks(*owner).is_some_and(|e| e.kind.attributes().iter().any(|a| a.handle == Some(*target)))
-                            }
+                            TargetKind::Attribute(owner) => self.attribute_instance(*target).is_some_and(|(entity, _)| entity.handle == *owner),
                         })
                 });
                 (!valid).then_some(*h)
