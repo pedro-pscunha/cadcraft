@@ -27,6 +27,79 @@ fn dimension_copy_without_its_geometry_does_not_bind_to_original_objects() {
 }
 
 #[test]
+fn bedit_and_refedit_edits_regenerate_imported_block_dimension_graphics() {
+    for refedit in [false, true] {
+        for edit in ["move", "textedit", "dimStyle", "textHeight", "arrowSize", "grip"] {
+            let (mut s, line, dim) = drawing();
+            s.execute("dimstyle", &json!({"name":"ALT","current":false,"DIMTXT":4})).unwrap();
+            let insert =
+                s.execute("block", &json!({"name":"MEASURES","base":[0,0],"handles":[line,dim]})).unwrap()["insert"].as_str().unwrap().to_string();
+            let source = cadcraft_io::read_dxf(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+            let old = source
+                .block("MEASURES")
+                .unwrap()
+                .entities
+                .iter()
+                .find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { dm.block.clone() } else { None })
+                .expect("imported cached graphics");
+            s.open_drawing(source, "cached.dxf", None);
+            if refedit {
+                s.execute("refedit", &json!({"handle":insert})).unwrap();
+            } else {
+                s.execute("bedit", &json!({"name":"MEASURES"})).unwrap();
+            }
+            let working = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).unwrap().handle;
+            // Opening can transform the entity and invalidate its cache already. Restore the
+            // valid origin-zero cache so the edit path itself must invalidate it as well.
+            s.doc_mut()
+                .unwrap()
+                .modify_entity(working, |e| {
+                    if let EntityKind::Dimension(dm) = &mut e.kind {
+                        dm.block = Some(old.clone())
+                    }
+                })
+                .unwrap();
+            match edit {
+                "move" => {
+                    s.execute("move", &json!({"handles":[working.hex()],"delta":[20,0]})).unwrap();
+                }
+                "textedit" => {
+                    s.execute(edit, &json!({"handle":working.hex(),"text":"edited"})).unwrap();
+                }
+                "grip" => {
+                    s.execute("grip.move", &json!({"handle":working.hex(),"index":0,"to":[2,0]})).unwrap();
+                }
+                property => {
+                    let mut p = json!({"handles":[working.hex()]});
+                    p[property] = if property == "dimStyle" { json!("ALT") } else { json!(4) };
+                    s.execute("properties.set", &p).unwrap();
+                }
+            }
+            let EntityKind::Dimension(working) = &s.doc().unwrap().entity(working).unwrap().kind else { panic!("dimension") };
+            assert!(working.block.is_none(), "editor={refedit}, edit={edit}: edit path retained cached geometry");
+            s.execute(if refedit { "refclose" } else { "bclose" }, &json!({"save":true})).unwrap();
+            let block = s.doc().unwrap().block("MEASURES").unwrap();
+            let dm = block.entities.iter().find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some(dm) } else { None }).unwrap();
+            assert!(dm.block.is_none(), "editor={refedit}, edit={edit}: close restored cached geometry");
+            for dwg in [false, true] {
+                let bytes =
+                    if dwg { cadcraft_io::write(s.doc().unwrap(), "x.dwg").unwrap() } else { cadcraft_io::write_dxf(s.doc().unwrap()).into_bytes() };
+                let back = cadcraft_io::read(&bytes, if dwg { "x.dwg" } else { "x.dxf" }).unwrap();
+                let name = back
+                    .block("MEASURES")
+                    .unwrap()
+                    .entities
+                    .iter()
+                    .find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { dm.block.as_ref() } else { None })
+                    .unwrap();
+                assert_ne!(name, &old, "editor={refedit}, edit={edit}, DWG={dwg}: stale anonymous block reused");
+                assert!(!back.block(name).unwrap().entities.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
 fn block_copy_writes_modelled_association_and_fresh_dimension_geometry() {
     let (mut s, line, dim) = drawing();
     s.execute("block", &json!({"name":"MEASURES","base":[0,0],"handles":[line,dim],"keep":"retain"})).unwrap();
