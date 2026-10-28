@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{Entity, EntityKind, Handle, RawTag};
 
 mod association;
+#[cfg(test)]
+mod tests;
 use association::RawDimAssoc;
 
 /// Longest foreign-data ownership chain followed while copying or retiring objects.
@@ -170,6 +172,8 @@ pub fn object_owner<S: AsRef<str>>(groups: impl IntoIterator<Item = (i32, S)>) -
 }
 
 fn owner(tags: &[RawTag]) -> Option<Handle> {
+    #[cfg(test)]
+    tests::OWNERS.with(|count| count.set(count.get().saturating_add(1)));
     object_owner(tags.iter().map(|t| (t.code, t.value.as_str())))
 }
 
@@ -458,12 +462,12 @@ impl crate::Drawing {
                 drop_references_to(&mut object.tags, is_dictionary(&object.kind), &dropped);
             }
             let dictionaries: Vec<_> = roots.keys().filter_map(|h| self.foreign.entities.get(h).and_then(|e| e.xdict)).collect();
+            let by_handle: BTreeMap<_, _> = objects.iter().map(|o| (o.handle, o)).collect();
+            let parents: BTreeSet<_> = objects.iter().filter_map(|o| owner(&o.tags)).collect();
             for dictionary in dictionaries {
-                let empty = objects
-                    .iter()
-                    .find(|o| o.handle == dictionary)
-                    .is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
-                if empty && !objects.iter().any(|o| owner(&o.tags) == Some(dictionary)) {
+                let empty =
+                    by_handle.get(&dictionary).is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
+                if empty && !parents.contains(&dictionary) {
                     dropped.insert(dictionary);
                 }
             }
@@ -495,13 +499,11 @@ impl crate::Drawing {
                 }
             }
             added_objects.extend(objects);
-            if has_metadata {
-                for (old, new) in &roots {
-                    if let Some(mut extra) = self.foreign.entities.get(old).cloned() {
-                        remap_extra(&mut extra, &map);
-                        if !extra.is_empty() {
-                            added_extras.push((*new, extra));
-                        }
+            for (old, new) in &roots {
+                if let Some(mut extra) = self.foreign.entities.get(old).cloned() {
+                    remap_extra(&mut extra, &map);
+                    if !extra.is_empty() {
+                        added_extras.push((*new, extra));
                     }
                 }
             }
