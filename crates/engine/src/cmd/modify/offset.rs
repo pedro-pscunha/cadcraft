@@ -213,15 +213,12 @@ pub(super) fn run_offset(s: &mut Session, p: &Value) -> Result<Value> {
 /// `current_layer`), then erase the source when `erase` and its layer is not locked.
 fn add_offset(s: &mut Session, src: &Entity, k: EntityKind, current_layer: bool, erase: bool) -> Result<Handle> {
     let space = s.space();
-    let d = s.doc_mut()?;
-    let mut common = src.common.clone();
+    let mut source = src.clone();
     if current_layer {
-        common.layer = d.header.str("CLAYER", "0");
+        source.common.layer = s.doc()?.header.str("CLAYER", "0");
     }
-    let nh = d.new_handle();
-    if let Some(st) = d.space_mut(&space) {
-        st.push(Entity { handle: nh, common, kind: k });
-    }
+    let nh = crate::cmd::modify2::push_derived(s, &space, &source, k)?;
+    let d = s.doc_mut()?;
     let locked = d.layer(&src.common.layer).is_some_and(|l| l.locked);
     if erase && !locked {
         d.remove_entity(src.handle);

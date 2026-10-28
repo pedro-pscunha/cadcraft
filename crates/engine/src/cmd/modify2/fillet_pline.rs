@@ -5,7 +5,7 @@
 use cadcraft_doc::{EntityKind, Handle, LwPolyline};
 use cadcraft_geom::{Line, PolyVertex, Polyline, Segment, Vec2, arc_to_bulge, bulge_to_arc, line_line_infinite};
 
-use super::{curves, other, push_entity, set_kind};
+use super::{curves, other, push_derived, set_kind};
 use crate::cmd::helpers::{arc, line};
 use crate::{Result, Session};
 
@@ -72,7 +72,7 @@ fn add_loose(s: &mut Session, near: Handle, c: &Corner) -> Result<Option<Handle>
         None if !c.t1.near(c.t2, 1e-12) => line(c.t1, c.t2),
         None => return Ok(None),
     };
-    Ok(Some(push_entity(s, &space, e.common.clone(), k)?))
+    Ok(Some(push_derived(s, &space, &e, k)?))
 }
 
 /// Two segments of one polyline.

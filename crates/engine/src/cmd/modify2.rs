@@ -2,7 +2,7 @@
 //! FLATTEN, plus the fillet/trim/extend extensions used by modify.rs (arcs, polylines,
 //! ellipses and splines).
 
-use cadcraft_doc::{Common, Entity, EntityKind, Handle, LwPolyline, MAX_BLOCK_DEPTH, Space};
+use cadcraft_doc::{Entity, EntityKind, Handle, LwPolyline, MAX_BLOCK_DEPTH, Space};
 use cadcraft_geom::{
     Arc, Ellipse, Line, Mat3, PolyVertex, Polyline, Segment, Spline, TAU, Vec2, ccw_sweep, intersect_ext, line_circle, line_line_infinite, norm_angle,
 };
@@ -97,13 +97,24 @@ fn set_kind(s: &mut Session, h: Handle, k: EntityKind) -> Result<()> {
     Ok(())
 }
 
-fn push_entity(s: &mut Session, space: &Space, common: Common, kind: EntityKind) -> Result<Handle> {
+/// Geometry derived from a source owns independent, remapped metadata. Each piece is its own
+/// copy set, so several pieces of one source never share a self-reference or owned dictionary.
+pub(crate) fn push_derived_entities(s: &mut Session, space: &Space, source: &Entity, kinds: Vec<EntityKind>) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
-    d.ensure_layer(&common.layer);
-    let h = d.new_handle();
+    d.ensure_layer(&source.common.layer);
+    let sets = kinds.into_iter().map(|kind| vec![Entity { kind, ..source.clone() }]).collect();
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
     let st = d.space_mut(space).ok_or_else(|| other("no such space"))?;
-    st.push(Entity { handle: h, common, kind });
-    Ok(h)
+    let mut handles = Vec::with_capacity(copies.len());
+    for copy in copies {
+        handles.push(copy.handle);
+        st.push(copy);
+    }
+    Ok(handles)
+}
+
+pub(crate) fn push_derived(s: &mut Session, space: &Space, source: &Entity, kind: EntityKind) -> Result<Handle> {
+    push_derived_entities(s, space, source, vec![kind])?.into_iter().next().ok_or_else(|| other("derived entity was not created"))
 }
 
 // =====================================================================================

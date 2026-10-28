@@ -1,6 +1,6 @@
 use super::{
     Arc, EntityKind, Handle, LwPolyline, PolyVertex, Result, Session, TanObj, Vec2, arc, ccw_sweep, curve_edits, curves, line, line_circle,
-    line_line_infinite, other, push_entity, set_kind,
+    line_line_infinite, other, push_derived, set_kind,
 };
 
 // =====================================================================================
@@ -101,7 +101,7 @@ pub(crate) fn fillet_curves(s: &mut Session, h1: Handle, p1: Vec2, h2: Handle, p
     match new_arc {
         Some(a) => {
             let space = s.doc()?.space_of(h1).unwrap_or_else(|| s.space());
-            Ok(Some(push_entity(s, &space, e1.common.clone(), arc(&a))?))
+            Ok(Some(push_derived(s, &space, &e1, arc(&a))?))
         }
         None => Ok(None),
     }

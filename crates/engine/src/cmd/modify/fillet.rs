@@ -70,22 +70,17 @@ pub(crate) fn fillet_lines(
         new_arc = Some(ar);
         (t1, t2)
     };
-    let common = e1.common.clone();
     let doc = s.doc_mut()?;
     doc.modify_entity(h1, |e| e.kind = line(k1, t1))?;
     doc.modify_entity(h2, |e| e.kind = line(k2, t2))?;
     let space = s.space();
-    let doc = s.doc_mut()?;
     let extra = match (chamfer, new_arc) {
         (Some(_), _) if !t1.near(t2, 1e-12) => Some(line(t1, t2)),
         (None, Some(a)) => Some(arc(&a)),
         _ => None,
     };
     if let Some(k) = extra {
-        let nh = doc.new_handle();
-        if let Some(st) = doc.space_mut(&space) {
-            st.push(Entity { handle: nh, common, kind: k });
-        }
+        let nh = crate::cmd::modify2::push_derived(s, &space, &e1, k)?;
         return Ok(Some(nh));
     }
     Ok(None)

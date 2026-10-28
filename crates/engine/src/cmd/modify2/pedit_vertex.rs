@@ -3,7 +3,7 @@
 
 use super::super::point_value;
 use super::{
-    EntityKind, Handle, Input, LwPolyline, PPhase, PeditM, PolyVertex, Result, Session, Value, Vec2, bad, curves, json, other, push_entity, set_kind,
+    EntityKind, Handle, Input, LwPolyline, PPhase, PeditM, PolyVertex, Result, Session, Value, Vec2, bad, curves, json, other, push_derived, set_kind,
 };
 
 fn ordered(pl: &LwPolyline, i: usize, j: usize) -> Result<(usize, usize)> {
@@ -58,7 +58,7 @@ pub(super) fn break_poly(s: &mut Session, h: Handle, pl: &LwPolyline, i: usize, 
     set_kind(s, h, EntityKind::LwPolyline(first))?;
     let mut out = vec![h];
     for p in it {
-        out.push(push_entity(s, &space, e.common.clone(), EntityKind::LwPolyline(p))?);
+        out.push(push_derived(s, &space, &e, EntityKind::LwPolyline(p))?);
     }
     Ok(out)
 }

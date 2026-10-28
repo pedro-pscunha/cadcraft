@@ -440,7 +440,7 @@ pub(super) fn fillet_curvy(s: &mut Session, h1: Handle, p1: Vec2, h2: Handle, p2
     match new_arc {
         Some(a) => {
             let space = s.doc()?.space_of(h1).unwrap_or_else(|| s.space());
-            Ok(Some(super::push_entity(s, &space, e1.common.clone(), crate::cmd::helpers::arc(&a))?))
+            Ok(Some(super::push_derived(s, &space, e1, crate::cmd::helpers::arc(&a))?))
         }
         None => Ok(None),
     }

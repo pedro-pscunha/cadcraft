@@ -1,6 +1,6 @@
 use super::{
-    Arc, EngineError, Entity, EntityKind, Handle, Line, PolyVertex, Polyline, Prim, Result, Segment, Session, TAU, Vec2, angle_in_sweep, arc,
-    ccw_sweep, intersect_ext, line, lwpoly, norm_angle,
+    Arc, EngineError, EntityKind, Handle, Line, PolyVertex, Polyline, Prim, Result, Segment, Session, TAU, Vec2, angle_in_sweep, arc, ccw_sweep,
+    intersect_ext, line, lwpoly, norm_angle,
 };
 
 // ---------------- trim / extend ----------------
@@ -170,18 +170,9 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
         EntityKind::LwPolyline(p) => trim_polyline(p, &cut, pick)?,
         k => crate::cmd::modify2::trim_other(k, &cut, pick)?,
     };
-    let common = e.common.clone();
     let space = s.space();
-    let d = s.doc_mut()?;
-    d.remove_entity(h);
-    let mut out = Vec::new();
-    for k in pieces {
-        let nh = d.new_handle();
-        if let Some(st) = d.space_mut(&space) {
-            st.push(Entity { handle: nh, common: common.clone(), kind: k });
-            out.push(nh);
-        }
-    }
+    let out = crate::cmd::modify2::push_derived_entities(s, &space, &e, pieces)?;
+    s.doc_mut()?.remove_entity(h);
     Ok(out)
 }
 

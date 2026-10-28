@@ -31,6 +31,64 @@ fn blockreplace_assigns_new_attribute_identities_before_the_command_returns() {
 }
 
 #[test]
+fn derived_geometry_remaps_self_referencing_xdata() {
+    let mut failures = Vec::new();
+    for command in ["offset", "break", "trim", "fillet", "chamfer", "join", "ncopy"] {
+        let mut s = Session::new();
+        let source = s.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+        let h = Handle::parse_hex(&source).unwrap();
+        s.doc_mut()
+            .unwrap()
+            .modify_entity(h, |e| {
+                e.common.xdata = vec![
+                    cadcraft_engine::doc::RawTag { code: 1001, value: "COPY_PROBE".into() },
+                    cadcraft_engine::doc::RawTag { code: 1005, value: source.clone() },
+                ]
+            })
+            .unwrap();
+        match command {
+            "offset" => {
+                s.execute(command, &json!({"handle":source,"distance":1,"side":[5,5]})).unwrap();
+            }
+            "break" => {
+                s.execute(command, &json!({"handle":source,"p1":[3,0],"p2":[7,0]})).unwrap();
+            }
+            "trim" => {
+                s.execute("line", &json!({"points":[[3,-5],[3,5]]})).unwrap();
+                s.execute("line", &json!({"points":[[7,-5],[7,5]]})).unwrap();
+                s.execute(command, &json!({"handle":source,"pick":[5,0]})).unwrap();
+            }
+            "join" => {
+                let other = s.execute("line", &json!({"points":[[10,0],[20,0]]})).unwrap()["handles"][0].clone();
+                s.execute(command, &json!({"handles":[source,other]})).unwrap();
+            }
+            "ncopy" => {
+                let insert = s.execute("block", &json!({"name":"SOURCE","handles":[source],"base":[0,0]})).unwrap()["insert"].clone();
+                s.execute(command, &json!({"handle":insert,"delta":[20,0]})).unwrap();
+            }
+            _ => {
+                let other = s.execute("line", &json!({"points":[[10,0],[10,10]]})).unwrap()["handles"][0].clone();
+                s.execute(command, &json!({"h1":source,"h2":other,"p1":[9,0],"p2":[10,1],"radius":1,"d1":1,"d2":1})).unwrap();
+            }
+        }
+        let derived: Vec<_> = s
+            .doc()
+            .unwrap()
+            .model
+            .iter()
+            .filter(|e| e.handle != h && e.common.xdata.iter().any(|t| t.code == 1001 && t.value == "COPY_PROBE"))
+            .collect();
+        assert!(!derived.is_empty(), "{command} must create metadata-bearing derived geometry");
+        for e in derived {
+            if e.common.xdata.iter().any(|t| t.code == 1005 && t.value != e.handle.hex()) {
+                failures.push(command);
+            }
+        }
+    }
+    assert!(failures.is_empty(), "derived self-references still point at source: {failures:?}");
+}
+
+#[test]
 fn repeated_selection_handles_do_not_duplicate_explode_or_repeat_move() {
     let mut s = Session::new();
     let h = s.execute("rectang", &json!({"p1":[0,0],"p2":[10,10]})).unwrap()["handle"].as_str().unwrap().to_string();

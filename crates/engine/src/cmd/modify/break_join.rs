@@ -1,7 +1,7 @@
 use super::trim::{param_on, sub_polyline};
 use super::{
-    Accept, Arc, EngineError, Entity, EntityKind, Handle, Input, Interactive, Line, PolyVertex, Polyline, Prompt, Result, Segment, Session, Step,
-    Value, Vec2, arc, bad, json, lwpoly, norm_angle, point_param, point_req, targets,
+    Accept, Arc, EngineError, EntityKind, Handle, Input, Interactive, Line, PolyVertex, Polyline, Prompt, Result, Segment, Session, Step, Value,
+    Vec2, arc, bad, json, lwpoly, norm_angle, point_param, point_req, targets,
 };
 
 /// Gives a rebuilt arc piece its source centre Z, or a rebuilt polyline piece its source elevation.
@@ -105,18 +105,9 @@ pub(crate) fn break_entity(s: &mut Session, h: Handle, p1: Vec2, p2: Vec2) -> Re
         }
         _ => return Err(EngineError::Other("Cannot break that object.".into())),
     };
-    let common = e.common.clone();
     let space = s.space();
-    let d = s.doc_mut()?;
-    d.remove_entity(h);
-    let mut out = Vec::new();
-    for k in pieces {
-        let nh = d.new_handle();
-        if let Some(st) = d.space_mut(&space) {
-            st.push(Entity { handle: nh, common: common.clone(), kind: k });
-            out.push(nh);
-        }
-    }
+    let out = crate::cmd::modify2::push_derived_entities(s, &space, &e, pieces)?;
+    s.doc_mut()?.remove_entity(h);
     Ok(out)
 }
 
@@ -147,10 +138,10 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
     let mut segs: Vec<Segment> = Vec::new();
     // Source entity of each segment in `segs`, so only entities that end up in the chain are removed.
     let mut owners: Vec<Handle> = Vec::new();
-    let mut common = None;
+    let mut source = None;
     for h in hs {
         let Some(e) = d.entity(*h) else { continue };
-        common.get_or_insert_with(|| e.common.clone());
+        source.get_or_insert_with(|| (**e).clone());
         match &e.kind {
             EntityKind::Line(l) => segs.push(Segment::Line(Line::new(l.a.xy(), l.b.xy()))),
             EntityKind::Arc(a) => segs.push(Segment::Arc { arc: Arc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true }),
@@ -209,10 +200,8 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
     for h in hs.iter().filter(|h| used.contains(*h)) {
         doc.remove_entity(*h);
     }
-    let nh = doc.new_handle();
-    if let Some(st) = doc.space_mut(&space) {
-        st.push(Entity { handle: nh, common: common.unwrap_or_default(), kind: lwpoly(vs, closed) });
-    }
+    let source = source.ok_or_else(|| EngineError::Other("joined geometry has no source".into()))?;
+    let nh = crate::cmd::modify2::push_derived(s, &space, &source, lwpoly(vs, closed))?;
     s.set_selection(Vec::new());
     Ok(Some(nh))
 }
