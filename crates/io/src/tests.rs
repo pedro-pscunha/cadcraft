@@ -1101,8 +1101,8 @@ fn dimension_associativity_roundtrips() {
     assert_eq!(back.model.len(), d.model.len());
     assert!(back.layouts.iter().all(|l| l.entities.is_empty()));
 
-    // Without CADCraft's xdata (a file from another writer), the standard DIMASSOC objects
-    // still give the extension-line links.
+    // Without CADCraft's xdata, supported standard references are inferred, while opaque
+    // references remain raw rather than being guessed into a different snap.
     let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
     let mut stripped = Vec::new();
     let mut skipping = false;
@@ -1119,9 +1119,10 @@ fn dimension_associativity_roundtrips() {
     let foreign = read_dxf(cadcraft_dxf::write_ascii(&stripped).as_bytes()).unwrap();
     assert_eq!(assoc_of(&foreign, hl), lin.assoc);
     let fa = assoc_of(&foreign, ha);
-    assert_eq!(fa.len(), 2);
-    assert_eq!(fa[1], ali.assoc[1], "the polyline vertex, named by its segment (#1049)");
-    assert!(matches!(fa[0].snap, AssocSnap::OnCircle { angle } if angle.abs() < 1e-9));
+    assert_eq!(fa, vec![ali.assoc[1].clone()], "the supported polyline vertex is inferred, not the opaque Nearest reference");
+    assert!(foreign.has_raw_dimassoc(ha), "osnap 10 is Nearest, not a fixed-angle circle association");
+    assert!(!foreign.raw_dimassoc_can_update(ha, |target| target == ci), "a changed Nearest target must not be evaluated");
+    assert!(foreign.raw_dimassoc_can_update(ha, |target| target == pl), "the supported vertex can follow while the Nearest target is unchanged");
     let fr = assoc_of(&foreign, hr);
     assert_eq!(fr.len(), 2, "a radial dimension's circle comes from the standard DIMASSOC");
     assert_eq!(fr[0], rad.assoc[0], "the centre");
