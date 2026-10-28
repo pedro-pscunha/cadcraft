@@ -297,6 +297,27 @@ pub(super) fn sortents_table(tags: &[Tag]) -> Option<(String, HashMap<Handle, u6
     (!map.is_empty()).then_some((owner, map))
 }
 
+/// Move each `*D` block by its dimension's group 12, so the graphics sit where AutoCAD draws
+/// them and the save can write the shift as zero. A block that dimensions share is moved only when
+/// they all shift it alike.
+pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) {
+    let mut shifts: HashMap<&str, Option<cadcraft_geom::Vec2>> = HashMap::new();
+    for (name, shift) in &rx.dim_block_shifts {
+        shifts.entry(name.as_str()).and_modify(|s| *s = s.filter(|s| s.near(*shift, 1e-9))).or_insert(Some(*shift));
+    }
+    for (up, shift) in shifts {
+        let Some(shift) = shift else { continue };
+        let Some(name) = d.blocks.keys().find(|k| k.eq_ignore_ascii_case(up)).cloned() else { continue };
+        let m = cadcraft_geom::Mat3::translate(shift);
+        if let Some(b) = d.blocks.get_mut(name.as_str()) {
+            let store = &mut std::sync::Arc::make_mut(b).entities;
+            for h in store.handles() {
+                store.modify(h, |e| e.kind.transform(&m));
+            }
+        }
+    }
+}
+
 /// Draw each space with a SORTENTSTABLE in sort-handle order: an entity listed in the table by
 /// its sort handle, any other by its own handle.
 pub(super) fn apply_sortents(

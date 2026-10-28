@@ -25,6 +25,7 @@ mod text;
 
 use document::{
     apply_sortents, count_skipped, outside_sections, parse_entities, place_blocks, place_entities, read_blocks, read_objects, setup_layouts,
+    shift_dimension_blocks,
 };
 #[cfg(test)]
 use entities::acad_table;
@@ -61,6 +62,8 @@ struct Rx {
     block_arrays: HashMap<String, cadcraft_doc::ArrayParams>,
     /// LAYER record handle (upper case) → layer name (VIEWPORT group 341 frozen layers).
     layers: HashMap<String, String>,
+    /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
+    dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
 }
 
 /// Read a DXF file into a drawing.
@@ -120,6 +123,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     let own_seed = objs.xrecord_text(crate::dxf_ext::HANDSEED_KEY).and_then(|t| Handle::parse_hex(t.trim()));
     let (paper_block_for, first_layout) = setup_layouts(&mut d, &mut layout_objs, &rx);
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
+    shift_dimension_blocks(&mut d, &rx);
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
     apply_sortents(&mut d, &objs.sortents, &rx.brs, &paper_block_for, &first_layout);
     objs.apply(&mut d, &rx);

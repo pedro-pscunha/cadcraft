@@ -426,6 +426,13 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
                 dm.p15 = center;
             }
             dm.marks = crate::dxf_ext::read_marks(tags);
+            // Group 12 (in OCS) shifts the `*D` block: a dimension copied inside a block keeps
+            // its old graphics and records the shift here.
+            let t = T(tags);
+            let shift = super::common::ocs_n(Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0)), t.p(12)).xy();
+            if let Some(name) = dm.block.as_ref().filter(|_| shift.is_finite() && (shift.x != 0.0 || shift.y != 0.0)) {
+                rx.dim_block_shifts.push((name.to_ascii_uppercase(), shift));
+            }
             // Group 52: the extension lines' angle relative to the dimension line (DIMEDIT Oblique).
             let base = match dm.kind {
                 DimKind::Linear { rotation } => Some(rotation),
