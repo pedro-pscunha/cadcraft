@@ -59,7 +59,8 @@ pub type ForeignKey = (String, String);
 /// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
 /// the DWG bridge reads their DXF groups into entities of its own and writes them, and a round
 /// trip through DWG keeps them (`crates/io/tests/it/unknown_entity_block.rs`). Other unmodelled types are
-/// left out of a DWG save, and the save says so.
+/// left out of a DWG save, and the save says so. The version matrix tests verify both types at
+/// the oldest supported DWG targets, 2000 and 2004; neither needs a version exclusion.
 pub const DWG_KEEPS_UNKNOWN: &[&str] = &["ARC_DIMENSION", "OLE2FRAME"];
 
 /// A non-graphical object of a type or role CADCraft does not model.

@@ -180,6 +180,25 @@ fn ole_data(dxf: &str) -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn unknown_dwg_types_are_checked_at_2000_and_2004_targets() {
+    for version in [cadcraft_io::Version::R2000, cadcraft_io::Version::R2004] {
+        let opts = cadcraft_io::SaveOptions { version: Some(version), ..Default::default() };
+        let arc = cadcraft_io::read_dxf(arc_dimension_dxf().as_bytes()).unwrap();
+        let bytes = cadcraft_io::write_with(&arc, "x.dwg", &opts).unwrap();
+        assert_eq!(bytes.get(..6), Some(version.code().as_bytes()), "bridge must use the actual requested DWG target");
+        let text = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
+        let (blocks, dims) = blocks_and_arc_dims(&text);
+        assert_eq!(dims.len(), 1, "ARC_DIMENSION was dropped at {}", version.code());
+        assert!(dims.iter().all(|name| blocks.contains(name)), "ARC_DIMENSION lost its geometry block at {}", version.code());
+        let ole = cadcraft_io::read_dxf(ole_dxf(&[1, 2, 3, 4]).as_bytes()).unwrap();
+        let bytes = cadcraft_io::write_with(&ole, "x.dwg", &opts).unwrap();
+        let text = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
+        assert_eq!(ole_data(&text), "01020304", "OLE2FRAME data was dropped at {}", version.code());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn ole_frame_keeps_its_data_through_dwg() {
     let data: Vec<u8> = (0..700u32).map(|i| (i * 37 % 251) as u8).collect();
     let source = ole_dxf(&data);
