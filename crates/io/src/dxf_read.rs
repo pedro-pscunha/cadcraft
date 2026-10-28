@@ -1,6 +1,6 @@
 //! DXF → Drawing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{
@@ -9,7 +9,7 @@ use cadcraft_doc::{
     Linetype, Lineweight, LwPolyline, MAX_FRAME_CHARS, MLeaderStyle, MText, MultilineAttrib, NamedView, PageSetup, Point, Polyline3d, RawTag,
     RayLine, Solid, Table, TableCell, Text, TextStyle, Tolerance, Transparency, Ucs, Unknown, VAlign, Viewport, VportConfig, VportTile, Wipeout,
 };
-use cadcraft_dxf::{Tag, records, sections};
+use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
 use crate::{IoError, Result};
@@ -78,7 +78,7 @@ type LayoutDef = (String, u32, String, PageSetup);
 /// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
 fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
-    let secs = sections(&tags);
+    let mut secs = sections(&tags);
     if secs.is_empty() {
         return Err(IoError::Format("no sections found".into()));
     }
@@ -97,11 +97,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // CADCraft wrote names its own next handle, above which its rebuilt records are numbered
     // (#495), so it is left to that.
     let ours = secs.iter().any(|s| s.name == "OBJECTS" && s.tags.iter().any(|t| t.code == 3 && t.str() == crate::dxf_ext::HANDSEED_KEY));
-    for t in secs.iter().filter(|_| !ours).flat_map(|s| s.tags.iter()).filter(|t| t.code == 5 || t.code == 105) {
-        if let Some(h) = Handle::parse_hex(t.str().trim()) {
-            d.bump_handseed(h);
-        }
-    }
+    reserve_attribute_handles(&mut secs, &mut d, ours);
     let mut skipped = std::collections::BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
@@ -137,9 +133,61 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
+    d.allocate_missing_attribute_handles();
     crate::dxf_raw::read(&secs, &mut d);
+    // Unlike rebuilt table records, kept objects still use their input identities in foreign
+    // references. New document identities must not alias them before the writer remaps them.
+    let kept: Vec<_> = d.foreign.objects.iter().map(|o| o.handle).collect();
+    for h in kept {
+        d.bump_handseed(h);
+    }
     d.skipped_records = skipped;
     Ok(d)
+}
+
+/// Reserve persistent ATTRIB identities even in CADCraft files with a private handseed. A
+/// colliding input identity is omitted before raw-data reading, so its dictionary cannot be
+/// attached to whichever different record already owns the handle.
+fn reserve_attribute_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
+    let mut used = HashSet::new();
+    for section in secs.iter().filter(|s| s.name != "HEADER") {
+        let mut kind = String::new();
+        let mut seen = false;
+        for t in &section.tags {
+            if t.code == 0 {
+                kind = t.str();
+                seen = false;
+            } else if !kind.is_empty() && kind != "ATTRIB" && matches!(t.code, 5 | 105) && !seen {
+                if let Some(h) = Handle::parse_hex(&t.str()) {
+                    used.insert(h);
+                    if !ours {
+                        d.bump_handseed(h);
+                    }
+                }
+                seen = true;
+            }
+        }
+    }
+    for section in secs.iter_mut().filter(|s| s.name != "HEADER") {
+        let mut attrib = false;
+        let mut seen = false;
+        for t in &mut section.tags {
+            if t.code == 0 {
+                attrib = t.str() == "ATTRIB";
+                seen = false;
+            } else if attrib && t.code == 5 {
+                let h = Handle::parse_hex(&t.str()).filter(|h| h.0 != 0 && h.0 != u64::MAX);
+                if !seen && h.is_some_and(|h| used.insert(h)) {
+                    if let Some(h) = h {
+                        d.bump_handseed(h);
+                    }
+                } else {
+                    *t = Tag::s(999, "Rejected duplicate or invalid ATTRIB identity");
+                }
+                seen = true;
+            }
+        }
+    }
 }
 
 /// An entity from the groups of a DXF record of type `kind` (without its `0` group), as the

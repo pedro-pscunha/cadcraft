@@ -3,7 +3,7 @@
 //! `$ACADVER`, from 2004 in the newer DIMSTYLE groups, and from 2007 in UTF-8 text (the caller
 //! picks the text encoding) and MULTILEADER entities (older files get LEADER + MTEXT).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadcraft_color::Color;
 use cadcraft_doc::{
@@ -36,9 +36,12 @@ use ctx::Ctx;
 use entity::entity;
 use sections::tags_for;
 
+#[derive(Default)]
 struct W {
     t: Vec<Tag>,
     next: u64,
+    first: u64,
+    used: HashSet<Handle>,
     /// Upper-case plot style name → its `ACDBPLACEHOLDER` handle (group 390 of layers and objects).
     pstyles: HashMap<String, String>,
     /// Upper-case layer name → its LAYER table record handle (group 341 of viewports).
@@ -49,6 +52,25 @@ struct W {
 }
 
 impl W {
+    fn new(d: &Drawing) -> Self {
+        let first = d.handseed.max(0x100).checked_add(0x1000).unwrap_or(0x100);
+        let used = std::iter::once(&d.model)
+            .chain(d.layouts.iter().map(|l| &l.entities))
+            .chain(d.blocks.values().map(|b| &b.entities))
+            .flat_map(|s| s.iter().map(|e| e.handle))
+            .collect();
+        Self { t: Vec::new(), next: first, first, used, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() }
+    }
+
+    fn attribute_handle(&mut self, wanted: Option<Handle>) -> String {
+        if let Some(h) = wanted.filter(|h| h.0 != 0 && h.0 < self.first)
+            && self.used.insert(h)
+        {
+            return h.hex();
+        }
+        self.h()
+    }
+
     fn s(&mut self, c: i32, v: impl Into<String>) {
         self.t.push(Tag::s(c, v));
     }
@@ -68,9 +90,13 @@ impl W {
         self.f(c + 10, p.y);
     }
     fn h(&mut self) -> String {
-        let h = format!("{:X}", self.next);
-        self.next = self.next.saturating_add(1);
-        h
+        while self.used.contains(&Handle(self.next)) {
+            self.next = self.next.checked_add(1).unwrap_or(1);
+        }
+        let h = Handle(self.next);
+        self.used.insert(h);
+        self.next = self.next.checked_add(1).unwrap_or(1);
+        h.hex()
     }
     /// A `102 {NAME` … `102 }` group of handles.
     fn group(&mut self, name: &str, code: i32, handles: &[&str]) {
@@ -152,13 +178,7 @@ fn bridge_markers(tags: &mut [Tag]) {
 /// VERTEXes, gives its first). Handles of objects outside the entity (owner, styles) are left
 /// out. AutoLISP's `entget` is built on it.
 pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
-    let mut w = W {
-        t: Vec::new(),
-        next: d.handseed.max(0x100).saturating_add(0x1000),
-        pstyles: HashMap::new(),
-        layers: HashMap::new(),
-        reactors: HashMap::new(),
-    };
+    let mut w = W::new(d);
     let cx = Ctx { target: Version::R2018, ..Ctx::default() };
     let paper = d.space_of(e.handle).is_some_and(|s| !matches!(s, cadcraft_doc::Space::Model));
     entity(&mut w, d, e, "0", paper, &cx);

@@ -12,6 +12,7 @@ mod entity;
 mod extents;
 mod gdt;
 mod header;
+mod identity;
 pub mod library;
 mod plotstyle;
 mod plotter;
@@ -194,9 +195,7 @@ impl Drawing {
 
     /// Allocate a fresh handle.
     pub fn new_handle(&mut self) -> Handle {
-        let h = Handle(self.handseed);
-        self.handseed = self.handseed.saturating_add(1);
-        h
+        identity::allocate_handle(&mut self.handseed)
     }
     /// Make sure future handles don't collide with `h` (after loading a file).
     pub fn bump_handseed(&mut self, h: Handle) {
@@ -348,8 +347,9 @@ impl Drawing {
     }
 
     /// Add an entity to a space with a new handle, using the given common properties.
-    pub fn add(&mut self, space: &Space, common: Common, kind: EntityKind) -> Result<Handle> {
+    pub fn add(&mut self, space: &Space, common: Common, mut kind: EntityKind) -> Result<Handle> {
         let h = self.new_handle();
+        self.allocate_attribute_handles(&mut kind);
         self.ensure_layer(&common.layer);
         let store = self.space_mut(space).ok_or_else(|| DocError::Invalid(format!("no such space {space:?}")))?;
         store.push(Entity { handle: h, common, kind });

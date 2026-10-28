@@ -243,7 +243,7 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx, version: Version) {
         w.i(70, 0);
         let v = serde_json::to_value(s).unwrap_or_default();
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
-        let mut newer = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
+        let mut newer = W::default();
         for (field, code, kind) in dxf_ext::DIM_CODES {
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(*kind, x)) else { continue };
             // DIMPOST is written even when empty: a reader that defaults a missing one to "<>"
@@ -870,13 +870,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     let committed = d.committed();
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
-    let mut w = W {
-        t: Vec::new(),
-        next: d.handseed.max(0x100).saturating_add(0x1000),
-        pstyles: HashMap::new(),
-        layers: HashMap::new(),
-        reactors: hatch_reactors(d),
-    };
+    let mut w = W { reactors: hatch_reactors(d), ..W::new(d) };
     // Pre-allocate handles for block records.
     let paper_layouts = d.paper_space_layouts();
     let ms_br = w.h();

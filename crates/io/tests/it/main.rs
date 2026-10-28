@@ -5,6 +5,7 @@ mod angle_header;
 mod annotative_roundtrip;
 mod assoc_array_roundtrip;
 mod attrib_fields_roundtrip;
+mod attrib_handles;
 mod attrib_modes;
 mod attrib_props;
 mod block_expansion;

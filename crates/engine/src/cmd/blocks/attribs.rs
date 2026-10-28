@@ -205,6 +205,7 @@ pub(super) fn sync(s: &mut Session, name: &str) -> Result<(String, usize)> {
     let defs = attdefs(&blk);
     let d = s.doc_mut()?;
     let n = update_references(d, &blk.name, |ins| ins.attribs = synced(&blk, &defs, ins));
+    d.allocate_missing_attribute_handles();
     Ok((blk.name.clone(), n))
 }
 

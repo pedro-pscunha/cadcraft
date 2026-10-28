@@ -7,8 +7,9 @@ use super::{Color, Deserialize, EntityKind, Mat3, Serialize, Vec2, Vec3};
 pub struct Attrib {
     /// This attribute instance's persistent handle. Unlike its tag or position in an INSERT,
     /// it survives rename, reorder and synchronization and owns the instance's foreign data.
-    /// New attributes and definitions have none until a file writer assigns one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The document assigns it when an instance is created or imported. Definitions have none.
+    /// It is internal identity, not a decimal handle in the public properties JSON.
+    #[serde(default, skip_serializing)]
     pub handle: Option<crate::Handle>,
     pub tag: String,
     pub text: Text,
@@ -79,6 +80,21 @@ impl MultilineAttrib {
 }
 
 impl Attrib {
+    /// Create attribute content; a drawing assigns its instance identity when it is inserted.
+    pub fn new(tag: impl Into<String>, text: Text) -> Self {
+        Self {
+            handle: None,
+            tag: tag.into(),
+            text,
+            invisible: false,
+            constant: false,
+            prompt: String::new(),
+            props: AttribProps::default(),
+            multiline: None,
+            modes: AttribModes::default(),
+        }
+    }
+
     /// Move a multiline attribute's text by `m` along with the attribute (nothing for others).
     pub fn transform_multiline(&mut self, m: &Mat3) {
         if let Some(ml) = &mut self.multiline {
