@@ -23,6 +23,26 @@ fn windows_single_byte_pages_encode_representable_characters_as_bytes() {
 }
 
 #[test]
+fn escaped_backslashes_protect_literal_unicode_text_in_bridge_encoding() {
+    for n in 1..=4 {
+        let value = format!("{}U+00E9", "\\".repeat(n));
+        let expected = if n % 2 == 0 { value.clone() } else { format!("{}é", "\\".repeat(n - 1)) };
+        let encoded = ascii_to_code_page(&value, "ANSI_1252");
+        assert_eq!(decode_code_page(&encoded, "ANSI_1252").unwrap(), expected, "backslash run {n}");
+    }
+}
+
+#[test]
+fn escaped_backslashes_protect_literal_unicode_text_when_reading() {
+    for n in 1..=4 {
+        let value = format!("{}U+00E9", "\\".repeat(n));
+        let expected = if n % 2 == 0 { value.clone() } else { format!("{}é", "\\".repeat(n - 1)) };
+        let tags = cadcraft_dxf::parse_ascii(&format!("0\nMTEXT\n1\n{value}\n0\nEOF\n")).unwrap();
+        assert_eq!(tags.iter().find(|t| t.code == 1).unwrap().str(), expected, "backslash run {n}");
+    }
+}
+
+#[test]
 fn unsupported_pages_fall_back_to_1252_and_leave_unmappable_characters_escaped() {
     for page in ["UTF-8", "ANSI_932", "unknown"] {
         assert_eq!(single_byte_code_page(page), "ANSI_1252");

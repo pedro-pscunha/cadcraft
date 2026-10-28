@@ -231,6 +231,12 @@ fn unescape_unicode(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
     while let Some(&c) = chars.get(i) {
+        if c == '\\' && chars.get(i + 1) == Some(&'\\') {
+            out.push(c);
+            out.push(c);
+            i += 2;
+            continue;
+        }
         if let Some(ch) = mif_escape_at(&chars, i) {
             out.push(ch);
             i += 8;
@@ -269,6 +275,14 @@ pub fn ascii_to_code_page(text: &str, code_page: &str) -> Vec<u8> {
     let mut i = 0;
     let mut buf = [0u8; 4];
     while let Some(&b) = bytes.get(i) {
+        // A literal escaped backslash must not start a Unicode escape. Consuming pairs also
+        // handles arbitrary even/odd runs without rescanning the prefix at every character.
+        if b == b'\\' && bytes.get(i + 1) == Some(&b'\\') {
+            out.push(b);
+            out.push(b);
+            i += 2;
+            continue;
+        }
         // `\U+XXXX` is ASCII: read it from the bytes, without a copy of the text as chars.
         let unit = (b == b'\\' && bytes.get(i + 1..i + 3) == Some(b"U+"))
             .then(|| bytes.get(i + 3..i + 7))
@@ -539,7 +553,14 @@ pub fn is_binary(bytes: &[u8]) -> bool {
 /// gives back the literal text. Line breaks become spaces.
 fn escape_unicode(s: &str, utf8: bool, out: &mut String) {
     let chars: Vec<char> = s.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        if c == '\\' && chars.get(i + 1) == Some(&'\\') {
+            out.push(c);
+            out.push(c);
+            i += 2;
+            continue;
+        }
         match c {
             '\r' | '\n' => out.push(' '),
             '\\' if matches!(chars.get(i + 1), Some('U' | 'M')) && chars.get(i + 2) == Some(&'+') => out.push_str("\\U+005C"),
@@ -551,6 +572,7 @@ fn escape_unicode(s: &str, utf8: bool, out: &mut String) {
                 }
             }
         }
+        i += 1;
     }
 }
 

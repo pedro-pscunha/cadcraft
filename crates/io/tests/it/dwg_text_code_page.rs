@@ -34,6 +34,23 @@ fn accented_text_is_stored_as_characters_in_dwg() {
     assert_eq!(texts, want);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn mtext_escaped_unicode_looking_text_survives_dwg() {
+    let literal = r"\\U+00E9";
+    let source = format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nMTEXT\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n1\n{literal}\n0\nENDSEC\n0\nEOF\n"
+    );
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let bytes = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let native = acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes.clone())).read().unwrap();
+    let values: Vec<_> =
+        native.entities().filter_map(|e| if let acadrust::entities::EntityType::MText(t) = e { Some(t.value.as_str()) } else { None }).collect();
+    assert_eq!(values, [literal]);
+    let back = cadcraft_io::read(&bytes, "x.dwg").unwrap();
+    assert!(back.model.iter().any(|e| matches!(&e.kind,cadcraft_doc::EntityKind::MText(t) if t.contents==literal)));
+}
+
 /// A drawing read with another supported single-byte page keeps that page in the DWG bridge.
 /// Representable Cyrillic is encoded as bytes; the unrepresentable `é` remains an escape.
 #[cfg(not(target_arch = "wasm32"))]
