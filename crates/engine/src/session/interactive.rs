@@ -390,6 +390,15 @@ impl Session {
     /// started in, so associativity is not applied across a document switch; `ok` is false for a
     /// failed or non-undoable programmatic command, which skips the constraint pass.
     pub(super) fn after_command(&mut self, before: Option<&Arc<Drawing>>, uid: Option<u64>, ok: bool) {
+        // Every creation/synchronization path must finish document-owned identities before
+        // undo, associativity or a writer can observe the command's result.
+        if let Some(before) = before
+            && let Ok(st) = self.state_mut()
+            && uid.is_none_or(|uid| uid == st.uid)
+            && !Arc::ptr_eq(before, &st.doc)
+        {
+            Arc::make_mut(&mut st.doc).allocate_missing_attribute_handles();
+        }
         cmd::groups::after_command(self, before);
         cmd::constraints::after_command(self, before, ok);
         assoc::after_command(self, before, uid);
