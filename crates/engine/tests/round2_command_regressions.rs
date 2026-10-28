@@ -69,9 +69,9 @@ fn refset_moves_identity_and_owned_metadata_into_the_definition() {
 fn blockreplace_assigns_new_attribute_identities_before_the_command_returns() {
     let mut s = attribute_session();
     let d = s.doc_mut().unwrap();
-    let mut replacement = (**d.block("LABEL").unwrap()).clone();
-    replacement.name = "REPLACEMENT".into();
-    let definition = replacement.entities.iter().find_map(|e| if let EntityKind::AttDef(a) = &e.kind { Some(a.clone()) } else { None }).unwrap();
+    let mut replacement = cadcraft_engine::doc::Block::new("REPLACEMENT");
+    let definition =
+        d.block("LABEL").unwrap().entities.iter().find_map(|e| if let EntityKind::AttDef(a) = &e.kind { Some(a.clone()) } else { None }).unwrap();
     let h = d.new_handle();
     replacement.entities.push(cadcraft_engine::doc::Entity::new(h, EntityKind::AttDef(cadcraft_engine::doc::Attrib::new("EXTRA", definition.text))));
     d.blocks.insert("REPLACEMENT".into(), std::sync::Arc::new(replacement));
