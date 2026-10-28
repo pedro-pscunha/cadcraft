@@ -138,10 +138,8 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
     let mut segs: Vec<Segment> = Vec::new();
     // Source entity of each segment in `segs`, so only entities that end up in the chain are removed.
     let mut owners: Vec<Handle> = Vec::new();
-    let mut source = None;
     for h in hs {
         let Some(e) = d.entity(*h) else { continue };
-        source.get_or_insert_with(|| (**e).clone());
         match &e.kind {
             EntityKind::Line(l) => segs.push(Segment::Line(Line::new(l.a.xy(), l.b.xy()))),
             EntityKind::Arc(a) => segs.push(Segment::Arc { arc: Arc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true }),
@@ -155,7 +153,9 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
     }
     // Chain greedily from the first segment.
     let mut chain = vec![segs.remove(0)];
-    let mut used = vec![owners.remove(0)];
+    let first_owner = owners.remove(0);
+    let source = d.entity(first_owner).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("joined geometry has no source".into()))?;
+    let mut used = vec![first_owner];
     let tol = 1e-6;
     loop {
         let start = chain.first().map(Segment::start).unwrap_or_default();
@@ -200,7 +200,6 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
     for h in hs.iter().filter(|h| used.contains(*h)) {
         doc.remove_entity(*h);
     }
-    let source = source.ok_or_else(|| EngineError::Other("joined geometry has no source".into()))?;
     let nh = crate::cmd::modify2::push_merged(s, &space, &source, lwpoly(vs, closed), &used)?;
     s.set_selection(Vec::new());
     Ok(Some(nh))

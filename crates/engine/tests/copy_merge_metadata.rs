@@ -293,3 +293,68 @@ fn breaking_one_source_still_gives_each_piece_its_own_identity() {
         assert_eq!(references, [h, external], "independent derived pieces must not use JOIN's many-to-one mapping");
     }
 }
+
+#[test]
+fn join_chooses_metadata_and_common_properties_only_from_used_geometry() {
+    use cadcraft_engine::doc::color::Color;
+    let mut s = Session::new();
+    let circle = handle(&s.execute("circle", &json!({"center":[100,100], "radius":5})).unwrap()["handle"]);
+    let a = line(&mut s, [[0.0, 0.0], [1.0, 0.0]]);
+    let b = line(&mut s, [[1.0, 0.0], [1.0, 1.0]]);
+    probe(&mut s, circle, "CIRCLE", circle);
+    probe(&mut s, a, "A", b);
+    owned_probe(&mut s, circle, circle, "CIRCLE");
+    owned_probe(&mut s, a, b, "A");
+    let d = s.doc_mut().unwrap();
+    d.ensure_layer("CIRCLES");
+    d.ensure_layer("LINES");
+    d.modify_entity(circle, |e| {
+        e.common.layer = "CIRCLES".into();
+        e.common.color = Color::Index(1);
+    })
+    .unwrap();
+    d.modify_entity(a, |e| {
+        e.common.layer = "LINES".into();
+        e.common.color = Color::Index(5);
+    })
+    .unwrap();
+    let circle_before = d.entity(circle).unwrap().clone();
+    let circle_metadata = d.foreign.entities.get(&circle).unwrap().clone();
+    let mut expected = d.entity(a).unwrap().common.clone();
+    let joined = handle(&s.execute("join", &json!({"handles":[circle.hex(), a.hex(), b.hex()]})).unwrap()["handle"]);
+    for t in expected.xdata.iter_mut().filter(|t| t.code == 1005) {
+        t.value = joined.hex();
+    }
+    let d = s.doc().unwrap();
+    assert_eq!(d.entity(circle).unwrap(), &circle_before, "the non-contributing circle must remain unchanged");
+    assert_eq!(d.foreign.entities.get(&circle), Some(&circle_metadata), "the circle must retain its own metadata");
+    assert_eq!(
+        d.entity(joined).unwrap().common,
+        expected,
+        "JOIN must inherit common properties and xdata from the first contributing geometry, not the leading circle"
+    );
+    assert_merged_graph(d, joined);
+    for extension in ["dxf", "dwg"] {
+        let name = format!("join-source.{extension}");
+        let bytes = cadcraft_io::write(d, &name).unwrap();
+        let saved = cadcraft_io::read(&bytes, &name).unwrap();
+        assert_eq!(saved.entity(joined).unwrap().common.layer, "LINES");
+        assert_eq!(saved.entity(joined).unwrap().common.color, Color::Index(5));
+        assert_merged_graph(&saved, joined);
+    }
+}
+
+#[test]
+fn join_keeps_chain_seed_metadata_when_a_later_segment_is_prepended() {
+    let mut s = Session::new();
+    let a = line(&mut s, [[1.0, 0.0], [2.0, 0.0]]);
+    let b = line(&mut s, [[0.0, 0.0], [1.0, 0.0]]);
+    probe(&mut s, a, "A", b);
+    probe(&mut s, b, "B", a);
+    owned_probe(&mut s, a, b, "A");
+    owned_probe(&mut s, b, a, "B");
+    let joined = handle(&s.execute("join", &json!({"handles":[a.hex(), b.hex()]})).unwrap()["handle"]);
+    let d = s.doc().unwrap();
+    assert!(role(d.entity(joined).unwrap(), "A"), "prepending geometry must not switch metadata away from the first selected contributing source");
+    assert_merged_graph(d, joined);
+}
