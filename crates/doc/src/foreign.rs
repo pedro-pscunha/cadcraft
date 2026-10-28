@@ -13,6 +13,7 @@ use crate::{Entity, EntityKind, Handle, RawTag};
 
 mod association;
 mod block_copy;
+mod merge;
 pub use block_copy::BlockContentCopy;
 use block_copy::{BlockNamespace, block_role};
 #[cfg(test)]
@@ -418,9 +419,12 @@ impl crate::Drawing {
     /// to any consumed entity follow the result, without adopting those entities' metadata.
     pub fn merge_entity(&mut self, entity: Entity, consumed: &[Handle]) -> crate::Result<Entity> {
         let aliases = consumed.iter().map(|h| (*h, entity.handle)).collect();
-        self.duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases, None)
+        let merged = self
+            .duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases, None)
             .pop()
-            .ok_or_else(|| crate::DocError::Invalid("merged entity was not created".into()))
+            .ok_or_else(|| crate::DocError::Invalid("merged entity was not created".into()))?;
+        self.remap_merged_references(consumed, merged.handle);
+        Ok(merged)
     }
 
     fn allocate_copy_roots(&mut self, entities: &mut [Entity]) -> BTreeMap<Handle, Handle> {

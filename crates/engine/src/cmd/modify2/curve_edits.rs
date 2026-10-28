@@ -251,6 +251,7 @@ pub(crate) fn join_curves(s: &mut Session, hs: &[Handle]) -> Result<Option<Handl
             let merged = merge_arcs(&src, &arcs);
             set_kind(s, src_h, ellipse_kind(&merged))?;
             let doc = s.doc_mut()?;
+            doc.remap_merged_references(&ells.iter().map(|(h, _)| *h).collect::<Vec<_>>(), src_h);
             for (h, _) in ells.iter().skip(1) {
                 doc.remove_entity(*h);
             }
@@ -309,6 +310,7 @@ pub(crate) fn join_curves(s: &mut Session, hs: &[Handle]) -> Result<Option<Handl
     let keep = first_h;
     set_kind(s, keep, EntityKind::Spline(out))?;
     let doc = s.doc_mut()?;
+    doc.remap_merged_references(&used, keep);
     for h in used.iter().filter(|h| **h != keep) {
         doc.remove_entity(*h);
     }

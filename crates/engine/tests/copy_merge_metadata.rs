@@ -220,6 +220,115 @@ fn assert_merged_references(d: &Drawing, joined: Handle, external: Handle) {
 }
 
 #[test]
+fn join_remaps_surviving_fields_and_xdata_document_wide_for_all_curve_routes() {
+    let mut failures = Vec::new();
+    for route in ["line", "spline", "ellipse"] {
+        let d = cadcraft_io::read_dxf(include_bytes!("../../io/tests/data/attrib_fields.dxf")).unwrap();
+        let mut s = Session::new();
+        s.open_drawing(d, "fields.dxf", None);
+        let b = Handle(0x30);
+        let a = if route == "ellipse" {
+            s.doc_mut()
+                .unwrap()
+                .modify_entity(b, |e| {
+                    e.kind = EntityKind::Ellipse(cadcraft_engine::doc::Ellipse {
+                        center: cadcraft_engine::geom::Vec3::ZERO,
+                        major: cadcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0),
+                        ratio: 0.5,
+                        start: std::f64::consts::PI,
+                        end: std::f64::consts::TAU,
+                    })
+                })
+                .unwrap();
+            s.doc_mut()
+                .unwrap()
+                .add(
+                    &cadcraft_engine::doc::Space::Model,
+                    Default::default(),
+                    EntityKind::Ellipse(cadcraft_engine::doc::Ellipse {
+                        center: cadcraft_engine::geom::Vec3::ZERO,
+                        major: cadcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0),
+                        ratio: 0.5,
+                        start: 0.0,
+                        end: std::f64::consts::PI,
+                    }),
+                )
+                .unwrap()
+        } else {
+            if route == "spline" {
+                s.doc_mut()
+                    .unwrap()
+                    .modify_entity(b, |e| e.kind = EntityKind::Spline(cadcraft_engine::geom::Spline::from_line(Vec2::ZERO, Vec2::new(10.0, 0.0), 1)))
+                    .unwrap();
+            }
+            line(&mut s, [[-10.0, 0.0], [0.0, 0.0]])
+        };
+        let external = line(&mut s, [[100.0, 0.0], [101.0, 0.0]]);
+        probe(&mut s, external, "survivor", b);
+        owned_probe(&mut s, external, b, "outside");
+        let f = Arc::make_mut(&mut s.doc_mut().unwrap().foreign);
+        f.entities
+            .entry(Handle(0x33))
+            .or_default()
+            .xdata
+            .extend([RawTag { code: 1001, value: "SURVIVOR_ATTR".into() }, RawTag { code: 1005, value: b.hex() }]);
+        f.records
+            .entry(("LAYER".into(), "0".into()))
+            .or_default()
+            .xdata
+            .extend([RawTag { code: 1001, value: "SURVIVOR_TABLE".into() }, RawTag { code: 1005, value: b.hex() }]);
+        let joined = handle(&s.execute("join", &json!({"handles":[a.hex(),b.hex()]})).unwrap()["handle"]);
+        for extension in ["dxf", "dwg"] {
+            let name = format!("survivors.{extension}");
+            let bytes = cadcraft_io::write(s.doc().unwrap(), &name).unwrap();
+            let back = cadcraft_io::read(&bytes, &name).unwrap();
+            let field_refs: Vec<_> = back
+                .foreign
+                .objects
+                .iter()
+                .filter(|o| o.kind == "FIELD")
+                .flat_map(|o| &o.tags)
+                .filter(|t| t.code == 331)
+                .filter_map(|t| Handle::parse_hex(&t.value))
+                .collect();
+            assert!(!field_refs.is_empty(), "fixture FIELD must survive");
+            if field_refs.iter().any(|h| *h != joined) {
+                failures.push(format!("{route}/{extension}: FIELD={field_refs:?}, result={joined:?}"));
+            }
+            if !back.entity(external).unwrap().common.xdata.iter().any(|t| t.code == 1005 && Handle::parse_hex(&t.value) == Some(joined)) {
+                failures.push(format!("{route}/{extension}: surviving entity xdata"));
+            }
+            if !back
+                .foreign
+                .objects
+                .iter()
+                .filter(|o| o.kind == "XRECORD" && o.tags.iter().any(|t| t.code == 1 && t.value == "outside"))
+                .flat_map(|o| &o.tags)
+                .any(|t| t.code == 340 && Handle::parse_hex(&t.value) == Some(joined))
+            {
+                failures.push(format!("{route}/{extension}: surviving owned graph"));
+            }
+            if !back.foreign.entities.get(&Handle(0x33)).unwrap().xdata.iter().any(|t| t.code == 1005 && Handle::parse_hex(&t.value) == Some(joined))
+            {
+                failures.push(format!("{route}/{extension}: surviving ATTRIB xdata"));
+            }
+            if !back
+                .foreign
+                .records
+                .get(&("LAYER".into(), "0".into()))
+                .unwrap()
+                .xdata
+                .iter()
+                .any(|t| t.code == 1005 && Handle::parse_hex(&t.value) == Some(joined))
+            {
+                failures.push(format!("{route}/{extension}: table xdata"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "consumed identities were not remapped in surviving data: {failures:?}");
+}
+
+#[test]
 fn join_remaps_all_consumed_xdata_identities_without_foreign_storage() {
     let (mut s, a, b, external) = join_sources();
     let joined = handle(&s.execute("join", &json!({"handles":[a.hex(), b.hex()]})).unwrap()["handle"]);
@@ -257,8 +366,8 @@ fn join_remaps_owned_graph_without_adopting_other_consumed_metadata() {
     assert_merged_graph(d, joined);
     assert_eq!(
         d.foreign.objects.iter().filter(|o| o.tags.iter().any(|t| t.code == 1 && t.value == "B")).count(),
-        1,
-        "consumed aliases are reference mappings, not extra metadata roots"
+        0,
+        "consumed metadata is retired, not reparented to the result by its aliases"
     );
     for extension in ["dxf", "dwg"] {
         let name = format!("join.{extension}");
