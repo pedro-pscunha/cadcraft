@@ -167,15 +167,15 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
         let mut nb = (**b).clone();
         nb.name = to.clone();
         nb.entities = Default::default();
-        for e in b.entities.iter() {
-            let e = adopt(d, e, &renames);
+        let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
             nb.entities.push(e);
         }
         d.blocks.insert(to.clone(), Arc::new(nb));
     }
     let mut handles = Vec::new();
-    for e in src.model.iter() {
-        let mut e = adopt(d, e, &renames);
+    let entities = src.model.iter().map(|e| adopt(e, &renames)).collect();
+    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
         if moved {
             e.kind.transform(&m);
         }
@@ -258,9 +258,8 @@ fn block_names(d: &Drawing, src: &Drawing) -> BTreeMap<String, String> {
 
 /// A copy of a source entity for this drawing: a fresh handle, block references renamed, and
 /// links to other source objects (associative dimension points) dropped.
-fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
+fn adopt(e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
     let mut e = e.clone();
-    e.handle = d.new_handle();
     match &mut e.kind {
         EntityKind::Insert(i) => {
             if let Some(n) = renames.get(&i.block) {

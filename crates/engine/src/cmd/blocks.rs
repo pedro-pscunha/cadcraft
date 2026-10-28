@@ -179,8 +179,7 @@ pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle],
     b.base = v3(base);
     b.description = description.to_string();
     let doc = s.doc_mut()?;
-    for mut e in ents {
-        e.handle = doc.new_handle();
+    for e in doc.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
         b.entities.push(e);
     }
     doc.blocks.insert(name.to_string(), Arc::new(b));
@@ -357,7 +356,15 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     d.linetypes = src.linetypes.clone();
     d.text_styles = src.text_styles.clone();
     d.dim_styles = src.dim_styles.clone();
-    d.blocks = src.blocks.clone();
+    for block in src.blocks.values() {
+        let mut block = (**block).clone();
+        let entities = block.entities.iter().map(|e| (**e).clone()).collect();
+        block.entities = Default::default();
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+            block.entities.push(e);
+        }
+        d.blocks.insert(block.name.clone(), Arc::new(block));
+    }
     // The base point becomes the written drawing's origin, its insertion base: by default 0,0 for
     // objects and the block's base point for a block (`base` is then in block coordinates).
     let base = point_param(p, "base");
@@ -385,8 +392,7 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     };
-    for mut e in ents {
-        e.handle = d.new_handle();
+    for e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::OtherDrawing) {
         d.model.push(e);
     }
     let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;

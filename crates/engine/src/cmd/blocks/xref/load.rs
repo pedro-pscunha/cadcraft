@@ -400,9 +400,8 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
             d.table_styles.push(cadcraft_doc::TableStyle { name: n, ..t.clone() });
         }
     }
-    let adopt = |d: &mut Drawing, e: &Entity| {
+    let adopt = |e: &Entity| {
         let mut e = e.clone();
-        e.handle = d.new_handle();
         rename_refs(&mut e, &dep);
         if let EntityKind::Dimension(dm) = &mut e.kind {
             dm.assoc.clear();
@@ -431,15 +430,15 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
             a.editing = None;
             a
         });
-        for e in b.entities.iter() {
-            let e = adopt(d, e);
+        let entities = b.entities.iter().map(|e| adopt(e)).collect();
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
             nb.entities.push(e);
         }
         d.blocks.insert(nb.name.clone(), Arc::new(nb));
     }
     let mut store = EntityStore::new();
-    for e in x.model.iter() {
-        let e = adopt(d, e);
+    let entities = x.model.iter().map(|e| adopt(e)).collect();
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
         store.push(e);
     }
     let base = x.header.point("INSBASE").filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).unwrap_or_default();

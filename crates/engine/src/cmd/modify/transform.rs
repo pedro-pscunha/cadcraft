@@ -1,29 +1,49 @@
-use super::{Entity, Handle, Mat3, Result, Session, Value, Vec2, bad, bool_or, f64_req, json, point_param, point_req, targets};
+use super::{Handle, Mat3, Result, Session, Value, Vec2, bad, bool_or, f64_req, json, point_param, point_req, targets};
 
 // ---------------- core operations ----------------
 
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
+    if copy {
+        return copy_transformed(s, hs, std::iter::once(*m));
+    }
     let d = s.doc_mut()?;
     let mut out = Vec::new();
     for h in hs {
-        let Some(sp) = d.space_of(*h) else { continue };
-        if copy {
-            let Some(e) = d.entity(*h).map(|e| (**e).clone()) else { continue };
-            let nh = d.new_handle();
-            let mut ne = Entity { handle: nh, ..e };
-            d.copy_foreign_data(*h, &mut ne);
-            ne.kind.transform(m);
-            if let Some(st) = d.space_mut(&sp) {
-                st.push(ne);
-                out.push(nh);
-            }
-        } else {
-            let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
-            if locked {
-                continue;
-            }
+        let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
+        if locked {
+            continue;
+        }
+        if d.space_of(*h).is_some() {
             d.modify_entity(*h, |e| e.kind.transform(m))?;
             out.push(*h);
+        }
+    }
+    Ok(out)
+}
+
+fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterator<Item = Mat3>) -> Result<Vec<Handle>> {
+    let d = s.doc_mut()?;
+    let mut seen = std::collections::HashSet::new();
+    let originals: Vec<_> = hs.iter().filter(|h| seen.insert(**h)).filter_map(|h| Some((d.space_of(*h)?, (**d.entity(*h)?).clone()))).collect();
+    let sets = transforms
+        .into_iter()
+        .map(|m| {
+            originals
+                .iter()
+                .map(|(_, e)| {
+                    let mut e = e.clone();
+                    e.kind.transform(&m);
+                    e
+                })
+                .collect()
+        })
+        .collect();
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    let mut out = Vec::new();
+    for (entity, (space, _)) in copies.into_iter().zip(originals.iter().cycle()) {
+        out.push(entity.handle);
+        if let Some(store) = d.space_mut(space) {
+            store.push(entity);
         }
     }
     Ok(out)
@@ -68,11 +88,8 @@ pub(super) fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     let d = delta_of("copy", p)?;
     let n = p.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, 10_000);
-    let mut out = Vec::new();
-    for k in 1..=n {
-        out.extend(transform_entities(s, &hs, &Mat3::translate(d * k as f64), true)?.into_iter().map(|h| h.hex()));
-    }
-    Ok(json!({ "handles": out }))
+    let out = copy_transformed(s, &hs, (1..=n).map(|k| Mat3::translate(d * k as f64)))?;
+    Ok(json!({ "handles": out.into_iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
 pub(super) fn run_rotate(s: &mut Session, p: &Value) -> Result<Value> {

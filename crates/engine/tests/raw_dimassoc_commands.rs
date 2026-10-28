@@ -20,10 +20,22 @@ fn session() -> (Session, String, String, Handle) {
             *tag = Tag::i(72, 8);
         }
     }
-    let mut d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
-    let raw = d.foreign.objects.iter().find(|o| o.kind == "DIMASSOC").unwrap().handle;
-    // A geometry reactor must not be left pointing to the retired raw association.
-    std::sync::Arc::make_mut(&mut d.foreign).entities.entry(Handle::parse_hex(&line).unwrap()).or_default().reactors.push(raw);
+    let original = objects(&source);
+    let raw =
+        original.iter().find(|(k, _)| k == "DIMASSOC").unwrap().1.iter().find(|t| t.code == 5).map(|t| Handle::parse_hex(&t.str()).unwrap()).unwrap();
+    let handle = tags.iter().position(|t| t.code == 5 && t.str() == line).unwrap();
+    assert_eq!(
+        tags[..handle].iter().rev().find(|t| t.code == 0).map(Tag::str).as_deref(),
+        Some("LINE"),
+        "fixture handle must identify the model-space LINE, not a line in the dimension block"
+    );
+    tags.splice(handle + 1..handle + 1, [Tag::s(102, "{ACAD_REACTORS"), Tag::s(330, raw.hex()), Tag::s(102, "}")]);
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert!(
+        d.foreign.entities.get(&Handle::parse_hex(&line).unwrap()).is_some_and(|x| x.reactors.contains(&raw)),
+        "fixture reactor must be read from the source DXF: line={line}, raw={raw:?}, extras={:?}",
+        d.foreign.entities
+    );
     let mut s = Session::new();
     s.open_drawing(d, "raw.dxf", None);
     (s, dim, line, raw)
@@ -49,6 +61,44 @@ fn assert_retired(s: &Session, raw: Handle) {
     let foreign = &s.doc().unwrap().foreign;
     assert!(foreign.objects.iter().all(|o| o.handle != raw), "raw DIMASSOC was not retired");
     assert!(foreign.entities.values().chain(foreign.records.values()).all(|x| !x.reactors.contains(&raw)), "retired reactor edge remains");
+}
+
+#[test]
+fn copying_a_raw_dimension_without_its_geometry_drops_the_cloned_association() {
+    let (mut s, dim, _, _) = session();
+    let copy = s.execute("copy", &json!({"handles":[dim], "delta":[20,0]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let h = Handle::parse_hex(&copy).unwrap();
+    assert!(
+        s.doc().unwrap().foreign.entities.get(&h).is_none_or(|x| x.xdict.is_none() && x.reactors.is_empty()),
+        "copied dimension retained a dictionary or reactor outside its cloned graph"
+    );
+    for text in saved(&s) {
+        let objects = objects(&text);
+        let associations: Vec<_> = objects.iter().filter(|(k, _)| k == "DIMASSOC").collect();
+        assert_eq!(associations.len(), 1, "only the original dimension keeps its association when geometry was not copied");
+        assert!(!associations[0].1.iter().any(|t| t.code == 330 && t.str() == copy), "copy still owns a raw association to original geometry");
+    }
+}
+
+#[test]
+fn copying_raw_dimension_with_geometry_remaps_the_whole_copy_set() {
+    let (mut s, dim, line, _) = session();
+    let result = s.execute("copy", &json!({"handles":[line, dim], "delta":[20,0]})).unwrap();
+    let line = result["handles"][0].as_str().unwrap();
+    let dim = result["handles"][1].as_str().unwrap();
+    for text in saved(&s) {
+        let objects = objects(&text);
+        let assoc = &objects
+            .iter()
+            .find(|(k, t)| k == "DIMASSOC" && t.iter().any(|t| t.code == 330 && t.str() == dim))
+            .expect("copied dimension keeps the association to its copied geometry")
+            .1;
+        assert_eq!(
+            assoc.iter().filter(|t| t.code == 331).map(Tag::str).collect::<Vec<_>>(),
+            vec![line.to_string(); 2],
+            "all raw references must follow the copied LINE"
+        );
+    }
 }
 
 #[test]

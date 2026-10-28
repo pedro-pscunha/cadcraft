@@ -108,19 +108,18 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
         let mut nb = (**b).clone();
         nb.name = to.clone();
         nb.entities = Default::default();
-        for e in b.entities.iter() {
-            let e = adopt(&mut d, e, &renames);
+        let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
             nb.entities.push(e);
         }
         d.blocks.insert(to.clone(), Arc::new(nb));
     }
     let mut b = Block::new(&name);
     b.base = src.header.point("INSBASE").filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).unwrap_or_default();
-    let mut ents = Vec::new();
-    for e in src.model.iter() {
-        let e = adopt(&mut d, e, &renames);
+    let entities = src.model.iter().map(|e| adopt(e, &renames)).collect();
+    let ents = d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing);
+    for e in &ents {
         d.ensure_layer(&e.common.layer);
-        ents.push(e);
     }
     if references_block(&d, &ents, &name) {
         return Err(bad("insert", format!("Block \"{name}\" references itself.")));
@@ -183,9 +182,8 @@ fn block_names(d: &Drawing, src: &Drawing, defining: &str) -> BTreeMap<String, S
 
 /// A copy of a source entity for this drawing: a fresh handle, block references renamed, and
 /// links to other source objects (associative dimension points) dropped.
-fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
+fn adopt(e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
     let mut e = e.clone();
-    e.handle = d.new_handle();
     match &mut e.kind {
         EntityKind::Insert(i) => {
             if let Some(n) = renames.get(&i.block) {
@@ -211,8 +209,7 @@ pub(super) fn explode_insert(s: &mut Session, h: Handle) -> Result<Vec<Handle>> 
     let d = s.doc_mut()?;
     d.remove_entity(h);
     let mut out = Vec::new();
-    for mut p in parts {
-        p.handle = d.new_handle();
+    for p in d.duplicate_entities(vec![parts], cadcraft_doc::DuplicationSource::SameDrawing) {
         out.push(p.handle);
         if let Some(st) = d.space_mut(&space) {
             st.push(p);

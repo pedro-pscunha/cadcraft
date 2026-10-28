@@ -173,27 +173,32 @@ pub(crate) fn explode_with(
     pieces: impl Fn(&cadcraft_doc::Drawing, &Entity) -> Option<Vec<Entity>>,
 ) -> Result<Vec<Handle>> {
     let space = s.space();
-    let mut out = Vec::new();
+    let mut sets = Vec::new();
+    let mut removed = Vec::new();
     for h in hs {
         if crate::cmd::curves::is_locked(s, *h) {
             continue;
         }
         let Some(e) = s.doc()?.entity(*h).map(|e| (**e).clone()) else { continue };
-        let Some(parts) = pieces(s.doc()?, &e) else { continue };
-        // The pieces of an object are new objects: its xdata goes with it. A block reference's
-        // pieces are copies of the block's objects and keep theirs.
-        let own_pieces = !matches!(e.kind, EntityKind::Insert(_));
-        let d = s.doc_mut()?;
-        d.remove_entity(*h);
-        for mut p in parts {
-            if own_pieces {
+        let Some(mut parts) = pieces(s.doc()?, &e) else { continue };
+        if !matches!(e.kind, EntityKind::Insert(_)) {
+            for p in &mut parts {
                 p.common.xdata.clear();
             }
-            p.handle = d.new_handle();
-            out.push(p.handle);
-            if let Some(st) = d.space_mut(&space) {
-                st.push(p);
-            }
+        }
+        sets.push(parts);
+        removed.push(*h);
+    }
+    let d = s.doc_mut()?;
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    for h in removed {
+        d.remove_entity(h);
+    }
+    let mut out = Vec::new();
+    for p in copies {
+        out.push(p.handle);
+        if let Some(store) = d.space_mut(&space) {
+            store.push(p);
         }
     }
     s.set_selection(Vec::new());

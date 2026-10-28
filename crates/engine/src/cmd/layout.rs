@@ -4,7 +4,7 @@
 //! Plotting goes through the host's [`super::file::IoHooks::plot`] hook so the engine stays
 //! I/O-agnostic.
 
-use cadcraft_doc::{Drawing, Entity, EntityKind, EntityStore, Handle, Layout, PageSetup, Space, Viewport};
+use cadcraft_doc::{Drawing, EntityKind, EntityStore, Handle, Layout, PageSetup, Space, Viewport};
 use cadcraft_geom::{Bounds2, Vec2};
 use serde_json::{Value, json};
 
@@ -309,9 +309,9 @@ fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let Some(src) = d.layouts.iter().find(|l| l.name == from).cloned() else { return Err(bad("layout.copy", "no such layout")) };
     let order = d.layouts.iter().map(|l| l.tab_order).max().unwrap_or(0).saturating_add(1);
     let mut store = EntityStore::new();
-    for e in src.entities.iter() {
-        let h = d.new_handle();
-        store.push(Entity { handle: h, ..Entity::clone(e) });
+    let entities = src.entities.iter().map(|e| (**e).clone()).collect();
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+        store.push(e);
     }
     d.layouts.push(Layout { name: to.clone(), tab_order: order, page: src.page, entities: store, view: src.view });
     Ok(json!({ "name": to }))

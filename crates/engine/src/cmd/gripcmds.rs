@@ -212,16 +212,18 @@ pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[
     let edits = stretched(s, hot, others, delta);
     let d = s.doc_mut()?;
     let mut out = Vec::new();
-    for (h, k) in edits {
-        if copy {
-            let (Some(sp), Some(e)) = (d.space_of(h), d.entity(h).map(|e| (**e).clone())) else { continue };
-            let nh = d.new_handle();
-            if let Some(st) = d.space_mut(&sp) {
-                st.push(Entity { handle: nh, kind: k, ..e });
-                out.push(nh);
+    if copy {
+        let (spaces, entities): (Vec<_>, Vec<_>) =
+            edits.into_iter().filter_map(|(h, kind)| Some((d.space_of(h)?, Entity { kind, ..(**d.entity(h)?).clone() }))).unzip();
+        for (entity, space) in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing).into_iter().zip(spaces) {
+            out.push(entity.handle);
+            if let Some(store) = d.space_mut(&space) {
+                store.push(entity);
             }
-        } else {
-            d.modify_entity(h, |e| e.kind = k)?;
+        }
+    } else {
+        for (h, kind) in edits {
+            d.modify_entity(h, |e| e.kind = kind)?;
             out.push(h);
         }
     }

@@ -166,8 +166,7 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
     let name = d.anonymous_block_name("*U");
     let mut b = Block::new(&name);
     b.base = v3(inv.apply(base));
-    for mut e in ents {
-        e.handle = d.new_handle();
+    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
         e.kind.transform(&inv);
         b.entities.push(e);
     }
@@ -225,10 +224,15 @@ fn rebase(s: &mut Session, h: Handle, base: Vec2) -> Result<()> {
     }
     // The source block keeps its objects; its base point moves with the array's.
     let src = d.block(&p.source).ok_or_else(|| other("The array's source block is missing."))?;
+    let entities = src.entities.iter().map(|e| (**e).clone()).collect();
     let mut ns = (**src).clone();
     ns.base = (ns.base.xy() + b).to3(ns.base.z);
     let d = s.doc_mut()?;
     ns.name = d.anonymous_block_name("*U");
+    ns.entities = Default::default();
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+        ns.entities.push(e);
+    }
     p.source.clone_from(&ns.name);
     d.blocks.insert(ns.name.clone(), Arc::new(ns));
     if let ArrayKind::Polar(k) = &mut p.kind {
@@ -247,9 +251,8 @@ fn open_source(s: &mut Session, h: Handle, item: (u32, u32, u32)) -> Result<Vec<
     let space = d.space_of(h).unwrap_or_default();
     let d = s.doc_mut()?;
     let mut out = Vec::new();
-    for e in src.entities.iter() {
-        let mut ne = (**e).clone();
-        ne.handle = d.new_handle();
+    let entities = src.entities.iter().map(|e| (**e).clone()).collect();
+    for mut ne in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
         ne.kind.transform(&m);
         out.push(ne.handle);
         d.ensure_layer(&ne.common.layer);
@@ -325,8 +328,7 @@ fn close_source(s: &mut Session, save: bool) -> Result<Value> {
     let d = s.doc_mut()?;
     let name = d.anonymous_block_name("*U");
     let mut nb = Block::new(&name);
-    for mut e in ents {
-        e.handle = d.new_handle();
+    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
         e.kind.transform(&inv);
         nb.entities.push(e);
     }

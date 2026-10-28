@@ -447,9 +447,8 @@ fn end_block(ctx: &mut Ctx<'_>) -> Value {
     if crate::cmd::blocks::references_block(d, &ents, &b.name) {
         return Value::Nil;
     }
-    for mut e in ents {
+    for e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
         d.ensure_layer(&e.common.layer);
-        e.handle = d.new_handle();
         b.entities.push(e);
     }
     let name = b.name.clone();

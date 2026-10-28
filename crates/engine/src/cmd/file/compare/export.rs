@@ -249,10 +249,10 @@ fn merge<T: Clone>(to: &mut Vec<T>, from: &[T], name: impl Fn(&T) -> &String) {
 /// group them as `name` (or `name_2`… when that group name is taken). Returns the group's name.
 fn add_group(d: &mut Drawing, name: &str, objs: &[(&Entity, Color)], renames: &Renames, folder: Option<&Path>, tinted: &mut Tinted) -> String {
     let mut members = Vec::new();
-    for (e, color) in objs {
-        d.ensure_layer(&e.common.layer);
-        let h = d.new_handle();
-        let mut copy = Entity { handle: h, ..(*e).clone() };
+    let entities = objs.iter().map(|(e, _)| (*e).clone()).collect();
+    for (mut copy, (_, color)) in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing).into_iter().zip(objs) {
+        d.ensure_layer(&copy.common.layer);
+        let h = copy.handle;
         detach(&mut copy.kind);
         rebase(&mut copy.kind, folder);
         rename_refs(&mut copy.kind, renames);
@@ -580,9 +580,8 @@ fn tinted_block(d: &mut Drawing, name: &str, color: Color, tinted: &mut Tinted, 
     // Hold the name while the nested copies pick theirs.
     d.blocks.insert(new.clone(), Arc::new(Block::new(&new)));
     let mut copy = Block { name: new.clone(), anonymous: dim_block, entities: EntityStore::new(), ..(*b).clone() };
-    for e in b.entities.iter() {
-        let h = d.new_handle();
-        let mut e = Entity { handle: h, ..(**e).clone() };
+    let entities = b.entities.iter().map(|e| (**e).clone()).collect();
+    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
         detach(&mut e.kind);
         paint(d, &mut e, color, tinted, depth + 1);
         copy.entities.push(e);
@@ -670,9 +669,8 @@ fn copy_blocks<'a>(
     for b in needed {
         let Some(name) = renames.get(&b.name.to_ascii_uppercase()).cloned() else { continue };
         let mut copy = Block { name: name.clone(), entities: EntityStore::new(), ..(*b).clone() };
-        for e in b.entities.iter() {
-            let h = d.new_handle();
-            let mut e = Entity { handle: h, ..(**e).clone() };
+        let entities = b.entities.iter().map(|e| (**e).clone()).collect();
+        for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
             detach(&mut e.kind);
             rename_refs(&mut e.kind, &renames);
             copy.entities.push(e);

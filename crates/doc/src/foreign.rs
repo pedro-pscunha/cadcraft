@@ -9,7 +9,34 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Handle, RawTag};
+use crate::{Entity, EntityKind, Handle, RawTag};
+
+/// Longest foreign-data ownership chain followed while copying or retiring objects.
+pub const MAX_FOREIGN_DEPTH: usize = 64;
+
+/// Whether copied entities belong to this drawing's foreign-data namespace.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DuplicationSource {
+    /// Clone owned metadata and remap references inside each copy set.
+    SameDrawing,
+    /// Assign new identities but do not adopt another drawing's raw metadata.
+    OtherDrawing,
+}
+
+/// The normalized DIMASSOC subclass position and the dimension referenced by its first 330.
+pub fn dimassoc_reference<S: AsRef<str>>(groups: impl IntoIterator<Item = (i32, S)>) -> Option<(usize, Handle)> {
+    let mut start = None;
+    for (i, (code, value)) in groups.into_iter().enumerate() {
+        if start.is_none() && code == 100 && value.as_ref().trim().eq_ignore_ascii_case("AcDbDimAssoc") {
+            start = Some(i);
+        } else if let Some(start) = start
+            && code == 330
+        {
+            return Handle::parse_hex(value.as_ref()).map(|h| (start, h));
+        }
+    }
+    None
+}
 
 /// What a file handle stood for when the object it named is one CADCraft writes itself (under a
 /// new handle on save): a kind and an upper-case name, e.g. `("LAYER", "WALLS")`,
@@ -116,29 +143,39 @@ fn owner(tags: &[RawTag]) -> Option<Handle> {
     None
 }
 
-fn owned_objects(objects: &[ForeignObject], roots: impl IntoIterator<Item = Handle>) -> BTreeSet<Handle> {
-    let mut children: BTreeMap<Handle, Vec<Handle>> = BTreeMap::new();
-    for object in objects {
+fn owner_index(objects: &[ForeignObject]) -> BTreeMap<Handle, Vec<usize>> {
+    let mut index: BTreeMap<Handle, Vec<usize>> = BTreeMap::new();
+    for (i, object) in objects.iter().enumerate() {
         if let Some(parent) = owner(&object.tags) {
-            children.entry(parent).or_default().push(object.handle);
+            index.entry(parent).or_default().push(i);
         }
     }
+    index
+}
+
+fn owned_indices(objects: &[ForeignObject], index: &BTreeMap<Handle, Vec<usize>>, roots: impl IntoIterator<Item = Handle>) -> BTreeSet<usize> {
     let mut owned = BTreeSet::new();
     let mut pending: Vec<_> = roots.into_iter().map(|h| (h, 0usize)).collect();
     while let Some((parent, depth)) = pending.pop() {
-        if depth >= 64 {
+        if depth >= MAX_FOREIGN_DEPTH {
             continue;
         }
-        for child in children.get(&parent).into_iter().flatten() {
-            if owned.insert(*child) {
-                pending.push((*child, depth + 1));
+        for i in index.get(&parent).into_iter().flatten() {
+            if owned.insert(*i)
+                && let Some(child) = objects.get(*i)
+            {
+                pending.push((child.handle, depth + 1));
             }
         }
     }
     owned
 }
 
-fn strip_edges(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeSet<Handle>) {
+fn owned_objects(objects: &[ForeignObject], roots: impl IntoIterator<Item = Handle>) -> BTreeSet<Handle> {
+    owned_indices(objects, &owner_index(objects), roots).into_iter().filter_map(|i| objects.get(i).map(|o| o.handle)).collect()
+}
+
+fn drop_references_to(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeSet<Handle>) {
     let gone = |t: &RawTag| Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h));
     let mut out = Vec::new();
     let mut i = 0;
@@ -185,12 +222,58 @@ fn remap_tags(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
 }
 
 fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
-    extra.xdict = extra.xdict.map(|h| map.get(&h).copied().unwrap_or(h));
-    for h in &mut extra.reactors {
-        *h = map.get(h).copied().unwrap_or(*h);
-    }
+    extra.xdict = extra.xdict.and_then(|h| map.get(&h).copied());
+    extra.reactors = extra.reactors.iter().filter_map(|h| map.get(h).copied()).collect();
     remap_tags(&mut extra.xdata, map);
     remap_tags(&mut extra.props, map);
+}
+
+fn remap_xdata(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>, source: DuplicationSource) {
+    if source == DuplicationSource::OtherDrawing {
+        for t in tags.iter_mut().filter(|t| t.code == 1005) {
+            if Handle::parse_hex(&t.value).is_none_or(|h| !map.contains_key(&h)) {
+                t.value = "0".into();
+            }
+        }
+    }
+    remap_tags(tags, map);
+}
+
+fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: DuplicationSource, discard_association: bool) {
+    match kind {
+        EntityKind::Dimension(dimension) => {
+            if source == DuplicationSource::OtherDrawing || discard_association {
+                dimension.assoc.clear();
+            }
+            for link in &mut dimension.assoc {
+                link.handle = map.get(&link.handle).copied().unwrap_or(link.handle);
+                if let crate::AssocSnap::Intersection { other } = &mut link.snap {
+                    *other = map.get(other).copied().unwrap_or(*other);
+                }
+            }
+        }
+        EntityKind::Hatch(hatch) => {
+            for boundary in &mut hatch.loops {
+                boundary.sources = boundary
+                    .sources
+                    .iter()
+                    .filter_map(|h| map.get(h).copied().or_else(|| (source == DuplicationSource::SameDrawing).then_some(*h)))
+                    .collect();
+            }
+        }
+        EntityKind::Unknown(unknown) => {
+            if source == DuplicationSource::OtherDrawing {
+                for t in &mut unknown.tags {
+                    if matches!(t.code, 320..=369 | 390..=399 | 480..=481 | 1005) && Handle::parse_hex(&t.value).is_none_or(|h| !map.contains_key(&h))
+                    {
+                        t.value = "0".into();
+                    }
+                }
+            }
+            remap_tags(&mut unknown.tags, map);
+        }
+        _ => {}
+    }
 }
 
 impl crate::Drawing {
@@ -221,7 +304,7 @@ impl crate::Drawing {
         let dictionary = self.foreign.entities.get(&dimension).and_then(|x| x.xdict);
         let foreign = std::sync::Arc::make_mut(&mut self.foreign);
         for object in &mut foreign.objects {
-            strip_edges(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+            drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
         }
         if let Some(dictionary) = dictionary {
             let empty = foreign
@@ -236,7 +319,7 @@ impl crate::Drawing {
         }
         foreign.objects.retain(|o| !removed.contains(&o.handle));
         for object in &mut foreign.objects {
-            strip_edges(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+            drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
         }
         for extra in foreign.entities.values_mut().chain(foreign.records.values_mut()) {
             extra.xdict = extra.xdict.filter(|h| !removed.contains(h));
@@ -247,38 +330,117 @@ impl crate::Drawing {
         true
     }
 
-    /// Give a copied entity and its attributes independent foreign data. Owned object graphs
-    /// are cloned; internal references follow the copy, while references to other geometry stay.
-    pub fn copy_foreign_data(&mut self, source: Handle, copy: &mut crate::Entity) {
-        let mut roots = BTreeMap::from([(source, copy.handle)]);
-        if let crate::EntityKind::Insert(insert) = &mut copy.kind {
-            for attribute in &mut insert.attribs {
-                if let Some(old) = attribute.handle {
+    /// Duplicate entity sets with fresh entity and attribute identities. Each inner vector is
+    /// one copy set: references within it follow that copy. Multiple transformed sets batch an
+    /// entire command, building the owner index once and mutating Foreign at most once.
+    /// External drawings contribute model data only. Raw dimension associations are copied only
+    /// when all their geometry is in the same set; dictionaries/reactors never retain old owners.
+    pub fn duplicate_entities(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource) -> Vec<Entity> {
+        let has_metadata = source == DuplicationSource::SameDrawing
+            && !self.foreign.is_empty()
+            && sets.iter().flatten().any(|e| {
+                self.foreign.entities.contains_key(&e.handle)
+                    || matches!(e.kind, EntityKind::Unknown(_))
+                    || e.kind.attributes().iter().filter_map(|a| a.handle).any(|h| self.foreign.entities.contains_key(&h))
+            });
+        let index = if has_metadata { owner_index(&self.foreign.objects) } else { BTreeMap::new() };
+        let mut added_objects = Vec::new();
+        let mut added_extras = Vec::new();
+        let mut out = Vec::new();
+        for mut entities in sets {
+            let mut roots = BTreeMap::new();
+            for entity in &mut entities {
+                let old = entity.handle;
+                entity.handle = self.new_handle();
+                if old.0 != 0 {
+                    roots.insert(old, entity.handle);
+                }
+                if let EntityKind::AttDef(definition) = &mut entity.kind {
+                    definition.handle = None;
+                }
+                for attribute in entity.kind.attributes_mut() {
+                    let old = attribute.handle;
                     let new = self.new_handle();
                     attribute.handle = Some(new);
-                    roots.insert(old, new);
+                    if let Some(old) = old {
+                        roots.insert(old, new);
+                    }
                 }
             }
-        }
-        let owned = owned_objects(&self.foreign.objects, roots.keys().copied());
-        let mut map = roots.clone();
-        for old in &owned {
-            map.insert(*old, self.new_handle());
-        }
-        remap_tags(&mut copy.common.xdata, &map);
-        let original = self.foreign.clone();
-        let foreign = std::sync::Arc::make_mut(&mut self.foreign);
-        for object in original.objects.iter().filter(|o| owned.contains(&o.handle)) {
-            let Some(handle) = map.get(&object.handle).copied() else { continue };
-            let mut cloned = ForeignObject { handle, ..object.clone() };
-            remap_tags(&mut cloned.tags, &map);
-            foreign.objects.push(cloned);
-        }
-        for (old, new) in roots {
-            if let Some(mut extra) = original.entities.get(&old).cloned() {
-                remap_extra(&mut extra, &map);
-                foreign.entities.insert(new, extra);
+            if !has_metadata {
+                for entity in &mut entities {
+                    remap_model(&mut entity.kind, &roots, source, false);
+                    remap_xdata(&mut entity.common.xdata, &roots, source);
+                }
+                out.extend(entities);
+                continue;
             }
+            let owned = owned_indices(&self.foreign.objects, &index, roots.keys().copied());
+            let mut dropped = BTreeSet::new();
+            let mut discarded_dimensions = BTreeSet::new();
+            for i in &owned {
+                let Some(object) = self.foreign.objects.get(*i).filter(|o| o.kind == "DIMASSOC") else { continue };
+                let dimension = dimassoc_reference(object.tags.iter().map(|t| (t.code, t.value.as_str()))).map(|(_, h)| h);
+                let refs: Vec<_> = object.tags.iter().filter(|t| matches!(t.code, 331 | 332)).collect();
+                if refs.is_empty()
+                    || dimension.is_none_or(|h| !roots.contains_key(&h))
+                    || refs.iter().any(|t| Handle::parse_hex(&t.value).is_none_or(|h| !roots.contains_key(&h)))
+                {
+                    dropped.insert(object.handle);
+                    discarded_dimensions.extend(dimension);
+                }
+            }
+            let descendants = owned_indices(&self.foreign.objects, &index, dropped.iter().copied());
+            dropped.extend(descendants.iter().filter_map(|i| self.foreign.objects.get(*i).map(|o| o.handle)));
+            let mut objects: Vec<_> =
+                owned.iter().filter_map(|i| self.foreign.objects.get(*i)).filter(|o| !dropped.contains(&o.handle)).cloned().collect();
+            for object in &mut objects {
+                drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &dropped);
+            }
+            let dictionaries: Vec<_> = roots.keys().filter_map(|h| self.foreign.entities.get(h).and_then(|e| e.xdict)).collect();
+            for dictionary in dictionaries {
+                let empty = objects
+                    .iter()
+                    .find(|o| o.handle == dictionary)
+                    .is_some_and(|o| o.kind == "DICTIONARY" && !o.tags.iter().any(|t| t.code == 3 || t.code >= 1000));
+                if empty && !objects.iter().any(|o| owner(&o.tags) == Some(dictionary)) {
+                    dropped.insert(dictionary);
+                }
+            }
+            objects.retain(|o| !dropped.contains(&o.handle));
+            let mut map = roots.clone();
+            for object in &objects {
+                map.insert(object.handle, self.new_handle());
+            }
+            for object in &mut objects {
+                if let Some(h) = map.get(&object.handle) {
+                    object.handle = *h;
+                }
+                remap_tags(&mut object.tags, &map);
+            }
+            added_objects.extend(objects);
+            if has_metadata {
+                for (old, new) in &roots {
+                    if let Some(mut extra) = self.foreign.entities.get(old).cloned() {
+                        remap_extra(&mut extra, &map);
+                        if !extra.is_empty() {
+                            added_extras.push((*new, extra));
+                        }
+                    }
+                }
+            }
+            let discarded: BTreeSet<_> = discarded_dimensions.iter().filter_map(|h| roots.get(h).copied()).collect();
+            for entity in &mut entities {
+                remap_model(&mut entity.kind, &map, source, discarded.contains(&entity.handle));
+                remap_xdata(&mut entity.common.xdata, &map, source);
+            }
+            out.extend(entities);
         }
+        if !added_objects.is_empty() || !added_extras.is_empty() {
+            let foreign = std::sync::Arc::make_mut(&mut self.foreign);
+            foreign.objects.extend(added_objects);
+            foreign.entities.extend(added_extras);
+        }
+        out
     }
 }

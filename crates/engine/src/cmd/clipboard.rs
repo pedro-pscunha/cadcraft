@@ -77,12 +77,13 @@ pub fn from_active(s: &Session) -> bool {
 pub(crate) fn paste(s: &mut Session, m: &Mat3) -> Result<Vec<Handle>> {
     let ents = s.clipboard.clone();
     let defs = s.clipboard_source.as_ref().map(|c| c.defs.clone());
+    let source = if from_active(s) { cadcraft_doc::DuplicationSource::SameDrawing } else { cadcraft_doc::DuplicationSource::OtherDrawing };
     let space = s.space();
     let d = s.doc_mut()?;
-    let renames = defs.map(|x| merge(d, &x)).unwrap_or_default();
+    let renames = defs.map(|x| merge(d, &x, source)).unwrap_or_default();
     let mut out = Vec::new();
-    for e in &ents {
-        let mut e = adopt(d, e, &renames);
+    let entities = ents.iter().map(|e| adopt(e, &renames)).collect();
+    for mut e in d.duplicate_entities(vec![entities], source) {
         e.kind.transform(m);
         d.ensure_layer(&e.common.layer);
         out.push(e.handle);
@@ -102,9 +103,10 @@ pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
         return Err(bad("pasteblock", "the clipboard is empty"));
     }
     let defs = s.clipboard_source.as_ref().map(|c| c.defs.clone());
+    let source = if from_active(s) { cadcraft_doc::DuplicationSource::SameDrawing } else { cadcraft_doc::DuplicationSource::OtherDrawing };
     let base = s.clipboard_base;
     let d = s.doc_mut()?;
-    let renames = defs.map(|x| merge(d, &x)).unwrap_or_default();
+    let renames = defs.map(|x| merge(d, &x, source)).unwrap_or_default();
     let seed = d.handseed;
     let name = (0..1_000_000u64)
         .map(|i| format!("A$C{:08X}", seed.wrapping_add(i) & 0xFFFF_FFFF))
@@ -112,8 +114,8 @@ pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
         .ok_or_else(|| bad("pasteblock", "no free block name"))?;
     let mut b = Block::new(&name);
     b.base = base.to3(0.0);
-    for e in &ents {
-        let e = adopt(d, e, &renames);
+    let entities = ents.iter().map(|e| adopt(e, &renames)).collect();
+    for e in d.duplicate_entities(vec![entities], source) {
         d.ensure_layer(&e.common.layer);
         b.entities.push(e);
     }
@@ -134,13 +136,13 @@ pub fn system_text(s: &Session) -> Option<String> {
     let renames = match &s.clipboard_source {
         Some(c) => {
             d.header = c.defs.header.clone();
-            merge(&mut d, &c.defs)
+            merge(&mut d, &c.defs, cadcraft_doc::DuplicationSource::OtherDrawing)
         }
         None => BTreeMap::new(),
     };
     d.header.set("INSBASE", HVal::Point(s.clipboard_base.to3(0.0)));
-    for e in &s.clipboard {
-        let e = adopt(&mut d, e, &renames);
+    let entities = s.clipboard.iter().map(|e| adopt(e, &renames)).collect();
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
         d.ensure_layer(&e.common.layer);
         d.model.push(e);
     }
@@ -278,7 +280,7 @@ fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
 
 /// Add `defs`' table records and blocks that `d` doesn't have. Returns the blocks copied, from
 /// their name in `defs` to their name in `d`.
-fn merge(d: &mut Drawing, defs: &Drawing) -> BTreeMap<String, String> {
+fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSource) -> BTreeMap<String, String> {
     fn add<T: Clone>(ours: &mut Vec<T>, theirs: &[T], name: fn(&T) -> &str) {
         for t in theirs {
             if !ours.iter().any(|o| name(o).eq_ignore_ascii_case(name(t))) {
@@ -298,8 +300,8 @@ fn merge(d: &mut Drawing, defs: &Drawing) -> BTreeMap<String, String> {
         let mut nb = (**b).clone();
         nb.name = to.clone();
         nb.entities = Default::default();
-        for e in b.entities.iter() {
-            let e = adopt(d, e, &renames);
+        let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
+        for e in d.duplicate_entities(vec![entities], source) {
             d.ensure_layer(&e.common.layer);
             nb.entities.push(e);
         }
@@ -338,9 +340,8 @@ fn block_names(d: &Drawing, defs: &Drawing) -> BTreeMap<String, String> {
 
 /// A copy of a clipboard object for `d`: a fresh handle, block references renamed, and links to
 /// objects of the source drawing (associative dimension points) dropped.
-fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
+fn adopt(e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
     let mut e = e.clone();
-    e.handle = d.new_handle();
     match &mut e.kind {
         EntityKind::Insert(i) => {
             if let Some(n) = renames.get(&i.block) {
@@ -348,7 +349,6 @@ fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Ent
             }
         }
         EntityKind::Dimension(dm) => {
-            dm.assoc.clear();
             if let Some(n) = dm.block.as_ref().and_then(|b| renames.get(b)) {
                 dm.block = Some(n.clone());
             }

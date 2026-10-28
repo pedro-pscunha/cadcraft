@@ -526,10 +526,9 @@ fn apply(
     // AutoCAD's anonymous copies have no units of their own.
     let mut b =
         Block { name: name.clone(), anonymous: true, xref_path: None, array: None, units: 0, entities: crate::EntityStore::new(), ..(*src).clone() };
-    let mut copies: HashMap<Handle, Handle> = HashMap::new();
-    for e in src.entities.iter() {
-        copies.insert(e.handle, d.new_handle());
-    }
+    let entities = src.entities.iter().map(|e| (**e).clone()).collect();
+    let duplicated = d.duplicate_entities(vec![entities], crate::DuplicationSource::SameDrawing);
+    let copies: HashMap<Handle, Handle> = src.entities.iter().zip(&duplicated).map(|(old, new)| (old.handle, new.handle)).collect();
     // How far each attribute definition moves (block coordinates): the reference's attribute of
     // that tag moves with it, as AutoCAD moves it.
     let attrib_moves: HashMap<String, Vec2> = src
@@ -543,16 +542,7 @@ fn apply(
             _ => None,
         })
         .collect();
-    for e in src.entities.iter() {
-        let Some(nh) = copies.get(&e.handle).copied() else { continue };
-        let mut c: Entity = (**e).clone();
-        c.handle = nh;
-        // The copy's own xdata names the copy, not its original (as the kept data below does).
-        for t in &mut c.common.xdata {
-            if t.code == 1005 && Handle::parse_hex(&t.value) == Some(e.handle) {
-                t.value = nh.hex();
-            }
-        }
+    for (e, mut c) in src.entities.iter().zip(duplicated) {
         if let Some(v) = shown_copy.get(&e.handle) {
             c.common.visible = *v;
         }
@@ -576,20 +566,6 @@ fn apply(
     let old = ins.block.clone();
     d.blocks.insert(name.clone(), std::sync::Arc::new(b));
     let f = std::sync::Arc::make_mut(&mut d.foreign);
-    for (old_h, new_h) in &copies {
-        if let Some(mut x) = f.entities.get(old_h).cloned() {
-            for t in &mut x.xdata {
-                if t.code == 1005 && Handle::parse_hex(&t.value) == Some(*old_h) {
-                    t.value = new_h.hex();
-                }
-            }
-            x.xdict = None;
-            // Reactors within the block (an associative hatch's outline) follow to the copies;
-            // ones outside it are not ours.
-            x.reactors = x.reactors.iter().filter_map(|r| copies.get(r).copied()).collect();
-            f.entities.insert(*new_h, x);
-        }
-    }
     if let Some(rec) = def_record {
         let xdata = vec![tag(1001, BTAG), tag(1070, "1"), tag(1005, rec.hex())];
         f.records.insert(("BLOCK_RECORD".into(), name.to_ascii_uppercase()), ForeignExtra { xdata, ..Default::default() });
