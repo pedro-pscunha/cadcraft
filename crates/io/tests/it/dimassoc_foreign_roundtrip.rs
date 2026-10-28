@@ -148,7 +148,14 @@ fn val(tags: &[Tag], code: i32) -> String {
 }
 
 fn assert_association(dxf: &str, in_block: bool, osnaps: [i64; 2]) {
-    let ents = section(dxf, if in_block { "BLOCKS" } else { "ENTITIES" });
+    let all = section(dxf, if in_block { "BLOCKS" } else { "ENTITIES" });
+    let ents = if in_block {
+        let start = all.iter().position(|(k, t)| k == "BLOCK" && val(t, 2) == "LABEL").expect("fixture LABEL block");
+        let end = all.iter().enumerate().skip(start + 1).find(|(_, (k, _))| k == "ENDBLK").map(|(i, _)| i).expect("LABEL end");
+        &all[start + 1..end]
+    } else {
+        all.as_slice()
+    };
     let dim = &ents.iter().find(|(k, _)| k == "DIMENSION").unwrap().1;
     let line = &ents.iter().find(|(k, _)| k == "LINE").unwrap().1;
     assert!(dim.iter().any(|t| t.code == 102 && t.str() == "{ACAD_XDICTIONARY"), "DIMENSION lost its extension dictionary");
@@ -157,16 +164,20 @@ fn assert_association(dxf: &str, in_block: bool, osnaps: [i64; 2]) {
     assert_eq!(assocs.len(), 1, "exactly one DIMASSOC, never raw plus modelled");
     let assoc = &assocs[0].1;
     let dict = &objs.iter().find(|(k, t)| k == "DICTIONARY" && val(t, 5) == val(dim, 360)).unwrap().1;
-    assert_eq!(val(dict, 330), val(dim, 5));
-    assert_eq!(val(dict, 3), "ACAD_DIMASSOC");
-    assert_eq!(val(dict, 360), val(assoc, 5));
-    assert_eq!(val(assoc, 330), val(dict, 5));
-    assert!(assoc.iter().any(|t| t.code == 330 && t.str() == val(dim, 5)));
-    assert_eq!(val(assoc, 90), "3");
+    assert_eq!(val(dict, 330), val(dim, 5), "xdict owner must be the written dimension");
+    assert_eq!(val(dict, 3), "ACAD_DIMASSOC", "association dictionary key changed");
+    assert_eq!(val(dict, 360), val(assoc, 5), "dictionary must point to its DIMASSOC object");
+    assert_eq!(val(assoc, 330), val(dict, 5), "DIMASSOC owner must be its dictionary");
+    assert!(assoc.iter().any(|t| t.code == 330 && t.str() == val(dim, 5)), "DIMASSOC lost its dimension reference");
+    assert_eq!(val(assoc, 90), "3", "association flags changed");
     let snaps: Vec<_> = assoc.iter().filter(|t| t.code == 72).map(|t| t.i64()).collect();
-    assert_eq!(snaps, osnaps);
+    assert_eq!(snaps, osnaps, "osnap types changed");
     let refs: Vec<_> = assoc.iter().filter(|t| t.code == 331).map(Tag::str).collect();
-    assert_eq!(refs, vec![val(line, 5); 2]);
+    assert_eq!(
+        refs,
+        vec![val(line, 5); 2],
+        "point references must target the fixture's LINE in the same space/block, not generated dimension geometry"
+    );
 }
 
 fn roundtrip(in_block: bool, osnaps: [i64; 2], dwg: bool) {
@@ -260,6 +271,20 @@ fn dimassoc_keeps_parameters_the_inferred_snap_does_not_reproduce() {
 fn dimassoc_keeps_handle_paths_and_subentity_markers() {
     let source = association_dxf(false, [13, 1]).replace("331\n30\n73\n0\n91\n0\n301\n\n", "331\n30\n331\n30\n73\n1\n91\n1\n301\nnested-path\n");
     assert_raw_semantics(&source, false);
+}
+
+#[test]
+fn unevaluable_inferred_snap_stays_raw_even_when_serialization_matches() {
+    let source = association_dxf(false, [2, 2]);
+    let line = "0\nLINE\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n11\n10\n21\n0\n";
+    assert_eq!(source.matches(line).count(), 1);
+    let source = source.replace(line,"0\nSPLINE\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbSpline\n70\n0\n71\n1\n72\n4\n73\n2\n74\n0\n40\n0\n40\n0\n40\n1\n40\n1\n10\n-10\n20\n0\n30\n0\n10\n10\n20\n0\n30\n0\n")
+        .replace("14\n10\n24\n0\n","14\n0\n24\n0\n").replace("40\n0\n10\n10\n20\n0\n","40\n0\n10\n0\n20\n0\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(
+        d.foreign.objects.iter().any(|o| o.kind == "DIMASSOC"),
+        "a serialized Mid/Spline pair the engine cannot evaluate was treated as fully modelled"
+    );
 }
 
 #[test]

@@ -735,6 +735,11 @@ fn dimension_block_definitions(
     for st in all_spaces {
         for e in st.iter() {
             if let EntityKind::Dimension(dm) = &e.kind {
+                // Imported block dimensions keep their source geometry; edited/new ones need
+                // a fresh anonymous block just like model/paper-space dimensions.
+                if d.entity(e.handle).is_none() && dm.block.is_some() {
+                    continue;
+                }
                 let reused = dim_plan.reuse.get(&e.handle);
                 let ents: Vec<Entity>;
                 let name = match reused {
@@ -851,7 +856,7 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
                 continue;
             }
             if let EntityKind::Dimension(dm) = &e.kind {
-                let (flags, refs) = std_assoc_refs(d, dm);
+                let (flags, refs) = std_assoc_refs(d, dm, Some(st));
                 if !refs.is_empty() {
                     cx.assoc.insert(e.handle, AssocObj { xdict: w.h(), handle: w.h(), flags, refs });
                 }
@@ -896,7 +901,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     let mut cx = Ctx { paper_views: paper_views(d), target, ..Ctx::default() };
     cx.block_records = user_blocks.iter().map(|(n, h, _)| (n.to_ascii_uppercase(), h.clone())).collect();
     let all_spaces: Vec<&EntityStore> = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).collect();
-    let mut dim_defs = dimension_block_definitions(d, &all_spaces, &dim_plan, &mut w, &mut cx);
+    let dimension_stores: Vec<&EntityStore> = all_spaces.iter().copied().chain(user_blocks.iter().map(|(_, _, b)| &b.entities)).collect();
+    let mut dim_defs = dimension_block_definitions(d, &dimension_stores, &dim_plan, &mut w, &mut cx);
     // Every entity, including block contents (for arrows, tables and overrides).
     let every: Vec<&Entity> = all_spaces
         .iter()
@@ -908,7 +914,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     // Image definitions (IMAGEDEF objects) of raster images anywhere in the drawing.
     cx.images = crate::dxf_image::plan(every.iter().copied(), || w.h());
     cx.mlines = crate::dxf_mline::plan(d, every.iter().copied(), || w.h());
-    plan_dimension_associations(d, &all_spaces, &mut w, &mut cx);
+    plan_dimension_associations(d, &dimension_stores, &mut w, &mut cx);
     let default_table_style = [TableStyle::default()];
     let table_styles: &[TableStyle] = if d.table_styles.is_empty() { &default_table_style } else { &d.table_styles };
     cx.table_styles = table_styles.iter().map(|s| (s.name.clone(), w.h())).collect();

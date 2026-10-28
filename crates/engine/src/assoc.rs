@@ -38,30 +38,9 @@ fn arc_geom(a: &cadcraft_doc::Arc) -> cadcraft_geom::Arc {
     cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end)
 }
 
-/// Where a snap sits on an object now.
+/// Resolve supported snap semantics in the engine's model/layout scope, not block-local space.
 pub fn snap_point(d: &Drawing, a: &DimAssoc) -> Option<Vec2> {
-    let e = d.entity(a.handle)?;
-    match (&e.kind, &a.snap) {
-        (EntityKind::Line(l), AssocSnap::Start) => Some(l.a.xy()),
-        (EntityKind::Line(l), AssocSnap::End) => Some(l.b.xy()),
-        (EntityKind::Line(l), AssocSnap::Mid) => Some(l.a.xy().mid(l.b.xy())),
-        (EntityKind::Line(l), AssocSnap::Intersection { other }) => match &d.entity(*other)?.kind {
-            EntityKind::Line(m) => cadcraft_geom::line_line_infinite(l.a.xy(), l.b.xy(), m.a.xy(), m.b.xy()).map(|x| x.0),
-            _ => None,
-        },
-        (EntityKind::Arc(ar), AssocSnap::Start) => Some(arc_geom(ar).start_point()),
-        (EntityKind::Arc(ar), AssocSnap::End) => Some(arc_geom(ar).end_point()),
-        (EntityKind::Arc(ar), AssocSnap::Mid) => Some(arc_geom(ar).mid_point()),
-        (EntityKind::Arc(ar), AssocSnap::Center) => Some(ar.center.xy()),
-        (EntityKind::Arc(ar), AssocSnap::OnCircle { angle }) => Some(ar.center.xy() + Vec2::from_angle(*angle) * ar.radius),
-        (EntityKind::Circle(c), AssocSnap::Center) => Some(c.center.xy()),
-        (EntityKind::Circle(c), AssocSnap::OnCircle { angle }) => Some(c.center.xy() + Vec2::from_angle(*angle) * c.radius),
-        (EntityKind::LwPolyline(p), AssocSnap::Vertex { index }) => p.vertices.get(*index).map(|v| v.p),
-        (EntityKind::LwPolyline(p), AssocSnap::Start) => p.vertices.first().map(|v| v.p),
-        (EntityKind::LwPolyline(p), AssocSnap::End) => p.vertices.last().map(|v| v.p),
-        (EntityKind::Point(p), AssocSnap::Start | AssocSnap::Center) => Some(p.p.xy()),
-        _ => None,
-    }
+    cadcraft_doc::association_point(a, |h| d.entity(h).map(|e| e.as_ref()))
 }
 
 fn close(a: Vec2, b: Vec2) -> bool {

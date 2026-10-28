@@ -271,6 +271,13 @@ fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: Du
             if source == DuplicationSource::OtherDrawing || discard_association {
                 dimension.assoc.clear();
             }
+            dimension.assoc.retain(|link| {
+                map.contains_key(&link.handle)
+                    && match link.snap {
+                        crate::AssocSnap::Intersection { other } => map.contains_key(&other),
+                        _ => true,
+                    }
+            });
             for link in &mut dimension.assoc {
                 link.handle = map.get(&link.handle).copied().unwrap_or(link.handle);
                 if let crate::AssocSnap::Intersection { other } = &mut link.snap {

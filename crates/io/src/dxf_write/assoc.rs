@@ -1,5 +1,5 @@
 use super::ctx::OsnapRef;
-use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, EntityKind, Handle, LwPolyline};
+use super::{AssocSnap, DimAssoc, DimKind, Dimension, Drawing, Entity, EntityKind, EntityStore, Handle, LwPolyline};
 use cadcraft_dxf::{Kind, Tag, kind_of};
 
 /// Whether a DIMASSOC point reference to `k` names a point of it without naming a segment:
@@ -36,13 +36,21 @@ pub(crate) fn polyline_vertex_ref(p: &LwPolyline, index: usize) -> Option<(i64, 
     preferred.into_iter().flatten().find(|(_, _, k)| straight(*k)).map(|(o, t, k)| (o, t, i64::try_from(k).unwrap_or(0)))
 }
 
+fn reference_entity<'a>(d: &'a Drawing, scope: Option<&'a EntityStore>, h: Handle) -> Option<&'a Entity> {
+    match scope {
+        Some(store) => store.get(h),
+        None => d.entity(h),
+    }
+    .map(|e| e.as_ref())
+}
+
 /// Standard DIMASSOC point references of an associative dimension: the extension-line
 /// origins of linear/aligned dimensions, both ends of both lines of an angular dimension, the
 /// feature point of ordinate dimensions and the circle of a radial/diametric dimension, linked
 /// to objects that exist ([`whole_object_ref`]). CADCraft's exact links travel in xdata as well.
-pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
+pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension, scope: Option<&EntityStore>) -> (i64, Vec<OsnapRef>) {
     if matches!(dm.kind, DimKind::Radius | DimKind::Diameter) {
-        return radial_ref(d, &dm.assoc);
+        return radial_ref(d, &dm.assoc, scope);
     }
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
@@ -57,7 +65,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     let mut refs = Vec::new();
     for (slot, name) in slots.iter().enumerate() {
         let Some(a) = dm.assoc.iter().find(|a| a.point == *name) else { continue };
-        let Some(ent) = d.entity(a.handle) else { continue };
+        let Some(ent) = reference_entity(d, scope, a.handle) else { continue };
         let point = match *name {
             "defpt" => dm.defpt,
             "p13" => dm.p13,
@@ -90,7 +98,7 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
             AssocSnap::Center => (if matches!(ent.kind, EntityKind::Point(_)) { 4 } else { 3 }, 0.0, None),
             AssocSnap::OnCircle { angle } => (10, *angle, None),
             AssocSnap::Intersection { other } => {
-                if !d.entity(*other).is_some_and(|o| whole_object_ref(&o.kind)) {
+                if !reference_entity(d, scope, *other).is_some_and(|o| whole_object_ref(&o.kind)) {
                     continue;
                 }
                 (6, 0.0, Some(*other))
@@ -164,11 +172,15 @@ fn same_tag(a: &Tag, b: &Tag) -> bool {
 }
 
 /// Whether the complete DIMASSOC can be written unchanged from the model. This deliberately
-/// keeps unfamiliar or omitted groups raw rather than guessing equivalent defaults. Block
-/// dimensions are not in `Drawing::entity` and are not planned by the association writer.
+/// keeps unfamiliar/omitted groups or unevaluable snaps raw rather than guessing. Imported
+/// block associations stay raw; new model-only block dimensions are planned in their own scope.
 pub(crate) fn dimassoc_reproducible(d: &Drawing, dimension: Handle, source: &[Tag]) -> bool {
     let Some(EntityKind::Dimension(dm)) = d.entity(dimension).map(|e| &e.kind) else { return false };
-    let (flags, refs) = std_assoc_refs(d, dm);
+    let scope = d.space_of(dimension).and_then(|space| d.space(&space));
+    if dm.assoc.iter().any(|link| cadcraft_doc::association_point(link, |h| reference_entity(d, scope, h)).is_none()) {
+        return false;
+    }
+    let (flags, refs) = std_assoc_refs(d, dm, scope);
     let Some((_, referenced)) = cadcraft_doc::foreign::dimassoc_reference(source.iter().map(|t| (t.code, t.str()))) else { return false };
     if referenced != dimension {
         return false;
@@ -184,9 +196,9 @@ pub(crate) fn dimassoc_reproducible(d: &Drawing, dimension: Handle, source: &[Ta
 /// dimensions that way: the one reference names the geometry, whose radius or diameter the
 /// dimension then follows. Returns no flags and no references when the association does not name
 /// a circle or arc, so such a dimension is saved unassociated rather than pointing at nothing.
-fn radial_ref(d: &Drawing, assoc: &[DimAssoc]) -> (i64, Vec<OsnapRef>) {
+fn radial_ref(d: &Drawing, assoc: &[DimAssoc], scope: Option<&EntityStore>) -> (i64, Vec<OsnapRef>) {
     for a in assoc {
-        let Some(ent) = d.entity(a.handle) else { continue };
+        let Some(ent) = reference_entity(d, scope, a.handle) else { continue };
         let centre = match &ent.kind {
             EntityKind::Circle(c) => c.center.xy(),
             EntityKind::Arc(arc) => arc.center.xy(),

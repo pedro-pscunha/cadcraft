@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod array;
+mod association;
 mod constraint;
 mod entity;
 mod extents;
@@ -23,6 +24,7 @@ mod tables;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use array::*;
+pub use association::association_point;
 pub use cadcraft_color as color;
 pub use cadcraft_geom as geom;
 pub use constraint::*;
