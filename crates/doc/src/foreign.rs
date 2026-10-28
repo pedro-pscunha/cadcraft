@@ -29,7 +29,15 @@ pub enum DuplicationSource {
 /// The normalized DIMASSOC subclass position and the dimension referenced by its first 330.
 pub fn dimassoc_reference<S: AsRef<str>>(groups: impl IntoIterator<Item = (i32, S)>) -> Option<(usize, Handle)> {
     let mut start = None;
+    let mut grouped = false;
     for (i, (code, value)) in groups.into_iter().enumerate() {
+        if code == 102 {
+            grouped = value.as_ref().trim().starts_with('{');
+            continue;
+        }
+        if grouped {
+            continue;
+        }
         if start.is_none() && code == 100 && value.as_ref().trim().eq_ignore_ascii_case("AcDbDimAssoc") {
             start = Some(i);
         } else if let Some(start) = start
@@ -136,17 +144,32 @@ impl Foreign {
     }
 }
 
-/// An object's owner, excluding the handles in its reactor and extension-dictionary groups.
-fn owner(tags: &[RawTag]) -> Option<Handle> {
+/// DXF group codes whose values reference another record's handle.
+pub fn is_pointer(code: i32) -> bool {
+    matches!(code,320..=369|390..=399|480..=481|1005)
+}
+
+/// DXF dictionary record types, normalized without allocating a name.
+pub fn is_dictionary(kind: &str) -> bool {
+    let kind = kind.trim();
+    kind.eq_ignore_ascii_case("DICTIONARY") || kind.eq_ignore_ascii_case("ACDBDICTIONARYWDFLT")
+}
+
+/// An object's owner, excluding reactor/extension/application groups and xdata.
+pub fn object_owner<S: AsRef<str>>(groups: impl IntoIterator<Item = (i32, S)>) -> Option<Handle> {
     let mut grouped = false;
-    for t in tags.iter().take_while(|t| t.code < 1000) {
-        if t.code == 102 {
-            grouped = t.value.trim().starts_with('{');
-        } else if t.code == 330 && !grouped {
-            return Handle::parse_hex(&t.value);
+    for (code, value) in groups.into_iter().take_while(|(code, _)| *code < 1000) {
+        if code == 102 {
+            grouped = value.as_ref().trim().starts_with('{');
+        } else if code == 330 && !grouped {
+            return Handle::parse_hex(value.as_ref());
         }
     }
     None
+}
+
+fn owner(tags: &[RawTag]) -> Option<Handle> {
+    object_owner(tags.iter().map(|t| (t.code, t.value.as_str())))
 }
 
 fn owner_index(objects: &[ForeignObject]) -> BTreeMap<Handle, Vec<usize>> {
@@ -215,7 +238,7 @@ fn drop_references_to(tags: &mut Vec<RawTag>, dictionary: bool, removed: &BTreeS
 
 fn remap_tags(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
     for t in tags {
-        if matches!(t.code, 5 | 105 | 320..=369 | 390..=399 | 480..=481 | 1005)
+        if (matches!(t.code, 5 | 105) || is_pointer(t.code))
             && let Some(new) = Handle::parse_hex(&t.value).and_then(|h| map.get(&h))
         {
             t.value = new.hex();
@@ -266,8 +289,7 @@ fn remap_model(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>, source: Du
         EntityKind::Unknown(unknown) => {
             if source == DuplicationSource::OtherDrawing {
                 for t in &mut unknown.tags {
-                    if matches!(t.code, 320..=369 | 390..=399 | 480..=481 | 1005) && Handle::parse_hex(&t.value).is_none_or(|h| !map.contains_key(&h))
-                    {
+                    if is_pointer(t.code) && Handle::parse_hex(&t.value).is_none_or(|h| !map.contains_key(&h)) {
                         t.value = "0".into();
                     }
                 }
@@ -331,12 +353,8 @@ impl crate::Drawing {
         let foreign = std::sync::Arc::make_mut(&mut self.foreign);
         foreign.objects.retain(|o| !removed.contains(&o.handle));
         for object in &mut foreign.objects {
-            if object
-                .tags
-                .iter()
-                .any(|t| matches!(t.code,320..=369|390..=399|480..=481|1005) && Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h)))
-            {
-                drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &removed);
+            if object.tags.iter().any(|t| is_pointer(t.code) && Handle::parse_hex(&t.value).is_some_and(|h| removed.contains(&h))) {
+                drop_references_to(&mut object.tags, is_dictionary(&object.kind), &removed);
             }
         }
         for extra in foreign.entities.values_mut().chain(foreign.records.values_mut()) {
@@ -415,7 +433,7 @@ impl crate::Drawing {
             let mut objects: Vec<_> =
                 owned.iter().filter_map(|i| self.foreign.objects.get(*i)).filter(|o| !dropped.contains(&o.handle)).cloned().collect();
             for object in &mut objects {
-                drop_references_to(&mut object.tags, matches!(object.kind.as_str(), "DICTIONARY" | "ACDBDICTIONARYWDFLT"), &dropped);
+                drop_references_to(&mut object.tags, is_dictionary(&object.kind), &dropped);
             }
             let dictionaries: Vec<_> = roots.keys().filter_map(|h| self.foreign.entities.get(h).and_then(|e| e.xdict)).collect();
             for dictionary in dictionaries {

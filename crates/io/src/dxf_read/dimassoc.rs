@@ -8,9 +8,8 @@ use super::{Arc, AssocSnap, Circle, DimAssoc, DimKind, Dimension, Drawing, Entit
 /// dimensions, and for radial or diametric dimensions the single circle reference
 /// ([`radial_links`]). CADCraft's own xdata links, when present, win.
 pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
-    let start = tags.iter().position(|x| x.code == 100 && x.str() == "AcDbDimAssoc").unwrap_or(0);
+    let Some((start, dim_h)) = cadcraft_doc::foreign::dimassoc_reference(tags.iter().map(|t| (t.code, t.str()))) else { return };
     let tail = tags.get(start..).unwrap_or(&[]);
-    let Some(dim_h) = tail.iter().find(|x| x.code == 330).and_then(|x| Handle::parse_hex(&x.str())) else { return };
     let Some(EntityKind::Dimension(dm)) = d.entity(dim_h).map(|e| &e.kind) else { return };
     if !dm.assoc.is_empty() {
         return;

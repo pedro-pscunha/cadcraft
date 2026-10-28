@@ -26,7 +26,7 @@ mod layout;
 mod objects;
 mod sections;
 
-pub(crate) use assoc::models_dimassoc;
+pub(crate) use assoc::dimassoc_reproducible;
 #[cfg(test)]
 pub(crate) use assoc::polyline_vertex_ref;
 pub(crate) use blocks::is_generated_arrow;

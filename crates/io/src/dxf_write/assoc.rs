@@ -101,10 +101,21 @@ pub(super) fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>
     (flags, refs)
 }
 
-/// The exact subclass payload the writer emits. Classification uses the same serialization so
-/// flags, snap kinds, handle paths, subentity markers and parameters cannot silently diverge.
-pub(super) fn dimassoc_tags(dimension: Handle, flags: i64, refs: &[OsnapRef]) -> Vec<Tag> {
-    let mut tags = vec![Tag::s(100, "AcDbDimAssoc"), Tag::s(330, dimension.hex()), Tag::i(90, flags), Tag::i(70, 0), Tag::i(71, 0)];
+/// The complete DIMASSOC record after group 0, including its owner/reactor header. Reading
+/// compares against this same grammar so neither header nor payload semantics can diverge.
+pub(super) fn dimassoc_tags(handle: &str, dictionary: &str, dimension: Handle, flags: i64, refs: &[OsnapRef]) -> Vec<Tag> {
+    let mut tags = vec![
+        Tag::s(5, handle),
+        Tag::s(102, "{ACAD_REACTORS"),
+        Tag::s(330, dictionary),
+        Tag::s(102, "}"),
+        Tag::s(330, dictionary),
+        Tag::s(100, "AcDbDimAssoc"),
+        Tag::s(330, dimension.hex()),
+        Tag::i(90, flags),
+        Tag::i(70, 0),
+        Tag::i(71, 0),
+    ];
     for r in refs {
         tags.extend([
             Tag::s(1, "AcDbOsnapPointRef"),
@@ -130,8 +141,17 @@ fn same_tag(a: &Tag, b: &Tag) -> bool {
     if a.code != b.code {
         return false;
     }
-    let kind = kind_of(a.code);
+    let code = a.code;
+    let kind = kind_of(code);
     let (a, b) = (a.str(), b.str());
+    // Pointer ranges are strings in some DXF value APIs; compare their normalized handle values.
+    if cadcraft_doc::foreign::is_pointer(code) {
+        return Handle::parse_hex(&a).zip(Handle::parse_hex(&b)).is_some_and(|(a, b)| a == b);
+    }
+    if (310..=319).contains(&code) {
+        let (a, b) = (a.trim(), b.trim());
+        return a.len().is_multiple_of(2) && a.bytes().all(|c| c.is_ascii_hexdigit()) && a.eq_ignore_ascii_case(b);
+    }
     match kind {
         Kind::Real => a.trim().parse::<f64>().ok().zip(b.trim().parse::<f64>().ok()).is_some_and(|(a, b)| a.is_finite() && a == b),
         Kind::Int16 | Kind::Int32 | Kind::Int64 | Kind::Bool => {
@@ -145,23 +165,17 @@ fn same_tag(a: &Tag, b: &Tag) -> bool {
 /// Whether the complete DIMASSOC can be written unchanged from the model. This deliberately
 /// keeps unfamiliar or omitted groups raw rather than guessing equivalent defaults. Block
 /// dimensions are not in `Drawing::entity` and are not planned by the association writer.
-pub(crate) fn models_dimassoc(d: &Drawing, dimension: Handle, source: &[Tag]) -> bool {
+pub(crate) fn dimassoc_reproducible(d: &Drawing, dimension: Handle, source: &[Tag]) -> bool {
     let Some(EntityKind::Dimension(dm)) = d.entity(dimension).map(|e| &e.kind) else { return false };
     let (flags, refs) = std_assoc_refs(d, dm);
-    let Some(start) = source.iter().position(|t| t.code == 100 && t.str() == "AcDbDimAssoc") else { return false };
-    let header = source.get(..start).unwrap_or(&[]);
-    let dictionary = header.iter().rev().find(|t| t.code == 330).and_then(|t| Handle::parse_hex(&t.str()));
-    if header.iter().any(|t| match t.code {
-        5 => false,
-        330 => Handle::parse_hex(&t.str()) != dictionary,
-        102 => !matches!(t.str().as_str(), "{ACAD_REACTORS" | "}"),
-        _ => true,
-    }) {
+    let Some((_, referenced)) = cadcraft_doc::foreign::dimassoc_reference(source.iter().map(|t| (t.code, t.str()))) else { return false };
+    if referenced != dimension {
         return false;
     }
-    let expected = dimassoc_tags(dimension, flags, &refs);
-    let actual = source.get(start..).unwrap_or(&[]);
-    !refs.is_empty() && actual.len() == expected.len() && actual.iter().zip(&expected).all(|(a, b)| same_tag(a, b))
+    let Some(dictionary) = cadcraft_doc::foreign::object_owner(source.iter().map(|t| (t.code, t.str()))) else { return false };
+    let Some(handle) = source.iter().find(|t| t.code == 5).map(Tag::str) else { return false };
+    let expected = dimassoc_tags(&handle, &dictionary.hex(), dimension, flags, &refs);
+    !refs.is_empty() && source.len() == expected.len() && source.iter().zip(&expected).all(|(a, b)| same_tag(a, b))
 }
 
 /// The single standard reference of a radial or diametric dimension: the circle or arc it
@@ -183,4 +197,24 @@ fn radial_ref(d: &Drawing, assoc: &[DimAssoc]) -> (i64, Vec<OsnapRef>) {
         return (2, vec![OsnapRef { osnap: 3, main: a.handle, segment: 0, param: 0.0, point: centre.to3(0.0), other: None }]);
     }
     (0, Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pointer_comparison_uses_handle_values_not_spelling() {
+        for code in [330, 331, 332, 1005] {
+            assert!(same_tag(&Tag::s(code, "00002a"), &Tag::s(code, "2A")), "pointer group {code} was compared as text");
+        }
+    }
+
+    #[test]
+    fn binary_chunk_comparison_uses_case_insensitive_hex() {
+        assert!(
+            same_tag(&Tag::s(310, "ab00CF1234567890aa55"), &Tag::s(310, "AB00cf1234567890AA55")),
+            "binary chunks must compare as case-insensitive hex"
+        );
+    }
 }

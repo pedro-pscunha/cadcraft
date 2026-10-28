@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use cadcraft_doc::foreign::{Foreign, ForeignExtra, ForeignKey, ForeignObject};
+use cadcraft_doc::foreign::{Foreign, ForeignExtra, ForeignKey, ForeignObject, MAX_FOREIGN_DEPTH, dimassoc_reference, is_dictionary, is_pointer};
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, RawTag, Unknown};
 use cadcraft_dxf::{Section, Tag};
 
@@ -45,14 +45,6 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
     MODELLED_XDICT_KEYS.contains(&key.as_str()) || (key == "ACAD_DIMASSOC" && modelled_assoc.contains(&norm(target)))
 }
 
-/// The dimension a DIMASSOC serves: its 330 after the subclass marker, not its dictionary owner.
-fn dimassoc_dimension<S: AsRef<str>>(tags: impl IntoIterator<Item = (i32, S)>) -> Option<Handle> {
-    tags.into_iter()
-        .skip_while(|(c, v)| *c != 100 || v.as_ref().trim() != "AcDbDimAssoc")
-        .find(|(c, _)| *c == 330)
-        .and_then(|(_, v)| handle(v.as_ref()))
-}
-
 /// Raw associations suppress modelled output; inferred links are a guard, not a partially usable
 /// model association. Commands and saving retire stale snapshots through
 /// [`Drawing::retire_raw_dimassocs`]. Other edits preserve their opaque source semantics.
@@ -61,7 +53,7 @@ pub(crate) fn raw_dimassoc_dimensions(d: &Drawing) -> HashSet<Handle> {
         .objects
         .iter()
         .filter(|o| o.kind == "DIMASSOC")
-        .filter_map(|o| dimassoc_dimension(o.tags.iter().map(|r| (r.code, r.value.as_str()))))
+        .filter_map(|o| dimassoc_reference(o.tags.iter().map(|r| (r.code, r.value.as_str()))).map(|(_, h)| h))
         .collect()
 }
 
@@ -73,8 +65,6 @@ const OWN_APPS: &[&str] = &["CADCRAFT", "ACADANNOTATIVE", "ACCMTRANSPARENCY", "A
 const MAX_OBJECTS: usize = 1_000_000;
 /// Most xdata groups kept per record (AutoCAD allows 16 KB of xdata per object).
 const MAX_XDATA_GROUPS: usize = 16_384;
-/// Longest ownership chain followed.
-const MAX_DEPTH: usize = 64;
 
 /// Record types that structure a file: never written as an entity of another type.
 const STRUCTURAL: &[&str] = &["", "SECTION", "ENDSEC", "EOF", "TABLE", "ENDTAB", "BLOCK", "ENDBLK", "SEQEND", "VERTEX", "ATTRIB", "CLASS"];
@@ -111,11 +101,6 @@ fn tag(r: &RawTag) -> Tag {
 /// AutoCAD writes some above 2^48 (e.g. 0xDAD1…), so the whole 64-bit range is believed.
 fn handle(s: &str) -> Option<Handle> {
     Handle::parse_hex(s).filter(|h| h.0 != 0)
-}
-
-/// Group codes whose values are handles of other objects (DXF Reference, group code ranges).
-fn is_pointer(code: i32) -> bool {
-    matches!(code, 320..=369 | 390..=399 | 480..=481 | 1005)
 }
 
 /// The records of a run of tags: (type, index of the record's `0` group, groups after it).
@@ -193,10 +178,6 @@ fn entries(tags: &[Tag]) -> Vec<(String, String)> {
         }
     }
     out
-}
-
-fn is_dictionary(kind: &str) -> bool {
-    kind == "DICTIONARY" || kind == "ACDBDICTIONARYWDFLT"
 }
 
 fn modelled_key(key: &str) -> bool {
@@ -358,8 +339,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")
         .filter_map(|(_, _, t)| {
-            let dimension = dimassoc_dimension(t.iter().map(|t| (t.code, t.str())))?;
-            crate::dxf_write::models_dimassoc(d, dimension, t).then(|| head(t).handle).flatten()
+            let (_, dimension) = dimassoc_reference(t.iter().map(|t| (t.code, t.str())))?;
+            crate::dxf_write::dimassoc_reproducible(d, dimension, t).then(|| head(t).handle).flatten()
         })
         .collect();
     // Extension dictionaries of entities and records: owner → dictionary.
@@ -550,7 +531,7 @@ fn retained_objects(
             if let Some(&known) = retained.get(&current) {
                 break known;
             }
-            if path.contains(&current) || path.len() >= MAX_DEPTH {
+            if path.contains(&current) || path.len() >= MAX_FOREIGN_DEPTH {
                 break false;
             }
             path.push(current);
@@ -966,7 +947,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             if let Some(&v) = alive_memo.get(&cur) {
                 break v;
             }
-            if path.contains(&cur) || path.len() >= MAX_DEPTH {
+            if path.contains(&cur) || path.len() >= MAX_FOREIGN_DEPTH {
                 break false;
             }
             path.push(cur.clone());

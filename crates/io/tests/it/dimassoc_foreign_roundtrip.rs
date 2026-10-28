@@ -108,6 +108,9 @@ fn association_dxf(in_block: bool, osnaps: [i64; 2]) -> String {
         (360, "51"),
         (0, "DIMASSOC"),
         (5, "51"),
+        (102, "{ACAD_REACTORS"),
+        (330, "50"),
+        (102, "}"),
         (330, "50"),
         (100, "AcDbDimAssoc"),
         (330, "40"),
@@ -257,6 +260,34 @@ fn dimassoc_keeps_parameters_the_inferred_snap_does_not_reproduce() {
 fn dimassoc_keeps_handle_paths_and_subentity_markers() {
     let source = association_dxf(false, [13, 1]).replace("331\n30\n73\n0\n91\n0\n301\n\n", "331\n30\n331\n30\n73\n1\n91\n1\n301\nnested-path\n");
     assert_raw_semantics(&source, false);
+}
+
+#[test]
+fn supported_dimassoc_handle_spelling_does_not_make_it_opaque() {
+    let source = association_dxf(false, [13, 1]);
+    assert_eq!(source.matches("5\n30\n").count(), 1, "fixture LINE handle must be unique");
+    assert_eq!(source.matches("331\n30\n").count(), 2, "fixture must name the LINE in both point references");
+    let source = source.replace("5\n30\n", "5\n2A\n").replace("331\n30\n", "331\n002a\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(d.foreign.objects.iter().all(|o| o.kind != "DIMASSOC"), "equivalent hexadecimal pointers were treated as changed semantics");
+}
+
+#[test]
+fn normalized_subclass_parsing_finds_the_dimension_not_the_dictionary() {
+    let source = association_dxf(false, [13, 1]);
+    assert_eq!(source.matches("100\nAcDbDimAssoc\n").count(), 1);
+    let d = cadcraft_io::read_dxf(source.replace("100\nAcDbDimAssoc\n", "100\n AcDbDimAssoc \n").as_bytes()).unwrap();
+    let EntityKind::Dimension(dimension) = &d.entity(Handle(0x40)).unwrap().kind else { panic!("dimension") };
+    assert_eq!(dimension.assoc.len(), 2, "normalized subclass owner parsing used the header's dictionary 330");
+}
+
+#[test]
+fn unsupported_header_multiplicity_is_preserved_instead_of_regenerated() {
+    let source = association_dxf(false, [13, 1]);
+    assert_eq!(source.matches("102\n{ACAD_REACTORS\n330\n50\n").count(), 1);
+    let source = source.replace("102\n{ACAD_REACTORS\n330\n50\n", "102\n{ACAD_REACTORS\n330\n50\n330\n50\n");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert!(d.foreign.objects.iter().any(|o| o.kind == "DIMASSOC"), "header was not validated against the emitted header grammar");
 }
 
 #[test]

@@ -701,10 +701,7 @@ fn write_associative_objects(w: &mut W, cx: &Ctx) {
         w.s(3, "ACAD_DIMASSOC");
         w.s(360, a.handle.clone());
         w.s(0, "DIMASSOC");
-        w.s(5, a.handle.clone());
-        w.group("ACAD_REACTORS", 330, &[&a.xdict]);
-        w.s(330, a.xdict.clone());
-        w.t.extend(super::assoc::dimassoc_tags(*dim, a.flags, &a.refs));
+        w.t.extend(super::assoc::dimassoc_tags(&a.handle, &a.xdict, *dim, a.flags, &a.refs));
     }
 }
 
