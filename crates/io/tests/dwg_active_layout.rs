@@ -80,3 +80,19 @@ fn the_active_layout_name_is_matched_ignoring_case() {
     d.active_layout = Some("s2".into());
     assert_eq!(dwg_active_layout(&dwg(&d)), "S2");
 }
+
+/// A drawing saved with a paper layout current (`TILEMODE` 0) opens on that layout again: the
+/// save used to leave `$TILEMODE` out, and AutoCAD then opened the Model tab.
+#[test]
+fn a_drawing_saved_on_a_layout_reopens_on_it() {
+    for tilemode in [0, 1] {
+        let mut d = three_sheets();
+        d.active_layout = Some("S2".into());
+        d.header.set("TILEMODE", cadcraft_doc::HVal::Int(tilemode));
+        let bytes = dwg(&d);
+        let doc = acadrust::DwgReader::from_stream(Cursor::new(bytes.clone())).read().unwrap();
+        assert_eq!(doc.header.show_model_space, tilemode == 1, "TILEMODE {tilemode} in the DWG header");
+        let back = read(&bytes, "case.dwg").unwrap();
+        assert_eq!(back.header.get("TILEMODE").and_then(|v| v.as_i64()), Some(tilemode), "TILEMODE {tilemode} after reopening");
+    }
+}
