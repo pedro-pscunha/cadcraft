@@ -165,6 +165,39 @@ fn deleted_polyline_vertices_are_not_repaired_by_ordinal_or_partial_evaluation()
 }
 
 #[test]
+fn reverse_commands_freeze_raw_ordinal_vertex_links_with_named_notes() {
+    for command in ["reverse", "pedit"] {
+        let mut s = Session::new();
+        let poly = s.execute("pline", &json!({"vertices":[[0,0],[5,0],[10,0],[20,0]]})).unwrap()["handle"].as_str().unwrap().to_string();
+        let other = s.execute("line", &json!({"points":[[75,0],[80,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+        let dim = s.execute("dimlinear", &json!({"p1":[5,0],"p2":[80,0],"at":[40,5]})).unwrap()["handle"].as_str().unwrap().to_string();
+        let h = Handle::parse_hex(&dim).unwrap();
+        let p = Handle::parse_hex(&poly).unwrap();
+        let o = Handle::parse_hex(&other).unwrap();
+        s.doc_mut()
+            .unwrap()
+            .modify_entity(h, |e| {
+                if let EntityKind::Dimension(dm) = &mut e.kind {
+                    dm.assoc = vec![
+                        DimAssoc { point: "p13".into(), handle: p, snap: AssocSnap::Vertex { index: 1 } },
+                        DimAssoc { point: "p14".into(), handle: o, snap: AssocSnap::End },
+                    ]
+                }
+            })
+            .unwrap();
+        reopen_raw(&mut s, h);
+        let before = s.doc().unwrap().entity(h).unwrap().kind.clone();
+        let result = if command == "pedit" {
+            s.execute(command, &json!({"handle":poly,"option":"reverse"})).unwrap()
+        } else {
+            s.execute(command, &json!({"handles":[poly]})).unwrap()
+        };
+        assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before, "{command} silently retargeted an ordinal vertex");
+        assert!(result["warnings"].to_string().contains(&dim), "{command} omitted the handle-named warning: {result}");
+    }
+}
+
+#[test]
 fn quadrant_identity_uses_the_dimension_point_when_the_cache_is_absent() {
     let (mut s, dim, target) = native_source(true);
     let result = s.execute("move", &json!({"handles":[target.hex()],"delta":[20,0]})).unwrap();

@@ -297,9 +297,23 @@ pub fn recompute(owner: Handle, dm: &Dimension, prev: Option<&Dimension>, before
     nd
 }
 
+fn vertex_positions_permuted(a: &[cadcraft_geom::PolyVertex], b: &[cadcraft_geom::PolyVertex]) -> bool {
+    if a.iter().zip(b).all(|(a, b)| a.p == b.p) {
+        return false;
+    }
+    let mut left: Vec<_> = a.iter().map(|v| v.p).collect();
+    let mut right: Vec<_> = b.iter().map(|v| v.p).collect();
+    let order = |a: &Vec2, b: &Vec2| a.x.total_cmp(&b.x).then_with(|| a.y.total_cmp(&b.y));
+    left.sort_by(order);
+    right.sort_by(order);
+    left == right
+}
+
 fn vertex_topology_changed(before: &Drawing, after: &Drawing, handle: Handle) -> bool {
     match (before.entity_including_blocks(handle).map(|e| &e.kind), after.entity_including_blocks(handle).map(|e| &e.kind)) {
-        (Some(EntityKind::LwPolyline(a)), Some(EntityKind::LwPolyline(b))) => a.vertices.len() != b.vertices.len() || a.closed != b.closed,
+        (Some(EntityKind::LwPolyline(a)), Some(EntityKind::LwPolyline(b))) => {
+            a.vertices.len() != b.vertices.len() || a.closed != b.closed || vertex_positions_permuted(&a.vertices, &b.vertices)
+        }
         _ => false,
     }
 }
