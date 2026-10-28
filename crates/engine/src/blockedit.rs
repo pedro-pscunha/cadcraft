@@ -145,6 +145,7 @@ impl BlockEdit {
         }
         let host = &self.host.doc;
         let mut d = editor.clone();
+        d.overlay_block_foreign(host, name, &self.original);
         // Saving as another block leaves the complete original definition unchanged.
         if !name.eq_ignore_ascii_case(&self.name) {
             restore_original(&mut d, host, &self.name);

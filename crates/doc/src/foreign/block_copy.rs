@@ -107,6 +107,48 @@ impl Drawing {
         Ok(BlockContentCopy { entities, handles: copy.handles })
     }
 
+    /// Compose an edited block over the current host's foreign database. History snapshots
+    /// own only the edited namespace; they cannot roll back outside retirement/pending state.
+    pub fn overlay_block_foreign(&mut self, host: &Drawing, name: &str, original: &crate::EntityStore) {
+        let editor = self.foreign.clone();
+        let mut edited = roots(self.model.iter().map(|entity| entity.as_ref()));
+        edited.extend(roots(original.iter().map(|entity| entity.as_ref())));
+        if let Some(block) = host.block(name) {
+            edited.extend(roots(block.entities.iter().map(|entity| entity.as_ref())));
+        }
+        edited.extend(role_roots(&editor, name));
+        edited.extend(role_roots(&host.foreign, name));
+        let mut scope = namespace(&editor, &edited);
+        scope.extend(namespace(&host.foreign, &edited));
+        let mut foreign = (*host.foreign).clone();
+        foreign.objects.retain(|object| !scope.contains(&object.handle));
+        foreign.objects.extend(editor.objects.iter().filter(|object| scope.contains(&object.handle)).cloned());
+        foreign.entities.retain(|handle, _| !edited.contains(handle));
+        foreign.entities.extend(editor.entities.iter().filter(|(handle, _)| edited.contains(handle)).map(|(handle, extra)| (*handle, extra.clone())));
+        foreign.records.retain(|key, _| !block_role(key, name));
+        foreign.records.extend(editor.records.iter().filter(|(key, _)| block_role(key, name)).map(|(key, extra)| (key.clone(), extra.clone())));
+        foreign.raw_dimassocs.retain(|handle, _| !edited.contains(handle));
+        foreign
+            .raw_dimassocs
+            .extend(editor.raw_dimassocs.iter().filter(|(handle, _)| edited.contains(handle)).map(|(handle, state)| (*handle, state.clone())));
+        for (handle, key) in &editor.targets {
+            if scope.contains(handle) || !foreign.targets.contains_key(handle) {
+                foreign.targets.insert(*handle, key.clone());
+            }
+        }
+        for class in &editor.classes {
+            if !foreign.classes.contains(class) {
+                foreign.classes.push(class.clone());
+            }
+        }
+        for class in &editor.class_order {
+            if !foreign.class_order.contains(class) {
+                foreign.class_order.push(class.clone());
+            }
+        }
+        self.foreign = Arc::new(foreign);
+    }
+
     /// A rename moves named roles without cloning record identities or owned object graphs.
     pub fn rename_block_foreign_records(&mut self, source: &str, target: &str) {
         if !self.foreign.records.keys().any(|key| block_role(key, source)) && !self.foreign.targets.values().any(|key| block_role(key, source)) {

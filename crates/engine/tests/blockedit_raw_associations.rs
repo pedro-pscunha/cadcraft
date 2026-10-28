@@ -197,6 +197,38 @@ fn block_commit_validates_host_dependencies_and_keeps_pending_state_across_saves
 }
 
 #[test]
+fn host_pending_state_survives_editor_undo_redo_and_repeated_commit() {
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |b, n| cadcraft_io::read(b, n).map_err(|e| e.to_string()),
+        write: |d, n| cadcraft_io::write(d, n).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    let (mut s, dim, leaf) = nested_target_session();
+    let h = Handle::parse_hex(&dim).unwrap();
+    let original = s.doc().unwrap().entity(h).unwrap().kind.clone();
+    s.execute("bedit", &json!({"name":"TARGET"})).unwrap();
+    s.execute("move", &json!({"handles":[leaf.hex()],"delta":[2,0]})).unwrap();
+    s.execute("line", &json!({"points":[[20,20],[30,20]]})).unwrap();
+    s.execute("bsave", &json!({})).unwrap();
+    assert!(s.state().unwrap().block_edit.as_ref().unwrap().host.doc.raw_dimassoc_unupdated(h));
+    s.execute("u", &json!({})).unwrap();
+    s.execute("bsave", &json!({})).unwrap();
+    assert!(
+        s.state().unwrap().block_edit.as_ref().unwrap().host.doc.raw_dimassoc_unupdated(h),
+        "old editor Foreign erased authoritative host pending state"
+    );
+    let bytes = s.execute("document.bytes", &json!({"format":"dxf"})).unwrap();
+    assert!(bytes["warnings"].to_string().contains(&dim));
+    s.execute("redo", &json!({})).unwrap();
+    s.execute("bsave", &json!({})).unwrap();
+    s.execute("bclose", &json!({"save":true})).unwrap();
+    assert!(s.doc().unwrap().raw_dimassoc_unupdated(h));
+    assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, original);
+    let bytes = s.execute("document.bytes", &json!({"format":"dwg"})).unwrap();
+    assert!(bytes["warnings"].to_string().contains(&dim));
+}
+
+#[test]
 fn removing_a_definition_target_retires_host_raw_data_without_resurrection() {
     let (mut s, dim, leaf) = nested_target_session();
     s.execute("bedit", &json!({"name":"TARGET"})).unwrap();
