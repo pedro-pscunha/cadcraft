@@ -62,7 +62,7 @@ fn assert_tables(text: &str) {
         let owner = value(block, 5);
         assert_eq!(block.iter().filter(|t| t.code == 102 && t.str() == "{ACAD_XDICTIONARY").count(), 1);
         let dictionary_handle = value(block, 360);
-        let dictionary = &records.iter().find(|(k, t)| k == "DICTIONARY" && value(t, 5) == dictionary_handle).unwrap().1;
+        let dictionary = &records.iter().find(|(k, t)| cadcraft_doc::foreign::is_dictionary(k) && value(t, 5) == dictionary_handle).unwrap().1;
         assert_eq!(value(dictionary, 330), owner);
         assert_eq!(dictionary.iter().filter(|t| t.code == 3 && t.str() == "ACAD_SORTENTS").count(), 1);
         let table_handle = dictionary.windows(2).find(|p| p[0].code == 3 && p[0].str() == "ACAD_SORTENTS").unwrap()[1].str();
@@ -93,6 +93,17 @@ fn dxf_keeps_model_and_block_draw_order_with_one_merged_extension_dictionary() {
         drawing = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
         assert_order(&drawing);
     }
+}
+
+#[test]
+fn a_dictionary_with_default_is_reused_without_losing_raw_keys() {
+    let source = source().replace("0\nDICTIONARY\n5\nB1\n", "0\nACDBDICTIONARYWDFLT\n5\nB1\n");
+    assert!(source.contains("ACDBDICTIONARYWDFLT"));
+    let drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert_order(&drawing);
+    let text = cadcraft_io::write_dxf(&drawing);
+    assert_tables(&text);
+    assert_order(&cadcraft_io::read_dxf(text.as_bytes()).unwrap());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

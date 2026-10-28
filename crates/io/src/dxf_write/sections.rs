@@ -494,7 +494,6 @@ struct ObjectWritePlan<'a> {
     table_styles: &'a [TableStyle],
     mleader_styles: &'a [MLeaderStyle],
     ltype_handles: &'a HashMap<String, String>,
-    sortents: &'a [super::sortents::Table],
 }
 
 fn write_layout_objects(w: &mut W, plan: &ObjectWritePlan<'_>) {
@@ -718,7 +717,6 @@ fn write_objects(w: &mut W, plan: ObjectWritePlan<'_>) {
     write_named_objects(w, &plan);
     write_associative_objects(w, plan.cx);
     write_layout_objects(w, &plan);
-    super::sortents::objects(w, plan.sortents);
     // Raster image definitions.
     w.t.extend(crate::dxf_image::objects(&plan.cx.images, plan.root_dict));
     w.s(0, "ENDSEC");
@@ -1071,21 +1069,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
 
     write_entities(&mut w, d, &ms_br, &ps_brs, &cx);
 
-    // Generated block geometry now has its final handles; include reused dimension blocks
-    // as well as user blocks and every layout, before raw extension dictionaries are merged.
-    let mut sortents = Vec::new();
-    super::sortents::plan(&mut w, &mut sortents, &ms_br, d.model.iter().map(|e| e.as_ref()));
-    for (_, owner, layout) in &ps_brs {
-        super::sortents::plan(&mut w, &mut sortents, owner, layout.entities.iter().map(|e| e.as_ref()));
-    }
-    for (_, owner, block) in &user_blocks {
-        super::sortents::plan(&mut w, &mut sortents, owner, block.entities.iter().map(|e| e.as_ref()));
-    }
-    for (_, owner, entities) in dim_defs.iter().chain(arrow_defs.iter()).chain(table_defs.iter()) {
-        super::sortents::plan(&mut w, &mut sortents, owner, entities.iter());
-    }
-    super::sortents::attach(&mut w, &sortents);
-
     write_objects(
         &mut w,
         ObjectWritePlan {
@@ -1107,7 +1090,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
             table_styles,
             mleader_styles,
             ltype_handles: &ltype_handles,
-            sortents: &sortents,
         },
     );
 
@@ -1117,6 +1099,24 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
         *t = Tag::s(5, seed);
     }
     crate::dxf_raw::finish(&mut w.t, d);
+    // Every entity now has its final emitted records, including raw passthrough. Flatten lowered
+    // multileaders and region loops into their source entity's position, and reuse restored xdicts.
+    let written = super::sortents::written(&mut w);
+    let mut sortents = Vec::new();
+    super::sortents::plan(&mut w, &mut sortents, &written, &ms_br, d.model.iter().map(|e| e.as_ref()));
+    for (_, owner, layout) in &ps_brs {
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, layout.entities.iter().map(|e| e.as_ref()));
+    }
+    for (_, owner, block) in &user_blocks {
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, block.entities.iter().map(|e| e.as_ref()));
+    }
+    for (_, owner, entities) in dim_defs.iter().chain(arrow_defs.iter()).chain(table_defs.iter()) {
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, entities.iter());
+    }
+    super::sortents::attach(&mut w, &sortents);
+    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
+        *tag = Tag::s(5, format!("{:X}", w.next));
+    }
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     add_class_instance_counts(&mut w.t);
     mark_xrefs(&mut w.t, d);

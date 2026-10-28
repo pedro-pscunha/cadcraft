@@ -42,6 +42,8 @@ struct Rx {
     styles: HashMap<String, String>,
     /// BLOCK_RECORD handle (upper case) → block name.
     brs: HashMap<String, String>,
+    /// Block record → its attached extension dictionary (not any dictionary claiming this owner).
+    block_xdicts: HashMap<Handle, Handle>,
     /// LTYPE record handle (upper case) → linetype name (DIMLTYPE, DIMLTEX1, DIMLTEX2).
     ltypes: HashMap<String, String>,
     /// Upper-case block name → (insertion units, explodable) from its BLOCK_RECORD.
@@ -125,7 +127,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
     shift_dimension_blocks(&mut d, &rx);
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
-    apply_sortents(&mut d, &objs.sortents, &rx.brs, &paper_block_for, &first_layout);
+    apply_sortents(&mut d, &objs, &rx, &paper_block_for, &first_layout);
     objs.apply(&mut d, &rx);
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);

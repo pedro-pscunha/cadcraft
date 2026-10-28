@@ -1,6 +1,6 @@
 use super::common::T;
 use super::entities::{entity_extras, entity_plot_style, entity_with_table_budget, insert_attribs, polyline_entity};
-use super::objects::{MAX_OBJECTS, Objects, page_setup};
+use super::objects::{MAX_OBJECTS, Objects, SortentsTable, page_setup};
 use super::{Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
 
 pub(super) fn parse_entities(
@@ -275,26 +275,28 @@ pub(super) fn outside_sections(tags: &[Tag]) -> usize {
 /// A SORTENTSTABLE (DXF Reference, OBJECTS section): after its AcDbSortentsTable marker, the
 /// owning block record (330), then pairs of an entity handle (331) and the sort handle (5) it is
 /// drawn by.
-pub(super) fn sortents_table(tags: &[Tag]) -> Option<(String, HashMap<Handle, u64>)> {
+pub(super) fn sortents_table(tags: &[Tag]) -> Option<SortentsTable> {
     let start = tags.iter().position(|t| t.code == 100 && t.str() == "AcDbSortentsTable")?;
     let tail = tags.get(start + 1..)?;
-    let owner = tail.iter().find(|t| t.code == 330)?.str().trim().to_ascii_uppercase();
-    let mut map = HashMap::new();
+    let block = Handle::parse_hex(&tail.iter().find(|t| t.code == 330)?.str())?;
+    let handle = Handle::parse_hex(&tags.iter().find(|t| t.code == 5)?.str())?;
+    let dictionary = Handle::parse_hex(&tags.get(..start)?.iter().find(|t| t.code == 330)?.str())?;
+    let mut entries = Vec::new();
     let mut ent: Option<Handle> = None;
     for t in tail {
         match t.code {
             331 => ent = Handle::parse_hex(&t.str()),
             5 => {
                 if let (Some(e), Some(k)) = (ent.take(), Handle::parse_hex(&t.str()))
-                    && map.len() < MAX_OBJECTS
+                    && entries.len() < MAX_OBJECTS
                 {
-                    map.insert(e, k.0);
+                    entries.push((e, k.0));
                 }
             }
             _ => {}
         }
     }
-    (!map.is_empty()).then_some((owner, map))
+    Some(SortentsTable { handle, dictionary, block, entries })
 }
 
 /// Move each `*D` block by its dimension's group 12, so the graphics sit where AutoCAD draws
@@ -320,26 +322,43 @@ pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) {
 
 /// Draw each space with a SORTENTSTABLE in sort-handle order: an entity listed in the table by
 /// its sort handle, any other by its own handle.
-pub(super) fn apply_sortents(
-    d: &mut Drawing,
-    tables: &[(String, HashMap<Handle, u64>)],
-    brs: &HashMap<String, String>,
-    paper_for: &HashMap<String, String>,
-    first_layout: &str,
-) {
-    for (owner, map) in tables {
-        let Some(name) = brs.get(owner) else { continue };
+pub(super) fn apply_sortents(d: &mut Drawing, objects: &Objects, rx: &Rx, paper_for: &HashMap<String, String>, first_layout: &str) {
+    // Record order is not draw order. Unlisted entities (including a whole space with no
+    // table) draw by their own handles; establish that default before explicit overrides.
+    d.model.sort_by_key(|e| e.handle);
+    for layout in &mut d.layouts {
+        layout.entities.sort_by_key(|e| e.handle);
+    }
+    for block in d.blocks.values_mut() {
+        std::sync::Arc::make_mut(block).entities.sort_by_key(|e| e.handle);
+    }
+    let mut notes = Vec::new();
+    for linked in objects.sortents(rx) {
+        let Some(name) = rx.brs.get(&linked.block.hex()) else { continue };
         let up = name.to_ascii_uppercase();
-        let key = |e: &Entity| map.get(&e.handle).copied().unwrap_or(e.handle.0);
-        if up == "*MODEL_SPACE" {
-            d.model.sort_by_key(key);
+        let store = if up == "*MODEL_SPACE" {
+            &mut d.model
         } else if up.starts_with("*PAPER_SPACE") {
             let lname = paper_for.get(&up).map(String::as_str).unwrap_or(first_layout);
-            if let Some(l) = d.layouts.iter_mut().find(|l| l.name == lname) {
-                l.entities.sort_by_key(key);
-            }
-        } else if let Some(b) = d.blocks.get_mut(name.as_str()) {
-            std::sync::Arc::make_mut(b).entities.sort_by_key(key);
+            let Some(layout) = d.layouts.iter_mut().find(|l| l.name == lname) else { continue };
+            &mut layout.entities
+        } else {
+            let Some(block) = d.blocks.get_mut(name.as_str()) else { continue };
+            &mut std::sync::Arc::make_mut(block).entities
+        };
+        let members = store.iter().map(|entity| entity.handle).collect();
+        let table = objects.recover_sortents(linked, &members);
+        let keys = table.keys(&members);
+        store.sort_by_key(|entity| keys.get(&entity.handle).copied().unwrap_or(entity.handle.0));
+        if linked.handle != table.handle || keys.len() != table.entries.len() {
+            notes.push(format!(
+                "SORTENTSTABLE {} for block {} repaired using {}: {} dead/duplicate entries dropped",
+                linked.handle.hex(),
+                name,
+                table.handle.hex(),
+                table.entries.len().saturating_sub(keys.len()),
+            ));
         }
     }
+    d.read_notes.extend(notes);
 }

@@ -45,6 +45,8 @@ struct W {
     next: u64,
     first: u64,
     used: HashSet<Handle>,
+    /// Source entity → its emitted top-level records (not ATTRIB/VERTEX/SEQEND children).
+    emitted: HashMap<Handle, Vec<Handle>>,
     /// Upper-case plot style name → its `ACDBPLACEHOLDER` handle (group 390 of layers and objects).
     pstyles: HashMap<String, String>,
     /// Upper-case layer name → its LAYER table record handle (group 341 of viewports).
@@ -64,7 +66,16 @@ impl W {
             .collect();
         #[cfg(test)]
         tests::SCANNED.with(|count| count.set(count.get().saturating_add(used.len())));
-        Self { t: Vec::new(), next: first, first, used, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() }
+        Self {
+            t: Vec::new(),
+            next: first,
+            first,
+            used,
+            emitted: HashMap::new(),
+            pstyles: HashMap::new(),
+            layers: HashMap::new(),
+            reactors: HashMap::new(),
+        }
     }
 
     fn attribute_handle(&mut self, wanted: Option<Handle>) -> String {

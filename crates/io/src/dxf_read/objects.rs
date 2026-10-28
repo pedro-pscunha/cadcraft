@@ -1,7 +1,29 @@
 use super::common::T;
 use super::dimassoc::dimassoc;
 use super::document::sortents_table;
-use super::{Drawing, EntityKind, Group, Handle, HashMap, MLeaderStyle, PageSetup, Rx, Tag, Vec2};
+use super::{Drawing, EntityKind, Group, Handle, HashMap, HashSet, MLeaderStyle, PageSetup, Rx, Tag, Vec2};
+
+/// A draw-order object and the identities that bind it to a block's ACAD_SORTENTS entry.
+pub(super) struct SortentsTable {
+    pub(super) handle: Handle,
+    pub(super) dictionary: Handle,
+    pub(super) block: Handle,
+    pub(super) entries: Vec<(Handle, u64)>,
+}
+
+impl SortentsTable {
+    /// AutoCAD drops dead entries and later duplicate keys when it opens a damaged table.
+    pub(super) fn keys(&self, members: &HashSet<Handle>) -> HashMap<Handle, u64> {
+        let mut keys = HashMap::new();
+        let mut used = HashSet::new();
+        for &(entity, key) in &self.entries {
+            if members.contains(&entity) && !keys.contains_key(&entity) && used.insert(key) {
+                keys.insert(entity, key);
+            }
+        }
+        keys
+    }
+}
 
 /// Non-graphical objects applied once every entity is placed.
 #[derive(Default)]
@@ -22,8 +44,10 @@ pub(super) struct Objects {
     groups: Vec<(String, Vec<Tag>)>,
     /// Saved paper-space views of layouts: (layout name, view).
     layout_views: Vec<(String, (Vec2, f64))>,
-    /// SORTENTSTABLE objects: (owning block record handle, entity handle → sort handle).
-    pub(super) sortents: Vec<(String, HashMap<Handle, u64>)>,
+    /// SORTENTSTABLE candidates. Only an attached dictionary's named entry is authoritative.
+    sortents: Vec<SortentsTable>,
+    /// Dictionary → (owning block record, ACAD_SORTENTS object).
+    sortents_links: HashMap<Handle, (Handle, Handle)>,
     /// WIPEOUTVARIABLES: the drawing's WIPEOUTFRAME (0 = frames hidden, 1 = shown).
     wipeout_frame: Option<i64>,
 }
@@ -41,7 +65,7 @@ impl Objects {
                     self.scales.push(s);
                 }
             }
-            "DICTIONARY" => {
+            "DICTIONARY" | "ACDBDICTIONARYWDFLT" => {
                 let mut name: Option<String> = None;
                 for t in tags {
                     match t.code {
@@ -50,6 +74,15 @@ impl Objects {
                             if let Some(n) = name.take()
                                 && self.names.len() < MAX_OBJECTS
                             {
+                                if n == "ACAD_SORTENTS"
+                                    && let (Some(dictionary), Some(owner), Some(table)) = (
+                                        Handle::parse_hex(&h),
+                                        cadcraft_doc::foreign::object_owner(tags.iter().map(|t| (t.code, t.str()))),
+                                        Handle::parse_hex(&t.str()),
+                                    )
+                                {
+                                    self.sortents_links.insert(dictionary, (owner, table));
+                                }
                                 self.names.insert(t.str().trim().to_ascii_uppercase(), n);
                             }
                         }
@@ -78,6 +111,27 @@ impl Objects {
             }
             _ => {}
         }
+    }
+
+    pub(super) fn sortents<'a>(&'a self, rx: &'a Rx) -> impl Iterator<Item = &'a SortentsTable> {
+        self.sortents.iter().filter(|table| {
+            rx.block_xdicts.get(&table.block) == Some(&table.dictionary)
+                && self.sortents_links.get(&table.dictionary) == Some(&(table.block, table.handle))
+        })
+    }
+
+    /// Valid linked tables never borrow orphan data. For a damaged table, recover the most
+    /// complete same-block/same-dictionary candidate, preferring its newest identity on ties.
+    /// Firenze's two damaged model tables normalize this way to AutoCAD LT's observed table.
+    pub(super) fn recover_sortents<'a>(&'a self, linked: &'a SortentsTable, members: &HashSet<Handle>) -> &'a SortentsTable {
+        if linked.keys(members).len() == linked.entries.len() {
+            return linked;
+        }
+        self.sortents
+            .iter()
+            .filter(|table| table.block == linked.block && table.dictionary == linked.dictionary)
+            .max_by_key(|table| (table.keys(members).len(), table.handle))
+            .unwrap_or(linked)
     }
 
     /// The text of the CADCraft XRECORD stored under `key` in a dictionary (its 1/3 strings).

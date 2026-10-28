@@ -8,12 +8,15 @@ fn line(h: &str, y: f64) -> String {
 }
 
 fn dxf(objects: &str) -> String {
-    let mut s = String::from("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n0\nBLOCK_RECORD\n5\n1F\n2\n*Model_Space\n0\nENDTAB\n0\nENDSEC\n");
+    let mut s = String::from(
+        "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n0\nBLOCK_RECORD\n5\n1F\n102\n{ACAD_XDICTIONARY\n360\nB1\n102\n}\n2\n*Model_Space\n0\nENDTAB\n0\nENDSEC\n",
+    );
     s.push_str("0\nSECTION\n2\nENTITIES\n");
     s.push_str(&line("A1", 0.0));
     s.push_str(&line("A2", 1.0));
     s.push_str(&line("A3", 2.0));
     s.push_str("0\nENDSEC\n0\nSECTION\n2\nOBJECTS\n");
+    s.push_str("0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n0\nDICTIONARY\n5\nB1\n330\n1F\n100\nAcDbDictionary\n3\nACAD_SORTENTS\n360\nB0\n");
     s.push_str(objects);
     s.push_str("0\nENDSEC\n0\nEOF\n");
     s

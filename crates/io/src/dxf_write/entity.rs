@@ -33,6 +33,7 @@ pub(super) fn hatch_reactors(d: &Drawing) -> HashMap<Handle, Vec<String>> {
 }
 
 pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
+    let start = w.t.len();
     write_basic_entity(w, d, e, owner, paper, cx);
     write_text_entity(w, d, e, owner, paper, cx);
     write_insert_entity(w, d, e, owner, paper, cx);
@@ -43,6 +44,17 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     write_viewport_entity(w, d, e, owner, paper, cx);
     write_wipeout_entity(w, d, e, owner, paper, cx);
     write_other_entity(w, d, e, owner, paper, cx);
+    let mut top_level = false;
+    let mut handles = Vec::new();
+    for tag in w.t.get(start..).unwrap_or_default() {
+        if tag.code == 0 {
+            top_level = !matches!(tag.str().as_str(), "VERTEX" | "ATTRIB" | "SEQEND");
+        } else if top_level && tag.code == 5 {
+            handles.extend(Handle::parse_hex(&tag.str()));
+            top_level = false;
+        }
+    }
+    w.emitted.insert(e.handle, handles);
 }
 
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {

@@ -1,7 +1,7 @@
 use super::common::T;
 use super::objects::MAX_OBJECTS;
 use super::{
-    Color, DashElement, DimStyle, Drawing, HVal, HashMap, Layer, Linetype, Lineweight, NamedView, Rgb, Rx, Tag, TextStyle, Ucs, Vec2, Vec3,
+    Color, DashElement, DimStyle, Drawing, HVal, Handle, HashMap, Layer, Linetype, Lineweight, NamedView, Rgb, Rx, Tag, TextStyle, Ucs, Vec2, Vec3,
     VportConfig, VportTile, records,
 };
 
@@ -294,7 +294,19 @@ fn index_table_handles(recs: &[(String, Vec<Tag>)], rx: &mut Rx) {
                 if let Some(array) = crate::dxf_ext::read_array(tags) {
                     rx.block_arrays.insert(name.to_ascii_uppercase(), array);
                 }
-                rx.brs.insert(handle.trim().to_ascii_uppercase(), name);
+                let Some(block) = Handle::parse_hex(&handle) else { continue };
+                let mut extension = false;
+                for tag in tags {
+                    if tag.code == 102 {
+                        extension = tag.str().trim() == "{ACAD_XDICTIONARY";
+                    } else if extension
+                        && tag.code == 360
+                        && let Some(dictionary) = Handle::parse_hex(&tag.str())
+                    {
+                        rx.block_xdicts.insert(block, dictionary);
+                    }
+                }
+                rx.brs.insert(block.hex(), name);
             }
             "LTYPE" => {
                 rx.ltypes.insert(handle.trim().to_ascii_uppercase(), name);

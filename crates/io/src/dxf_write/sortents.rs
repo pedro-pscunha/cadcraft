@@ -1,83 +1,183 @@
-//! Explicit draw order: AutoCAD falls back to handle order, not DXF record order.
+//! Explicit draw order uses the final emitted records, not pre-lowering source identities.
 
-use super::{Entity, Handle, HashMap, W};
+use super::{Entity, Handle, HashMap, HashSet, Tag, W};
 
 pub(super) struct Table {
-    owner: String,
-    dictionary: String,
+    owner: Handle,
+    dictionary: Handle,
+    new_dictionary: bool,
     handle: String,
     order: Vec<Handle>,
 }
 
-/// Allocate only for spaces whose current draw order needs an override. Sort handles reuse
-/// the space's existing entity handles as keys; they are not new object identities.
-pub(super) fn plan<'a>(w: &mut W, tables: &mut Vec<Table>, owner: &str, entities: impl Iterator<Item = &'a Entity>) {
-    let order: Vec<_> = entities.map(|e| e.handle).collect();
+/// Final records after foreign passthrough: dictionaries can be reused, and unknown entities
+/// participate only when their raw record really survived.
+pub(super) struct Written {
+    entities: HashSet<Handle>,
+    dictionaries: HashMap<Handle, Handle>,
+}
+
+fn records(tags: &[Tag]) -> impl Iterator<Item = (usize, &Tag, &[Tag])> {
+    let mut rest = tags;
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        let (head, tail) = rest.split_first()?;
+        let length = tail.iter().position(|t| t.code == 0).unwrap_or(tail.len());
+        let (body, next) = tail.split_at(length);
+        let start = offset;
+        offset += length + 1;
+        rest = next;
+        Some((start, head, body))
+    })
+}
+
+fn handle(body: &[Tag]) -> Option<Handle> {
+    body.iter().find(|t| matches!(t.code, 5 | 105)).and_then(|t| Handle::parse_hex(&t.str()))
+}
+
+fn extension_dictionary(body: &[Tag]) -> Option<Handle> {
+    let mut extension = false;
+    for tag in body.iter().take_while(|t| t.code < 1000) {
+        if tag.code == 102 {
+            extension = tag.str().trim() == "{ACAD_XDICTIONARY";
+        } else if extension && tag.code == 360 {
+            return Handle::parse_hex(&tag.str());
+        }
+    }
+    None
+}
+
+pub(super) fn written(w: &mut W) -> Written {
+    let mut out = Written { entities: HashSet::new(), dictionaries: HashMap::new() };
+    let mut section = String::new();
+    // Raw passthrough allocated above the writer's old seed. Continue from its final seed and
+    // reserve every actual identity before allocating dictionaries/tables through W::h.
+    if let Some(seed) = w.t.windows(2).find(|p| p[0].code == 9 && p[0].str() == "$HANDSEED").and_then(|p| Handle::parse_hex(&p[1].str())) {
+        w.next = w.next.max(seed.0);
+    }
+    for (_, head, body) in records(&w.t) {
+        let kind = head.str();
+        if kind == "SECTION" {
+            section = body.iter().find(|t| t.code == 2).map(Tag::str).unwrap_or_default();
+        } else if kind == "ENDSEC" {
+            section.clear();
+        } else if section != "HEADER"
+            && let Some(h) = handle(body)
+        {
+            w.used.insert(h);
+            if matches!(section.as_str(), "ENTITIES" | "BLOCKS") && !matches!(kind.as_str(), "BLOCK" | "ENDBLK" | "VERTEX" | "ATTRIB" | "SEQEND") {
+                out.entities.insert(h);
+            } else if kind == "BLOCK_RECORD"
+                && let Some(dictionary) = extension_dictionary(body)
+            {
+                out.dictionaries.insert(h, dictionary);
+            }
+        }
+    }
+    out
+}
+
+pub(super) fn plan<'a>(w: &mut W, tables: &mut Vec<Table>, written: &Written, owner: &str, entities: impl Iterator<Item = &'a Entity>) {
+    let mut order = Vec::new();
+    for entity in entities {
+        match w.emitted.get(&entity.handle).filter(|handles| !handles.is_empty()) {
+            Some(handles) => order.extend(handles.iter().copied().filter(|h| written.entities.contains(h))),
+            // Unknown entities are restored by raw passthrough, not the modelled entity writer.
+            None if written.entities.contains(&entity.handle) => order.push(entity.handle),
+            None => {}
+        }
+    }
     if order.is_sorted() {
         return;
     }
-    tables.push(Table { owner: owner.to_string(), dictionary: w.h(), handle: w.h(), order });
+    let Some(owner) = Handle::parse_hex(owner) else { return };
+    let existing = written.dictionaries.get(&owner).copied();
+    let dictionary = existing.map(Handle::hex).unwrap_or_else(|| w.h());
+    let Some(dictionary) = Handle::parse_hex(&dictionary) else { return };
+    tables.push(Table { owner, dictionary, new_dictionary: existing.is_none(), handle: w.h(), order });
 }
 
-/// Declare the class and attach before raw passthrough, which merges any kept entries into
-/// this same dictionary. No class is needed when every space is already in handle order.
-pub(super) fn attach(w: &mut W, tables: &[Table]) {
-    if tables.is_empty() {
-        return;
-    }
-    let dictionaries: HashMap<_, _> = tables.iter().map(|t| (t.owner.as_str(), t.dictionary.as_str())).collect();
-    let mut block_record = false;
-    let mut section_start = false;
-    let mut classes = false;
-    for tag in std::mem::take(&mut w.t) {
-        if section_start && tag.code == 2 {
-            classes = tag.str() == "CLASSES";
-            section_start = false;
-        }
-        if tag.code == 0 {
-            block_record = tag.str() == "BLOCK_RECORD";
-            section_start = tag.str() == "SECTION";
-            if classes && tag.str() == "ENDSEC" {
-                w.s(0, "CLASS");
-                w.s(1, "SORTENTSTABLE");
-                w.s(2, "AcDbSortentsTable");
-                w.s(3, "ObjectDBX Classes");
-                w.i(90, 0);
-                w.i(280, 0);
-                w.i(281, 0);
-                classes = false;
-            }
-        }
-        let dictionary = (block_record && tag.code == 5).then(|| tag.str()).and_then(|h| dictionaries.get(h.as_str()).copied());
-        w.t.push(tag);
-        if let Some(dictionary) = dictionary {
-            w.group("ACAD_XDICTIONARY", 360, &[dictionary]);
-        }
-    }
-}
-
-pub(super) fn objects(w: &mut W, tables: &[Table]) {
+fn objects(w: &mut W, tables: &[Table]) {
     for table in tables {
-        w.s(0, "DICTIONARY");
-        w.s(5, &table.dictionary);
-        w.group("ACAD_REACTORS", 330, &[&table.owner]);
-        w.s(330, &table.owner);
-        w.s(100, "AcDbDictionary");
-        w.i(280, 1);
-        w.i(281, 1);
-        w.s(3, "ACAD_SORTENTS");
-        w.s(360, &table.handle);
+        if table.new_dictionary {
+            w.s(0, "DICTIONARY");
+            w.s(5, table.dictionary.hex());
+            w.group("ACAD_REACTORS", 330, &[&table.owner.hex()]);
+            w.s(330, table.owner.hex());
+            w.s(100, "AcDbDictionary");
+            w.i(280, 1);
+            w.i(281, 1);
+            w.s(3, "ACAD_SORTENTS");
+            w.s(360, &table.handle);
+        }
         w.s(0, "SORTENTSTABLE");
         w.s(5, &table.handle);
-        w.group("ACAD_REACTORS", 330, &[&table.dictionary]);
-        w.s(330, &table.dictionary);
+        w.group("ACAD_REACTORS", 330, &[&table.dictionary.hex()]);
+        w.s(330, table.dictionary.hex());
         w.s(100, "AcDbSortentsTable");
-        w.s(330, &table.owner);
+        w.s(330, table.owner.hex());
         let mut sorted = table.order.clone();
         sorted.sort_unstable();
         for (entity, sort) in table.order.iter().zip(sorted) {
             w.s(331, entity.hex());
             w.s(5, sort.hex());
         }
+    }
+}
+
+/// Reuse an already restored extension dictionary, or attach exactly one new dictionary.
+/// Insert by tag position in one pass, keeping all raw keys and moving rather than cloning tags.
+pub(super) fn attach(w: &mut W, tables: &[Table]) {
+    if tables.is_empty() {
+        return;
+    }
+    let owners: HashMap<_, _> = tables.iter().map(|t| (t.owner, t)).collect();
+    let dictionaries: HashMap<_, _> = tables.iter().filter(|t| !t.new_dictionary).map(|t| (t.dictionary, t)).collect();
+    let has_class = records(&w.t).any(|(_, head, body)| head.str() == "CLASS" && body.iter().any(|t| t.code == 1 && t.str() == "SORTENTSTABLE"));
+    let mut inserts: HashMap<usize, Vec<Tag>> = HashMap::new();
+    let mut section = String::new();
+    for (start, head, body) in records(&w.t) {
+        let kind = head.str();
+        if kind == "SECTION" {
+            section = body.iter().find(|t| t.code == 2).map(Tag::str).unwrap_or_default();
+        } else if kind == "BLOCK_RECORD"
+            && let Some(table) = handle(body).and_then(|h| owners.get(&h)).filter(|t| t.new_dictionary)
+        {
+            if let Some(index) = body.iter().position(|t| t.code == 5) {
+                inserts.entry(start + index + 2).or_default().extend([
+                    Tag::s(102, "{ACAD_XDICTIONARY"),
+                    Tag::s(360, table.dictionary.hex()),
+                    Tag::s(102, "}"),
+                ]);
+            }
+        } else if cadcraft_doc::foreign::is_dictionary(&kind)
+            && let Some(table) = handle(body).and_then(|h| dictionaries.get(&h))
+        {
+            let at = body.iter().position(|t| t.code == 1001).unwrap_or(body.len());
+            inserts.entry(start + at + 1).or_default().extend([Tag::s(3, "ACAD_SORTENTS"), Tag::s(360, &table.handle)]);
+        } else if kind == "ENDSEC" {
+            if section == "CLASSES" && !has_class {
+                inserts.entry(start).or_default().extend([
+                    Tag::s(0, "CLASS"),
+                    Tag::s(1, "SORTENTSTABLE"),
+                    Tag::s(2, "AcDbSortentsTable"),
+                    Tag::s(3, "ObjectDBX Classes"),
+                    Tag::i(90, 0),
+                    Tag::i(280, 0),
+                    Tag::i(281, 0),
+                ]);
+            } else if section == "OBJECTS" {
+                let mut extra = W::default();
+                objects(&mut extra, tables);
+                inserts.entry(start).or_default().extend(extra.t);
+            }
+            section.clear();
+        }
+    }
+    for (index, tag) in std::mem::take(&mut w.t).into_iter().enumerate() {
+        if let Some(extra) = inserts.remove(&index) {
+            w.t.extend(extra);
+        }
+        w.t.push(tag);
     }
 }
