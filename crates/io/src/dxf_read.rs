@@ -141,6 +141,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     for h in kept {
         d.bump_handseed(h);
     }
+    d.remember_raw_dimassocs();
     d.skipped_records = skipped;
     Ok(d)
 }

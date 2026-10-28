@@ -4,12 +4,15 @@
 //! It is kept as the file's own DXF groups, with the file's handles. The file reader fills it and
 //! the writer puts it back, pointing references at whatever now has the referenced role (the
 //! named object dictionary, a table record, a block, an entity); references to objects that are
-//! gone are dropped. Copies clone owned graphs; explicit dimension association commands retire
-//! raw associations they replace. Other commands leave the kept data alone.
+//! gone are dropped. Copies clone owned graphs. Opaque associations are retired when their guard
+//! snapshot changes or a resolved target goes; other foreign data stays with its owner.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Entity, EntityKind, Handle, RawTag};
+
+mod association;
+use association::RawDimAssoc;
 
 /// Longest foreign-data ownership chain followed while copying or retiring objects.
 pub const MAX_FOREIGN_DEPTH: usize = 64;
@@ -96,6 +99,8 @@ pub struct Foreign {
     pub dictionary: Vec<(String, Handle)>,
     /// Extras of entities and attribute instances, by their document handle.
     pub entities: BTreeMap<Handle, ForeignExtra>,
+    /// Guard snapshots for opaque DIMASSOC records; inferred links are not evaluated by the engine.
+    pub(crate) raw_dimassocs: BTreeMap<Handle, RawDimAssoc>,
     /// Extras of table records (`("LAYER", "WALLS")`), tables (`("TABLE", "LAYER")`) and blocks
     /// (`("BLOCK", "DOOR")`), by [`ForeignKey`].
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
@@ -117,6 +122,7 @@ impl Foreign {
         self.objects.is_empty()
             && self.dictionary.is_empty()
             && self.entities.is_empty()
+            && self.raw_dimassocs.is_empty()
             && self.records.is_empty()
             && self.classes.is_empty()
             && self.targets.is_empty()
@@ -339,6 +345,7 @@ impl crate::Drawing {
         }
         foreign.entities.retain(|_, extra| !extra.is_empty());
         foreign.records.retain(|_, extra| !extra.is_empty());
+        foreign.raw_dimassocs.retain(|h, _| !retired.contains(h));
         retired
     }
 
@@ -358,6 +365,7 @@ impl crate::Drawing {
         let index = if has_metadata { owner_index(&self.foreign.objects) } else { BTreeMap::new() };
         let mut added_objects = Vec::new();
         let mut added_extras = Vec::new();
+        let mut added_snapshots = Vec::new();
         let mut out = Vec::new();
         for mut entities in sets {
             let mut roots = BTreeMap::new();
@@ -430,6 +438,22 @@ impl crate::Drawing {
                 }
                 remap_tags(&mut object.tags, &map);
             }
+            let opaque: BTreeSet<_> = objects
+                .iter()
+                .filter(|o| o.kind == "DIMASSOC")
+                .filter_map(|o| dimassoc_reference(o.tags.iter().map(|t| (t.code, t.value.as_str()))).map(|(_, h)| h))
+                .collect();
+            if !opaque.is_empty() {
+                let attribute_owners =
+                    entities.iter().flat_map(|e| e.kind.attributes().iter().filter_map(move |a| a.handle.map(|h| (h, e.handle)))).collect();
+                for (old, new) in &roots {
+                    if opaque.contains(new)
+                        && let Some(snapshot) = self.foreign.raw_dimassocs.get(old)
+                    {
+                        added_snapshots.push((*new, snapshot.remapped(&map, &attribute_owners)));
+                    }
+                }
+            }
             added_objects.extend(objects);
             if has_metadata {
                 for (old, new) in &roots {
@@ -452,6 +476,7 @@ impl crate::Drawing {
             let foreign = std::sync::Arc::make_mut(&mut self.foreign);
             foreign.objects.extend(added_objects);
             foreign.entities.extend(added_extras);
+            foreign.raw_dimassocs.extend(added_snapshots);
         }
         out
     }

@@ -77,7 +77,9 @@ fn solids_whose_geometry_the_data_store_keeps_are_not_reported_from_2013() {
             RawTag { code: 310, value: "00".into() },
         ]
     };
-    d.foreign = std::sync::Arc::new(Foreign { data_store: record(kept), ..Foreign::default() });
+    let mut foreign = Foreign::default();
+    foreign.data_store = record(kept);
+    d.foreign = std::sync::Arc::new(foreign);
     // The solid with a data store record keeps its geometry from 2013 on; the others don't.
     assert_eq!(not_saved_as(&d, Version::R2018), [("3DSOLID".to_string(), 1), ("REGION".to_string(), 1)].into_iter().collect());
     // Before 2013 a file has no data store: every solid loses its geometry.

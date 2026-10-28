@@ -867,7 +867,11 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
 pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // An in-place block edit in progress is not written: the drawing as before it.
-    let committed = d.committed();
+    let mut committed = d.committed();
+    let stale = committed.stale_raw_dimassocs();
+    if !stale.is_empty() {
+        committed.to_mut().retire_raw_dimassocs(&stale);
+    }
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
     let mut w = W { reactors: hatch_reactors(d), ..W::new(d) };

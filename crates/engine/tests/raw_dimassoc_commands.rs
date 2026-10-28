@@ -6,20 +6,38 @@ use cadcraft_engine::doc::{Handle, RawTag};
 use serde_json::json;
 
 fn session() -> (Session, String, String, Handle) {
+    session_with_snaps([8, 8])
+}
+
+fn session_with_snaps(snaps: [i64; 2]) -> (Session, String, String, Handle) {
     let mut s = Session::new();
     let line = s.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
     let dim = s.execute("dimlinear", &json!({"object":line, "at":[5,5]})).unwrap()["handle"].as_str().unwrap().to_string();
     s.execute("dimreassociate", &json!({"handles":[dim]})).unwrap();
     let source = cadcraft_io::write_dxf(s.doc().unwrap());
     let mut tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+    // Remove CADCraft's own association xdata so it cannot override the synthetic raw snaps.
+    let mut own = false;
+    tags.retain(|t| {
+        if t.code == 0 {
+            own = false;
+        }
+        if t.code == 1001 {
+            own = t.str().eq_ignore_ascii_case("CADCRAFT");
+        }
+        !own
+    });
     let mut in_assoc = false;
+    let mut point = 0;
     for tag in &mut tags {
         if tag.code == 0 {
             in_assoc = tag.str() == "DIMASSOC";
         } else if in_assoc && tag.code == 72 {
-            *tag = Tag::i(72, 8);
+            *tag = Tag::i(72, snaps[point]);
+            point += 1;
         }
     }
+    assert_eq!(point, 2, "fixture must replace exactly two DIMASSOC point references");
     let original = objects(&source);
     let raw =
         original.iter().find(|(k, _)| k == "DIMASSOC").unwrap().1.iter().find(|t| t.code == 5).map(|t| Handle::parse_hex(&t.str()).unwrap()).unwrap();
@@ -35,6 +53,12 @@ fn session() -> (Session, String, String, Handle) {
         d.foreign.entities.get(&Handle::parse_hex(&line).unwrap()).is_some_and(|x| x.reactors.contains(&raw)),
         "fixture reactor must be read from the source DXF: line={line}, raw={raw:?}, extras={:?}",
         d.foreign.entities
+    );
+    let cadcraft_engine::doc::EntityKind::Dimension(model) = &d.entity(Handle::parse_hex(&dim).unwrap()).unwrap().kind else { panic!("dimension") };
+    assert_eq!(
+        model.assoc.len(),
+        snaps.iter().filter(|s| **s == 13 || **s == 1).count(),
+        "fixture inferred attachments must come from raw snaps, not hidden own xdata"
     );
     let mut s = Session::new();
     s.open_drawing(d, "raw.dxf", None);
@@ -61,6 +85,76 @@ fn assert_retired(s: &Session, raw: Handle) {
     let foreign = &s.doc().unwrap().foreign;
     assert!(foreign.objects.iter().all(|o| o.handle != raw), "raw DIMASSOC was not retired");
     assert!(foreign.entities.values().chain(foreign.records.values()).all(|x| !x.reactors.contains(&raw)), "retired reactor edge remains");
+}
+
+#[test]
+fn erasing_geometry_retires_raw_association_even_without_inferred_links() {
+    let (mut s, _, line, raw) = session();
+    s.execute("erase", &json!({"handles":[line]})).unwrap();
+    assert_retired(&s, raw);
+    for text in saved(&s) {
+        assert!(objects(&text).iter().all(|(k, _)| k != "DIMASSOC"), "erased target left a raw association with a null 331");
+    }
+}
+
+#[test]
+fn changed_inferred_attachments_invalidate_raw_association_at_save_boundary() {
+    let (mut s, dim, _, _) = session_with_snaps([13, 8]);
+    s.doc_mut()
+        .unwrap()
+        .modify_entity(Handle::parse_hex(&dim).unwrap(), |e| {
+            if let cadcraft_engine::doc::EntityKind::Dimension(d) = &mut e.kind {
+                d.assoc.clear();
+            }
+        })
+        .unwrap();
+    for text in saved(&s) {
+        assert!(objects(&text).iter().all(|(k, _)| k != "DIMASSOC"), "save resurrected raw data after model attachments changed");
+    }
+}
+
+#[test]
+fn audit_attachment_drop_retires_the_raw_association() {
+    let (mut s, _, line, raw) = session_with_snaps([13, 8]);
+    s.doc_mut().unwrap().remove_entity(Handle::parse_hex(&line).unwrap());
+    s.execute("audit", &json!({"fix":true})).unwrap();
+    assert_retired(&s, raw);
+}
+
+#[test]
+fn opaque_raw_associations_do_not_follow_only_the_inferred_subset() {
+    let (mut s, dim, line, raw) = session_with_snaps([13, 8]);
+    let dim = Handle::parse_hex(&dim).unwrap();
+    let before = s.doc().unwrap().entity(dim).unwrap().kind.clone();
+    s.execute("move", &json!({"handles":[line],"delta":[2,0]})).unwrap();
+    assert_eq!(s.doc().unwrap().entity(dim).unwrap().kind, before, "opaque raw association must not partially move the cached dimension");
+    assert!(
+        s.doc().unwrap().foreign.objects.iter().any(|o| o.handle == raw),
+        "moving geometry should keep opaque raw semantics while targets remain valid"
+    );
+}
+
+#[test]
+fn incomplete_reassociation_leaves_raw_and_model_unchanged() {
+    for partial in [false, true] {
+        let (mut s, dim, _, raw) = session_with_snaps([13, 8]);
+        let h = Handle::parse_hex(&dim).unwrap();
+        s.doc_mut()
+            .unwrap()
+            .modify_entity(h, |e| {
+                if let cadcraft_engine::doc::EntityKind::Dimension(d) = &mut e.kind {
+                    d.p14 = cadcraft_engine::geom::Vec3::new(50.0, 50.0, 0.0);
+                    if !partial {
+                        d.p13 = cadcraft_engine::geom::Vec3::new(40.0, 40.0, 0.0);
+                    }
+                }
+            })
+            .unwrap();
+        let before = s.doc().unwrap().entity(h).unwrap().kind.clone();
+        s.execute("dimreassociate", &json!({"handles":[dim]})).unwrap();
+        assert_eq!(s.doc().unwrap().entity(h).unwrap().kind, before, "empty or partial reassociation changed the model");
+        assert!(s.doc().unwrap().foreign.objects.iter().any(|o| o.handle == raw), "empty or partial plan discarded the raw association");
+    }
 }
 
 #[test]

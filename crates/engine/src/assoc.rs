@@ -294,6 +294,8 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
 /// After a change: update every associative dimension whose objects changed.
 /// Returns the number of dimensions updated.
 pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
+    let stale = after.stale_raw_dimassocs();
+    let retired = if stale.is_empty() { 0 } else { Arc::make_mut(after).retire_raw_dimassocs(&stale).len() };
     let mut changes: Vec<(Handle, Dimension)> = Vec::new();
     {
         let d: &Drawing = after;
@@ -301,7 +303,8 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
-                if dm.assoc.is_empty() {
+                // Raw DIMASSOC is opaque and authoritative; inferred links are a guard only.
+                if dm.assoc.is_empty() || d.has_raw_dimassoc(e.handle) {
                     continue;
                 }
                 let touched = dm.assoc.iter().any(|a| {
@@ -322,14 +325,14 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> usize {
         }
     }
     if changes.is_empty() {
-        return 0;
+        return retired;
     }
     let d = Arc::make_mut(after);
     let n = changes.len();
     for (h, nd) in changes {
         let _ = d.modify_entity(h, |e| e.kind = EntityKind::Dimension(nd));
     }
-    n
+    n + retired
 }
 
 /// The post-command pass: called by `Session::execute` and when an interactive command

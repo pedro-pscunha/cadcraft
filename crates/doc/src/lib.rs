@@ -331,6 +331,11 @@ impl Drawing {
     pub fn entity(&self, h: Handle) -> Option<&std::sync::Arc<Entity>> {
         self.model.get(h).or_else(|| self.layouts.iter().find_map(|l| l.entities.get(h)))
     }
+    /// Find a database entity by record identity in model space, layouts or block definitions.
+    pub fn entity_including_blocks(&self, h: Handle) -> Option<&std::sync::Arc<Entity>> {
+        self.entity(h).or_else(|| self.blocks.values().find_map(|b| b.entities.get(h)))
+    }
+
     pub fn space_of(&self, h: Handle) -> Option<Space> {
         if self.model.contains(h) {
             return Some(Space::Model);
