@@ -41,7 +41,8 @@ fn assert_fresh(s: &Session, stage: &str) {
     let mut used = HashSet::new();
     for section in cadcraft_dxf::sections(&tags).into_iter().filter(|s| s.name != "HEADER") {
         for (kind, body) in cadcraft_dxf::records(&section.tags) {
-            for t in body.iter().filter(|t| matches!(t.code, 5 | 105)) {
+            // Later group 5 values in SORTENTSTABLE are sort keys, not object identities.
+            if let Some(t) = body.iter().find(|t| matches!(t.code, 5 | 105)) {
                 assert!(used.insert(Handle::parse_hex(&t.str()).unwrap()), "{stage}: duplicate file handle {} on {kind}", t.str());
             }
         }
@@ -176,7 +177,8 @@ fn refedit_projection_keeps_original_identity_and_saves_only_one_field_graph() {
             let records: Vec<_> =
                 cadcraft_dxf::sections(&tags).into_iter().filter(|s| s.name != "HEADER").flat_map(|s| cadcraft_dxf::records(&s.tags)).collect();
             for (kind, body) in &records {
-                for t in body.iter().filter(|t| matches!(t.code, 5 | 105)) {
+                // Later group 5 values in SORTENTSTABLE are sort keys, not object identities.
+                if let Some(t) = body.iter().find(|t| matches!(t.code, 5 | 105)) {
                     assert!(used.insert(t.str()), "REFEDIT close={close} DWG={dwg}: duplicate {kind} handle");
                 }
             }

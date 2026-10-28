@@ -25,6 +25,7 @@ mod header;
 mod layout;
 mod objects;
 mod sections;
+mod sortents;
 #[cfg(test)]
 mod tests;
 

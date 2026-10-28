@@ -61,6 +61,7 @@ mod region_roundtrip;
 mod roundtrip_audit;
 mod skipped_records;
 mod sortents;
+mod sortents_roundtrip;
 mod spline_fit_data;
 mod split_entities_section;
 mod style_typeface;

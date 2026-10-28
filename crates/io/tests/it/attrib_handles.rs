@@ -16,7 +16,8 @@ fn assert_unique_file(text: &str, stage: &str) {
     let mut used = HashSet::new();
     for section in sections(&tags).into_iter().filter(|s| s.name != "HEADER") {
         for (kind, body) in records(&section.tags) {
-            for tag in body.iter().filter(|t| matches!(t.code, 5 | 105)) {
+            // Later group 5 values in SORTENTSTABLE are sort keys, not object identities.
+            if let Some(tag) = body.iter().find(|t| matches!(t.code, 5 | 105)) {
                 let h = Handle::parse_hex(&tag.str()).unwrap();
                 assert!(used.insert(h), "{stage}: duplicate {h:?} on {kind}");
                 assert!(h.0 < seed.0, "{stage}: {kind} handle {h:?} is not below HANDSEED {seed:?}");

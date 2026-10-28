@@ -1,5 +1,5 @@
-//! Draw order from DXF files (#439): a SORTENTSTABLE reorders its space by sort handle, and the
-//! order CADCraft writes (the order of the entity records) reads back unchanged.
+//! Draw order from DXF files (#439): a SORTENTSTABLE reorders its space by sort handle.
+//! Saving must also write a table: AutoCAD otherwise draws by handle, not by record order.
 
 use cadcraft_doc::*;
 
@@ -29,8 +29,9 @@ fn sortentstable_sets_the_draw_order() {
     let table = "0\nSORTENTSTABLE\n5\nB0\n330\nB1\n100\nAcDbSortentsTable\n330\n1F\n331\nA1\n5\nA4\n331\nA3\n5\n10\n";
     let d = cadcraft_io::read_dxf(dxf(table).as_bytes()).unwrap();
     assert_eq!(order(&d), ["A3", "A2", "A1"]);
-    // Written back in draw order, without a table, the order survives.
-    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    assert!(text.lines().any(|line| line == "SORTENTSTABLE"));
+    let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
     assert_eq!(order(&back), ["A3", "A2", "A1"]);
 }
 

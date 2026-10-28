@@ -27,7 +27,8 @@ fn assert_file_unique(d: &Drawing) {
     let mut used = BTreeSet::new();
     for section in cadcraft_dxf::sections(&tags).into_iter().filter(|s| s.name != "HEADER") {
         for (kind, body) in cadcraft_dxf::records(&section.tags) {
-            for t in body.iter().filter(|t| matches!(t.code, 5 | 105)) {
+            // Later group 5 values in SORTENTSTABLE are sort keys, not object identities.
+            if let Some(t) = body.iter().find(|t| matches!(t.code, 5 | 105)) {
                 let h = Handle::parse_hex(&t.str()).unwrap();
                 assert!(h.0 != 0 && used.insert(h), "duplicate/zero identity {h:?} in {kind}");
             }
