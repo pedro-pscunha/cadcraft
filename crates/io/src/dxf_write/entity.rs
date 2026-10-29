@@ -78,6 +78,7 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.i(70, i64::from(p.closed) | if p.plinegen { 128 } else { 0 });
         w.f(40, p.const_width);
         w.f(41, p.const_width);
+        w.p(210, e.common.extrusion);
         for vertex in &p.vertices {
             heavy_vertex(
                 w,
@@ -174,6 +175,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             if p.elevation != 0.0 {
                 w.f(38, p.elevation);
             }
+            w.p(210, e.common.extrusion);
             thickness(w, e);
             for v in &p.vertices {
                 w.p2(10, v.p);
