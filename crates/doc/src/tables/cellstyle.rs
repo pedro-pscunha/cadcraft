@@ -27,6 +27,14 @@ pub struct CellBorder {
     pub overrides: u8,
 }
 
+impl CellBorder {
+    /// The bits of [`CellBorder::overrides`] (`TableBorderPropertyFlags`).
+    pub const LINEWEIGHT: u8 = 1;
+    pub const LINETYPE: u8 = 2;
+    pub const COLOR: u8 = 4;
+    pub const VISIBILITY: u8 = 8;
+}
+
 fn is_zero(v: &u8) -> bool {
     *v == 0
 }
