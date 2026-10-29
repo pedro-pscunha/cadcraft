@@ -1470,20 +1470,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         let start = out.len();
         out.extend(tags.get(r.start).cloned());
         let x = extras.of(r, b);
-        // The source geometry of the record: its own, or the next VERTEX of a polyline that has some.
-        let geometry = match r.kind.as_str() {
-            "VERTEX" => family.as_mut().and_then(|(g, i)| {
-                *i += 1;
-                g.records.get(*i)
-            }),
-            kind => {
-                let written = recs.iter().skip(n + 1).take_while(|v| v.kind == "VERTEX").count();
-                // A polyline replays its VERTEX records only if they are as many as the source's.
-                let g = handle_of_record(b).and_then(|h| map.geometry.get(&h)).filter(|g| g.records.len() == 1 || g.records.len() == written + 1);
-                family = if kind == "POLYLINE" { g.map(|g| (g.as_ref(), 0)) } else { None };
-                g.and_then(|g| g.records.first())
-            }
-        };
+        let geometry = record_geometry(&map, &recs, n, b, &mut family);
         if x.is_none() && Some(r.start) != root && geometry.is_none() {
             out.extend(b.iter().cloned());
         } else {
@@ -1566,6 +1553,29 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
         }
     }
     out
+}
+
+/// The source geometry of record `n` of `recs` (its groups `b`): its own snapshot, or the next VERTEX
+/// record of a polyline that has one (`family`: that snapshot and the VERTEX records handed out).
+fn record_geometry<'a>(
+    map: &'a Map,
+    recs: &[Rec],
+    n: usize,
+    b: &[Tag],
+    family: &mut Option<(&'a cadcraft_doc::GeometrySnapshot, usize)>,
+) -> Option<&'a cadcraft_doc::GeometryRecord> {
+    let kind = recs.get(n)?.kind.as_str();
+    if kind == "VERTEX" {
+        return family.as_mut().and_then(|(g, i)| {
+            *i += 1;
+            g.records.get(*i)
+        });
+    }
+    let written = recs.iter().skip(n + 1).take_while(|v| v.kind == "VERTEX").count();
+    // A polyline replays its VERTEX records only if they are as many as the source's.
+    let g = handle_of_record(b).and_then(|h| map.geometry.get(&h)).filter(|g| g.records.len() == 1 || g.records.len() == written + 1);
+    *family = if kind == "POLYLINE" { g.map(|g| (g.as_ref(), 0)) } else { None };
+    g.and_then(|g| g.records.first())
 }
 
 /// A written record with its kept extras, remapped references (unknown entities) and kept

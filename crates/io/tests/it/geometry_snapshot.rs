@@ -449,7 +449,7 @@ fn dimensions_keep_their_plane_and_definition_points_through_every_save() {
         for (name, ty, own, own_codes) in cases {
             let source = dxf(&[&dimension(ty, plane, own)]);
             let codes: Vec<i32> =
-                base.iter().copied().chain(own_codes.iter().flat_map(|c| [*c, c + 10, c + 20].into_iter().filter(|c| *c < 50 || *c == 50))).collect();
+                base.iter().copied().chain(own_codes.iter().flat_map(|c| [*c, c + 10, c + 20].into_iter().filter(|c| *c <= 50))).collect();
             // A DWG's two-line angular dimension has a 2D fourth point.
             assert_kept(&source, "DIMENSION", &codes, &[53, 50], &[36]);
             let _ = name;
@@ -561,7 +561,7 @@ fn mleader_source(plane: (f64, f64, f64)) -> String {
 
 #[test]
 fn a_multileader_keeps_its_context_planes_and_leader_geometry_through_every_save() {
-    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8), (1e-8, -2e-8, -0.99999999999999978)] {
+    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8), (1e-8, -2e-8, -0.9999999999999999)] {
         let source = mleader_source(plane);
         let want = mleader_numbers(&all_records(&source, "MULTILEADER")[0]);
         assert!(want.len() > 20, "{want:?}");
@@ -619,7 +619,7 @@ fn a_table_keeps_its_plane_direction_and_sizes_through_every_save() {
         for (what, text) in [("DXF", first), ("DXF, second save", second)] {
             let got = all_records(&text, "ACAD_TABLE").remove(0);
             let codes = [10, 20, 30, 210, 220, 230, 11, 21, 31, 141, 142];
-            assert_eq!(numbers(&[got], &codes), numbers(&[want.clone()], &codes), "{what}: {plane:?}");
+            assert_eq!(numbers(&[got], &codes), numbers(std::slice::from_ref(&want), &codes), "{what}: {plane:?}");
         }
     }
 }
