@@ -98,14 +98,15 @@ pub(super) fn read_dwg(dwg: &[u8]) -> CadDocument {
     DwgReader::from_stream(Cursor::new(dwg)).read().expect("read dwg")
 }
 
-/// The drawing as a DWG, opened and saved by CADCraft, read back by acadrust: the first save, and
-/// a save of that save.
-pub(super) fn saves(doc: &CadDocument) -> [CadDocument; 2] {
+/// The drawing as acadrust's DWG writer and reader return it (the source of the saves), after a
+/// CADCraft save, and after a save of that save.
+pub(super) fn saves(doc: &CadDocument) -> [(&'static str, CadDocument); 3] {
     let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
     let save = |dwg: &[u8]| cadcraft_io::write_with(&cadcraft_io::read(dwg, "x.dwg").expect("cadcraft read"), "x.dwg", &opts).expect("cadcraft save");
-    let first = save(&DwgWriter::write_to_vec(doc).expect("write dwg"));
+    let source = DwgWriter::write_to_vec(doc).expect("write dwg");
+    let first = save(&source);
     let second = save(&first);
-    [read_dwg(&first), read_dwg(&second)]
+    [("source", read_dwg(&source)), ("first save", read_dwg(&first)), ("second save", read_dwg(&second))]
 }
 
 fn style_description(doc: &CadDocument, handle: Handle) -> String {
@@ -121,26 +122,26 @@ fn ucs_name(doc: &CadDocument, handle: Handle) -> String {
 
 #[test]
 fn the_object_pointers_of_the_header_name_the_saved_objects() {
-    for back in saves(&document()) {
+    for (what, back) in saves(&document()) {
         let h = &back.header;
         let material = match back.objects.get(&h.current_material_handle) {
             Some(ObjectType::Material(m)) => m.name.clone(),
             other => format!("not a material: {other:?}"),
         };
-        assert_eq!(material, "Brick", "CMATERIAL");
-        assert_eq!(style_description(&back, h.interference_object_visual_style_handle), "interference objects", "INTERFEREOBJVS");
-        assert_eq!(style_description(&back, h.interference_viewport_visual_style_handle), "interference viewport", "INTERFEREVPVS");
-        assert_eq!(style_description(&back, h.drag_visual_style_handle), "drag", "DRAGVS");
+        assert_eq!(material, "Brick", "{what}: CMATERIAL");
+        assert_eq!(style_description(&back, h.interference_object_visual_style_handle), "interference objects", "{what}: INTERFEREOBJVS");
+        assert_eq!(style_description(&back, h.interference_viewport_visual_style_handle), "interference viewport", "{what}: INTERFEREVPVS");
+        assert_eq!(style_description(&back, h.drag_visual_style_handle), "drag", "{what}: DRAGVS");
     }
 }
 
 #[test]
 fn the_plot_style_of_new_objects_is_kept() {
-    for back in saves(&document()) {
-        assert_eq!(back.header.current_plotstyle_type, 3, "CEPSNTYPE");
+    for (what, back) in saves(&document()) {
+        assert_eq!(back.header.current_plotstyle_type, 3, "{what}: CEPSNTYPE");
         assert!(
             matches!(back.objects.get(&back.header.current_plotstyle_handle), Some(ObjectType::PlaceHolder(_))),
-            "CPSNID names {:?}",
+            "{what}: CPSNID names {:?}",
             back.header.current_plotstyle_handle
         );
     }
@@ -148,15 +149,15 @@ fn the_plot_style_of_new_objects_is_kept() {
 
 #[test]
 fn the_plot_style_table_and_the_project_name_are_kept() {
-    for back in saves(&document()) {
-        assert_eq!(back.header.stylesheet, "monochrome.ctb", "STYLESHEET");
-        assert_eq!(back.header.project_name, "Synthetic", "PROJECTNAME");
+    for (what, back) in saves(&document()) {
+        assert_eq!(back.header.stylesheet, "monochrome.ctb", "{what}: STYLESHEET");
+        assert_eq!(back.header.project_name, "Synthetic", "{what}: PROJECTNAME");
     }
 }
 
 #[test]
 fn the_ucs_header_names_the_saved_ucs_entries() {
-    for back in saves(&document()) {
+    for (what, back) in saves(&document()) {
         let h = &back.header;
         for (variable, name, handle, expected) in [
             ("UCSNAME", &h.model_space_ucs_name, h.model_space_ucs_handle, "Plan"),
@@ -166,17 +167,17 @@ fn the_ucs_header_names_the_saved_ucs_entries() {
             ("PUCSBASE", &h.paper_ucs_base, h.paper_ucs_base_handle, "SheetBase"),
             ("PUCSORTHOREF", &h.paper_ucs_ortho_ref_name, h.paper_ucs_ortho_ref, "SheetRef"),
         ] {
-            assert_eq!(name, expected, "{variable} name");
-            assert_eq!(ucs_name(&back, handle), expected, "{variable} handle");
+            assert_eq!(name, expected, "{what}: {variable} name");
+            assert_eq!(ucs_name(&back, handle), expected, "{what}: {variable} handle");
         }
-        assert_eq!(h.ucs_ortho_view, 3, "UCSORTHOVIEW");
-        assert_eq!(h.ucs_ortho_origins[0], Vector3::new(0.5, 1.5, 2.5), "UCSORGTOP");
-        assert_eq!(h.ucs_ortho_origins[5], Vector3::new(-1.0, -2.0, -3.0), "UCSORGBACK");
-        assert_eq!(h.paper_ucs_ortho_view, 5, "PUCSORTHOVIEW");
-        assert_eq!(h.paper_ucs_ortho_origins[2], Vector3::new(4.5, 5.5, 6.5), "PUCSORGLEFT");
-        assert_eq!(h.paper_space_ucs_origin, Vector3::new(7.0, 8.0, 0.0), "PUCSORG");
-        assert_eq!(h.paper_space_ucs_x_axis, Vector3::new(0.0, 1.0, 0.0), "PUCSXDIR");
-        assert_eq!(h.paper_space_ucs_y_axis, Vector3::new(-1.0, 0.0, 0.0), "PUCSYDIR");
+        assert_eq!(h.ucs_ortho_view, 3, "{what}: UCSORTHOVIEW");
+        assert_eq!(h.ucs_ortho_origins[0], Vector3::new(0.5, 1.5, 2.5), "{what}: UCSORGTOP");
+        assert_eq!(h.ucs_ortho_origins[5], Vector3::new(-1.0, -2.0, -3.0), "{what}: UCSORGBACK");
+        assert_eq!(h.paper_ucs_ortho_view, 5, "{what}: PUCSORTHOVIEW");
+        assert_eq!(h.paper_ucs_ortho_origins[2], Vector3::new(4.5, 5.5, 6.5), "{what}: PUCSORGLEFT");
+        assert_eq!(h.paper_space_ucs_origin, Vector3::new(7.0, 8.0, 0.0), "{what}: PUCSORG");
+        assert_eq!(h.paper_space_ucs_x_axis, Vector3::new(0.0, 1.0, 0.0), "{what}: PUCSXDIR");
+        assert_eq!(h.paper_space_ucs_y_axis, Vector3::new(-1.0, 0.0, 0.0), "{what}: PUCSYDIR");
     }
 }
 
@@ -191,15 +192,15 @@ fn a_null_dimension_linetype_stays_null() {
     doc.header.dim_linetype_handle = Handle::NULL;
     doc.header.dim_linetype1_handle = Handle::NULL;
     doc.header.dim_linetype2_handle = Handle::NULL;
-    for back in saves(&doc) {
+    for (what, back) in saves(&doc) {
         let h = back.header;
         for (variable, name, handle) in [
             ("DIMLTYPE", &h.dim_linetype_name, h.dim_linetype_handle),
             ("DIMLTEX1", &h.dim_linetype1_name, h.dim_linetype1_handle),
             ("DIMLTEX2", &h.dim_linetype2_name, h.dim_linetype2_handle),
         ] {
-            assert_eq!(name, "", "{variable} name");
-            assert!(handle.is_null(), "{variable} handle {handle:?}");
+            assert_eq!(name, "", "{what}: {variable} name");
+            assert!(handle.is_null(), "{what}: {variable} handle {handle:?}");
         }
     }
 }

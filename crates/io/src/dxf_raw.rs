@@ -411,6 +411,12 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             x.color_book = Some((rgb, book));
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
+        // A viewport's UCS: its named UCS (345), the UCS its orthographic type is relative to (346)
+        // and that type (79).
+        if kind == "VIEWPORT" {
+            let own = tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]);
+            x.props.extend(own.iter().filter(|t| matches!(t.code, 345 | 346 | 79)).map(raw));
+        }
     }
     x
 }
