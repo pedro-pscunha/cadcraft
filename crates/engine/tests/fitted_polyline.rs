@@ -44,6 +44,7 @@ fn affine_edits_transform_controls_fit_points_and_tangents() {
                 ("scale", json!({"handles": ["100"], "base": [0, 0], "factor": 2}), Mat3::scale_about(Vec2::ZERO, 2.0)),
                 ("mirror", json!({"handles": ["100"], "p1": [0, 0], "p2": [1, 0], "erase": true}), Mat3::mirror(Vec2::ZERO, Vec2::new(1.0, 0.0))),
                 ("stretch", json!({"window": [[-20, -20], [20, 20]], "delta": [3, 4]}), Mat3::translate(Vec2::new(3.0, 4.0))),
+                ("grip.stretch", json!({"grips": [["100", 0], ["100", 2], ["100", 4]], "delta": [3, 4]}), Mat3::translate(Vec2::new(3.0, 4.0))),
             ] {
                 let drawing = source(spline, negative);
                 let original = polyline(&drawing).saved_fit().unwrap().clone();
@@ -137,6 +138,7 @@ fn shape_edits_decurve_without_restoring_the_source_controls() {
         ("pedit", json!({"handles": ["100"], "option": "vertex", "index": 1, "to": [5, 8]})),
         ("pedit", json!({"handles": ["100"], "option": "decurve"})),
         ("stretch", json!({"window": [[4, 2], [6, 4]], "delta": [0, 5]})),
+        ("grip.stretch", json!({"grips": [["100", 2]], "delta": [0, 5]})),
     ] {
         for spline in [false, true] {
             let mut session = Session::new();

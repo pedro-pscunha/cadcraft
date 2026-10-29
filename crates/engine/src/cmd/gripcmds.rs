@@ -200,6 +200,14 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
             }
         }
         if changed {
+            if let (EntityKind::LwPolyline(original), EntityKind::LwPolyline(edited)) = (&e.kind, &mut k)
+                && original.saved_fit().is_some()
+            {
+                let mut whole = original.clone();
+                whole.transform(&Mat3::translate(delta));
+                // Moving every vertex by the same delta is a whole-polyline move, not a decurve.
+                edited.fit = if edited.vertices == whole.vertices { whole.fit } else { None };
+            }
             out.push((h, k));
         }
     }
