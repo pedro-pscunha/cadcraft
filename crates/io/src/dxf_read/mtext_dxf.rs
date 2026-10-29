@@ -197,22 +197,21 @@ pub(crate) fn read_xdata_columns(xdata: &[Tag]) -> Option<(MTextColumns, f64)> {
     Some((c, width))
 }
 
-/// The (code, value) groups of the column record of the entity's ACAD xdata, between its markers; `None`
-/// unless the application holds just that record.
+/// Where the column record of an ACAD xdata chunk (`1001 ACAD` and its groups) is: the indexes of its
+/// `ACAD_MTEXT_COLUMN_INFO_BEGIN` and of the `_END` that follows, when only numbers are between them.
+pub(crate) fn column_record<S: AsRef<[Tag]>>(chunk: S) -> Option<(usize, usize)> {
+    let chunk = chunk.as_ref();
+    chunk.first().filter(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case("ACAD"))?;
+    let marker = |t: &Tag, name: &str| t.code == 1000 && t.str().trim() == name;
+    let begin = chunk.iter().position(|t| marker(t, "ACAD_MTEXT_COLUMN_INFO_BEGIN"))?;
+    let end = begin + 1 + chunk.get(begin + 1..)?.iter().position(|t| marker(t, "ACAD_MTEXT_COLUMN_INFO_END"))?;
+    chunk.get(begin + 1..end)?.iter().all(|t| matches!(t.code, 1070 | 1040)).then_some((begin, end))
+}
+
+/// The (code, value) groups of the column record of the entity's ACAD xdata, between its markers.
 fn xdata_column_values(xdata: &[Tag]) -> Option<Vec<&Tag>> {
-    let first = xdata.first().filter(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case("ACAD"))?;
-    let _ = first;
-    let rest = xdata.get(1..)?;
-    let (begin, end) = (rest.first()?, rest.last()?);
-    if begin.code != 1000
-        || begin.str().trim() != "ACAD_MTEXT_COLUMN_INFO_BEGIN"
-        || end.code != 1000
-        || end.str().trim() != "ACAD_MTEXT_COLUMN_INFO_END"
-    {
-        return None;
-    }
-    let inner = rest.get(1..rest.len() - 1)?;
-    inner.iter().all(|t| matches!(t.code, 1070 | 1040)).then(|| inner.iter().collect())
+    let (begin, end) = column_record(xdata)?;
+    Some(xdata.get(begin + 1..end)?.iter().collect())
 }
 
 /// The ACAD xdata record of an MTEXT's columns for a file of 2007 to 2017, as AutoCAD writes it.
@@ -243,6 +242,38 @@ pub(crate) fn xdata_column_tags(t: &MText) -> Vec<Tag> {
     }
     v.push(Tag::s(1000, "ACAD_MTEXT_COLUMN_INFO_END"));
     v
+}
+
+/// The whole ACAD xdata chunk of an MTEXT with columns for a file of 2007 to 2017: the model's column record
+/// in the place the entity's other ACAD data left for it (`kept`, the entity's foreign xdata: an empty record
+/// marks the place), else before the rest of that data.
+pub(crate) fn xdata_column_chunk(t: &MText, kept: &[cadcraft_doc::RawTag]) -> Vec<Tag> {
+    let record = xdata_column_tags(t);
+    let Some(start) = kept.iter().position(|r| r.code == 1001 && r.value.trim().eq_ignore_ascii_case("ACAD")) else { return record };
+    let chunk =
+        kept.get(start..).map(|k| k.iter().skip(1).position(|r| r.code == 1001).map_or(k.len(), |p| p + 1)).and_then(|n| kept.get(start..start + n));
+    let rest: Vec<Tag> = chunk.unwrap_or_default().iter().skip(1).map(crate::dxf_raw::tag).collect();
+    // The record's own groups (between the application name and the end of the record).
+    let inner = record.get(1..).unwrap_or_default();
+    let at = rest.windows(2).position(|w| {
+        w[0].code == 1000
+            && w[0].str().trim() == "ACAD_MTEXT_COLUMN_INFO_BEGIN"
+            && w[1].code == 1000
+            && w[1].str().trim() == "ACAD_MTEXT_COLUMN_INFO_END"
+    });
+    let mut out = vec![Tag::s(1001, "ACAD")];
+    match at {
+        Some(i) => {
+            out.extend(rest.get(..i).unwrap_or_default().iter().cloned());
+            out.extend(inner.iter().cloned());
+            out.extend(rest.get(i + 2..).unwrap_or_default().iter().cloned());
+        }
+        None => {
+            out.extend(inner.iter().cloned());
+            out.extend(rest);
+        }
+    }
+    out
 }
 
 /// The embedded object (group 101) of an R2018+ MTEXT with columns, as AutoCAD writes it: the

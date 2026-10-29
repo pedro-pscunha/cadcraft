@@ -213,7 +213,7 @@ fn raw(t: &Tag) -> RawTag {
 
 /// A kept group with the value type its code has (so binary output encodes it right); text that
 /// doesn't parse as that type stays text.
-fn tag(r: &RawTag) -> Tag {
+pub(crate) fn tag(r: &RawTag) -> Tag {
     use cadcraft_dxf::{Kind, Value, kind_of};
     let v = r.value.trim();
     let value = match kind_of(r.code) {
@@ -384,12 +384,16 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let chunk = rest.get(i..i + 1 + len).unwrap_or(&[]);
         i += 1 + len;
         let app = up(&first.str());
+        // An MTEXT's column record is read into the model and written from it. With other ACAD data
+        // beside it, the rest stays foreign and the record's place is kept as an empty one (BEGIN, END).
+        let columns = (kind == "MTEXT" && app == "ACAD")
+            .then(|| crate::dxf_read::mtext_dxf::read_xdata_columns(chunk).and(crate::dxf_read::mtext_dxf::column_record(chunk)))
+            .flatten();
         let own = OWN_APPS.contains(&app.as_str())
             || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
             || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE") && annotative_on(chunk))
             || (kind == "LAYER" && layer_xdata_modelled(&app, chunk))
-            // An MTEXT's column record is read into the model and written from it.
-            || (kind == "MTEXT" && app == "ACAD" && crate::dxf_read::mtext_dxf::read_xdata_columns(chunk).is_some());
+            || columns.is_some_and(|(b, e)| b == 1 && e + 1 == chunk.len());
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
         }
@@ -407,7 +411,10 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
             }
         }
         if ok && depth == 0 {
-            out.extend(chunk.iter().map(raw));
+            match columns {
+                Some((b, e)) => out.extend(chunk.iter().enumerate().filter(|(i, _)| *i <= b || *i >= e).map(|(_, t)| raw(t))),
+                None => out.extend(chunk.iter().map(raw)),
+            }
         }
     }
     out
@@ -1728,11 +1735,17 @@ fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
 /// Kept xdata of applications the record doesn't already carry, handles remapped.
 fn xdata(map: &Map, x: &ForeignExtra, own: &HashSet<String>, out: &mut Vec<Tag>) {
     let mut skip = false;
-    for r in &x.xdata {
+    let empty_record = |i: usize| {
+        let marker = |at: usize, name: &str| x.xdata.get(at).is_some_and(|r| r.code == 1000 && r.value.trim() == name);
+        (marker(i, "ACAD_MTEXT_COLUMN_INFO_BEGIN") && marker(i + 1, "ACAD_MTEXT_COLUMN_INFO_END")).then_some(i)
+    };
+    for (i, r) in x.xdata.iter().enumerate() {
         if r.code == 1001 {
             skip = own.contains(&up(&r.value));
         }
-        if !skip {
+        // The place the model's column record takes in an MTEXT's ACAD data (see `foreign_xdata`) is not data.
+        let place = empty_record(i).is_some() || i.checked_sub(1).and_then(empty_record).is_some();
+        if !skip && !place {
             out.push(map.group(r));
         }
     }
