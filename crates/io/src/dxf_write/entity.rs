@@ -419,7 +419,8 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
 fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     if let EntityKind::Insert(i) = &e.kind {
         w.s(0, "INSERT");
-        common(w, e, owner, paper, "AcDbBlockReference");
+        let subclass = if i.cols > 1 || i.rows > 1 { "AcDbMInsertBlock" } else { "AcDbBlockReference" };
+        common(w, e, owner, paper, subclass);
         if !i.attribs.is_empty() {
             w.i(66, 1);
         }

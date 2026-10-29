@@ -58,6 +58,7 @@ mod layout_plot_pointers;
 mod layout_plot_window;
 #[cfg(not(target_arch = "wasm32"))]
 mod low_handseed;
+mod minsert_subclass;
 mod mleader_content;
 mod mleader_roundtrip;
 mod mline_dictionary_names;

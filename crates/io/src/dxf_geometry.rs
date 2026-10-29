@@ -18,6 +18,7 @@ type Spec = &'static [(&'static str, &'static [i32])];
 /// The geometry groups of a DIMENSION's own `AcDbDimension` subclass: definition point, text point,
 /// text rotation, plane and the horizontal direction.
 const DIMENSION: &[i32] = &[10, 20, 30, 11, 21, 31, 53, 51, 210, 220, 230];
+const INSERT: &[i32] = &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230];
 
 /// The geometry groups of the types that keep a snapshot, by subclass in record order.
 fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
@@ -34,7 +35,8 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         // Only the main groups: a column text has an embedded object (101) with a second set of the same codes,
         // which the generated record owns.
         "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230])],
-        "INSERT" => &[("AcDbBlockReference", &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230])],
+        "INSERT" if has("AcDbMInsertBlock") => &[("AcDbMInsertBlock", INSERT)],
+        "INSERT" => &[("AcDbBlockReference", INSERT)],
         // The whole curve: flags, degree, counts, tolerances, tangents, knots, weights, controls, fits and the plane.
         "SPLINE" => &[("AcDbSpline", &[210, 220, 230, 70, 71, 72, 73, 74, 42, 43, 44, 12, 22, 32, 13, 23, 33, 40, 41, 10, 20, 30, 11, 21, 31])],
         // The vertices and the plane of the leader, and the annotation's size and offsets (the style, the
