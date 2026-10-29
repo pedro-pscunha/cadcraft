@@ -228,3 +228,34 @@ fn purge_preventer_block_pointer_stays_in_the_dwg_bridge() {
     let bridge = purge_preventer(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap());
     assert!(bridge.iter().any(|t| t.code == 340 && t.str() != "0"), "bridge preventer keeps its block: {bridge:?}");
 }
+
+/// The bridge records the DWG layout of the bytes of an embedded entity in group 455, in SOLID history steps and
+/// surfaces. A user DXF holds only the groups of the DXF Reference; the DWG bridge keeps the group.
+#[test]
+fn the_embedded_layout_group_stays_in_the_dwg_bridge_only() {
+    let text: String = [
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC",
+        "0\nSECTION\n2\nENTITIES",
+        "0\nEXTRUDEDSURFACE\n5\n60\n330\n1F\n100\nAcDbEntity\n8\n0\n100\nAcDbSurface\n310\nAABBCC\n455\n1032\n90\n4",
+        "0\nENDSEC\n0\nSECTION\n2\nOBJECTS",
+        "0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n281\n1\n3\nACME_STEP\n350\n61",
+        "0\nACSH_SWEEP_CLASS\n5\n61\n330\nC\n100\nAcDbEvalExpr\n90\n1\n310\nDDEE\n455\n1032\n90\n9",
+        "0\nENDSEC\n0\nEOF\n",
+    ]
+    .iter()
+    .flat_map(|chunk| chunk.lines())
+    .collect::<Vec<_>>()
+    .chunks(2)
+    .map(|p| format!("{}\n{}\n", p[0], p.get(1).copied().unwrap_or("")))
+    .collect();
+    let d = crate::read_dxf(text.as_bytes()).unwrap();
+    let kept = |tags: &[Tag]| tags.iter().filter(|t| t.code == 455 && t.i64() == 1032).count();
+    for target in [Version::R2000, Version::R2010, Version::R2018] {
+        let public = tags(&d, target);
+        assert_eq!(kept(&public), 0, "public DXF {target:?}");
+        assert!(public.iter().any(|t| t.code == 310 && t.str() == "AABBCC"), "the surface bytes stay: {target:?}");
+        assert!(public.iter().any(|t| t.code == 310 && t.str() == "DDEE"), "the history bytes stay: {target:?}");
+        let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, target)).unwrap();
+        assert_eq!(kept(&bridge), 2, "DWG bridge {target:?}");
+    }
+}

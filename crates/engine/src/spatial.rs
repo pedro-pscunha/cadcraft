@@ -298,7 +298,9 @@ mod tests {
             xref_path: None,
             explodable: true,
             units: 0,
+            scale_uniformly: false,
             array: None,
+            preview: None,
         };
         blk.entities
             .push(Entity::new(cadcraft_doc::Handle(1_000_000), EntityKind::Circle(cadcraft_doc::Circle { center: v3(0.0, 0.0), radius: 1.0 })));

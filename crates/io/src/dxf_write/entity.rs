@@ -673,7 +673,7 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
     }
 }
 
-fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
+fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     if let EntityKind::Hatch(h) = &e.kind {
         w.s(0, "HATCH");
         common(w, e, owner, paper, "AcDbHatch");
@@ -734,8 +734,10 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
             }
         }
         w.i(98, 0);
+        // Gradient fills (450 to 470) exist from AutoCAD 2004; AutoCAD 2000 ends the hatch at the seed points
+        // and the fill stays in CADCraft's xdata below.
         if let Some(g) = &h.gradient {
-            gradient(w, g);
+            gradient(w, g, cx.dwg_bridge || cx.target >= Version::R2004);
         }
         hatch_xdata(w, h);
     }
@@ -860,7 +862,14 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
 /// carrying ACI (63) and, for true colours, the RGB value (421). Those groups belong to R2004+
 /// files, so the same gradient also travels as `CADCRAFT` xdata, which survives this R2000
 /// file's conversion to DWG (where the native fields don't exist).
-fn gradient(w: &mut W, g: &Gradient) {
+fn gradient(w: &mut W, g: &Gradient, groups: bool) {
+    if groups {
+        gradient_groups(w, g);
+    }
+    gradient_xdata(w, g);
+}
+
+fn gradient_groups(w: &mut W, g: &Gradient) {
     w.i(450, 1);
     w.i(451, 0);
     w.f(460, g.angle);
@@ -879,6 +888,9 @@ fn gradient(w: &mut W, g: &Gradient) {
         }
     }
     w.s(470, &g.name);
+}
+
+fn gradient_xdata(w: &mut W, g: &Gradient) {
     w.s(1001, dxf_ext::APP);
     w.s(1000, "GRADIENT");
     // A 1000 group holds at most 255 bytes; cut at a character boundary.

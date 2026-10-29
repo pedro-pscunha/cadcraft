@@ -194,7 +194,9 @@ fn preserved_header_vars(w: &mut W, d: &Drawing, target: Version) {
     let source = Version::for_acadver(&d.header.str("ACADVER", "AC1032")).unwrap_or_default();
     for (name, codes) in &d.header.dxf_codes {
         if written.contains(name)
-            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED" | "CEPSNID")
+            // ACADMAINTVER is the producing application's maintenance version, in the source format's group code;
+            // AutoCAD refuses a DXF whose value or code it does not take for its version and writes its own.
+            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED" | "CEPSNID" | "ACADMAINTVER")
             || (!w.dwg_bridge && bridge_header(name))
             || target < header_since(name, source)
         {

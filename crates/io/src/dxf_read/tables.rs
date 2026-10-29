@@ -317,7 +317,11 @@ fn index_table_handles(recs: &[(String, Vec<Tag>)], rx: &mut Rx) {
             }
             "BLOCK_RECORD" => {
                 let units = table.i(70).and_then(|units| u8::try_from(units).ok()).unwrap_or(0);
-                rx.block_props.insert(name.to_ascii_uppercase(), (units, table.i(280).unwrap_or(1) != 0));
+                rx.block_props.insert(name.to_ascii_uppercase(), (units, table.i(280).unwrap_or(1) != 0, table.i(281).unwrap_or(0) != 0));
+                let preview: Vec<String> = tags.iter().filter(|t| t.code == 310).map(|t| t.str()).collect();
+                if !preview.is_empty() {
+                    rx.block_previews.insert(name.to_ascii_uppercase(), preview);
+                }
                 if let Some(array) = crate::dxf_ext::read_array(tags) {
                     rx.block_arrays.insert(name.to_ascii_uppercase(), array);
                 }

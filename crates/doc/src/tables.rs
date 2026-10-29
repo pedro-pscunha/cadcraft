@@ -762,9 +762,24 @@ pub struct Block {
     pub explodable: bool,
     #[serde(default)]
     pub units: u8,
+    /// Block scalability (DXF 281): the block can be scaled uniformly only.
+    #[serde(default)]
+    pub scale_uniformly: bool,
     /// The parameters of an associative array when this is an array block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub array: Option<crate::ArrayParams>,
+    /// The preview bitmap the file had for this block, kept while the block is unedited.
+    #[serde(skip)]
+    pub preview: Option<BlockPreview>,
+}
+
+/// A block's preview image as read (the values of its BLOCK_RECORD `310` groups) and the
+/// [`Block::content_key`] of the block when it was read. The writer writes the groups back while the key is still the
+/// block's: AutoCAD makes a new preview after an edit.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockPreview {
+    pub groups: Vec<String>,
+    pub key: u64,
 }
 
 /// The load state of an external reference.
@@ -810,8 +825,30 @@ impl Block {
             xref_path: None,
             explodable: true,
             units: 0,
+            scale_uniformly: false,
             array: None,
+            preview: None,
         }
+    }
+
+    /// A key of what the block draws: its base point and its entities, as they are now. It changes with
+    /// every edit of the contents, a property edit included.
+    pub fn content_key(&self) -> u64 {
+        use std::fmt::Write;
+        use std::hash::{DefaultHasher, Hasher};
+        struct Hashed(DefaultHasher);
+        impl Write for Hashed {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0.write(s.as_bytes());
+                Ok(())
+            }
+        }
+        let mut hashed = Hashed(DefaultHasher::new());
+        let _ = write!(hashed, "{:?}", self.base);
+        for e in self.entities.iter() {
+            let _ = write!(hashed, "{e:?}");
+        }
+        hashed.0.finish()
     }
 }
 

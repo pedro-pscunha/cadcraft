@@ -47,8 +47,8 @@ struct Rx {
     block_xdicts: HashMap<Handle, Handle>,
     /// LTYPE record handle (upper case) → linetype name (DIMLTYPE, DIMLTEX1, DIMLTEX2).
     ltypes: HashMap<String, String>,
-    /// Upper-case block name → (insertion units, explodable) from its BLOCK_RECORD.
-    block_props: HashMap<String, (u8, bool)>,
+    /// Upper-case block name → (insertion units, explodable, scale uniformly) from its BLOCK_RECORD.
+    block_props: HashMap<String, (u8, bool, bool)>,
     /// Upper-case names of anonymous `*T` blocks drawn by ACAD_TABLE entities.
     table_blocks: std::collections::HashSet<String>,
     /// Upper-case block names used by INSERTs.
@@ -66,6 +66,8 @@ struct Rx {
     pstyles: HashMap<String, String>,
     /// Upper-case block name → associative array parameters from its BLOCK_RECORD.
     block_arrays: HashMap<String, cadcraft_doc::ArrayParams>,
+    /// Upper-case block name → the values of its BLOCK_RECORD preview (310) groups.
+    block_previews: HashMap<String, Vec<String>>,
     /// LAYER record handle (upper case) → layer name (VIEWPORT group 331 frozen layers).
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
@@ -172,7 +174,19 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     d.allocate_missing_attribute_handles();
     d.remember_raw_dimassocs();
     d.skipped_records = skipped;
+    keep_block_previews(&mut d, rx.block_previews);
     Ok(d)
+}
+
+/// Give each block the preview its file had, keyed to the contents it has now: the last step of reading, after
+/// nothing changes the blocks any more.
+fn keep_block_previews(d: &mut Drawing, mut previews: HashMap<String, Vec<String>>) {
+    for (name, block) in &mut d.blocks {
+        if let Some(groups) = previews.remove(&name.to_ascii_uppercase()) {
+            let block = std::sync::Arc::make_mut(block);
+            block.preview = Some(cadcraft_doc::BlockPreview { groups, key: block.content_key() });
+        }
+    }
 }
 
 /// Reserve persistent child identities even in CADCraft files with a private handseed. A

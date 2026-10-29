@@ -283,7 +283,7 @@ fn block_definition_properties_and_constant_attdefs_roundtrip() {
     d.blocks.insert("Title".into(), std::sync::Arc::new(b));
     d.blocks.insert("Plain".into(), std::sync::Arc::new(Block::new("Plain")));
     d.bump_handseed(Handle(0x510));
-    let back = roundtrip(&d);
+    let back = read_dxf(dxf_at(&d, Version::R2018).as_bytes()).unwrap();
     let t = back.block("Title").unwrap();
     assert_eq!((t.description.as_str(), t.units, t.explodable), ("Drawing title block", 4, false));
     let flags: Vec<(String, bool, bool)> = t
@@ -565,6 +565,11 @@ fn first<T>(d: &Drawing, f: impl Fn(&EntityKind) -> Option<T>) -> T {
 
 fn roundtrip(d: &Drawing) -> Drawing {
     read_dxf(write_dxf(d).as_bytes()).unwrap()
+}
+
+/// The DXF text of `d` at `version` (`write_dxf` writes AutoCAD 2000's).
+fn dxf_at(d: &Drawing, version: Version) -> String {
+    String::from_utf8(write_with(d, "x.dxf", &SaveOptions { version: Some(version), binary: false }).unwrap()).unwrap()
 }
 
 #[test]
@@ -1872,7 +1877,7 @@ fn hatches(d: &Drawing) -> Vec<Hatch> {
 #[test]
 fn gradient_hatch_roundtrips_through_dxf() {
     let (d, gradients) = gradient_sample();
-    let text = write_dxf(&d);
+    let text = dxf_at(&d, Version::R2004);
     for code in ["450", "451", "452", "453", "460", "461", "462", "463", "421", "470"] {
         assert!(text.lines().any(|l| l.trim() == code), "missing group {code}");
     }
@@ -1891,7 +1896,7 @@ fn gradient_hatch_roundtrips_through_dxf() {
 #[test]
 fn gradient_falls_back_to_xdata_and_native_groups_win() {
     let (d, gradients) = gradient_sample();
-    let text = write_dxf(&d);
+    let text = dxf_at(&d, Version::R2004);
     // Strip groups 450–470 and 63/421 (pairs of lines) from every entity.
     let lines: Vec<&str> = text.lines().collect();
     let mut stripped = String::new();
@@ -1977,9 +1982,9 @@ fn long_gradient_name_is_cut_only_in_xdata() {
         g.name = name.clone();
     }
     d.add(&Space::Model, Common::default(), EntityKind::Hatch(h)).unwrap();
-    let text = write_dxf(&d);
+    let text = dxf_at(&d, Version::R2004);
     let lines: Vec<&str> = text.lines().collect();
-    // Non-ASCII text is written as \U+ escapes (R2000 files are ANSI).
+    // Non-ASCII text is written as \U+ escapes (files before 2007 are ANSI).
     assert!(lines.contains(&"\\U+00C4".repeat(200).as_str()));
     assert!(lines.contains(&"\\U+00C4".repeat(127).as_str()));
     let back = read_dxf(text.as_bytes()).unwrap();

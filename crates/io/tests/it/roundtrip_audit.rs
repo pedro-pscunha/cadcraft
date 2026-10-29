@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use cadcraft_doc::{Drawing, EntityKind};
 use cadcraft_dxf::{Tag, records, sections};
-use cadcraft_io::{read_dxf, write_dxf};
+use cadcraft_io::{SaveOptions, Version, read_dxf, write_dxf, write_with};
 
 /// DXF text from lines of `code value` (the value may be empty).
 fn dxf(src: &str) -> String {
@@ -679,10 +679,19 @@ fn xdata(tags: &[Tag], app: &str) -> Vec<(i32, String)> {
 
 /// Read the fixture, save, reopen and save again: both saves.
 fn saves(src: &str) -> (Drawing, Out, Out) {
+    saves_with(src, write_dxf)
+}
+
+/// Like [`saves`], with DXF of AutoCAD 2004: its CLASS records have instance counts.
+fn saves_2004(src: &str) -> (Drawing, Out, Out) {
+    saves_with(src, |d| String::from_utf8(write_with(d, "x.dxf", &SaveOptions { version: Some(Version::R2004), binary: false }).unwrap()).unwrap())
+}
+
+fn saves_with(src: &str, write: impl Fn(&Drawing) -> String) -> (Drawing, Out, Out) {
     let d = read_dxf(src.as_bytes()).expect("read fixture");
-    let first = write_dxf(&d);
+    let first = write(&d);
     let d2 = read_dxf(first.as_bytes()).expect("reopen");
-    let second = write_dxf(&d2);
+    let second = write(&d2);
     let d3 = read_dxf(second.as_bytes()).expect("reopen again");
     (d3, Out::new(&first), Out::new(&second))
 }
@@ -880,7 +889,7 @@ fn saving_twice_writes_the_same_records() {
 
 #[test]
 fn class_records_have_instance_counts_for_generated_and_preserved_records() {
-    let (_, a, b) = saves(&fixture());
+    let (_, a, b) = saves_2004(&fixture());
     for out in [&a, &b] {
         let counts = out.counts();
         for class in out.in_section("CLASSES", "CLASS") {

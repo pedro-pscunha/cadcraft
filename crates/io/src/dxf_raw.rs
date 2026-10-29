@@ -536,6 +536,14 @@ fn unnamed_styles(tables: &Recs<'_>) -> Vec<ForeignObject> {
         .collect()
 }
 
+/// AutoCAD writes a dynamic block proxy node's evaluation groups only: a trailing, empty subclass marker (which the
+/// DWG bridge adds) makes it refuse the object ("premature end of object").
+fn strip_empty_node_marker(kind: &str, tags: &mut Vec<RawTag>) {
+    if kind == "ACDB_DYNAMICBLOCKPROXYNODE" && tags.last().is_some_and(|r| r.code == 100 && r.value.trim() == "AcDbDynamicBlockProxyNode") {
+        tags.pop();
+    }
+}
+
 /// Keep what `secs` holds that the reader did not model in `d.foreign`.
 pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let get = |name: &str| secs.iter().find(|s| s.name == name).map(|s| split(&s.tags)).unwrap_or_default();
@@ -594,6 +602,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             f.dictionary.push((key, h));
         }
         kept.insert(h.hex());
+        strip_empty_node_marker(kind, &mut tags);
         f.objects.push(ForeignObject { handle: h, kind: kind.clone(), tags });
     }
     // Extras of entities, tables, table records, blocks and attributes.
@@ -988,6 +997,8 @@ struct Map<'a> {
     entities: HashSet<String>,
     /// The snapshots of the source geometry that are written back, by entity or attribute handle.
     geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
+    /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
+    version: u32,
 }
 
 impl Map<'_> {
@@ -1434,7 +1445,12 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry };
+    let version = tags
+        .windows(2)
+        .find(|w| w[0].code == 9 && w[0].str() == "$ACADVER")
+        .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
+        .unwrap_or(0);
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1610,7 +1626,7 @@ fn record(
     };
     // The source geometry of an entity whose geometry is as it was read.
     let replayed;
-    let b = match geometry.and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, |t| map.group(t))) {
+    let b = match geometry.and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, map.version, |t| map.group(t))) {
         Some(tags) => {
             replayed = tags;
             replayed.as_slice()
