@@ -295,10 +295,21 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             }
         }
         EntityKind::Helix(h) => {
-            // A cubic spline through points on the helix, then the helix data (DXF Reference).
+            // A cubic spline through points on the helix, then the helix data (DXF Reference). A canonical helix writes
+            // its own axis and start point and its control points in WCS; one whose frame cannot be built is not written.
+            let (s, controls, start, axis) = match &h.frame {
+                Some(f) => match h.world_spline3() {
+                    Ok((s, controls)) => (s, controls, f.start, f.axis),
+                    Err(_) => return,
+                },
+                None => {
+                    let (s, z) = h.spline3();
+                    let controls = s.control.iter().zip(&z).map(|(c, z)| c.to3(*z)).collect();
+                    (s, controls, h.start_point(), Vec3::Z)
+                }
+            };
             w.s(0, "HELIX");
             common(w, e, owner, paper, "AcDbSpline");
-            let (s, z) = h.spline3();
             w.i(70, 0);
             w.i(71, s.degree as i64);
             w.i(72, s.knots.len() as i64);
@@ -309,15 +320,15 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             for k in &s.knots {
                 w.f(40, *k);
             }
-            for (c, z) in s.control.iter().zip(&z) {
-                w.p(10, c.to3(*z));
+            for c in &controls {
+                w.p(10, *c);
             }
             w.s(100, "AcDbHelix");
             w.i(90, 29);
             w.i(91, 63);
             w.p(10, h.center);
-            w.p(11, h.start_point());
-            w.p(12, Vec3::Z);
+            w.p(11, start);
+            w.p(12, axis);
             w.f(40, h.base_radius);
             w.f(41, h.turns);
             w.f(42, h.turn_height());

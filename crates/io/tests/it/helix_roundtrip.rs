@@ -44,6 +44,7 @@ fn helix_survives_save_and_reopen() {
         start_angle: 0.7,
         ccw: false,
         constrain: HelixConstrain::Turns,
+        frame: None,
     };
     let b = Helix {
         center: Vec3::ZERO,
@@ -54,6 +55,7 @@ fn helix_survives_save_and_reopen() {
         start_angle: 0.0,
         ccw: true,
         constrain: HelixConstrain::Height,
+        frame: None,
     };
     d.add(&Space::Model, Common { layer: "Springs".into(), ..Common::default() }, EntityKind::Helix(a.clone())).unwrap();
     d.add(&Space::Model, Common::default(), EntityKind::Helix(b.clone())).unwrap();
@@ -180,6 +182,7 @@ fn helix_survives_dwg_save_and_reopen() {
         start_angle: 0.0,
         ccw: true,
         constrain: HelixConstrain::Height,
+        frame: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::Helix(a.clone())).unwrap();
     let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();

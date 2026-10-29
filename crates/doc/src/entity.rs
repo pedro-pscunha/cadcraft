@@ -50,6 +50,7 @@ mod edit;
 mod fill;
 mod fill_canonical;
 mod geometry;
+mod helix_canonical;
 mod layout;
 mod layout_canonical;
 mod mesh;

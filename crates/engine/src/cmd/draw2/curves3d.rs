@@ -90,7 +90,17 @@ impl Interactive for Poly3dM {
 
 /// A helix entity (base centre `c`, radii, height, turns, twist, start angle).
 fn helix_kind(c: Vec2, rb: f64, rt: f64, height: f64, turns: f64, ccw: bool, a0: f64) -> EntityKind {
-    let h = Helix { center: c.to3(0.0), base_radius: rb, top_radius: rt, height, turns, start_angle: a0, ccw, constrain: HelixConstrain::Height };
+    let h = Helix {
+        center: c.to3(0.0),
+        base_radius: rb,
+        top_radius: rt,
+        height,
+        turns,
+        start_angle: a0,
+        ccw,
+        constrain: HelixConstrain::Height,
+        frame: None,
+    };
     EntityKind::Helix(h.sanitized())
 }
 

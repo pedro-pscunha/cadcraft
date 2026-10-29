@@ -1,6 +1,6 @@
 //! Every canonical wipeout field is part of the replay key, so changing it alone retires the source snapshot.
 
-use cadcraft_doc::{Common, EntityKind, Wipeout, WipeoutFrame, geometry_key};
+use cadcraft_doc::{Common, EntityKind, Helix, HelixConstrain, HelixFrame, Wipeout, WipeoutFrame, geometry_key};
 use cadcraft_geom::{Vec2, Vec3};
 
 fn wipeout() -> Wipeout {
@@ -38,6 +38,54 @@ fn each_wipeout_frame_field_alone_changes_the_key() {
         let mut w = wipeout();
         mutate(w.frame.as_mut().unwrap());
         let k = key(&w);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    for (i, a) in keys.iter().enumerate() {
+        for b in &keys[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+}
+
+fn helix() -> Helix {
+    Helix {
+        center: Vec3::new(1.0, 2.0, 3.0),
+        base_radius: 2.0,
+        top_radius: 2.0,
+        height: 4.0,
+        turns: 2.0,
+        start_angle: 0.0,
+        ccw: true,
+        constrain: HelixConstrain::Height,
+        frame: Some(HelixFrame { axis: Vec3::new(2.0, 0.0, 0.0), start: Vec3::new(1.0, 4.0, 3.0) }),
+    }
+}
+
+#[test]
+fn each_helix_frame_field_alone_changes_the_key() {
+    let key = |h: &Helix| geometry_key(&EntityKind::Helix(h.clone()), &Common::default()).unwrap();
+    let base = key(&helix());
+    type Mutation = fn(&mut Helix);
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("center z", |h| h.center.z += 0.5),
+        ("axis x", |h| h.frame.as_mut().unwrap().axis.x += 0.5),
+        ("axis y", |h| h.frame.as_mut().unwrap().axis.y += 0.5),
+        ("axis z", |h| h.frame.as_mut().unwrap().axis.z += 0.5),
+        ("start x", |h| h.frame.as_mut().unwrap().start.x += 0.5),
+        ("start z", |h| h.frame.as_mut().unwrap().start.z += 0.5),
+        ("radius", |h| h.base_radius += 0.5),
+        ("top radius", |h| h.top_radius += 0.5),
+        ("height", |h| h.height += 0.5),
+        ("turns", |h| h.turns += 1.0),
+        ("handedness", |h| h.ccw = false),
+        ("constraint", |h| h.constrain = HelixConstrain::Turns),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let mut h = helix();
+        mutate(&mut h);
+        let k = key(&h);
         assert_ne!(k, base, "{name}");
         keys.push(k);
     }
