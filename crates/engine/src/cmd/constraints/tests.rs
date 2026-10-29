@@ -350,7 +350,7 @@ fn settings_bars_checkbox_clears_exceptions() {
 
 fn make_canonical(s: &mut Session, h: &str) {
     let h = Handle::parse_hex(h).unwrap();
-    s.doc_mut().unwrap().modify_entity(h, |e| e.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2).unwrap();
+    crate::assoc::install_canonical_fixture(s.doc_mut().unwrap(), h);
 }
 
 #[test]
