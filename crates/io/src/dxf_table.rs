@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use cadcraft_color::Color;
+use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{CellBorder, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle};
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,11 @@ fn aci(v: i64) -> Color {
     Color::from_aci(i16::try_from(v).unwrap_or(256))
 }
 
+/// A true colour from a 24-bit group value (420 to 427).
+fn true_color(v: i64) -> Color {
+    Color::True(Rgb::from_u32((v & 0xFF_FFFF) as u32))
+}
+
 /// A table style from a TABLESTYLE object's groups. `ltypes` names the file's linetypes by handle
 /// (upper case), for the border linetypes a DWG bridge DXF carries.
 pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String, String>) -> TableStyle {
@@ -130,6 +135,14 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
         }
         let filled = block.iter().find(|t| t.code == 283).is_some_and(|t| t.i64() != 0);
         cs.fill = if filled { Some(block.iter().find(|t| t.code == 63).map(|t| aci(t.i64())).unwrap_or(Color::Index(7))) } else { None };
+        // True colours: 420 the text's, 421 the fill's, 422 to 427 the borders' (groups only a DWG
+        // bridge DXF has; the group before them holds the nearest ACI).
+        if let Some(c) = block.iter().find(|t| t.code == 420) {
+            cs.text_color = true_color(c.i64());
+        }
+        if let Some(c) = block.iter().find(|t| t.code == 421).filter(|_| filled) {
+            cs.fill = Some(true_color(c.i64()));
+        }
         for (k, b) in cs.borders.as_array_mut().into_iter().enumerate() {
             let k = k as i32;
             if let Some(w) = block.iter().find(|t| t.code == 274 + k) {
@@ -140,6 +153,9 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
             }
             if let Some(c) = block.iter().find(|t| t.code == 64 + k) {
                 b.color = aci(c.i64());
+            }
+            if let Some(c) = block.iter().find(|t| t.code == 422 + k) {
+                b.color = true_color(c.i64());
             }
             // Groups only a DWG bridge DXF has (340 to 345 the linetype, 94 to 99 the override flags).
             // ByBlock is the default every border has: it is no linetype of its own.
@@ -166,7 +182,8 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
 
 /// The groups of one documented cell type of a TABLESTYLE, in file order. `ltypes` (the written
 /// linetypes' handles by upper-case name) is given for a DWG bridge only: the DXF Reference has no
-/// group for a border's linetype or override flags, so a user DXF does not get them.
+/// group for a border's linetype or override flags, or for a true colour of the cell types, so a
+/// user DXF does not get them (CADCraft's xdata holds the colours there).
 pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str, ltypes: Option<&HashMap<String, String>>) -> Vec<Tag> {
     let mut out = vec![
         Tag::s(7, text_style),
@@ -181,7 +198,11 @@ pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str, ltypes: Option<&H
     out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(284 + k as i32, i64::from(x.visible))));
     out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(64 + k as i32, i64::from(x.color.to_aci()))));
     if let Some(ltypes) = ltypes {
+        let rgb = |c: Color| if let Color::True(rgb) = c { Some(i64::from(rgb.to_u32() & 0xFF_FFFF)) } else { None };
+        out.extend(rgb(cs.text_color).map(|v| Tag::i(420, v)));
+        out.extend(cs.fill.and_then(rgb).map(|v| Tag::i(421, v)));
         for (k, x) in b.iter().enumerate() {
+            out.extend(rgb(x.color).map(|v| Tag::i(422 + k as i32, v)));
             let handle = x.linetype.as_deref().and_then(|n| ltypes.get(&n.trim().to_ascii_uppercase()));
             out.extend(handle.map(|h| Tag::s(340 + k as i32, h.clone())));
             out.extend((x.overrides != 0).then(|| Tag::i(94 + k as i32, i64::from(x.overrides))));
