@@ -343,24 +343,9 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
 fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("wblock", "`path` is required"))?.to_string();
     let src = s.doc()?;
-    let mut d = cadcraft_doc::Drawing::new_imperial();
-    d.layers = src.layers.clone();
-    d.linetypes = src.linetypes.clone();
-    d.text_styles = src.text_styles.clone();
-    d.dim_styles = src.dim_styles.clone();
-    for block in src.blocks.values() {
-        let mut block = (**block).clone();
-        let entities = block.entities.iter().map(|e| (**e).clone()).collect();
-        block.entities = Default::default();
-        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
-            block.entities.push(e);
-        }
-        d.blocks.insert(block.name.clone(), Arc::new(block));
-    }
     // The base point becomes the written drawing's origin, its insertion base: by default 0,0 for
     // objects and the block's base point for a block (`base` is then in block coordinates).
     let base = point_param(p, "base");
-    d.header.set("INSBASE", cadcraft_doc::HVal::Point(Vec3::ZERO));
     let m = Mat3::translate(-base.unwrap_or(Vec2::ZERO));
     let ents: Vec<Entity> = if let Some(name) = str_param(p, "name") {
         let b = src.block(name).ok_or_else(|| bad("wblock", format!("no block `{name}`")))?;
@@ -384,9 +369,24 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     };
-    for e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::OtherDrawing) {
-        d.model.push(e);
+    let mut d = super::clipboard::defs_for(src, &ents);
+    let defaults = cadcraft_doc::Drawing::new_imperial();
+    d.header = defaults.header.clone();
+    d.layouts = defaults.layouts.clone();
+    d.handseed = src.handseed;
+    d.foreign = src.foreign.clone();
+    for mut entity in ents {
+        if entity.handle.0 == 0 {
+            entity.handle = d.new_handle();
+        }
+        d.model.push(entity);
     }
+    d.prepare_export(str_param(p, "name"));
+    if let Some(name) = str_param(p, "name") {
+        d.rename_block_foreign_records(name, "*Model_Space");
+    }
+    // New databases keep their standard symbols, without importing unused source definitions.
+    let _ = super::clipboard::merge(&mut d, &defaults, cadcraft_doc::DuplicationSource::OtherDrawing);
     let (bytes, notes) = super::file::write_document(&d, "wblock", &path, &super::file::SaveAs::default())?;
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;

@@ -13,6 +13,7 @@ use crate::{Entity, EntityKind, Handle, RawTag};
 
 mod association;
 mod block_copy;
+mod export;
 mod merge;
 pub use block_copy::BlockContentCopy;
 use block_copy::{BlockNamespace, block_role};
