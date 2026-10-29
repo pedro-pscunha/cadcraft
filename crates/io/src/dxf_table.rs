@@ -1,6 +1,6 @@
 //! Table data in DXF beyond the plain table: cell styles and per-cell styles and formulas.
 //!
-//! TABLESTYLE: the Data, Header and Title cell types are written in the groups the public DXF
+//! TABLESTYLE: the Data, Title and Header cell types are written in the groups the public DXF
 //! Reference documents (text style 7, height 140, alignment 170, text colour 62, fill colour 63
 //! with flag 283, border lineweights 274–279, visibility 284–289 and colours 64–69). Everything
 //! else — custom cell styles, per-style margins, data format and precision, true colours — goes
@@ -20,8 +20,9 @@ pub(crate) const CELLSTYLES: &str = "CELLSTYLES";
 pub(crate) const TABLEX: &str = "TABLEX";
 /// Largest JSON payload read back.
 const MAX_PAYLOAD: usize = 8 << 20;
-/// The documented cell types of a TABLESTYLE, in file order.
-pub(crate) const CELL_TYPES: [&str; 3] = [CellStyle::DATA, CellStyle::HEADER, CellStyle::TITLE];
+/// The documented cell types of a TABLESTYLE, in the file order AutoCAD writes (and acadrust reads):
+/// data, title, header.
+pub(crate) const CELL_TYPES: [&str; 3] = [CellStyle::DATA, CellStyle::TITLE, CellStyle::HEADER];
 
 /// `text` cut into xdata strings of at most 250 bytes (at character boundaries).
 pub(crate) fn chunks(text: &str) -> Vec<String> {
