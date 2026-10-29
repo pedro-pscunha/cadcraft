@@ -428,7 +428,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             x.color_book = Some((rgb, book));
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
-        x.props.extend(subclass_groups(kind, tags));
+        x.subclass = subclass_groups(kind, tags);
     }
     x
 }
@@ -436,8 +436,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
 /// read: a viewport's view (direction, target, twist, lens, clipping), UCS (345, 346, 79 and its
 /// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
-/// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
-/// model writes, or keeps elsewhere (frozen layers by 331 and xdata, the sun by link), is not one.
+/// offsets. The writer puts them after the groups it writes in that subclass, with handles
+/// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
+/// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
@@ -638,6 +639,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for x in f.entities.values().chain(f.records.values()) {
         note(&x.xdata);
         note(&x.props);
+        note(&x.subclass);
         note(&x.layout);
     }
     for e in all_entities(d) {
@@ -671,9 +673,9 @@ fn link_suns(f: &mut Foreign, viewports: &HashSet<String>, ids: &HashMap<String,
         f.objects.iter().filter(|o| up(&o.kind) == "SUN").filter_map(|o| Some((owner_of(o)?, RawTag { code: 361, value: o.handle.hex() }))).collect();
     for (owner, link) in suns {
         if viewports.contains(&owner.hex()) {
-            f.entities.entry(owner).or_default().props.push(link);
+            f.entities.entry(owner).or_default().subclass.push(link);
         } else if let Some(key) = ids.get(&owner.hex()).filter(|k| k.0 == "VPORT") {
-            f.records.entry(key.clone()).or_default().props.push(link);
+            f.records.entry(key.clone()).or_default().subclass.push(link);
         }
     }
 }
@@ -1509,9 +1511,10 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
-    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
-    // groups, such as the sun it points at, follow its AcDbViewport groups, a leader's its AcDbLeader's).
-    let props_at = if entity && !matches!(r.kind.as_str(), "VIEWPORT" | "LEADER") {
+    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata. The groups of
+    // the record's own subclass (a viewport's sun link, a leader's annotation) follow the groups
+    // the writer wrote in it, which is the end of the record before its xdata.
+    let props_at = if entity {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
@@ -1539,13 +1542,14 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
         if i == xdata_at
             && let Some(x) = x
         {
+            out.extend(x.subclass.iter().map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
         // A VPORT record's kept view replaces the plan view the writer wrote.
         if !entity
             && r.kind == "VPORT"
             && i < xdata_at
-            && x.is_some_and(|x| x.props.iter().any(|p| p.code == t.code))
+            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code))
             && !matches!(t.code, 0 | 5 | 100 | 330)
         {
             continue;
@@ -1585,6 +1589,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             out.extend(x.props.iter().map(|p| map.group(p)));
         }
         if xdata_at == b.len() {
+            out.extend(x.subclass.iter().map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
     }
