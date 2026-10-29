@@ -59,6 +59,8 @@ fn attribute_dispatch_updates_plain_and_embedded_payloads_atomically() {
         style: "Standard".into(),
         halign: Default::default(),
         valign: Default::default(),
+        backward: false,
+        upside_down: false,
     };
     let mut attribute = cadcraft_doc::Attrib::new("TAG", text);
     attribute.multiline = Some(cadcraft_doc::MultilineAttrib {
@@ -74,8 +76,10 @@ fn attribute_dispatch_updates_plain_and_embedded_payloads_atomically() {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         },
         read_as: "value".into(),
+        normal: cadcraft_geom::Vec3::Z,
     });
     attribute.try_transform(&Mat4::from_mat3(&Mat3::translate(Vec2::new(2.0, 3.0)))).unwrap();
     assert_eq!(attribute.text.insert, Vec3::new(3.0, 5.0, 3.0));

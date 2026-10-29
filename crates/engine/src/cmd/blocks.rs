@@ -344,6 +344,8 @@ fn attdef_kind(s: &Session, tag: &str, prompt: &str, default: &str, at: Vec2, he
                 style,
                 halign: HAlign::Left,
                 valign: VAlign::Baseline,
+                backward: false,
+                upside_down: false,
             },
         )
     })

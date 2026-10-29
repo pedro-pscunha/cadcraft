@@ -19,6 +19,8 @@ fn text(value: &str) -> EntityKind {
         style: "Standard".into(),
         halign: HAlign::Left,
         valign: VAlign::Baseline,
+        backward: false,
+        upside_down: false,
     })
 }
 

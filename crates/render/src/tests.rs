@@ -58,6 +58,8 @@ fn text_produces_strokes() {
             style: "Standard".into(),
             halign: Default::default(),
             valign: Default::default(),
+            backward: false,
+            upside_down: false,
         }),
     )
     .unwrap();
@@ -265,6 +267,8 @@ fn text_doc(style_font: &str, value: &str) -> Drawing {
             style: "TT".into(),
             halign: Default::default(),
             valign: Default::default(),
+            backward: false,
+            upside_down: false,
         }),
     )
     .unwrap();
@@ -339,6 +343,7 @@ fn truetype_mtext_and_dimension_text() {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         }),
     )
     .unwrap();
@@ -774,6 +779,8 @@ fn attrib(tag: &str) -> cadcraft_doc::Attrib {
             style: "Standard".into(),
             halign: Default::default(),
             valign: Default::default(),
+            backward: false,
+            upside_down: false,
         },
     )
 }
@@ -865,6 +872,7 @@ fn mtext_exact_spacing_ignores_taller_lines() {
         line_spacing,
         line_spacing_exact,
         columns: None,
+        direction: None,
     };
     let d = Drawing::new_imperial();
     let height = |contents: &str, ls: f64, exact: bool| layout_mtext_entity(&d, &mtext(contents, ls, exact)).bounds.height();

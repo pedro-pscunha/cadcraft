@@ -19,6 +19,8 @@ fn attrib(tag: &str, modes: AttribModes) -> Attrib {
         style: "Standard".into(),
         halign: HAlign::Left,
         valign: VAlign::Baseline,
+        backward: false,
+        upside_down: false,
     };
     Attrib { modes, ..Attrib::new(tag, text) }
 }

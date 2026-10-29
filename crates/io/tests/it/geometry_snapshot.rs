@@ -530,6 +530,7 @@ fn mleader_source(plane: (f64, f64, f64)) -> String {
         line_spacing: 1.0,
         line_spacing_exact: false,
         columns: None,
+        direction: None,
     };
     let m = MLeader {
         roots: vec![cadcraft_doc::MLeaderRoot::new(

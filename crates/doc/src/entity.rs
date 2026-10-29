@@ -53,8 +53,9 @@ mod layout;
 mod mesh;
 mod mleader;
 mod text;
+mod text_canonical;
 
-pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
+pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
 pub use curves::{
     Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
@@ -67,6 +68,7 @@ pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
 pub use mleader::{MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot};
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
+pub use text_canonical::{Similarity, TextFrame};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown {
     pub dxf_type: String,

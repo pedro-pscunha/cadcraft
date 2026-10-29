@@ -42,6 +42,13 @@ pub struct Text {
     pub halign: HAlign,
     #[serde(default)]
     pub valign: VAlign,
+    /// Backward text (DXF generation flag 2 of group 71): the glyphs run right to left. Only canonical text keeps the
+    /// source's reflection; legacy text reads it as unreflected.
+    #[serde(default)]
+    pub backward: bool,
+    /// Upside-down text (generation flag 4 of group 71).
+    #[serde(default)]
+    pub upside_down: bool,
 }
 
 impl Text {
@@ -83,6 +90,10 @@ pub struct MText {
     /// one column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub columns: Option<MTextColumns>,
+    /// The full direction of the text's X axis in WCS (DXF groups 11, 21, 31), kept by canonical text: `rotation` is
+    /// then only its angle in the plane. `None` for legacy text, whose direction is `rotation` alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Vec3>,
 }
 
 impl MText {

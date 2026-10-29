@@ -104,6 +104,7 @@ fn scale_scales_multileader_text_width_and_columns() {
             flow_reversed: false,
             extents: None,
         }),
+        direction: None,
     };
     let mut s = Session::new();
     let ml = MLeader {

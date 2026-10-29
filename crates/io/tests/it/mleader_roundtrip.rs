@@ -28,6 +28,7 @@ fn text_mleader() -> MLeader {
         line_spacing: 1.25,
         line_spacing_exact: true,
         columns: None,
+        direction: None,
     };
     let lines = vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)], vec![Vec3::new(1.0, -2.0, 0.0)]];
     let mut m = MLeader::single(Vec3::new(5.0, 4.0, 0.0), 0.75, false, lines, Some(text));
@@ -84,6 +85,8 @@ fn spline_leader_with_block_content_and_attributes() {
         style: "Standard".into(),
         halign: HAlign::default(),
         valign: VAlign::default(),
+        backward: false,
+        upside_down: false,
     };
     blk.entities.push(Entity::new(Handle(0x201), EntityKind::AttDef(Attrib { prompt: "Number".into(), ..Attrib::new("NUM", tag_text) })));
     d.blocks.insert(blk.name.clone(), std::sync::Arc::new(blk));

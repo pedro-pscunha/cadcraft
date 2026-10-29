@@ -40,6 +40,8 @@ pub(crate) fn make_text(s: &Session, at: Vec2, value: &str, height: f64, rotatio
         style,
         halign: h,
         valign: v,
+        backward: false,
+        upside_down: false,
     })
 }
 
@@ -82,6 +84,7 @@ pub(super) fn run_mtext(s: &mut Session, p: &Value) -> Result<Value> {
         line_spacing: f64_or(p, "lineSpacing", 1.0),
         line_spacing_exact: bool_or(p, "lineSpacingExact", false),
         columns: crate::cmd::mtext_opts::json_columns(p, height, width)?,
+        direction: None,
     });
     added(s.add_entity(k)?)
 }

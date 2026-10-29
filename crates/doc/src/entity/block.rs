@@ -35,6 +35,29 @@ pub struct Attrib {
     /// geometry is as it was read (see [`super::GeometrySnapshot`]).
     #[serde(default, skip)]
     pub geometry: Option<std::sync::Arc<super::GeometrySnapshot>>,
+    /// This attribute's own plane (normal and signed thickness): independent of its block reference's.
+    #[serde(default, skip_serializing_if = "AttribPlane::is_default")]
+    pub plane: AttribPlane,
+}
+
+/// The plane of a canonical attribute: its normal (kept with its source magnitude) and its signed thickness.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttribPlane {
+    pub normal: Vec3,
+    pub thickness: f64,
+}
+
+impl Default for AttribPlane {
+    fn default() -> Self {
+        AttribPlane { normal: Vec3::Z, thickness: 0.0 }
+    }
+}
+
+impl AttribPlane {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// An attribute's modes beyond invisible and constant.
@@ -70,6 +93,9 @@ impl AttribModes {
 pub struct MultilineAttrib {
     #[serde(default)]
     pub geometry_revision: super::GeometryRevision,
+    /// The plane of the embedded text (its own normal), independent of the attribute's.
+    #[serde(default = "plane_z", skip_serializing_if = "is_plane_z")]
+    pub normal: Vec3,
     pub mtext: MText,
     /// The plain text `mtext`'s contents read as: an attribute whose value differs was edited
     /// since, and its value replaces the contents.
@@ -115,6 +141,7 @@ impl Attrib {
             multiline: None,
             modes: AttribModes::default(),
             geometry: None,
+            plane: AttribPlane::default(),
         }
     }
 
@@ -243,4 +270,12 @@ impl Insert {
             .then_before(Mat3::scale(self.scale.x, self.scale.y))
             .then_before(Mat3::translate(-base))
     }
+}
+
+fn plane_z() -> Vec3 {
+    Vec3::Z
+}
+
+fn is_plane_z(v: &Vec3) -> bool {
+    *v == Vec3::Z
 }

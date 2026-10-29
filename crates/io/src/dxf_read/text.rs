@@ -38,7 +38,7 @@ pub(super) fn split_embedded(tags: &[Tag]) -> (&[Tag], Option<&[Tag]>) {
 pub(super) fn multiline_attrib(embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
     let mtext = mtext_from(embedded.filter(|e| !e.is_empty())?, c);
     let read_as = cadcraft_fonts::plain_mtext(&mtext.contents);
-    Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as })
+    Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as, normal: cadcraft_geom::Vec3::Z })
 }
 
 /// Multiline text from MTEXT groups (an MTEXT entity's, or a multiline attribute's embedded ones).
@@ -90,6 +90,7 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         line_spacing: t.fd(44, 1.0),
         line_spacing_exact: t.i(73) == Some(2),
         columns: columns.map(|(c, _)| c),
+        direction: None,
     };
     if let Some((w, h)) = mtext_dxf::read_embedded_extents(tags) {
         text.set_column_extents(w, h);
@@ -98,6 +99,17 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
 }
 
 pub(super) fn text_from(t: &T) -> Text {
+    let mut text = text_fields(t);
+    let align = t.f(11).map(|_| t.p(11));
+    let n = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
+    if n.z < 0.0 {
+        mirror_text(&mut text, align.map(|a| ocs_n(n, a)), ocs_n(n, t.p(10)));
+    }
+    text
+}
+
+/// A TEXT's fields as the groups hold them (OCS points, baseline angle), whatever its normal.
+pub(super) fn text_fields(t: &T) -> Text {
     let h = match t.i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
@@ -115,7 +127,7 @@ pub(super) fn text_from(t: &T) -> Text {
         _ => VAlign::Baseline,
     };
     let align = if t.f(11).is_some() { Some(t.p(11)) } else { None };
-    let mut text = Text {
+    Text {
         insert: t.p(10),
         align_pt: if h == HAlign::Left && v == VAlign::Baseline { None } else { align },
         height: t.fd(40, 0.2).max(1e-9),
@@ -126,12 +138,9 @@ pub(super) fn text_from(t: &T) -> Text {
         style: t.s(7).unwrap_or_else(|| "Standard".into()),
         halign: h,
         valign: v,
-    };
-    let n = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
-    if n.z < 0.0 {
-        mirror_text(&mut text, align.map(|a| ocs_n(n, a)), ocs_n(n, t.p(10)));
+        backward: false,
+        upside_down: false,
     }
-    text
 }
 
 /// TEXT / ATTRIB / ATTDEF with extrusion (0,0,-1): the points are OCS and the text runs from its

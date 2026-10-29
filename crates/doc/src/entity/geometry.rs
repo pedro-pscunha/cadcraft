@@ -32,15 +32,18 @@ pub struct GeometrySnapshot {
     pub model: String,
 }
 
-/// The placement of a multiline attribute's embedded MTEXT.
+/// The placement of a multiline attribute's embedded MTEXT: its place, size and attachment, its full direction and its
+/// own plane.
 fn embedded_geometry(s: &mut String, a: &Attrib) {
-    if let Some(m) = a.multiline.as_ref().map(|m| &m.mtext) {
-        let _ = write!(s, "{:?}", (m.insert, m.height, m.width, m.attach, m.rotation, m.line_spacing, m.line_spacing_exact));
+    if let Some(ml) = a.multiline.as_ref() {
+        let m = &ml.mtext;
+        let _ = write!(s, "{:?}", (m.insert, m.height, m.width, m.attach, m.rotation, m.line_spacing, m.line_spacing_exact, m.direction, ml.normal));
     }
 }
 
+/// The geometry fields of a text: its points and baseline angle, size, slant, alignment and reflection.
 fn text_geometry(s: &mut String, t: &Text) {
-    let _ = write!(s, "{:?}", (t.insert, t.align_pt, t.height, t.rotation, t.width_factor, t.oblique, t.halign, t.valign));
+    let _ = write!(s, "{:?}", (t.insert, t.align_pt, t.height, t.rotation, t.width_factor, t.oblique, t.halign, t.valign, t.backward, t.upside_down));
 }
 
 /// The key of the geometry of a top-level entity, or `None` for a kind that keeps no snapshot.
@@ -81,7 +84,7 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(
                 s,
                 "MTEXT{:?}{plane:?}",
-                (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact, &t.columns)
+                (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact, &t.columns, t.direction)
             );
         }
         EntityKind::Insert(i) => {
@@ -174,6 +177,8 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
 pub fn attrib_geometry_key(a: &Attrib) -> String {
     let mut s = String::from("ATTRIB");
     text_geometry(&mut s, &a.text);
+    // Its own plane: not its block reference's.
+    let _ = write!(s, "{:?}", (a.plane.normal, a.plane.thickness));
     embedded_geometry(&mut s, a);
     s
 }

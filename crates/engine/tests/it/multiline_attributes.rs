@@ -22,6 +22,8 @@ fn session() -> Session {
         style: "Standard".into(),
         halign: Default::default(),
         valign: Default::default(),
+        backward: false,
+        upside_down: false,
     };
     let mtext = MText {
         insert: Vec3::new(10.0, 3.0, 0.0),
@@ -34,10 +36,16 @@ fn session() -> Session {
         line_spacing: 1.0,
         line_spacing_exact: false,
         columns: None,
+        direction: None,
     };
     let def = Attrib {
         prompt: "Site".into(),
-        multiline: Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as: "SITE\nNAME".into() }),
+        multiline: Some(MultilineAttrib {
+            geometry_revision: Default::default(),
+            mtext,
+            read_as: "SITE\nNAME".into(),
+            normal: cadcraft_geom::Vec3::Z,
+        }),
         ..Attrib::new("LABEL", text)
     };
     let mut b = Block::new("TAG");

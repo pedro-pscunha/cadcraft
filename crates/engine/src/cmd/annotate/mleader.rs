@@ -28,6 +28,7 @@ fn mleader_kind(s: &Session, pts: &[Vec2], text: &str, landing: bool) -> Option<
         line_spacing: 1.0,
         line_spacing_exact: false,
         columns: None,
+        direction: None,
     });
     let mut m = MLeader::single(v3(*landing_pt), dogleg, dir < 0.0, vec![arrow_pts.iter().map(|p| v3(*p)).collect()], text);
     m.style = st.name.clone();
@@ -74,6 +75,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
+                direction: None,
             }))?
             .hex(),
         );

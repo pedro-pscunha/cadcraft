@@ -47,6 +47,8 @@ fn attribute() -> cadcraft_doc::Attrib {
             style: "Standard".into(),
             halign: Default::default(),
             valign: Default::default(),
+            backward: false,
+            upside_down: false,
         },
     )
 }
@@ -76,8 +78,10 @@ fn embedded_mtext_checks_its_revision_independently_of_the_attribute() {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         },
         read_as: "value".into(),
+        normal: cadcraft_geom::Vec3::Z,
     });
     let before = attribute.clone();
     assert!(attribute.try_transform(&Mat4::from_mat3(&Mat3::translate(Vec2::new(3.0, 4.0)))).is_err());
@@ -192,8 +196,10 @@ fn non_finite_nested_text_keeps_the_owning_entity_handle() {
                     line_spacing: 1.0,
                     line_spacing_exact: false,
                     columns: None,
+                    direction: None,
                 },
                 read_as: "value".into(),
+                normal: cadcraft_geom::Vec3::Z,
             });
         } else {
             attribute.text.height = 1e308;
