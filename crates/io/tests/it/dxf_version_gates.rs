@@ -66,3 +66,149 @@ fn gradient_groups_exist_from_2004() {
         assert_eq!(name(&back), Some("CYLINDER".into()), "{version:?}: the gradient is kept");
     }
 }
+
+/// Follow the boundary groups of a hatch as the DXF Reference lays them out and return how many groups they take, or `None`
+/// at the first group out of place. Spline edges have a fit data count (97, then the fit points) from AutoCAD 2010.
+fn boundary_len(groups: &[Tag], fit_counts: bool) -> Option<usize> {
+    let code = |i: usize| groups.get(i).map(|t| t.code);
+    let int = |i: usize| groups.get(i).map(|t| t.i64().max(0) as usize);
+    let expect = |i: &mut usize, c: i32| (code(*i) == Some(c)).then(|| *i += 1);
+    let mut i = 0;
+    expect(&mut i, 91)?;
+    for _ in 0..int(0)? {
+        let flags = groups.get(i).filter(|t| t.code == 92)?.i64();
+        i += 1;
+        if flags & 2 != 0 {
+            let has_bulge = groups.get(i).filter(|t| t.code == 72)?.i64() != 0;
+            expect(&mut i, 72)?;
+            expect(&mut i, 73)?;
+            let n = int(i).filter(|_| code(i) == Some(93))?;
+            i += 1;
+            for _ in 0..n {
+                expect(&mut i, 10)?;
+                expect(&mut i, 20)?;
+                if has_bulge {
+                    expect(&mut i, 42)?;
+                }
+            }
+        } else {
+            let n = int(i).filter(|_| code(i) == Some(93))?;
+            i += 1;
+            for _ in 0..n {
+                let kind = groups.get(i).filter(|t| t.code == 72)?.i64();
+                i += 1;
+                match kind {
+                    1 => [10, 20, 11, 21].iter().try_for_each(|c| expect(&mut i, *c))?,
+                    2 => [10, 20, 40, 50, 51, 73].iter().try_for_each(|c| expect(&mut i, *c))?,
+                    3 => [10, 20, 11, 21, 40, 50, 51, 73].iter().try_for_each(|c| expect(&mut i, *c))?,
+                    4 => {
+                        let rational = groups.get(i + 1).filter(|t| t.code == 73)?.i64() != 0;
+                        let (knots, controls) = (int(i + 3).filter(|_| code(i + 3) == Some(95))?, int(i + 4).filter(|_| code(i + 4) == Some(96))?);
+                        [94, 73, 74, 95, 96].iter().try_for_each(|c| expect(&mut i, *c))?;
+                        for _ in 0..knots {
+                            expect(&mut i, 40)?;
+                        }
+                        for _ in 0..controls {
+                            expect(&mut i, 10)?;
+                            expect(&mut i, 20)?;
+                            if rational {
+                                expect(&mut i, 42)?;
+                            }
+                        }
+                        if fit_counts {
+                            let fit = int(i).filter(|_| code(i) == Some(97))?;
+                            i += 1;
+                            for _ in 0..fit {
+                                expect(&mut i, 11)?;
+                                expect(&mut i, 21)?;
+                            }
+                            if fit > 0 {
+                                [12, 22, 13, 23].iter().try_for_each(|c| expect(&mut i, *c))?;
+                            }
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        let sources = int(i).filter(|_| code(i) == Some(97))?;
+        i += 1;
+        for _ in 0..sources {
+            expect(&mut i, 330)?;
+        }
+    }
+    Some(i)
+}
+
+/// A hatch whose loop has a spline edge between two lines, written as acadrust writes it for a file before 2010
+/// (`fit_count: false`: no fit data count) or after it.
+fn spline_hatch(fit_count: bool) -> String {
+    let fit = if fit_count { "97 0\n" } else { "" };
+    let spline = format!(
+        "72 4\n94 3\n73 0\n74 0\n95 8\n96 4\n40 0\n40 0\n40 0\n40 0\n40 1\n40 1\n40 1\n40 1\n10 5\n20 0\n10 6\n20 2\n10 7\n20 2\n10 8\n20 0\n{fit}"
+    );
+    dxf(&format!(
+        "0 HATCH\n5 51\n100 AcDbEntity\n8 0\n100 AcDbHatch\n10 0\n20 0\n30 2.5\n210 0\n220 0\n230 -1\n2 ANSI31\n70 0\n71 0\n91 1\n92 1\n93 3\n\
+         72 1\n10 0\n20 0\n11 5\n21 0\n{spline}72 1\n10 8\n20 0\n11 0\n21 0\n97 0\n75 0\n76 1\n52 0\n41 1\n77 0\n78 0\n98 0"
+    ))
+}
+
+#[test]
+fn a_hatch_spline_edge_has_its_fit_count_from_2010_only() {
+    for source in [spline_hatch(false), spline_hatch(true)] {
+        let d = read_dxf(source.as_bytes()).unwrap();
+        for version in Version::ALL {
+            let text = save(&d, version);
+            let hatch = section(&text, "ENTITIES").into_iter().find(|(k, _)| k == "HATCH").unwrap().1;
+            let start = hatch.iter().position(|t| t.code == 91).unwrap();
+            let end = hatch.iter().position(|t| t.code == 75).unwrap();
+            let loops = boundary_len(&hatch[start..], version >= Version::R2010);
+            assert_eq!(loops.map(|n| start + n), Some(end), "{version:?}: {:?}", &hatch[start..end]);
+            // The spline edge itself is there (a replay of the source, not a polygon).
+            assert!(hatch.iter().any(|t| t.code == 72 && t.i64() == 4), "{version:?}");
+        }
+    }
+}
+
+/// AutoCAD writes no oblique angle (52) for extension lines perpendicular to the dimension line and refuses a
+/// DXF that has one, also when the source file had it (a DWG's -270 degrees).
+#[test]
+fn a_perpendicular_oblique_of_a_source_dimension_is_not_replayed() {
+    let source = dxf(
+        "0 DIMENSION\n5 52\n100 AcDbEntity\n8 0\n100 AcDbDimension\n2 *D1\n10 5.5\n20 6.5\n30 0\n11 3.5\n21 4.5\n31 0\n70 32\n53 0\n3 Standard\n\
+         100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 0\n14 8.5\n24 1.5\n34 0\n50 180\n52 -270\n100 AcDbRotatedDimension",
+    );
+    let d = read_dxf(source.as_bytes()).unwrap();
+    for version in [Version::R2000, Version::R2018] {
+        let dim = section(&save(&d, version), "ENTITIES").into_iter().find(|(k, _)| k == "DIMENSION").unwrap().1;
+        assert!(!dim.iter().any(|t| t.code == 52), "{version:?}: {dim:?}");
+    }
+}
+
+/// A DXF of AutoCAD 2010 (Citycon) with what AutoCAD refused in a CADCraft DXF of another version: a maintenance
+/// version in the format's own group code, and a dynamic block node with an empty marker at its end.
+fn objects_source() -> String {
+    let lines = [
+        "0 SECTION\n2 HEADER\n9 $ACADVER\n1 AC1024\n9 $ACADMAINTVER\n70 0\n0 ENDSEC",
+        "0 SECTION\n2 OBJECTS",
+        "0 DICTIONARY\n5 C\n330 0\n100 AcDbDictionary\n281 1\n3 ACME_NODE\n350 45",
+        "0 ACDB_DYNAMICBLOCKPROXYNODE\n5 45\n330 C\n100 AcDbEvalExpr\n90 1\n98 33\n99 328\n100 AcDbDynamicBlockProxyNode",
+        "0 ENDSEC\n0 EOF\n",
+    ];
+    lines.iter().flat_map(|l| l.lines()).map(|l| l.split_once(' ').map_or(format!("{l}\n"), |(c, v)| format!("{c}\n{v}\n"))).collect()
+}
+
+/// AutoCAD ends a maintenance version of another group code, and a node whose subclass marker is empty, early.
+#[test]
+fn the_maintenance_version_and_an_empty_node_marker_are_not_replayed() {
+    let d = read_dxf(objects_source().as_bytes()).unwrap();
+    for version in Version::ALL {
+        let text = save(&d, version);
+        let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+        let header = sections(&tags).into_iter().find(|s| s.name == "HEADER").unwrap();
+        assert!(!header.tags.iter().any(|t| t.code == 9 && t.str() == "$ACADMAINTVER"), "{version:?}");
+        let node = section(&text, "OBJECTS").into_iter().find(|(k, _)| k == "ACDB_DYNAMICBLOCKPROXYNODE").expect("the node is kept").1;
+        assert!(!node.iter().any(|t| t.code == 100 && t.str() == "AcDbDynamicBlockProxyNode"), "{version:?}: {node:?}");
+        assert!(node.iter().any(|t| t.code == 99 && t.i64() == 328), "{version:?}: its data stays");
+    }
+}

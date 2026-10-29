@@ -121,7 +121,15 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
     for (i, (marker, codes)) in spec.iter().enumerate() {
         let range = subclass(tags, marker, occurrence(spec, i))?;
         out.push(RawTag { code: 100, value: (*marker).to_string() });
-        out.extend(tags.get(range).unwrap_or_default().iter().filter(|t| codes.contains(&t.code)).map(|t| RawTag { code: t.code, value: t.str() }));
+        // AutoCAD writes no oblique angle (52) of a dimension for extension lines perpendicular to its line and refuses a DXF that has one.
+        let perpendicular = |t: &Tag| kind == "DIMENSION" && t.code == 52 && (t.f64().rem_euclid(180.0) - 90.0).abs() < 1e-9;
+        out.extend(
+            tags.get(range)
+                .unwrap_or_default()
+                .iter()
+                .filter(|t| codes.contains(&t.code) && !perpendicular(t))
+                .map(|t| RawTag { code: t.code, value: t.str() }),
+        );
     }
     // A multiline attribute's embedded MTEXT, after a `101` group.
     if matches!(kind, "ATTRIB" | "ATTDEF")
@@ -137,9 +145,9 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
 
 /// The record `generated` with its geometry groups replaced by `kept` (see [`capture`]); `None`
 /// when the record lacks one of the subclasses. `convert` turns a kept group into a tag.
-pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
+pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], version: u32, convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
     if kind == "HATCH" {
-        return hatch_restore(generated, kept, convert);
+        return hatch_restore(generated, kept, version, convert);
     }
     if matches!(kind, "MULTILEADER" | "MLEADER") {
         return mleader_restore(generated, kept, convert);
@@ -219,10 +227,69 @@ fn hatch_loops(codes: &[i32], loops: usize, tail: usize) -> Vec<(usize, usize, u
         .enumerate()
         .map(|(n, start)| {
             let end = starts.get(n + 1).copied().unwrap_or(tail);
-            let sources = (*start..end).find(|i| codes.get(*i) == Some(&97)).unwrap_or(end);
+            // The last 97 of the loop is its source object count: a spline edge has a fit data count (97) too.
+            let sources = (*start..end).rfind(|i| codes.get(*i) == Some(&97)).unwrap_or(end);
             (*start, sources, end)
         })
         .collect()
+}
+
+/// The boundary groups of a hatch with the fit data count (97) every spline edge has after its control
+/// points. A DXF made from a DWG by acadrust leaves it out, and AutoCAD takes the loop's source object count (97)
+/// that follows for it ("expected group 11"). The fit count is a 97 that is followed by fit points (11), by
+/// the next edge (72) or by the loop's own count (97); the loop's own count is followed by its objects (330)
+/// or by the next loop (92) or the style (75).
+fn with_fit_counts(groups: Vec<RawTag>) -> Vec<RawTag> {
+    let code = |i: usize| groups.get(i).map(|g| g.code);
+    let int = |i: usize| groups.get(i).and_then(|g| g.value.trim().parse::<usize>().ok()).unwrap_or(0);
+    let mut out = Vec::with_capacity(groups.len() + 4);
+    let mut i = 0;
+    while i < groups.len() {
+        if !(groups[i].code == 72 && groups[i].value.trim() == "4" && code(i + 1) == Some(94)) {
+            out.push(groups[i].clone());
+            i += 1;
+            continue;
+        }
+        // 72 4, 94 degree, 73 rational, 74 periodic, 95 knots, 96 controls, the knots (40), the controls (10, 20, 42 when rational).
+        let (rational, knots, controls) = (int(i + 2) != 0, int(i + 4), int(i + 5));
+        let head = 6;
+        let per_control = if rational { 3 } else { 2 };
+        let end = (i + head + knots + controls * per_control).min(groups.len());
+        out.extend(groups[i..end].iter().cloned());
+        i = end;
+        let counted = code(i) == Some(97) && matches!(code(i + 1), Some(11 | 97 | 72));
+        if !counted {
+            out.push(RawTag { code: 97, value: "0".into() });
+        }
+    }
+    out
+}
+
+/// The boundary groups of a hatch for a file before 2010: its spline edges have no fit data count (97). Edges with
+/// fit points cannot be written so; `None` then.
+fn without_fit_counts(groups: Vec<RawTag>) -> Option<Vec<RawTag>> {
+    let code = |i: usize| groups.get(i).map(|g| g.code);
+    let int = |i: usize| groups.get(i).and_then(|g| g.value.trim().parse::<usize>().ok()).unwrap_or(0);
+    let mut out = Vec::with_capacity(groups.len());
+    let mut i = 0;
+    while i < groups.len() {
+        if !(groups[i].code == 72 && groups[i].value.trim() == "4" && code(i + 1) == Some(94)) {
+            out.push(groups[i].clone());
+            i += 1;
+            continue;
+        }
+        let (rational, knots, controls) = (int(i + 2) != 0, int(i + 4), int(i + 5));
+        let end = (i + 6 + knots + controls * if rational { 3 } else { 2 }).min(groups.len());
+        out.extend(groups[i..end].iter().cloned());
+        i = end;
+        if code(i) == Some(97) && matches!(code(i + 1), Some(11 | 97 | 72)) {
+            if int(i) != 0 {
+                return None;
+            }
+            i += 1;
+        }
+    }
+    Some(out)
 }
 
 fn hatch_capture(tags: &[Tag]) -> Option<Vec<RawTag>> {
@@ -233,15 +300,17 @@ fn hatch_capture(tags: &[Tag]) -> Option<Vec<RawTag>> {
     let raw = |t: &Tag| RawTag { code: t.code, value: t.str() };
     let mut out = vec![RawTag { code: 100, value: "AcDbHatch".into() }];
     out.extend(groups.iter().take(loops).filter(|t| HATCH_HEAD.contains(&t.code)).map(raw));
-    out.extend(groups.iter().take(tail).skip(loops).map(raw));
+    out.extend(with_fit_counts(groups.iter().take(tail).skip(loops).map(raw).collect()));
     out.extend(groups.iter().skip(tail).filter(|t| HATCH_TAIL.contains(&t.code)).map(raw));
     Some(out)
 }
 
-fn hatch_restore(generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
+fn hatch_restore(generated: &[Tag], kept: &[RawTag], version: u32, convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
     let range = subclass(generated, "AcDbHatch", 0)?;
     let groups = generated.get(range.clone())?;
     let kept: Vec<RawTag> = kept.iter().skip(1).cloned().collect();
+    // The fit data count of a spline edge exists from AutoCAD 2010 (AC1024) on.
+    let kept = if version < 1024 { without_fit_counts(kept)? } else { kept };
     let codes: Vec<i32> = groups.iter().map(|t| t.code).collect();
     let kept_codes: Vec<i32> = kept.iter().map(|t| t.code).collect();
     let ((loops, tail), (k_loops, k_tail)) = (hatch_parts(&codes)?, hatch_parts(&kept_codes)?);
