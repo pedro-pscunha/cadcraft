@@ -9,6 +9,7 @@ use super::{
 
 fn chain_of(s: &Session, h: Handle) -> Result<Chain> {
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     Chain::of(&e.kind).ok_or_else(|| other("Cannot divide/measure that object."))
 }
 

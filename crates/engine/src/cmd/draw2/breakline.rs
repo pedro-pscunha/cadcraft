@@ -66,6 +66,7 @@ impl Symbol {
         let mut anchors = Vec::new();
         let mut pieces: Vec<Vec<PolyVertex>> = Vec::new();
         for e in b.entities.iter() {
+            e.require_legacy_geometry()?;
             match &e.kind {
                 EntityKind::Point(p) if e.common.layer.eq_ignore_ascii_case("Defpoints") => anchors.push(p.p.xy()),
                 k => {

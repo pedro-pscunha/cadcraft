@@ -210,6 +210,12 @@ pub(crate) fn island_style(t: &str) -> Option<u8> {
 pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
     let d = s.doc()?;
     let space = s.space();
+    // Legacy extents participate in tracing, including non-boundary objects.
+    if let Some(store) = d.space(&space) {
+        for entity in store.iter().filter(|entity| d.is_visible(entity)) {
+            entity.require_legacy_geometry()?;
+        }
+    }
     let ext = d.extents(&space);
     let tol = ((ext.width() + ext.height()) * 1e-9).max(1e-9);
     let (polys, owners) = outlines(d, &space, None);
@@ -258,7 +264,9 @@ pub(crate) fn loops_from_handles(s: &Session, hs: &[Handle]) -> Result<Vec<Hatch
     let d = s.doc()?;
     let mut loops = Vec::new();
     for h in hs {
-        if let Some(vs) = d.entity(*h).and_then(|e| closed_loop(d, e)) {
+        let Some(entity) = d.entity(*h) else { continue };
+        entity.require_legacy_geometry()?;
+        if let Some(vs) = closed_loop(d, entity) {
             loops.push(HatchLoop { vertices: vs, outer: loops.is_empty(), sources: vec![*h] });
         }
     }
@@ -518,7 +526,9 @@ fn run_region(s: &mut Session, p: &Value) -> Result<Value> {
     for h in hs {
         let vs = {
             let d = s.doc()?;
-            d.entity(h).and_then(|e| closed_loop(d, e).map(|v| (v, e.common.clone())))
+            let Some(entity) = d.entity(h) else { continue };
+            entity.require_legacy_geometry()?;
+            closed_loop(d, entity).map(|v| (v, entity.common.clone()))
         };
         if let Some((vs, common)) = vs {
             let d = s.doc_mut()?;

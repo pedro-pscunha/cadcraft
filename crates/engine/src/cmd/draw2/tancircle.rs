@@ -26,6 +26,7 @@ pub(super) fn run_circle_variant(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn tan_obj(s: &Session, h: Handle, pick: Vec2) -> Result<TanObj> {
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     TanObj::from_kind(&e.kind, pick).ok_or_else(|| other("Select a line, circle, arc or polyline segment."))
 }
 

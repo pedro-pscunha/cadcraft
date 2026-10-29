@@ -42,10 +42,12 @@ pub(crate) fn blend_spline(e1: (Vec2, Vec2), e2: (Vec2, Vec2), smooth: bool) -> 
 }
 
 fn blend(s: &mut Session, h1: Handle, p1: Vec2, h2: Handle, p2: Vec2, smooth: bool) -> Result<Handle> {
-    let k1 = curves::entity(s, h1)?.kind;
-    let k2 = curves::entity(s, h2)?.kind;
-    let e1 = curve_end(&k1, p1).ok_or_else(|| other("Select an open line, arc, polyline, ellipse arc or spline."))?;
-    let e2 = curve_end(&k2, p2).ok_or_else(|| other("Select an open line, arc, polyline, ellipse arc or spline."))?;
+    let first = curves::entity(s, h1)?;
+    let second = curves::entity(s, h2)?;
+    first.require_legacy_geometry()?;
+    second.require_legacy_geometry()?;
+    let e1 = curve_end(&first.kind, p1).ok_or_else(|| other("Select an open line, arc, polyline, ellipse arc or spline."))?;
+    let e2 = curve_end(&second.kind, p2).ok_or_else(|| other("Select an open line, arc, polyline, ellipse arc or spline."))?;
     let sp = blend_spline(e1, e2, smooth).ok_or_else(|| other("The ends coincide."))?;
     s.add_entity(EntityKind::Spline(sp))
 }
@@ -102,8 +104,9 @@ impl Interactive for BlendM {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 match self.first {
                     None => {
-                        let k = curves::entity(s, h)?.kind;
-                        curve_end(&k, p).ok_or_else(|| other("Select an open curve."))?;
+                        let entity = curves::entity(s, h)?;
+                        entity.require_legacy_geometry()?;
+                        curve_end(&entity.kind, p).ok_or_else(|| other("Select an open curve."))?;
                         self.first = Some((h, p));
                         Ok(Step::Continue)
                     }
