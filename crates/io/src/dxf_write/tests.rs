@@ -253,8 +253,11 @@ fn the_embedded_layout_group_stays_in_the_dwg_bridge_only() {
     for target in [Version::R2000, Version::R2010, Version::R2018] {
         let public = tags(&d, target);
         assert_eq!(kept(&public), 0, "public DXF {target:?}");
-        assert!(public.iter().any(|t| t.code == 310 && t.str() == "AABBCC"), "the surface bytes stay: {target:?}");
-        assert!(public.iter().any(|t| t.code == 310 && t.str() == "DDEE"), "the history bytes stay: {target:?}");
+        // The bytes are in the layout of 2018 (the 455 value): another release gets them encoded again.
+        if target == Version::R2018 {
+            assert!(public.iter().any(|t| t.code == 310 && t.str() == "AABBCC"), "the surface bytes stay: {target:?}");
+            assert!(public.iter().any(|t| t.code == 310 && t.str() == "DDEE"), "the history bytes stay: {target:?}");
+        }
         let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, target)).unwrap();
         assert_eq!(kept(&bridge), 2, "DWG bridge {target:?}");
     }
