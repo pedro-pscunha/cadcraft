@@ -3,14 +3,14 @@
 //! AutoCAD keeps them. A save numbers objects and table records anew, so every handle that one of
 //! them holds names the saved object.
 
-use acadrust::entities::{AttributeEntity, Insert, Line, Viewport};
+use acadrust::entities::{AttributeEntity, Insert, Leader, Line, MText, Viewport};
 use acadrust::objects::{Dictionary, Material, ObjectType, PlaceHolder, Scale};
 use acadrust::tables::{AppId, BlockRecord, Layer, LineType, Ucs};
 use acadrust::types::{DxfVersion, Vector3};
 use acadrust::xdata::{ExtendedDataRecord, XDataValue};
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
 
-use super::bridge_header_groups::saves;
+use super::bridge_header_groups::{add_to_dictionary, saves, visual_style};
 
 /// Add the object `object` builds under `name` to the dictionary `dictionary`.
 fn add_object(doc: &mut CadDocument, dictionary: Handle, name: &str, object: impl FnOnce(Handle, Handle) -> ObjectType) -> Handle {
@@ -315,5 +315,68 @@ fn xref_symbols_point_at_the_block_record_of_their_xref() {
         let xref = block.handle;
         assert_eq!(back.layers.get("SITE|Walls").map(|l| l.xref_block_record_handle), Some(xref), "{what}: layer");
         assert_eq!(back.line_types.get("SITE|Dashed").map(|l| l.xref_block_record_handle), Some(xref), "{what}: linetype");
+    }
+}
+
+#[test]
+fn a_layout_viewport_keeps_its_view_and_visual_style() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let styles = doc.header.acad_visualstyle_dict_handle;
+    let style = add_to_dictionary(&mut doc, styles, "Realistic", visual_style("realistic"));
+    let mut vp = Viewport::new();
+    vp.id = 2;
+    vp.width = 160.0;
+    vp.height = 100.0;
+    vp.view_direction = Vector3::new(1.0, 1.0, 1.0);
+    vp.view_target = Vector3::new(4.0, 5.0, 6.0);
+    vp.twist_angle = 0.5;
+    vp.lens_length = 80.0;
+    vp.visual_style_handle = style;
+    doc.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), "Layout1").expect("add viewport");
+    for (what, back) in saves(&doc) {
+        let vp = back
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Viewport(v) if v.width == 160.0 => Some(v.as_ref()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{what}: viewport lost"));
+        assert_eq!(vp.view_direction, Vector3::new(1.0, 1.0, 1.0), "{what}: view direction");
+        assert_eq!(vp.view_target, Vector3::new(4.0, 5.0, 6.0), "{what}: view target");
+        assert_eq!(vp.twist_angle, 0.5, "{what}: twist");
+        assert_eq!(vp.lens_length, 80.0, "{what}: lens");
+        let described = match back.objects.get(&vp.visual_style_handle) {
+            Some(ObjectType::VisualStyle(s)) => s.description.clone(),
+            other => format!("not a visual style: {other:?}"),
+        };
+        assert_eq!(described, "realistic", "{what}: visual style");
+    }
+}
+
+#[test]
+fn a_leader_keeps_its_annotation_and_hook_line() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let mut text = MText::new();
+    text.common.handle = doc.allocate_handle();
+    text.value = "note".to_string();
+    let annotation = text.common.handle;
+    doc.add_entity(EntityType::MText(Box::new(text))).expect("add mtext");
+    let mut leader = Leader::new();
+    leader.vertices = vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(5.0, 5.0, 0.0)];
+    leader.annotation_handle = annotation;
+    leader.hookline_enabled = true;
+    leader.text_height = 2.5;
+    doc.add_entity(EntityType::Leader(leader)).expect("add leader");
+    for (what, back) in saves(&doc) {
+        let leader = back
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Leader(l) => Some(l),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{what}: leader lost"));
+        assert!(matches!(back.get_entity(leader.annotation_handle), Some(EntityType::MText(_))), "{what}: annotation {:?}", leader.annotation_handle);
+        assert!(leader.hookline_enabled, "{what}: hook line");
+        assert_eq!(leader.text_height, 2.5, "{what}: text height");
     }
 }

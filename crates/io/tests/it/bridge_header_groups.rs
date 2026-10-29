@@ -12,7 +12,7 @@ use acadrust::types::{DxfVersion, Vector3};
 use acadrust::{CadDocument, DwgReader, DwgWriter, Handle, TableEntry};
 
 /// Add the object `make(handle, owner)` builds to the dictionary `dictionary` under `name`.
-fn add_to_dictionary(doc: &mut CadDocument, dictionary: Handle, name: &str, make: impl FnOnce(Handle, Handle) -> ObjectType) -> Handle {
+pub(super) fn add_to_dictionary(doc: &mut CadDocument, dictionary: Handle, name: &str, make: impl FnOnce(Handle, Handle) -> ObjectType) -> Handle {
     let handle = doc.allocate_handle();
     doc.objects.insert(handle, make(handle, dictionary));
     let Some(ObjectType::Dictionary(dict)) = doc.objects.get_mut(&dictionary) else { panic!("no dictionary {dictionary:?}") };
@@ -20,7 +20,7 @@ fn add_to_dictionary(doc: &mut CadDocument, dictionary: Handle, name: &str, make
     handle
 }
 
-fn visual_style(description: &'static str) -> impl FnOnce(Handle, Handle) -> ObjectType {
+pub(super) fn visual_style(description: &'static str) -> impl FnOnce(Handle, Handle) -> ObjectType {
     move |handle, owner| {
         let mut style = VisualStyle::new();
         style.handle = handle;

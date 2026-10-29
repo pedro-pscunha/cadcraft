@@ -411,14 +411,35 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             x.color_book = Some((rgb, book));
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
-        // A viewport's UCS: its named UCS (345), the UCS its orthographic type is relative to (346)
-        // and that type (79).
-        if kind == "VIEWPORT" {
-            let own = tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]);
-            x.props.extend(own.iter().filter(|t| matches!(t.code, 345 | 346 | 79)).map(raw));
-        }
+        x.props.extend(subclass_groups(kind, tags));
     }
     x
+}
+
+/// The groups of an entity's own subclass that the model has no field for, as read: a viewport's
+/// view (direction, target, twist, lens, clipping, snap and grid), UCS (345, 346, 79 and its
+/// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
+/// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
+/// model writes, or keeps elsewhere (frozen layers by 341 and xdata, the sun by link), is not one.
+fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
+    let (marker, modelled): (&str, &[i32]) = match kind {
+        "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76]),
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    let mut in_subclass = false;
+    let mut in_group = false;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        match t.code {
+            100 => in_subclass = t.str().trim() == marker,
+            // An application group (reactors, extension dictionary).
+            102 => in_group = t.str().trim().starts_with('{'),
+            c if in_subclass && !in_group && !modelled.contains(&c) => out.push(raw(t)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Every entity of the drawing (model space, layouts, blocks).
@@ -1455,8 +1476,8 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
     // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
-    // groups, such as the sun it points at, follow its AcDbViewport groups).
-    let props_at = if entity && r.kind != "VIEWPORT" {
+    // groups, such as the sun it points at, follow its AcDbViewport groups, a leader's its AcDbLeader's).
+    let props_at = if entity && !matches!(r.kind.as_str(), "VIEWPORT" | "LEADER") {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
