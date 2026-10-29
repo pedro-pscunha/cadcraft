@@ -655,3 +655,91 @@ fn the_column_width_of_a_text_is_not_its_linetype_scale() {
     let d = cadcraft_io::read_dxf(dxf(&[line]).as_bytes()).unwrap();
     assert_eq!(d.model.iter().next().unwrap().common.ltscale, 0.5, "the linetype scale of the entity subclass still reads");
 }
+
+/// The groups of the leader roots of a MULTILEADER record (depth 2 and 3), as (code, value) text.
+fn root_groups(record: &[Tag]) -> Vec<(i32, String)> {
+    let mut depth = 0usize;
+    let mut out = Vec::new();
+    for t in record {
+        let value = t.str();
+        if matches!(t.code, 301 | 303 | 305) && value.trim() == "}" {
+            depth = depth.saturating_sub(1);
+        }
+        if depth >= 1 && (t.code == 302 || depth >= 2) {
+            // Numbers by their bits, so that "1" and "1.0" are one value.
+            let v = value.trim().parse::<f64>().map_or_else(|_| value.trim().to_string(), |v| format!("{:x}", v.to_bits()));
+            out.push((t.code, v));
+        }
+        if matches!(t.code, 300 | 302 | 304) && value.trim().ends_with('{') {
+            depth += 1;
+        }
+    }
+    out
+}
+
+/// A multileader of the shape CADCraft writes, with a second leader root after the first: its own landing,
+/// its direction, dogleg and one leader line.
+fn two_root_source() -> String {
+    let mut tags = cadcraft_dxf::parse(mleader_source((0.0, 0.0, 1.0)).as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 0 && t.str() == "MULTILEADER").unwrap();
+    let close = tags.iter().skip(start).position(|t| t.code == 303).unwrap() + start;
+    let second = [
+        Tag::s(302, "LEADER{"),
+        Tag::i(290, 1),
+        Tag::i(291, 1),
+        Tag::f(10, 9.5),
+        Tag::f(20, 9.25),
+        Tag::f(30, 0.5),
+        Tag::f(11, -1.0),
+        Tag::f(21, 0.0),
+        Tag::f(31, 0.0),
+        Tag::i(90, 1),
+        Tag::f(40, 0.4375),
+        Tag::s(304, "LEADER_LINE{"),
+        Tag::f(10, 7.0),
+        Tag::f(20, 8.0),
+        Tag::f(30, 0.5),
+        Tag::f(10, 6.5),
+        Tag::f(20, 6.0),
+        Tag::f(30, 0.5),
+        Tag::i(91, 1),
+        Tag::s(305, "}"),
+        Tag::i(271, 0),
+        Tag::s(303, "}"),
+    ];
+    for (i, t) in second.into_iter().enumerate() {
+        tags.insert(close + 1 + i, t);
+    }
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+#[test]
+fn a_multileader_with_two_leader_roots_keeps_them_apart() {
+    let source = two_root_source();
+    let want = root_groups(&all_records(&source, "MULTILEADER")[0]);
+    assert_eq!(want.iter().filter(|(c, _)| *c == 302).count(), 2, "{want:?}");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let first = save_2018(&d);
+    let second = save_2018(&cadcraft_io::read_dxf(first.as_bytes()).unwrap());
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let through = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+    let dwg_first = save_2018(&through);
+    for (what, text) in [("DXF", first), ("DXF, second save", second)] {
+        assert_eq!(root_groups(&all_records(&text, "MULTILEADER")[0]), want, "{what}");
+    }
+    // A DWG gives every leader line properties of its own: its roots, landings and vertices are compared.
+    let places = |g: Vec<(i32, String)>| g.into_iter().filter(|(c, _)| matches!(c, 302 | 10 | 20 | 30 | 11 | 21 | 31)).collect::<Vec<_>>();
+    assert_eq!(places(root_groups(&all_records(&dwg_first, "MULTILEADER")[0])), places(want), "DWG");
+    // A vertex edit joins the roots as before: the model's leader lines through one landing.
+    let mut edited = d.clone();
+    let h = first_handle(&edited);
+    edited
+        .modify_entity(h, |e| {
+            if let EntityKind::MLeader(m) = &mut e.kind {
+                m.leaders[0][0].x += 1.0;
+            }
+        })
+        .unwrap();
+    let got = root_groups(&all_records(&save_2018(&edited), "MULTILEADER")[0]);
+    assert_eq!(got.iter().filter(|(c, _)| *c == 302).count(), 1, "{got:?}");
+}

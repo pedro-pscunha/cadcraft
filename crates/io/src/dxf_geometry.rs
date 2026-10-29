@@ -139,7 +139,7 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
         return hatch_restore(generated, kept, convert);
     }
     if matches!(kind, "MULTILEADER" | "MLEADER") {
-        return nested_restore(generated, kept, "AcDbMLeader", mleader_geometry, convert);
+        return mleader_restore(generated, kept, convert);
     }
 
     let spec = spec(kind, generated)?;
@@ -292,15 +292,46 @@ fn depths(groups: impl Iterator<Item = (i32, String)>) -> Vec<usize> {
         .collect()
 }
 
-/// The geometry groups of a MULTILEADER by depth: the content context (1), a leader root (2) and a
-/// leader line (3).
+/// The geometry groups of a MULTILEADER's content context (depth 1); its leader roots are replayed whole
+/// by [`mleader_restore`].
 fn mleader_geometry(depth: usize, code: i32) -> bool {
-    match depth {
-        1 => matches!(code, 10..=16 | 20..=26 | 30..=36 | 42 | 43 | 46 | 47 | 110..=112 | 120..=122 | 130..=132),
-        2 => matches!(code, 10 | 11 | 20 | 21 | 30 | 31 | 40),
-        3 => matches!(code, 10 | 20 | 30),
-        _ => false,
+    depth == 1 && matches!(code, 10..=16 | 20..=26 | 30..=36 | 42 | 43 | 46 | 47 | 110..=112 | 120..=122 | 130..=132)
+}
+
+/// The leader roots of a MULTILEADER (`302 LEADER{` ... `303 }`, one after the other in the content
+/// context): the range of their groups, from the first opener to the last closer.
+fn roots_region(groups: &[(i32, String)]) -> Option<std::ops::Range<usize>> {
+    let depths = depths(groups.iter().cloned());
+    let first = (0..groups.len()).find(|i| depths[*i] == 1 && groups[*i].0 == 302 && groups[*i].1.trim().ends_with('{'))?;
+    let last = (first..groups.len()).rfind(|i| depths[*i] == 1 && groups[*i].0 == 303 && groups[*i].1.trim() == "}")?;
+    Some(first..last + 1)
+}
+
+/// A MULTILEADER: its leader roots as the source had them (the model joins the roots of one entity, so
+/// their number, the lines of each and the landings are the snapshot's), then the values of the geometry groups
+/// of the content context by [`nested_restore`].
+fn mleader_restore(generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
+    let range = subclass(generated, "AcDbMLeader", 0)?;
+    let own = generated.get(range.clone())?;
+    let kept_groups = kept.get(1..)?;
+    let pairs = |t: &[Tag]| t.iter().map(|t| (t.code, t.str())).collect::<Vec<_>>();
+    let kept_pairs: Vec<(i32, String)> = kept_groups.iter().map(|t| (t.code, t.value.clone())).collect();
+    let (own_pairs, theirs) = (pairs(own), roots_region(&kept_pairs));
+    let mut tags: Vec<Tag> = generated.to_vec();
+    if let Some(theirs) = theirs {
+        // Where the writer put its roots, else before the first `272` of the context.
+        let at = match roots_region(&own_pairs) {
+            Some(mine) => mine,
+            None => {
+                let depth = depths(own_pairs.iter().cloned());
+                let i = (0..own_pairs.len()).find(|i| depth[*i] == 1 && own_pairs[*i].0 == 272)?;
+                i..i
+            }
+        };
+        let roots: Vec<Tag> = kept_groups.get(theirs)?.iter().map(&convert).collect();
+        tags.splice(range.start + at.start..range.start + at.end, roots);
     }
+    nested_restore(&tags, kept, "AcDbMLeader", mleader_geometry, convert)
 }
 
 fn nested_restore(
