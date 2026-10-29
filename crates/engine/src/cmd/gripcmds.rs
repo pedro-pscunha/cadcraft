@@ -46,7 +46,7 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
     let e = curves::entity(s, h)?;
-    let k = stretch_grip(&e.kind, i, to).ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
+    let k = stretch_grip(&e, i, to)?.ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
     let mut edits = vec![(h, k)];
     // The other `handles` with a grip on the same point stretch with it (connected objects stay
     // connected); locked ones and edits that would be degenerate are left alone.
@@ -58,7 +58,7 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
         }
         let Ok(oe) = curves::entity(s, o) else { continue };
         if let Some(j) = oe.kind.grips().iter().position(|g| g.near(from, tol))
-            && let Some(k) = stretch_grip(&oe.kind, j, to)
+            && let Some(k) = stretch_grip(&oe, j, to)?
         {
             edits.push((o, k));
         }
@@ -66,14 +66,15 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     for (o, k) in &mut edits {
         // A dimension's text moved by its grip: with DIMTMOVE 0 the dimension line follows.
-        if let cadcraft_doc::EntityKind::Dimension(dm) = k
+        if k.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1
+            && let cadcraft_doc::EntityKind::Dimension(dm) = &mut k.kind
             && let Some(cadcraft_doc::EntityKind::Dimension(old)) = d.entity(*o).map(|e| &e.kind)
             && dm.text_mid != old.text_mid
         {
             let st = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
             st.follow_text(dm, d.header.f64("DIMSCALE", 1.0));
         }
-        d.modify_entity(*o, |e| e.kind = k.clone())?;
+        d.modify_entity(*o, |e| *e = k.clone())?;
     }
     Ok(json!({ "handle": h.hex(), "handles": edits.iter().map(|(o, _)| o.hex()).collect::<Vec<_>>() }))
 }
@@ -144,9 +145,9 @@ fn run_grip_option(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let e = curves::entity(s, h)?;
     let value = p.get("value").and_then(Value::as_f64);
-    let k = grip_action(&e.kind, i, action, point_param(p, "to"), value)
+    let k = grip_action(&e, i, action, point_param(p, "to"), value)?
         .ok_or_else(|| bad(cmd, "that option doesn't apply to this grip, or the result would be degenerate"))?;
-    s.doc_mut()?.modify_entity(h, |e| e.kind = k)?;
+    s.doc_mut()?.modify_entity(h, |e| *e = k)?;
     Ok(json!({ "handle": h.hex() }))
 }
 
@@ -160,8 +161,8 @@ const MAX_GRIPS: usize = 1000;
 /// The objects as they'd be after moving the grips `hot` by `delta`, with the grips of `others`
 /// that sit on a hot grip's point (connected objects stay connected). Locked objects and edits
 /// that would be degenerate are left out; several hot grips of one object move together.
-pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle], delta: Vec2) -> Vec<(Handle, EntityKind)> {
-    let Ok(d) = s.doc() else { return Vec::new() };
+pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle], delta: Vec2) -> Result<Vec<(Handle, Entity)>> {
+    let d = s.doc()?;
     // Every grip to move, per object, with its target point.
     let mut moves: Vec<(Handle, Vec<(usize, Vec2)>)> = Vec::new();
     let mut add = |h: Handle, i: usize, to: Vec2| match moves.iter_mut().find(|(x, _)| *x == h) {
@@ -191,16 +192,17 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
             continue;
         }
         let Some(e) = d.entity(h) else { continue };
-        let mut k = e.kind.clone();
+        let mut k = e.as_ref().clone();
         let mut changed = false;
         for (i, to) in mv {
-            if let Some(nk) = stretch_grip(&k, i, to) {
+            if let Some(nk) = stretch_grip(&k, i, to)? {
                 k = nk;
                 changed = true;
             }
         }
         if changed {
-            if let (EntityKind::LwPolyline(original), EntityKind::LwPolyline(edited)) = (&e.kind, &mut k)
+            if k.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1
+                && let (EntityKind::LwPolyline(original), EntityKind::LwPolyline(edited)) = (&e.kind, &mut k.kind)
                 && original.saved_fit().is_some()
             {
                 let mut whole = original.clone();
@@ -211,18 +213,17 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
             out.push((h, k));
         }
     }
-    out
+    Ok(out)
 }
 
 /// Stretch the grips `hot` by `delta` (see [`stretched`]). With `copy` the stretched objects are
 /// added as copies and the originals stay. Returns the edited (or new) objects.
 pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[Handle], delta: Vec2, copy: bool) -> Result<Vec<Handle>> {
-    let edits = stretched(s, hot, others, delta);
+    let edits = stretched(s, hot, others, delta)?;
     let d = s.doc_mut()?;
     let mut out = Vec::new();
     if copy {
-        let (spaces, entities): (Vec<_>, Vec<_>) =
-            edits.into_iter().filter_map(|(h, kind)| Some((d.space_of(h)?, Entity { kind, ..(**d.entity(h)?).clone() }))).unzip();
+        let (spaces, entities): (Vec<_>, Vec<_>) = edits.into_iter().filter_map(|(h, entity)| Some((d.space_of(h)?, entity))).unzip();
         for (entity, space) in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing).into_iter().zip(spaces) {
             out.push(entity.handle);
             if let Some(store) = d.space_mut(&space) {
@@ -230,8 +231,8 @@ pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[
             }
         }
     } else {
-        for (h, kind) in edits {
-            d.modify_entity(h, |e| e.kind = kind)?;
+        for (h, entity) in edits {
+            d.modify_entity(h, |e| *e = entity)?;
             out.push(h);
         }
     }

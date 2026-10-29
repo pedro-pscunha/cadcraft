@@ -21,7 +21,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             continue;
         }
         if d.space_of(*h).is_some() {
-            d.try_modify_entity(*h, |e| e.try_transform(&cadcraft_geom::Mat4::from_mat3(m)))?;
+            d.transform_entity(*h, &cadcraft_geom::Mat4::from_mat3(m))?;
             out.push(*h);
         }
     }

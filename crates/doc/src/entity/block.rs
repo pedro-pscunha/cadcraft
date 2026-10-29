@@ -93,6 +93,14 @@ impl MultilineAttrib {
 }
 
 impl Attrib {
+    pub(super) fn require_legacy_geometry(&self) -> crate::Result<()> {
+        self.geometry_revision.require_legacy()?;
+        if let Some(multiline) = &self.multiline {
+            multiline.geometry_revision.require_legacy()?;
+        }
+        Ok(())
+    }
+
     /// Create attribute content; a drawing assigns its instance identity when it is inserted.
     pub fn new(tag: impl Into<String>, text: Text) -> Self {
         Self {

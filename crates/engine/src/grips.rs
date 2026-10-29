@@ -4,7 +4,7 @@
 //! The UI calls [`Session::grip_edit`]; every edit runs through a `grip.*` command so it is
 //! undoable and reachable from scripts, the control channel and MCP.
 
-use cadcraft_doc::{DimKind, EntityKind, Handle, LwPolyline};
+use cadcraft_doc::{DimKind, Entity, EntityKind, Handle, LwPolyline};
 use cadcraft_geom::{Arc, EPS, Mat3, Polyline, Vec2, Vec3, norm_angle};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -74,7 +74,23 @@ fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
 
 /// The shape after dragging grip `index` to `to` (STRETCH mode). `None` when the grip does not
 /// exist or the result would be degenerate.
-pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityKind> {
+pub fn stretch_grip(entity: &Entity, index: usize, to: Vec2) -> Result<Option<Entity>> {
+    entity.require_legacy_geometry()?;
+    grip_candidate(entity, stretch_grip_legacy(&entity.kind, index, to))
+}
+
+fn grip_candidate(source: &Entity, kind: Option<EntityKind>) -> Result<Option<Entity>> {
+    kind.map(|kind| {
+        let candidate = Entity { kind, ..source.clone() };
+        if !cadcraft_doc::has_finite_numbers(&candidate) {
+            return Err(EngineError::Other("The grip result has infinite or undefined coordinates.".into()));
+        }
+        Ok(candidate)
+    })
+    .transpose()
+}
+
+fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityKind> {
     if !to.is_finite() {
         return None;
     }
@@ -412,7 +428,12 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
 /// projected onto the object; Radius: a point on the new circle) or the typed `value` (Lengthen:
 /// the change in length; Radius: the new radius). `None` when the option doesn't apply or the
 /// result would be degenerate.
-pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Option<Vec2>, value: Option<f64>) -> Option<EntityKind> {
+pub fn grip_action(entity: &Entity, index: usize, action: GripAction, to: Option<Vec2>, value: Option<f64>) -> Result<Option<Entity>> {
+    entity.require_legacy_geometry()?;
+    grip_candidate(entity, grip_action_legacy(&entity.kind, index, action, to, value))
+}
+
+fn grip_action_legacy(kind: &EntityKind, index: usize, action: GripAction, to: Option<Vec2>, value: Option<f64>) -> Option<EntityKind> {
     if !grip_actions(kind, index).contains(&action) || to.is_some_and(|p| !p.is_finite()) || value.is_some_and(|v| !v.is_finite()) {
         return None;
     }
