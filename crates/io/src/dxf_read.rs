@@ -65,7 +65,7 @@ struct Rx {
     pstyles: HashMap<String, String>,
     /// Upper-case block name → associative array parameters from its BLOCK_RECORD.
     block_arrays: HashMap<String, cadcraft_doc::ArrayParams>,
-    /// LAYER record handle (upper case) → layer name (VIEWPORT group 341 frozen layers).
+    /// LAYER record handle (upper case) → layer name (VIEWPORT group 331 frozen layers).
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
     dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
@@ -128,7 +128,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
         match s.name.as_str() {
-            "HEADER" => header(&s.tags, &mut d),
+            "HEADER" => header(&s.tags, &mut d, &rx),
             "TABLES" => tables(&s.tags, &mut d, &mut rx),
             "BLOCKS" => blocks.extend(read_blocks(&s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped)),
             // A damaged file may split its entities over several ENTITIES sections (#865).

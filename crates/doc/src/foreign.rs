@@ -143,7 +143,7 @@ pub struct ForeignExtra {
     /// The colour book colour (group 430) and the true colour (group 420) it was read with: it is
     /// written back while the colour is unchanged.
     pub color_book: Option<(String, String)>,
-    /// Other unmodelled property groups (material 347, shadow mode 284).
+    /// Other unmodelled property groups (material 347, shadow mode 284) and the groups of a viewport's or leader's own subclass.
     pub props: Vec<RawTag>,
     /// A layout's plot settings and layout groups as read (each after its `100` subclass marker):
     /// the writer takes from them what it has no model for (limits, extents, UCS, plot origin...).

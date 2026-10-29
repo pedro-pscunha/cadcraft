@@ -4,13 +4,14 @@ use super::{Attrib, AttribModes, AttribProps, Common, HAlign, MText, MultilineAt
 /// The properties an ATTRIB carries itself: those it has groups for. Its layer counts only when
 /// it differs from its block reference's (an attribute defined on layer 0 goes on the reference's
 /// layer, as it is drawn anyway).
-pub(super) fn attrib_props(t: &T, insert_layer: &str) -> AttribProps {
+pub(super) fn attrib_props(t: &T, insert_layer: &str, plot_style: Option<String>) -> AttribProps {
     let c = common(t);
     AttribProps {
         layer: t.s(8).filter(|l| !l.is_empty() && !l.eq_ignore_ascii_case(insert_layer)),
         color: (t.i(62).is_some() || t.i(420).is_some()).then_some(c.color),
         linetype: t.s(6).filter(|l| !l.is_empty()),
         lineweight: t.i(370).is_some().then_some(c.lineweight),
+        plot_style,
     }
 }
 

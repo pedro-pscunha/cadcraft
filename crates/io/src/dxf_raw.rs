@@ -80,8 +80,10 @@ fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
 
 /// Groups of a layout's `AcDbLayout` subclass the writer has no model for: its flags (paper space
 /// linetype scaling, limits checking), limits, insertion base, extents, elevation, UCS and
-/// orthographic view type.
-const LAYOUT_FRAME_CODES: &[i32] = &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76];
+/// orthographic view type, and the pointers after its block record: the viewport last active (331) and
+/// the named and base UCS (345, 346).
+const LAYOUT_FRAME_CODES: &[i32] =
+    &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76, 331, 345, 346];
 /// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
 /// shade plot mode, resolution and DPI, and the paper image origin.
 const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
@@ -129,7 +131,7 @@ fn first_group(from: &[RawTag], code: i32) -> Option<&RawTag> {
 
 /// A written layout with the groups it has constants for taken from the file's (`kept`, see
 /// [`layout_groups`]), and the Model layout's plot settings replaced by the file's.
-fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
+fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<String>) -> Vec<Tag> {
     let at = kept.iter().position(|t| t.code == 100 && layout_part(&t.value) == LayoutPart::Frame).unwrap_or(kept.len());
     let (plot, frame) = (kept.get(1..at).unwrap_or(&[]), kept.get(at + 1..).unwrap_or(&[]));
     let model = b
@@ -151,6 +153,18 @@ fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
             if part == LayoutPart::Plot && model && !plot.is_empty() {
                 out.extend(plot.iter().map(tag));
             }
+            continue;
+        }
+        // The pointers of the layout the writer has none for follow its block record, those still
+        // naming an object of the saved file.
+        if part == LayoutPart::Frame && t.code == 330 {
+            out.push(t.clone());
+            out.extend(
+                [331, 345, 346]
+                    .into_iter()
+                    .filter_map(|c| first_group(frame, c))
+                    .filter_map(|k| Some(Tag::s(k.code, saved(&k.value).filter(|h| h != "0")?))),
+            );
             continue;
         }
         let replaced = match part {
@@ -400,7 +414,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
-    if !unknown && (entity || kind == "LAYER") {
+    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT")) {
         let props =
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
@@ -411,8 +425,37 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             x.color_book = Some((rgb, book));
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
+        x.props.extend(subclass_groups(kind, tags));
     }
     x
+}
+
+/// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
+/// read: a viewport's view (direction, target, twist, lens, clipping), UCS (345, 346, 79 and its
+/// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
+/// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
+/// model writes, or keeps elsewhere (frozen layers by 331 and xdata, the sun by link), is not one.
+fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
+    let (marker, modelled): (&str, &[i32]) = match kind {
+        "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76]),
+        // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
+        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    let mut in_subclass = false;
+    let mut in_group = false;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        match t.code {
+            100 => in_subclass = t.str().trim() == marker,
+            // An application group (reactors, extension dictionary).
+            102 => in_group = t.str().trim().starts_with('{'),
+            c if in_subclass && !in_group && !modelled.contains(&c) => out.push(raw(t)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Every entity of the drawing (model space, layouts, blocks).
@@ -592,6 +635,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for x in f.entities.values().chain(f.records.values()) {
         note(&x.xdata);
         note(&x.props);
+        note(&x.layout);
     }
     for e in all_entities(d) {
         note(&e.common.xdata);
@@ -1439,7 +1483,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let patched;
     let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
         Some(x) => {
-            patched = patch_layout(b, &x.layout);
+            patched = patch_layout(b, &x.layout, |h| map.get(h));
             patched.as_slice()
         }
         None => b,
@@ -1449,8 +1493,8 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
     // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
-    // groups, such as the sun it points at, follow its AcDbViewport groups).
-    let props_at = if entity && r.kind != "VIEWPORT" {
+    // groups, such as the sun it points at, follow its AcDbViewport groups, a leader's its AcDbLeader's).
+    let props_at = if entity && !matches!(r.kind.as_str(), "VIEWPORT" | "LEADER") {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
@@ -1479,6 +1523,15 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             && let Some(x) = x
         {
             xdata(map, x, &own_apps, out);
+        }
+        // A VPORT record's kept view replaces the plan view the writer wrote.
+        if !entity
+            && r.kind == "VPORT"
+            && i < xdata_at
+            && x.is_some_and(|x| x.props.iter().any(|p| p.code == t.code))
+            && !matches!(t.code, 0 | 5 | 100 | 330)
+        {
+            continue;
         }
         let mut t = t.clone();
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
@@ -1530,18 +1583,20 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     }
 }
 
-/// Header variables that point at an object ($CMATERIAL, $INTERFEREOBJVS…) were written with
+/// Header variables that point at an object ($CMATERIAL, $INTERFEREOBJVS, $CEPSNTYPE 390…) were written with
 /// the handle read (see `header::preserved_header_vars`): point them at the saved object, or at
 /// the null handle when it is gone (`saved`). The writer generates no pointer-valued header
 /// variable.
 fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
     let Some(start) = out.windows(2).position(|w| w[0].code == 0 && w[1].code == 2 && w[1].str() == "HEADER") else { return };
-    let mut named = false;
+    let mut variable = String::new();
     for t in out.iter_mut().skip(start + 2).take_while(|t| t.code != 0) {
-        if named && cadcraft_doc::foreign::is_pointer(t.code) {
+        if t.code == 9 {
+            variable = t.str();
+        // $CEPSNTYPE's 390 names a placeholder the writer wrote in this file: already saved.
+        } else if cadcraft_doc::foreign::is_pointer(t.code) && !variable.eq_ignore_ascii_case("$CEPSNTYPE") {
             *t = Tag::s(t.code, saved(&t.str()));
         }
-        named = t.code == 9;
     }
 }
 

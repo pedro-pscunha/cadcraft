@@ -77,6 +77,7 @@ fn attribute_properties_roundtrip() {
         color: Some(Color::True(Rgb(10, 20, 30))),
         linetype: Some("DASHED".into()),
         lineweight: Some(Lineweight::Mm100(50)),
+        plot_style: Some("ByBlock".into()),
     };
     let red = AttribProps { color: Some(Color::ByLayer), ..AttribProps::default() };
     let (d, h) = drawing(vec![attrib("OWN", 0.0, own.clone()), attrib("DEFLAYER", 10.0, AttribProps::default()), attrib("RED", 20.0, red.clone())]);

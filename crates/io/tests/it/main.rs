@@ -10,6 +10,8 @@ mod attrib_handles;
 mod attrib_modes;
 mod attrib_props;
 mod block_expansion;
+mod bridge_header_groups;
+mod bridge_object_groups;
 mod closed_spline;
 mod codepages;
 mod dim_block_resave_roundtrip;
