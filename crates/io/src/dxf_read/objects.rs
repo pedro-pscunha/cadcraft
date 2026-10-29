@@ -148,11 +148,11 @@ impl Objects {
         Some(text)
     }
 
-    fn apply_table_styles(&self, d: &mut Drawing) {
+    fn apply_table_styles(&self, d: &mut Drawing, rx: &Rx) {
         // Table styles (named by their ACAD_TABLESTYLE dictionary entries).
         for (h, tags) in &self.table_styles {
             let Some(name) = self.names.get(h).filter(|n| !n.is_empty()) else { continue };
-            let st = crate::dxf_table::read_table_style(name, tags);
+            let st = crate::dxf_table::read_table_style(name, tags, &rx.ltypes);
             match d.table_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,
                 None => d.table_styles.push(st),
@@ -235,7 +235,7 @@ impl Objects {
         if let Some(style) = self.xrecord_text(crate::dxf_ext::MLEADER_STYLE_KEY).filter(|s| !s.trim().is_empty()) {
             d.header.set_str("CMLEADERSTYLE", &style);
         }
-        self.apply_table_styles(d);
+        self.apply_table_styles(d, rx);
         self.apply_table_style_fixes(d, rx);
         // Parametric constraints and parameters.
         if let Some((c, p)) = self.xrecord_text(crate::dxf_ext::CONSTRAINTS_KEY).and_then(|t| crate::dxf_ext::parse_constraints(&t)) {

@@ -3,14 +3,22 @@ use super::{Drawing, Group, MLeaderStyle, TableStyle, W, dxf_ext};
 /// A TABLESTYLE object (DXF Reference, OBJECTS: TABLESTYLE): margins, title/header
 /// suppression and per row type (data, column header, title) text and border settings.
 /// A table style's name is its dictionary key, and group 3 is its description. The DWG bridge reads
-/// the name from group 3 (`bridge`), and writes it into the DWG object.
-pub(super) fn table_style_obj(w: &mut W, d: &Drawing, s: &TableStyle, h: &str, dict: &str, bridge: bool) {
+/// the name from group 3 (`bridge`, given with the handles of the written linetypes by upper-case name),
+/// and writes it into the DWG object. The border linetypes and override flags are written for the bridge only.
+pub(super) fn table_style_obj(
+    w: &mut W,
+    d: &Drawing,
+    s: &TableStyle,
+    h: &str,
+    dict: &str,
+    bridge: Option<&std::collections::HashMap<String, String>>,
+) {
     w.s(0, "TABLESTYLE");
     w.s(5, h);
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbTableStyle");
-    w.s(3, if bridge { s.name.as_str() } else { "" });
+    w.s(3, if bridge.is_some() { s.name.as_str() } else { "" });
     w.i(70, 0);
     w.i(71, 0);
     w.f(40, s.margin);
@@ -21,7 +29,7 @@ pub(super) fn table_style_obj(w: &mut W, d: &Drawing, s: &TableStyle, h: &str, d
     for kind in crate::dxf_table::CELL_TYPES {
         let cs = s.cell_style(kind);
         let style = if d.text_style(&cs.text_style).is_some() { cs.text_style.clone() } else { "Standard".to_string() };
-        w.t.extend(crate::dxf_table::cell_type_tags(&cs, &style));
+        w.t.extend(crate::dxf_table::cell_type_tags(&cs, &style, bridge));
     }
     let x = crate::dxf_table::cell_styles_xdata(s);
     if !x.is_empty() {

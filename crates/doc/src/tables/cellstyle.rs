@@ -11,24 +11,36 @@ use crate::{Lineweight, Table, TableStyle};
 pub const MAX_CELL_STYLES: usize = 64;
 
 /// One border of a cell style.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CellBorder {
     pub visible: bool,
     pub color: Color,
     pub lineweight: Lineweight,
+    /// The border's linetype by name, as a DWG's cell style holds it (the DXF TABLESTYLE has no
+    /// group for it); `None` when the file gave none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linetype: Option<String>,
+    /// The properties the border overrides in the cell style a DWG holds (`TableBorderPropertyFlags`:
+    /// 1 lineweight, 2 linetype, 4 colour, 8 visibility, 16 double line spacing); 0 when the file gave none.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub overrides: u8,
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
 }
 
 impl Default for CellBorder {
     fn default() -> Self {
-        CellBorder { visible: true, color: Color::ByBlock, lineweight: Lineweight::ByBlock }
+        CellBorder { visible: true, color: Color::ByBlock, lineweight: Lineweight::ByBlock, linetype: None, overrides: 0 }
     }
 }
 
 /// The borders of a cell style, in the order of the DXF Reference's TABLESTYLE groups: top,
 /// inside horizontal, bottom, left, inside vertical, right. "Inside" borders separate cells that
 /// share the style.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CellBorders {
     pub top: CellBorder,
@@ -41,8 +53,8 @@ pub struct CellBorders {
 
 impl CellBorders {
     /// The borders in DXF order (top, inside horizontal, bottom, left, inside vertical, right).
-    pub fn as_array(&self) -> [CellBorder; 6] {
-        [self.top, self.inside_h, self.bottom, self.left, self.inside_v, self.right]
+    pub fn as_array(&self) -> [&CellBorder; 6] {
+        [&self.top, &self.inside_h, &self.bottom, &self.left, &self.inside_v, &self.right]
     }
     /// Mutable borders in DXF order.
     pub fn as_array_mut(&mut self) -> [&mut CellBorder; 6] {

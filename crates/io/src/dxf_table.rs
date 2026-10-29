@@ -7,6 +7,8 @@
 //! into CADCraft xdata (`CELLSTYLES`, JSON). ACAD_TABLE: the cell texts are the evaluated values;
 //! row and cell styles and the formulas go into CADCraft xdata (`TABLEX`, JSON).
 
+use std::collections::HashMap;
+
 use cadcraft_color::Color;
 use cadcraft_doc::{CellBorder, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle};
 use cadcraft_dxf::Tag;
@@ -78,8 +80,9 @@ fn aci(v: i64) -> Color {
     Color::from_aci(i16::try_from(v).unwrap_or(256))
 }
 
-/// A table style from a TABLESTYLE object's groups.
-pub(crate) fn read_table_style(name: &str, tags: &[Tag]) -> TableStyle {
+/// A table style from a TABLESTYLE object's groups. `ltypes` names the file's linetypes by handle
+/// (upper case), for the border linetypes a DWG bridge DXF carries.
+pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String, String>) -> TableStyle {
     let first = |code: i32, set: &[Tag]| set.iter().find(|t| t.code == code).map(|t| t.f64()).filter(|v| v.is_finite());
     let def = TableStyle::default();
     // Groups up to the first cell type (code 7) are the style's own.
@@ -138,6 +141,14 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag]) -> TableStyle {
             if let Some(c) = block.iter().find(|t| t.code == 64 + k) {
                 b.color = aci(c.i64());
             }
+            // Groups only a DWG bridge DXF has (340 to 345 the linetype, 94 to 99 the override flags).
+            // ByBlock is the default every border has: it is no linetype of its own.
+            if let Some(h) = block.iter().find(|t| t.code == 340 + k) {
+                b.linetype = ltypes.get(&h.str().trim().to_ascii_uppercase()).filter(|n| !n.eq_ignore_ascii_case("ByBlock")).cloned();
+            }
+            if let Some(f) = block.iter().find(|t| t.code == 94 + k) {
+                b.overrides = u8::try_from(f.i64() & 0xFF).unwrap_or(0);
+            }
         }
         st.set_cell_style(cs);
     }
@@ -153,8 +164,10 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag]) -> TableStyle {
     st
 }
 
-/// The groups of one documented cell type of a TABLESTYLE, in file order.
-pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str) -> Vec<Tag> {
+/// The groups of one documented cell type of a TABLESTYLE, in file order. `ltypes` (the written
+/// linetypes' handles by upper-case name) is given for a DWG bridge only: the DXF Reference has no
+/// group for a border's linetype or override flags, so a user DXF does not get them.
+pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str, ltypes: Option<&HashMap<String, String>>) -> Vec<Tag> {
     let mut out = vec![
         Tag::s(7, text_style),
         Tag::f(140, cs.text_height),
@@ -163,10 +176,17 @@ pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str) -> Vec<Tag> {
         Tag::i(63, i64::from(cs.fill.unwrap_or(Color::Index(7)).to_aci())),
         Tag::i(283, i64::from(cs.fill.is_some())),
     ];
-    let b: [CellBorder; 6] = cs.borders.as_array();
+    let b: [&CellBorder; 6] = cs.borders.as_array();
     out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(274 + k as i32, i64::from(x.lineweight.to_dxf()))));
     out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(284 + k as i32, i64::from(x.visible))));
     out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(64 + k as i32, i64::from(x.color.to_aci()))));
+    if let Some(ltypes) = ltypes {
+        for (k, x) in b.iter().enumerate() {
+            let handle = x.linetype.as_deref().and_then(|n| ltypes.get(&n.trim().to_ascii_uppercase()));
+            out.extend(handle.map(|h| Tag::s(340 + k as i32, h.clone())));
+            out.extend((x.overrides != 0).then(|| Tag::i(94 + k as i32, i64::from(x.overrides))));
+        }
+    }
     out
 }
 
@@ -226,6 +246,8 @@ pub(crate) fn read_table_xdata(tags: &[Tag], t: &mut Table) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadcraft_doc::{Drawing, Linetype};
+    use cadcraft_dxf::{records, sections};
 
     #[test]
     fn chunks_respect_byte_limit_and_characters() {
@@ -233,5 +255,76 @@ mod tests {
         let c = chunks(&s);
         assert!(c.iter().all(|x| x.len() <= 250));
         assert_eq!(c.concat(), s);
+    }
+
+    /// A drawing whose table style `Plan` has a dashed top border with the linetype and colour
+    /// overrides on its data cell style, and a right border with the visibility override only.
+    fn dashed_borders() -> Drawing {
+        let mut d = Drawing::new_imperial();
+        d.linetypes.push(Linetype::simple("DASHED", "Dashed", &[0.5, -0.25]));
+        let mut st = TableStyle { name: "Plan".into(), ..TableStyle::default() };
+        let mut data = st.cell_style(CellStyle::DATA);
+        data.borders.top.linetype = Some("Dashed".into());
+        data.borders.top.overrides = 2 | 4;
+        data.borders.right.overrides = 8;
+        st.set_cell_style(data);
+        d.table_styles.push(st);
+        d
+    }
+
+    /// The groups of the TABLESTYLE named `Plan` (group 3, which only a bridge writes) in `text`,
+    /// and the handle of its DASHED linetype.
+    fn plan_style(text: &[u8]) -> (Vec<Tag>, String) {
+        let tags = cadcraft_dxf::parse(text).unwrap();
+        let secs = sections(&tags);
+        let records_of = |name: &str| secs.iter().find(|s| s.name == name).map(|s| records(&s.tags)).unwrap_or_default();
+        let style = records_of("OBJECTS").into_iter().find(|(k, t)| k == "TABLESTYLE" && t.iter().any(|t| t.code == 3 && t.str() == "Plan"));
+        let dashed = records_of("TABLES")
+            .into_iter()
+            .find(|(k, t)| k == "LTYPE" && t.iter().any(|t| t.code == 2 && t.str() == "DASHED"))
+            .and_then(|(_, t)| t.iter().find(|t| t.code == 5).map(Tag::str));
+        (style.map(|(_, t)| t).expect("the table style Plan is written"), dashed.expect("the DASHED linetype is written"))
+    }
+
+    #[test]
+    fn the_bridge_carries_border_linetypes_and_overrides_and_a_user_dxf_does_not() {
+        let d = dashed_borders();
+        let (style, dashed) = plan_style(&crate::dxf_write::dwg_bridge(&d, crate::Version::R2018));
+        let at = |code: i32| style.iter().filter(|t| t.code == code).map(|t| t.str().trim().to_string()).collect::<Vec<_>>();
+        assert_eq!(at(340), [dashed], "the top border's linetype handle, once");
+        assert_eq!((at(94), at(99)), (["6".to_string()].to_vec(), ["8".to_string()].to_vec()), "override flags of the top and right borders");
+        assert!(at(95).is_empty() && at(96).is_empty() && at(341).is_empty());
+        // A user DXF has neither group in any cell type.
+        let text = crate::dxf_write::write(&d);
+        let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+        let objects = sections(&tags).into_iter().find(|s| s.name == "OBJECTS").map(|s| records(&s.tags)).unwrap_or_default();
+        let user = objects.iter().filter(|(k, _)| k == "TABLESTYLE").flat_map(|(_, t)| t.iter().take_while(|t| t.code < 1000));
+        assert!(user.clone().all(|t| !(340..=345).contains(&t.code) && !(94..=99).contains(&t.code)), "no private group in a user DXF");
+        // CADCraft's own xdata keeps the linetype and flags through a user DXF.
+        let back = crate::read_dxf(text.as_bytes()).unwrap();
+        let plan = back.table_styles.iter().find(|s| s.name == "Plan").unwrap();
+        assert_eq!(plan.cell_style(CellStyle::DATA).borders.top.linetype.as_deref(), Some("Dashed"));
+        assert_eq!(plan.cell_style(CellStyle::DATA).borders.top.overrides, 6);
+    }
+
+    #[test]
+    fn border_linetypes_and_override_flags_are_read_from_a_bridge_record() {
+        let ltypes: HashMap<String, String> = [("30".to_string(), "DASHED".to_string()), ("31".to_string(), "ByBlock".to_string())].into();
+        let tags = vec![
+            Tag::s(100, "AcDbTableStyle"),
+            Tag::s(7, "Standard"),
+            Tag::f(140, 0.18),
+            Tag::s(340, "30"),
+            Tag::i(94, 6),
+            // Border 1 names ByBlock, the default, with no flags; border 5 a handle that is no linetype here.
+            Tag::s(341, "31"),
+            Tag::s(345, "99"),
+            Tag::i(99, 8),
+        ];
+        let st = read_table_style("Plan", &tags, &ltypes);
+        let b = st.cell_style(CellStyle::DATA).borders;
+        assert_eq!((b.top.linetype.as_deref(), b.top.overrides), (Some("DASHED"), 6));
+        assert_eq!((b.inside_h.linetype, b.inside_h.overrides), (None, 0));
+        assert_eq!((b.right.linetype, b.right.overrides), (None, 8));
     }
 }
