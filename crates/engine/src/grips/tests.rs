@@ -22,6 +22,14 @@ fn v(x: f64, y: f64) -> Vec2 {
 }
 
 #[test]
+fn a_non_finite_grip_candidate_uses_the_shared_error_and_source_handle() {
+    let source = cadcraft_doc::Entity::new(Handle(0xABC), EntityKind::Point(cadcraft_doc::Point { p: cadcraft_geom::Vec3::ZERO, angle: 0.0 }));
+    let kind = EntityKind::Point(cadcraft_doc::Point { p: cadcraft_geom::Vec3::new(f64::INFINITY, 0.0, 0.0), angle: 0.0 });
+    let error = super::grip_candidate(&source, Some(kind)).unwrap_err();
+    assert!(matches!(error, crate::EngineError::TooLarge(ref message) if *message == crate::finite::too_large(source.handle)));
+}
+
+#[test]
 fn line_and_circle_grips() {
     let mut s = Session::new();
     let l = h(&s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap());

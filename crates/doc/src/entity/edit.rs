@@ -17,6 +17,7 @@ impl Entity {
                 }
             }
             EntityKind::MLeader(leader) => {
+                leader.context.geometry_revision.require_legacy()?;
                 if let Some(insert) = &leader.block {
                     for attribute in &insert.attribs {
                         attribute.require_legacy_geometry()?;
@@ -71,10 +72,10 @@ impl Entity {
     {
         self.require_legacy_geometry()?;
         let mut candidate = self.clone();
-        let result = edit(&mut candidate)?;
+        let result = edit(&mut candidate).map_err(|e| if matches!(e, DocError::NonFinite(_)) { DocError::NonFinite(self.handle) } else { e })?;
         candidate.require_legacy_geometry()?;
         if !has_finite_numbers(&candidate) {
-            return Err(DocError::Invalid("The geometry result has infinite or undefined coordinates.".into()));
+            return Err(DocError::NonFinite(self.handle));
         }
         Ok((candidate, result))
     }
