@@ -1,0 +1,301 @@
+//! Canonical CIRCLE, ARC and 2D polylines (revision CanonicalV2): the OCS center, angles and vertices, the normal with
+//! its source magnitude and the signed thickness are written as held. Each field changed alone reaches the user DXF and
+//! the DWG, and the canonical readers return what the writer wrote.
+
+use acadrust::DwgReader;
+use acadrust::entities::EntityType;
+use cadcraft_doc::{Arc, Circle, Common, Drawing, Entity, EntityKind, GeometryRevision, LwPolyline, Solid};
+use cadcraft_dxf::{Tag, records, sections};
+use cadcraft_geom::{PolyVertex, Vec2, Vec3};
+
+const NORMAL: Vec3 = Vec3 { x: 0.0, y: 3.0, z: 4.0 };
+
+fn drawing(kind: EntityKind, normal: Vec3, thickness: f64) -> Drawing {
+    let mut d = Drawing::new_metric();
+    let handle = d.new_handle();
+    let mut e = Entity::new(handle, kind);
+    e.geometry_revision = GeometryRevision::CanonicalV2;
+    e.common = Common { extrusion: normal, thickness, ..Common::default() };
+    d.model.push(e);
+    d
+}
+
+fn dxf(d: &Drawing) -> String {
+    String::from_utf8(cadcraft_io::write(d, "x.dxf").unwrap()).unwrap()
+}
+
+fn tags_of(text: &str, section: &str) -> Vec<(String, Vec<Tag>)> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let section = sections(&tags).into_iter().find(|s| s.name == section).unwrap();
+    records(&section.tags)
+}
+
+fn record(text: &str, kind: &str) -> Vec<Tag> {
+    tags_of(text, "ENTITIES").into_iter().find(|(k, _)| k == kind).unwrap_or_else(|| panic!("no {kind}")).1
+}
+
+fn groups(text: &str, kind: &str) -> Vec<(i32, String)> {
+    record(text, kind).iter().map(|t| (t.code, t.str())).collect()
+}
+
+fn num(g: &[(i32, String)], code: i32) -> Option<f64> {
+    g.iter().find(|t| t.0 == code).map(|t| t.1.trim().parse().unwrap())
+}
+
+fn point(g: &[(i32, String)], code: i32) -> Option<Vec3> {
+    Some(Vec3::new(num(g, code)?, num(g, code + 10)?, num(g, code + 20)?))
+}
+
+fn near(a: Vec3, b: Vec3) -> bool {
+    (a - b).len() < 1e-9
+}
+
+fn dwg_entities(d: &Drawing) -> Vec<EntityType> {
+    DwgReader::from_stream(std::io::Cursor::new(cadcraft_io::write(d, "x.dwg").unwrap())).read().unwrap().entities().cloned().collect()
+}
+
+fn v3(p: acadrust::types::Vector3) -> Vec3 {
+    Vec3::new(p.x, p.y, p.z)
+}
+
+#[test]
+fn each_circle_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut Circle, &mut Vec3, &mut f64);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("center x", |c, _, _| c.center.x = 1.5),
+        ("center y", |c, _, _| c.center.y = 2.5),
+        ("elevation", |c, _, _| c.center.z = 3.5),
+        ("radius", |c, _, _| c.radius = 2.5),
+        ("normal x", |_, n, _| n.x = 0.25),
+        ("normal z", |_, n, _| n.z = 4.5),
+        ("thickness", |_, _, t| *t = -1.25),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut c, mut n, mut t) = (Circle { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0 }, NORMAL, 0.5);
+        mutate(&mut c, &mut n, &mut t);
+        (drawing(EntityKind::Circle(c.clone()), n, t), c, n, t)
+    };
+    let base = groups(&dxf(&make(|_, _, _| {}).0), "CIRCLE");
+    for (name, mutate) in cases {
+        let (d, c, n, t) = make(mutate);
+        let g = groups(&dxf(&d), "CIRCLE");
+        assert_ne!(g, base, "{name}");
+        assert!(near(point(&g, 10).unwrap(), c.center) && num(&g, 40) == Some(c.radius), "{name}: {g:?}");
+        assert!(near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t), "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Circle(s) = e { Some(s) } else { None }).expect("a CIRCLE");
+        assert!(near(v3(s.center), c.center) && (s.radius - c.radius).abs() < 1e-12, "{name}: DWG {:?}", s.center);
+        assert!(near(v3(s.normal), n) && s.thickness == t, "{name}: DWG normal {:?} thickness {}", s.normal, s.thickness);
+    }
+}
+
+#[test]
+fn each_arc_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut Arc, &mut Vec3);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("center z", |a, _| a.center.z = 3.5),
+        ("radius", |a, _| a.radius = 2.5),
+        ("start", |a, _| a.start = 0.5),
+        ("end", |a, _| a.end = 2.5),
+        ("normal y", |_, n| n.y = 3.5),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut a, mut n) = (Arc { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0, start: 0.25, end: 2.0 }, NORMAL);
+        mutate(&mut a, &mut n);
+        (drawing(EntityKind::Arc(a.clone()), n, 0.0), a, n)
+    };
+    let base = groups(&dxf(&make(|_, _| {}).0), "ARC");
+    for (name, mutate) in cases {
+        let (d, a, n) = make(mutate);
+        let g = groups(&dxf(&d), "ARC");
+        assert_ne!(g, base, "{name}");
+        assert!(near(point(&g, 10).unwrap(), a.center) && near(point(&g, 210).unwrap(), n), "{name}");
+        assert!((num(&g, 50).unwrap() - a.start.to_degrees()).abs() < 1e-9 && (num(&g, 51).unwrap() - a.end.to_degrees()).abs() < 1e-9, "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Arc(s) = e { Some(s) } else { None }).expect("an ARC");
+        assert!(near(v3(s.center), a.center) && near(v3(s.normal), n), "{name}: DWG");
+        assert!((s.start_angle - a.start).abs() < 1e-9 && (s.end_angle - a.end).abs() < 1e-9, "{name}: DWG angles {} {}", s.start_angle, s.end_angle);
+    }
+}
+
+fn polyline() -> LwPolyline {
+    LwPolyline {
+        records: Default::default(),
+        vertices: vec![
+            PolyVertex { p: Vec2::new(0.0, 0.0), bulge: 0.5, start_width: 0.25, end_width: 0.5 },
+            PolyVertex::new(Vec2::new(3.0, 1.0)),
+            PolyVertex::new(Vec2::new(4.0, 4.0)),
+        ],
+        closed: false,
+        const_width: 0.0,
+        elevation: 2.0,
+        plinegen: false,
+        heavy: false,
+        fit: None,
+    }
+}
+
+#[test]
+fn each_lwpolyline_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut LwPolyline, &mut Vec3, &mut f64);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("vertex x", |p, _, _| p.vertices[1].p.x = 3.5),
+        ("bulge", |p, _, _| p.vertices[0].bulge = 0.75),
+        ("width", |p, _, _| p.vertices[0].end_width = 0.75),
+        ("elevation", |p, _, _| p.elevation = 2.5),
+        ("closed", |p, _, _| p.closed = true),
+        ("normal x", |_, n, _| n.x = 0.25),
+        ("thickness", |_, _, t| *t = 1.25),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut p, mut n, mut t) = (polyline(), NORMAL, 0.0);
+        mutate(&mut p, &mut n, &mut t);
+        (drawing(EntityKind::LwPolyline(p.clone()), n, t), p, n, t)
+    };
+    let base = groups(&dxf(&make(|_, _, _| {}).0), "LWPOLYLINE");
+    for (name, mutate) in cases {
+        let (d, p, n, t) = make(mutate);
+        let g = groups(&dxf(&d), "LWPOLYLINE");
+        assert_ne!(g, base, "{name}");
+        let xs: Vec<f64> = g.iter().filter(|t| t.0 == 10).map(|t| t.1.trim().parse().unwrap()).collect();
+        assert_eq!(xs, p.vertices.iter().map(|v| v.p.x).collect::<Vec<_>>(), "{name}: the vertices are written as held");
+        assert!(near(point(&g, 210).unwrap(), n) && num(&g, 38) == Some(p.elevation) && num(&g, 39).unwrap_or(0.0) == t, "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::LwPolyline(s) = e { Some(s) } else { None }).expect("an LWPOLYLINE");
+        assert!(
+            near(v3(s.normal), n) && (s.elevation - p.elevation).abs() < 1e-12 && s.is_closed == p.closed && s.thickness == t,
+            "{name}: DWG plane"
+        );
+        assert_eq!(s.vertices.len(), p.vertices.len(), "{name}");
+        for (a, b) in s.vertices.iter().zip(&p.vertices) {
+            assert!((a.location.x - b.p.x).abs() < 1e-12 && (a.location.y - b.p.y).abs() < 1e-12 && a.bulge == b.bulge, "{name}: DWG vertex {a:?}");
+            assert!(a.start_width == b.start_width && a.end_width == b.end_width, "{name}: DWG widths");
+        }
+    }
+}
+
+#[test]
+fn a_negative_z_polyline_is_not_mirrored() {
+    let p = polyline();
+    let g = groups(&dxf(&drawing(EntityKind::LwPolyline(p.clone()), Vec3::new(0.0, 0.0, -1.0), 0.0)), "LWPOLYLINE");
+    let xs: Vec<f64> = g.iter().filter(|t| t.0 == 10).map(|t| t.1.trim().parse().unwrap()).collect();
+    assert_eq!(xs, vec![0.0, 3.0, 4.0], "the OCS x is written as held");
+    assert_eq!(g.iter().filter(|t| t.0 == 42).map(|t| t.1.trim().parse::<f64>().unwrap()).collect::<Vec<_>>(), vec![0.5]);
+}
+
+#[test]
+fn the_canonical_readers_return_what_the_canonical_writer_wrote() {
+    let normal = Vec3::new(0.0, 3.0, -4.0);
+    let circle = Circle { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0 };
+    let out = dxf(&drawing(EntityKind::Circle(circle.clone()), normal, 0.5));
+    let (c, kind) = cadcraft_io::canonical_curve_from_groups("CIRCLE", &record(&out, "CIRCLE")).unwrap();
+    assert_eq!((c.extrusion, c.thickness, kind), (normal, 0.5, EntityKind::Circle(circle)));
+
+    let arc = Arc { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0, start: 0.25, end: 2.0 };
+    let out = dxf(&drawing(EntityKind::Arc(arc.clone()), normal, 0.0));
+    let (_, kind) = cadcraft_io::canonical_curve_from_groups("ARC", &record(&out, "ARC")).unwrap();
+    let EntityKind::Arc(read) = kind else { panic!("not an arc") };
+    assert_eq!((read.center, read.radius), (arc.center, arc.radius));
+    assert!((read.start - arc.start).abs() < 1e-12 && (read.end - arc.end).abs() < 1e-12, "no angle reversal under a negative Z");
+
+    let out = dxf(&drawing(EntityKind::LwPolyline(polyline()), normal, 0.0));
+    let (c, kind) = cadcraft_io::canonical_curve_from_groups("LWPOLYLINE", &record(&out, "LWPOLYLINE")).unwrap();
+    assert_eq!(c.extrusion, normal);
+    assert_eq!(kind, EntityKind::LwPolyline(polyline()), "no mirroring under a negative Z");
+}
+
+#[test]
+fn the_canonical_readers_refuse_a_bad_radius_and_a_zero_normal() {
+    let tags = |radius: f64, nz: f64| vec![Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(30, 0.0), Tag::f(40, radius), Tag::f(230, nz)];
+    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 1.0)).is_some());
+    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(-1.0, 1.0)).is_none());
+    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(f64::NAN, 1.0)).is_none());
+    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 0.0)).is_none());
+}
+
+#[test]
+fn a_heavy_polyline_with_fit_data_round_trips_in_the_ocs() {
+    let mut pl = polyline();
+    pl.heavy = true;
+    pl.vertices[0].start_width = 0.0;
+    pl.vertices[0].end_width = 0.0;
+    let normal = Vec3::new(0.0, 0.0, -2.0);
+    let out = dxf(&drawing(EntityKind::LwPolyline(pl.clone()), normal, 0.0));
+    let entities = tags_of(&out, "ENTITIES");
+    let at = entities.iter().position(|(k, _)| k == "POLYLINE").expect("a POLYLINE");
+    let children: Vec<(String, Vec<Tag>)> = entities[at + 1..].iter().take_while(|(k, _)| k == "VERTEX" || k == "SEQEND").cloned().collect();
+    let (c, kind) = cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children).unwrap();
+    assert_eq!(c.extrusion, normal);
+    let EntityKind::LwPolyline(read) = kind else { panic!("not a polyline") };
+    assert!(read.heavy);
+    assert_eq!(read.vertices.iter().map(|v| (v.p, v.bulge)).collect::<Vec<_>>(), pl.vertices.iter().map(|v| (v.p, v.bulge)).collect::<Vec<_>>());
+    assert_eq!(read.elevation, pl.elevation);
+    // The legacy reader mirrors the same record.
+    let legacy = cadcraft_io::read(out.as_bytes(), "x.dxf").unwrap();
+    let EntityKind::LwPolyline(mirrored) = &legacy.model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_))).unwrap().kind else {
+        panic!("not a polyline")
+    };
+    assert_eq!(mirrored.vertices[1].p.x, -3.0);
+}
+
+#[test]
+fn the_canonical_polyline_reader_leaves_3d_polylines_and_meshes_alone() {
+    let parent = vec![Tag::i(70, 8)];
+    assert!(cadcraft_io::canonical_polyline_from_groups(&parent, &[]).is_none());
+    assert!(cadcraft_io::canonical_polyline_from_groups(&[Tag::i(70, 64)], &[]).is_none());
+}
+
+fn solid() -> Solid {
+    Solid { corners: [Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 3.0, 2.0), Vec3::new(2.0, 3.0, 2.0)] }
+}
+
+#[test]
+fn each_solid_and_trace_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut Solid, &mut Vec3, &mut f64);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("first corner x", |s, _, _| s.corners[0].x = 0.5),
+        ("third corner y", |s, _, _| s.corners[2].y = 3.5),
+        // A DWG solid has one elevation for its four corners, as AutoCAD writes them.
+        ("elevation", |s, _, _| s.corners.iter_mut().for_each(|c| c.z = 2.5)),
+        ("normal y", |_, n, _| n.y = 3.5),
+        ("thickness", |_, _, t| *t = -0.75),
+    ];
+    for (kind, trace) in [("SOLID", false), ("TRACE", true)] {
+        let make = |mutate: Mutation| {
+            let (mut s, mut n, mut t) = (solid(), NORMAL, 0.5);
+            mutate(&mut s, &mut n, &mut t);
+            let k = if trace { EntityKind::Trace(s.clone()) } else { EntityKind::Solid(s.clone()) };
+            (drawing(k, n, t), s, n, t)
+        };
+        let base = groups(&dxf(&make(|_, _, _| {}).0), kind);
+        for (name, mutate) in &cases {
+            let (d, s, n, t) = make(*mutate);
+            let g = groups(&dxf(&d), kind);
+            assert_ne!(g, base, "{kind} {name}");
+            for (i, c) in s.corners.iter().enumerate() {
+                assert!(near(point(&g, 10 + i as i32).unwrap(), *c), "{kind} {name}: corner {i}");
+            }
+            assert!(near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t), "{kind} {name}");
+            let stored = dwg_entities(&d)
+                .into_iter()
+                .find_map(|e| if let EntityType::Solid(x) = e { Some(x) } else { None })
+                .unwrap_or_else(|| panic!("a {kind} in the DWG"));
+            let dwg = [stored.first_corner, stored.second_corner, stored.third_corner, stored.fourth_corner];
+            assert!(dwg.iter().zip(&s.corners).all(|(a, b)| near(v3(*a), *b)), "{kind} {name}: DWG corners");
+            assert!(near(v3(stored.normal), n) && stored.thickness == t && stored.is_trace == trace, "{kind} {name}: DWG plane");
+        }
+    }
+}
+
+#[test]
+fn the_canonical_reader_returns_solids_and_traces_in_the_ocs() {
+    let normal = Vec3::new(0.0, 3.0, -4.0);
+    for (kind, trace) in [("SOLID", false), ("TRACE", true)] {
+        let k = if trace { EntityKind::Trace(solid()) } else { EntityKind::Solid(solid()) };
+        let out = dxf(&drawing(k.clone(), normal, 0.5));
+        let (c, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        assert_eq!((c.extrusion, c.thickness, read), (normal, 0.5, k), "{kind}");
+    }
+    // A triangle repeats its third corner.
+    let tags = vec![Tag::f(10, 0.0), Tag::f(11, 1.0), Tag::f(12, 0.0), Tag::f(22, 1.0), Tag::f(230, 1.0)];
+    let (_, read) = cadcraft_io::canonical_curve_from_groups("SOLID", &tags).unwrap();
+    let EntityKind::Solid(s) = read else { panic!("solid") };
+    assert_eq!(s.corners[3], s.corners[2]);
+}

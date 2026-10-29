@@ -82,7 +82,7 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.f(40, p.const_width);
         w.f(41, p.const_width);
         w.p(210, e.common.extrusion);
-        let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+        let ocs_x = if e.common.extrusion.z < 0.0 && canonical_plane(e).is_none() { -1.0 } else { 1.0 };
         for (index, vertex) in p.vertices.iter().enumerate() {
             heavy_vertex(
                 w,
@@ -188,6 +188,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             thickness(w, e);
             w.p(10, c.center);
             w.f(40, c.radius);
+            canonical_normal(w, e);
         }
         EntityKind::Arc(a) => {
             w.s(0, "ARC");
@@ -195,6 +196,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             thickness(w, e);
             w.p(10, a.center);
             w.f(40, a.radius);
+            canonical_normal(w, e);
             w.s(100, "AcDbArc");
             w.f(50, a.start.to_degrees());
             w.f(51, a.end.to_degrees());
@@ -223,7 +225,8 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             }
             w.p(210, e.common.extrusion);
             thickness(w, e);
-            let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+            // A canonical polyline holds its OCS coordinates as read; a legacy one holds them mirrored under -Z.
+            let ocs_x = if e.common.extrusion.z < 0.0 && canonical_plane(e).is_none() { -1.0 } else { 1.0 };
             for v in &p.vertices {
                 w.p2(10, Vec2::new(ocs_x * v.p.x, v.p.y));
                 if v.start_width != 0.0 || v.end_width != 0.0 {
@@ -693,6 +696,7 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.p(12, s.corners[2]);
             w.p(13, s.corners[3]);
             thickness(w, e);
+            canonical_normal(w, e);
         }
         EntityKind::Face3d(f) => {
             w.s(0, "3DFACE");
@@ -1046,6 +1050,13 @@ fn gradient_xdata(w: &mut W, g: &Gradient) {
     w.i(1070, i64::from(g.centered));
     w.s(1000, g.color1.name());
     w.s(1000, g.color2.name());
+}
+
+/// Group 210 of a canonical entity: its normal, kept as read. A legacy entity writes none.
+fn canonical_normal(w: &mut W, e: &Entity) {
+    if let Some(normal) = canonical_plane(e) {
+        w.p(210, normal);
+    }
 }
 
 /// The plane of a canonical text-family entity: its normal, kept as read. Legacy text has none.

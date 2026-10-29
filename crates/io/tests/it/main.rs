@@ -14,6 +14,7 @@ mod bridge_header_groups;
 mod bridge_object_groups;
 mod closed_spline;
 mod codepages;
+mod curve_canonical;
 mod dim_block_resave_roundtrip;
 mod dim_block_text;
 mod dim_clone_insert_point;

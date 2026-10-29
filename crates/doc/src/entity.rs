@@ -45,6 +45,7 @@ pub use revision::GeometryRevision;
 mod block;
 mod common;
 mod curves;
+mod curves_canonical;
 mod dim;
 mod edit;
 mod fill;

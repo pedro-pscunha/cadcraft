@@ -30,7 +30,7 @@ fn ellipse(c: &Common, t: &T) -> Ellipse {
 }
 
 /// A LWPOLYLINE, or the region CADCraft wrote as one.
-fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
+pub(super) fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
     let mut verts = Vec::new();
     let mut cur: Option<PolyVertex> = None;
     for tg in tags {
@@ -492,6 +492,19 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
 
 /// A POLYLINE and its child records, advancing `i` past the VERTEX and SEQEND records.
 pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T, d: &mut super::Drawing, rx: &Rx) -> (Common, EntityKind) {
+    polyline_entity_in(recs, i, t, d, rx, false)
+}
+
+/// [`polyline_entity`], and with `canonical` a 2D polyline keeps its OCS vertices as the records hold them instead of
+/// mirroring them under a negative Z.
+pub(super) fn polyline_entity_in(
+    recs: &[(String, Vec<Tag>)],
+    i: &mut usize,
+    t: &T,
+    d: &mut super::Drawing,
+    rx: &Rx,
+    canonical: bool,
+) -> (Common, EntityKind) {
     let flags = t.i(70).unwrap_or(0);
     let mut pts: Vec<(Vec3, f64, f64, f64)> = Vec::new();
     let mut fit_vertices = Vec::new();
@@ -559,7 +572,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T,
         EntityKind::Polyline3d(Polyline3d { records, points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
-        let m = if c.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+        let m = if c.extrusion.z < 0.0 && !canonical { -1.0 } else { 1.0 };
         let vertices: Vec<_> =
             pts.iter().map(|p| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 }).collect();
         let fit = (flags & 6 != 0 || t.i(75).unwrap_or(0) != 0 || fit_vertices.iter().any(|v| v.flags != 0 || v.tangent != 0.0)).then(|| {
