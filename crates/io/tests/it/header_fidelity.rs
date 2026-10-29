@@ -29,7 +29,9 @@ fn header_fidelity_read_variables_keep_codes_and_modified_values() {
         assert_eq!(back.header.get(name), d.header.get(name), "{name}");
     }
     assert_eq!(back.header.get("EXTMIN"), Some(&HVal::Point(Vec3::ZERO)), "model geometry owns EXTMIN");
-    assert!(!tags.iter().any(|t| t.code == 9 && t.str() == "$CMATERIAL"), "stale source handles must not be replayed");
+    // Its handle 123 names no object here: the pointer is never replayed, only remapped.
+    let cmaterial = tags.iter().position(|t| t.code == 9 && t.str() == "$CMATERIAL").and_then(|i| tags.get(i + 1)).map(|t| t.str());
+    assert!(cmaterial.as_deref().is_none_or(|h| h == "0"), "stale source handles must not be replayed: {cmaterial:?}");
 }
 
 #[test]

@@ -1173,6 +1173,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let unknown = unknown_handles(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() {
+        // No kept object a header pointer could name.
+        remap_header_pointers(tags, |_| "0".into());
         return;
     }
     // APPID roles must exist before handle remapping, not only after foreign xdata is emitted.
@@ -1365,6 +1367,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     {
         *t = Tag::s(5, format!("{top:X}"));
     }
+    remap_header_pointers(&mut out, |h| map.get(h).unwrap_or_else(|| "0".into()));
     *tags = out;
 }
 
@@ -1524,6 +1527,21 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
                 out.push(Tag::s(350, nh.clone()));
             }
         }
+    }
+}
+
+/// Header variables that point at an object ($CMATERIAL, $INTERFEREOBJVS…) were written with
+/// the handle read (see `header::preserved_header_vars`): point them at the saved object, or at
+/// the null handle when it is gone (`saved`). The writer generates no pointer-valued header
+/// variable.
+fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
+    let Some(start) = out.windows(2).position(|w| w[0].code == 0 && w[1].code == 2 && w[1].str() == "HEADER") else { return };
+    let mut named = false;
+    for t in out.iter_mut().skip(start + 2).take_while(|t| t.code != 0) {
+        if named && cadcraft_doc::foreign::is_pointer(t.code) {
+            *t = Tag::s(t.code, saved(&t.str()));
+        }
+        named = t.code == 9;
     }
 }
 

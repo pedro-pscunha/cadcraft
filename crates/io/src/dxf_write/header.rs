@@ -161,8 +161,9 @@ fn header_since(name: &str, source: Version) -> Version {
     }
 }
 
-/// Values are current model values, not a replay of the old header. Pointer strings cannot
-/// be replayed here: symbol/object handles are allocated again when the drawing is saved.
+/// Values are current model values, not a replay of the old header. A pointer (an object
+/// handle) is written as read and remapped onto the saved file's handles by `dxf_raw::finish`,
+/// which allocates them.
 fn preserved_header_vars(w: &mut W, d: &Drawing, target: Version) {
     let written: HashSet<String> = w.t.iter().filter(|t| t.code == 9).map(|t| t.str().trim_start_matches('$').to_string()).collect();
     let source = Version::for_acadver(&d.header.str("ACADVER", "AC1032")).unwrap_or_default();
@@ -186,7 +187,8 @@ fn header_value(value: &HVal, codes: &[i32]) -> Vec<Tag> {
     use cadcraft_dxf::Kind;
     match (value, codes) {
         (HVal::Point(p), [10, 20] | [10, 20, 30]) if p.is_finite() => codes.iter().zip([p.x, p.y, p.z]).map(|(code, v)| Tag::f(*code, v)).collect(),
-        (_, [code]) if !matches!(code, 5 | 105 | 320..=369 | 390..=399 | 480..=481 | 1005) => {
+        (_, [code]) if cadcraft_doc::foreign::is_pointer(*code) => value.as_str().map(|v| Tag::s(*code, v)).into_iter().collect(),
+        (_, [code]) if !matches!(code, 5 | 105) => {
             let tag = match cadcraft_dxf::kind_of(*code) {
                 Kind::Real => value.as_f64().filter(|v| v.is_finite()).map(|v| Tag::f(*code, v)),
                 Kind::Int16 => value.as_i64().filter(|v| i16::try_from(*v).is_ok()).map(|v| Tag::i(*code, v)),
