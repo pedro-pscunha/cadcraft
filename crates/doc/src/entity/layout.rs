@@ -45,6 +45,17 @@ impl Default for Viewport {
     }
 }
 
+/// A named raster definition, retained even when no IMAGE entity uses it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageDefinition {
+    pub name: String,
+    pub path: String,
+    pub size: Vec2,
+    pub pixel_size: Vec2,
+    pub units: u8,
+    pub loaded: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Image {

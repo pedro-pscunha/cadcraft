@@ -571,8 +571,10 @@ fn write_root_group_objects(
     if !cx.images.is_empty() {
         w.s(3, "ACAD_IMAGE_DICT");
         w.s(350, cx.images.dict.clone());
-        w.s(3, "ACAD_IMAGE_VARS");
-        w.s(350, cx.images.vars.clone());
+        if !cx.images.vars.is_empty() {
+            w.s(3, "ACAD_IMAGE_VARS");
+            w.s(350, cx.images.vars.clone());
+        }
     }
     w.s(3, "ACAD_LAYOUT");
     w.s(350, layout_dict.clone());
@@ -915,7 +917,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     let mut arrow_defs = arrow_block_definitions(d, &every, &user_blocks, &mut w, &mut cx);
     let mut table_defs = table_block_definitions(d, &every, &mut w, &mut cx);
     // Image definitions (IMAGEDEF objects) of raster images anywhere in the drawing.
-    cx.images = crate::dxf_image::plan(every.iter().copied(), || w.h());
+    cx.images = crate::dxf_image::plan(d, every.iter().copied(), || w.h());
     cx.mlines = crate::dxf_mline::plan(d, every.iter().copied(), || w.h());
     plan_dimension_associations(d, &dimension_stores, &mut w, &mut cx);
     let default_table_style = [TableStyle::default()];
@@ -954,7 +956,12 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
     // Plot style names used by layers and objects (Normal always), each a placeholder object.
     let pstyle_dict = w.h();
     let mut pstyle_names: Vec<String> = vec![cadcraft_doc::NORMAL_STYLE.to_string()];
-    let named = d.layers.iter().map(|l| l.plot_style.as_str()).chain(every.iter().map(|e| e.common.plot_style.as_str()));
+    let named = d
+        .plot_style_names
+        .iter()
+        .map(String::as_str)
+        .chain(d.layers.iter().map(|l| l.plot_style.as_str()))
+        .chain(every.iter().map(|e| e.common.plot_style.as_str()));
     for n in named {
         let n = n.trim();
         let logical = n.is_empty() || n.eq_ignore_ascii_case("bylayer") || n.eq_ignore_ascii_case("byblock");

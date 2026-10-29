@@ -101,6 +101,13 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             Some((t.s(5)?.trim().to_ascii_uppercase(), name.or_else(|| t.s(3))?))
         })
         .collect();
+    d.registered_apps.extend(
+        recs.iter()
+            .filter(|(kind, _)| kind == "APPID")
+            .filter_map(|(_, tags)| T(tags).s(2))
+            .filter(|name| !name.trim().is_empty())
+            .take(MAX_OBJECTS.saturating_sub(d.registered_apps.len())),
+    );
     // Handle maps first: DIMSTYLE records refer to text styles and arrow blocks by handle.
     index_table_handles(&recs, rx);
     let mut active_vport = false;

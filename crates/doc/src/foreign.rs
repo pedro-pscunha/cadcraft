@@ -110,6 +110,8 @@ pub struct Foreign {
     pub classes: Vec<Vec<RawTag>>,
     /// Kept objects, in file order.
     pub objects: Vec<ForeignObject>,
+    /// Unnamed STYLE/DIMSTYLE records, kept outside the selectable, named style lists.
+    pub table_records: Vec<ForeignObject>,
     /// Entries of the named object dictionary that CADCraft doesn't write itself: (key, object).
     pub dictionary: Vec<(String, Handle)>,
     /// Extras of entities and attribute instances, by their document handle.
@@ -135,6 +137,7 @@ pub struct Foreign {
 impl Foreign {
     pub fn is_empty(&self) -> bool {
         self.objects.is_empty()
+            && self.table_records.is_empty()
             && self.dictionary.is_empty()
             && self.entities.is_empty()
             && self.raw_dimassocs.is_empty()

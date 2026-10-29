@@ -78,6 +78,8 @@ mod tables_objects_roundtrip;
 mod text_left_justify;
 mod tolerance_roundtrip;
 mod unknown_entity_block;
+mod unused_definitions;
+mod unused_symbol_names;
 mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
