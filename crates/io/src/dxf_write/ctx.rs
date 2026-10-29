@@ -53,6 +53,8 @@ pub(super) struct Ctx {
     /// The version the file ends up in (the DWG version for a DWG save): it decides which
     /// entity types exist (MULTILEADER from 2007).
     pub(super) target: Version,
+    /// This DXF is internal transport to acadrust, not a file to open in AutoCAD.
+    pub(super) dwg_bridge: bool,
 }
 
 impl Ctx {
@@ -82,6 +84,6 @@ impl Ctx {
     pub(super) fn encode(&self, kind: K, v: &serde_json::Value) -> Option<DimVal> {
         let ltype = |n: &str| self.ltypes.get(&n.trim().to_ascii_uppercase()).cloned();
         dxf_ext::encode(kind, v, &|n| self.style(n), &|n| self.arrow(n), &ltype)
-            .filter(|x| !matches!(x, DimVal::Int(i) if i16::try_from(*i).is_err()))
+            .filter(|x| kind == K::TrueColor || !matches!(x, DimVal::Int(i) if i16::try_from(*i).is_err()))
     }
 }

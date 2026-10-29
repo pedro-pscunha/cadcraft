@@ -243,7 +243,12 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx) {
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
         let mut newer = W::default();
         for (field, code, kind) in dxf_ext::DIM_CODES {
-            let plain = !dxf_ext::NEWER_CODES.contains(code) || cx.target >= dxf_ext::newer_since(*code);
+            let private = dxf_ext::BRIDGE_CODES.contains(code);
+            let plain = if private {
+                cx.dwg_bridge && cx.target >= dxf_ext::bridge_since(*code)
+            } else {
+                !dxf_ext::NEWER_CODES.contains(code) || cx.target >= dxf_ext::newer_since(*code)
+            };
             let kind = if plain { dxf_ext::table_kind(*kind) } else { *kind };
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(kind, x)) else { continue };
             // DIMPOST is written even when empty: a reader that defaults a missing one to "<>"
@@ -256,7 +261,7 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx) {
                 w.s(*code, "");
                 continue;
             }
-            if !dxf_ext::NEWER_CODES.contains(code) {
+            if !private && !dxf_ext::NEWER_CODES.contains(code) {
                 w.dimval(*code, enc, false);
                 continue;
             }
@@ -867,7 +872,7 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
-pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
+pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
     // An in-place block edit in progress is not written: the drawing as before it.
     let mut committed = d.committed();
     let stale = committed.stale_raw_dimassocs();
@@ -898,7 +903,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
         .collect();
     user_blocks.iter_mut().for_each(|b| b.1 = format!("{:X}", 0));
     let user_blocks: Vec<(String, String, &Block)> = user_blocks.into_iter().map(|(n, _, b)| (n, w.h(), b)).collect();
-    let mut cx = Ctx { paper_views: paper_views(d), target, ..Ctx::default() };
+    let mut cx = Ctx { paper_views: paper_views(d), target, dwg_bridge, ..Ctx::default() };
     cx.block_records = user_blocks.iter().map(|(n, h, _)| (n.to_ascii_uppercase(), h.clone())).collect();
     let all_spaces: Vec<&EntityStore> = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).collect();
     let dimension_stores: Vec<&EntityStore> = all_spaces.iter().copied().chain(user_blocks.iter().map(|(_, _, b)| &b.entities)).collect();

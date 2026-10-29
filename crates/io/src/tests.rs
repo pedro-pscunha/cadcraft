@@ -1997,6 +1997,7 @@ fn autocad_header_dim_variables_are_not_overrides() {
             K::Int => (70, v.as_i64().unwrap().to_string()),
             K::Bool => (70, i64::from(v.as_bool().unwrap()).to_string()),
             K::Color => (70, serde_json::from_value::<Color>(v.clone()).unwrap().to_aci().to_string()),
+            K::TrueColor => continue,
             K::Char => (70, u32::from(v.as_str().unwrap().chars().next().unwrap()).to_string()),
             K::Str => (1, v.as_str().unwrap().to_string()),
             // Names as AutoCAD may spell them.

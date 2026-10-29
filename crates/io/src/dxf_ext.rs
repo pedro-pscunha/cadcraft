@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use cadcraft_color::Color;
+use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{ArrayParams, AssocSnap, Constraint, DimAssoc, DimStyle, Handle, LayerState, Parametric, PlotStyleTable};
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_render::Arrowhead;
@@ -54,6 +54,8 @@ pub(crate) enum K {
     Str,
     /// ACI colour number (0 ByBlock, 256 ByLayer).
     Color,
+    /// Packed 24-bit RGB in acadrust's private DIMSTYLE transport.
+    TrueColor,
     /// A character stored as its code (DIMDSEP).
     Char,
     /// Handle of a STYLE record (DIMTXSTY).
@@ -153,7 +155,28 @@ pub(crate) const DIM_CODES: &[(&str, i32, K)] = &[
     ("extLinetype2", 347, K::Linetype),
     ("dimLineweight", 371, K::Int),
     ("extLineweight", 372, K::Int),
+    // acadrust-private groups: never emitted as plain groups in a user DXF.
+    ("measurementZeroFactor", 51, K::Real),
+    ("altMeasurementZeroFactor", 52, K::Real),
+    ("measurementZeroSuffix", 300, K::Str),
+    ("altMeasurementZeroSuffix", 301, K::Str),
+    ("dimLineColor", 421, K::TrueColor),
+    ("extLineColor", 422, K::TrueColor),
+    ("textColor", 423, K::TrueColor),
+    ("textFillColor", 424, K::TrueColor),
 ];
+
+/// acadrust's private DIMSTYLE transport; AutoCAD does not define these DXF groups.
+pub(crate) const BRIDGE_CODES: &[i32] = &[51, 52, 300, 301, 421, 422, 423, 424];
+
+/// First DWG format that can hold a private transport variable.
+pub(crate) fn bridge_since(code: i32) -> Version {
+    match code {
+        421..=423 => Version::R2004,
+        424 => Version::R2007,
+        _ => Version::R2010,
+    }
+}
 
 /// DIMSAH: separate arrow blocks in use.
 pub(crate) const DIMSAH: i32 = 173;
@@ -226,6 +249,10 @@ pub(crate) fn encode(kind: K, v: &Value, style: Lookup, block: Lookup, ltype: Lo
         K::Bool => DimVal::Int(i64::from(v.as_bool()?)),
         K::Str => DimVal::Str(v.as_str()?.to_string()),
         K::Color => DimVal::Int(i64::from(serde_json::from_value::<Color>(v.clone()).ok()?.to_aci())),
+        K::TrueColor => {
+            let Color::True(rgb) = serde_json::from_value::<Color>(v.clone()).ok()? else { return None };
+            DimVal::Int(i64::from(rgb.to_u32()))
+        }
         K::Char => DimVal::Int(i64::from(u32::from(v.as_str()?.chars().next().unwrap_or('.')))),
         K::TextStyle => DimVal::Handle(style(v.as_str()?)?),
         K::Block => {
@@ -258,6 +285,10 @@ pub(crate) fn decode(
         K::Bool => Value::Bool(t.i64() != 0),
         K::Str => Value::String(t.str()),
         K::Color => serde_json::to_value(Color::from_aci(i16::try_from(t.i64()).ok()?)).ok()?,
+        K::TrueColor => {
+            let rgb = u32::try_from(t.i64()).ok().filter(|rgb| *rgb <= 0xffffff)?;
+            serde_json::to_value(Color::True(Rgb::from_u32(rgb))).ok()?
+        }
         K::Char => Value::String(char::from_u32(u32::try_from(t.i64()).ok()?).filter(|c| !c.is_control())?.to_string()),
         K::TextStyle => Value::String(styles.get(&t.str().trim().to_ascii_uppercase())?.clone()),
         K::Block => {

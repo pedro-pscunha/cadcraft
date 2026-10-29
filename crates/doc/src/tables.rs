@@ -239,6 +239,12 @@ pub struct DimStyle {
     pub user_position_text: bool,
     /// DIMTXTDIRECTION: right-to-left dimension text.
     pub text_right_to_left: bool,
+    /// DIMMZF / DIMALTMZF: primary and alternate measurement factors (percent).
+    pub measurement_zero_factor: f64,
+    pub alt_measurement_zero_factor: f64,
+    /// DIMMZS / DIMALTMZS: suffixes for the primary and alternate measurement factors.
+    pub measurement_zero_suffix: String,
+    pub alt_measurement_zero_suffix: String,
     /// DIMAUNIT: 0 decimal degrees, 1 deg/min/sec, 2 grads, 3 radians.
     pub angular_unit: u8,
     /// DIMSE1 / DIMSE2 suppress extension lines.
@@ -342,6 +348,10 @@ pub const DIMVARS: &[(&str, &str)] = &[
     ("DIMALTTZ", "altTolZeroSuppression"),
     ("DIMUPT", "userPositionText"),
     ("DIMTXTDIRECTION", "textRightToLeft"),
+    ("DIMMZF", "measurementZeroFactor"),
+    ("DIMALTMZF", "altMeasurementZeroFactor"),
+    ("DIMMZS", "measurementZeroSuffix"),
+    ("DIMALTMZS", "altMeasurementZeroSuffix"),
     ("DIMAUNIT", "angularUnit"),
     ("DIMSE1", "suppressExt1"),
     ("DIMSE2", "suppressExt2"),
@@ -423,6 +433,10 @@ impl Default for DimStyle {
             alt_tol_zero_suppression: 0,
             user_position_text: false,
             text_right_to_left: false,
+            measurement_zero_factor: 100.0,
+            alt_measurement_zero_factor: 100.0,
+            measurement_zero_suffix: String::new(),
+            alt_measurement_zero_suffix: String::new(),
             angular_unit: 0,
             suppress_ext1: false,
             suppress_ext2: false,

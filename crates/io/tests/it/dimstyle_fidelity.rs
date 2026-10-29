@@ -65,6 +65,44 @@ fn dimstyle_fidelity_unused_separate_arrow_names_do_not_enable_dimsah() {
     assert_eq!(back.dim_style("Detail"), Some(&want));
 }
 
+#[test]
+fn dimstyle_fidelity_measurement_factors_stay_private_in_user_dxf() {
+    let mut d = drawing();
+    let st = d.dim_styles.iter_mut().find(|s| s.name == "Detail").unwrap();
+    let fields = serde_json::json!({"DIMMZF": 12.5, "DIMALTMZF": 25.0, "DIMMZS": "m", "DIMALTMZS": "cm"});
+    assert!(st.apply_fields(fields.as_object().unwrap()).is_empty());
+    let want = st.clone();
+    for version in [Version::R2000, Version::R2010, Version::R2018] {
+        let dxf = cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(version), binary: false }).unwrap();
+        let text = String::from_utf8(dxf.clone()).unwrap();
+        let lines: Vec<_> = text.lines().map(str::trim).collect();
+        let start = lines.windows(2).position(|p| p == ["2", "Detail"]).unwrap();
+        let style: Vec<_> = lines[start..].chunks(2).take_while(|p| p[0] != "0").collect();
+        assert!(!style.iter().any(|p| matches!(p[0], "51" | "52" | "300" | "301")), "no acadrust-private table groups in {version:?}");
+        assert!(style.iter().any(|p| p[1] == "DIMVARS"), "private xdata in {version:?}");
+        assert_eq!(cadcraft_io::read_dxf(&dxf).unwrap().dim_style("Detail"), Some(&want));
+    }
+}
+
+#[test]
+fn dimstyle_fidelity_true_colors_stay_private_in_user_dxf() {
+    let mut d = drawing();
+    let st = d.dim_styles.iter_mut().find(|s| s.name == "Detail").unwrap();
+    let rgb = cadcraft_color::Color::True(cadcraft_color::Rgb(187, 130, 157));
+    st.dim_line_color = rgb;
+    st.ext_line_color = rgb;
+    st.text_color = rgb;
+    st.text_fill = 2;
+    st.text_fill_color = rgb;
+    let want = st.clone();
+    for version in [Version::R2000, Version::R2007, Version::R2018] {
+        let dxf = cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(version), binary: false }).unwrap();
+        let tags = cadcraft_dxf::parse(&dxf).unwrap();
+        assert!(!tags.iter().any(|t| (421..=424).contains(&t.code)), "private RGB groups are not user DXF {version:?}");
+        assert_eq!(cadcraft_io::read_dxf(&dxf).unwrap().dim_style("Detail"), Some(&want));
+    }
+}
+
 fn dimension() -> Dimension {
     Dimension {
         kind: DimKind::Aligned,

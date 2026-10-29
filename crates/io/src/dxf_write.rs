@@ -126,7 +126,16 @@ impl W {
     fn dimval(&mut self, code: i32, v: DimVal, xdata: bool) {
         match v {
             DimVal::Real(x) => self.f(if xdata { 1040 } else { code }, x),
-            DimVal::Int(i) => self.i(if xdata { 1070 } else { code }, i),
+            DimVal::Int(i) => self.i(
+                if !xdata {
+                    code
+                } else if i16::try_from(i).is_ok() {
+                    1070
+                } else {
+                    1071
+                },
+                i,
+            ),
             DimVal::Str(t) => {
                 if xdata || !t.is_empty() {
                     self.s(if xdata { 1000 } else { code }, t);
@@ -154,14 +163,14 @@ pub fn write(d: &Drawing) -> String {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`.
 pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
-    tags_for(d, version, version)
+    tags_for(d, version, version, false)
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's (MULTILEADER from 2007). Its text is in the Windows single-byte page it declares,
 /// so the bridge stores representable characters rather than their literal Unicode escapes.
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
-    let mut tags = tags_for(d, Version::R2000, dwg);
+    let mut tags = tags_for(d, Version::R2000, dwg, true);
     let page = cadcraft_dxf::single_byte_code_page(&d.header.str("DWGCODEPAGE", "ANSI_1252"));
     bridge_markers(&mut tags);
     bridge_code_page(&mut tags, page);
