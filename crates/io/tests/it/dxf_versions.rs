@@ -29,6 +29,7 @@ fn table() -> Table {
     let mut cells = vec![vec![cell("Title"), cell(""), cell("")], vec![cell("A"), cell("B"), cell("C")], vec![cell("1"), cell("2"), cell("3")]];
     cells[0][0].merged = Some((1, 3));
     Table {
+        dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0),
         insert: Vec3::new(5.0, 20.0, 0.0),
         col_widths: vec![1.5, 2.5, 4.0],
         row_heights: vec![0.5, 0.4, 0.4],

@@ -145,7 +145,9 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(s, "MLEADER{:?}{plane:?}", (roots, m.context, m.spline, text, block));
         }
         EntityKind::Table(t) => {
-            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, &t.row_heights, &t.col_widths));
+            // The layout geometry: direction, sizes, the merged spans and the cells' own text heights; not the cell text.
+            let cells: Vec<Vec<_>> = t.cells.iter().map(|row| row.iter().map(|c| (c.merged, c.text_height)).collect()).collect();
+            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, t.dir, &t.row_heights, &t.col_widths, cells));
         }
         EntityKind::Tolerance(t) => {
             let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));

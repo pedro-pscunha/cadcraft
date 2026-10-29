@@ -50,6 +50,7 @@ mod edit;
 mod fill;
 mod geometry;
 mod layout;
+mod layout_canonical;
 mod mesh;
 mod mleader;
 mod text;
