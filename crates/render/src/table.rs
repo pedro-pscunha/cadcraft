@@ -289,10 +289,10 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
                 continue;
             }
             let br = match (style_of(above), style_of(below)) {
-                (None, Some(b)) => Some(b.borders.top),
-                (Some(a), None) => Some(a.borders.bottom),
-                (Some(a), Some(_)) if same_style(above, below) => Some(a.borders.inside_h),
-                (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.bottom.visible && b.borders.top.visible, ..b.borders.top }),
+                (None, Some(b)) => Some(b.borders.top.clone()),
+                (Some(a), None) => Some(a.borders.bottom.clone()),
+                (Some(a), Some(_)) if same_style(above, below) => Some(a.borders.inside_h.clone()),
+                (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.bottom.visible && b.borders.top.visible, ..b.borders.top.clone() }),
                 (None, None) => None,
             };
             push(&mut g, p(x_at(c), y_at(i)), p(x_at(c + 1), y_at(i)), br);
@@ -306,10 +306,10 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
                 continue;
             }
             let br = match (style_of(left), style_of(right)) {
-                (None, Some(b)) => Some(b.borders.left),
-                (Some(a), None) => Some(a.borders.right),
-                (Some(a), Some(_)) if same_style(left, right) => Some(a.borders.inside_v),
-                (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.right.visible && b.borders.left.visible, ..b.borders.left }),
+                (None, Some(b)) => Some(b.borders.left.clone()),
+                (Some(a), None) => Some(a.borders.right.clone()),
+                (Some(a), Some(_)) if same_style(left, right) => Some(a.borders.inside_v.clone()),
+                (Some(a), Some(b)) => Some(CellBorder { visible: a.borders.right.visible && b.borders.left.visible, ..b.borders.left.clone() }),
                 (None, None) => None,
             };
             push(&mut g, p(x_at(j), y_at(r)), p(x_at(j), y_at(r + 1)), br);

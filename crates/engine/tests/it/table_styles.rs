@@ -127,3 +127,27 @@ fn typed_cell_style() {
     assert_eq!((c.text_height, c.fill, c.align, c.format), (0.3, Some(Color::Index(4)), 8, CellFormat::Percent));
     assert_eq!(c.name, "Notes");
 }
+
+/// A border edit through the table style command sets the override bits AutoCAD sets
+/// (`TableBorderPropertyFlags`: 1 lineweight, 4 colour, 8 visibility), and they reach a DWG: the
+/// groups the DWG bridge reads back, without CADCraft's own xdata, carry them.
+#[test]
+fn border_edits_set_the_override_flags_and_reach_a_dwg() {
+    let mut s = Session::new();
+    s.execute(
+        "tablestyle.cellstyle",
+        &json!({ "name": "Header", "borders": { "bottom": { "color": "red", "lineweight": 0.5 }, "left": false, "right": { "visible": true } } }),
+    )
+    .unwrap();
+    let flags = |st: &TableStyle| {
+        let b = st.cell_style("Header").borders;
+        [b.top.overrides, b.bottom.overrides, b.left.overrides, b.right.overrides]
+    };
+    assert_eq!(flags(&style(&s, "Standard")), [0, 1 | 4, 8, 8], "an edited border overrides the properties that were set, an untouched one none");
+    let dwg = cadcraft_io::write(s.doc().unwrap(), "x.dwg").unwrap();
+    let bridge = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
+    let back = cadcraft_io::read_dxf(bridge.replace("CELLSTYLES", "SOMETHING_ELSE").as_bytes()).unwrap();
+    let st = back.table_styles.iter().find(|t| t.name == "Standard").unwrap();
+    assert_eq!(flags(st), [0, 1 | 4, 8, 8], "flags after the DWG save");
+    assert_eq!(st.cell_style("Header").borders.bottom.color, Color::Index(1));
+}

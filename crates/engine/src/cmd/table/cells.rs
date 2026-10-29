@@ -86,19 +86,25 @@ fn lineweight_value(v: &Value) -> Option<Lineweight> {
     }
 }
 
+/// Edit a border; each property set also sets its override bit, as AutoCAD does, so that the edit
+/// shows in a DWG's cell style.
 fn apply_border(b: &mut CellBorder, v: &Value) -> std::result::Result<(), String> {
     if let Some(on) = v.as_bool() {
         b.visible = on;
+        b.overrides |= CellBorder::VISIBILITY;
         return Ok(());
     }
     if let Some(on) = v.get("visible").and_then(Value::as_bool) {
         b.visible = on;
+        b.overrides |= CellBorder::VISIBILITY;
     }
     if let Some(c) = v.get("color") {
         b.color = color_value(c).ok_or_else(|| format!("invalid border color {c}"))?;
+        b.overrides |= CellBorder::COLOR;
     }
     if let Some(w) = v.get("lineweight") {
         b.lineweight = lineweight_value(w).ok_or_else(|| format!("invalid lineweight {w}"))?;
+        b.overrides |= CellBorder::LINEWEIGHT;
     }
     Ok(())
 }

@@ -643,7 +643,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
         w.s(350, h);
     }
     for (s, (_, h)) in table_styles.iter().zip(&cx.table_styles) {
-        table_style_obj(w, d, s, h, table_style_dict, cx.dwg_bridge);
+        table_style_obj(w, d, s, h, table_style_dict, cx.dwg_bridge.then_some(&cx.ltypes));
     }
 }
 
