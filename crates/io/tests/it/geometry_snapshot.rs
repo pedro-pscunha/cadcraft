@@ -6,16 +6,30 @@
 use cadcraft_doc::{Drawing, EntityKind};
 use cadcraft_dxf::{Tag, records, sections};
 
-/// A DXF text from `code value` groups.
-fn dxf(entities: &[&str]) -> String {
-    let mut text = String::from("0\nSECTION\n2\nENTITIES\n");
-    for e in entities {
+/// The `code value` lines of some records as DXF text.
+fn groups(records: &[&str]) -> String {
+    let mut text = String::new();
+    for e in records {
         for line in e.lines().map(str::trim).filter(|l| !l.is_empty()) {
             let (code, value) = line.split_once(' ').unwrap_or((line, ""));
             text.push_str(&format!("{code}\n{value}\n"));
         }
     }
-    text + "0\nENDSEC\n0\nEOF\n"
+    text
+}
+
+/// A DXF text from `code value` groups.
+fn dxf(entities: &[&str]) -> String {
+    format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", groups(entities))
+}
+
+/// A DXF text with the block `B` (an attribute definition) and the entities.
+fn dxf_with_block(block: &[&str], entities: &[&str]) -> String {
+    format!(
+        "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n200\n8\n0\n2\nB\n70\n2\n10\n0\n20\n0\n30\n0\n3\nB\n1\n\n{}0\nENDBLK\n5\n201\n8\n0\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n",
+        groups(block),
+        groups(entities)
+    )
 }
 
 /// The groups of the first record of `kind` in the ENTITIES section of a DXF text.
@@ -52,13 +66,17 @@ fn saves(d: &Drawing) -> Vec<(&'static str, String)> {
 
 /// Check that the geometry groups `codes` of the first `kind` record of the source are bit for bit
 /// those of every save. A DWG stores angles in radians, so `angles` only agree to the last digits
-/// there.
-fn assert_kept(source: &str, kind: &str, codes: &[i32], angles: &[i32]) {
+/// there. The groups `dxf_only` are checked in the user DXF saves only: acadrust's DXF reader has
+/// no 210/220/230 for an ATTRIB, so a DWG does not keep the plane of an attribute.
+fn assert_kept(source: &str, kind: &str, codes: &[i32], angles: &[i32], dxf_only: &[i32]) {
     let want = record(source, kind);
     let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
     for (what, text) in saves(&d) {
         let got = record(&text, kind);
         for code in codes {
+            if what.starts_with("DWG") && dxf_only.contains(code) {
+                continue;
+            }
             if what.starts_with("DWG") && angles.contains(code) {
                 let (a, b) = (bits(&got, *code), bits(&want, *code));
                 assert_eq!(a.len(), b.len(), "{what}: {kind} group {code}");
@@ -91,12 +109,12 @@ const ARCS: [&str; 2] = [
 
 #[test]
 fn a_line_circle_and_arc_keep_their_plane_and_geometry_through_every_save() {
-    assert_kept(&dxf(&[LINE]), "LINE", &[39, 10, 20, 30, 11, 21, 31, 210, 220, 230], &[]);
+    assert_kept(&dxf(&[LINE]), "LINE", &[39, 10, 20, 30, 11, 21, 31, 210, 220, 230], &[], &[]);
     for c in CIRCLES {
-        assert_kept(&dxf(&[c]), "CIRCLE", &[39, 10, 20, 30, 40, 210, 220, 230], &[]);
+        assert_kept(&dxf(&[c]), "CIRCLE", &[39, 10, 20, 30, 40, 210, 220, 230], &[], &[]);
     }
     for a in ARCS {
-        assert_kept(&dxf(&[a]), "ARC", &[10, 20, 30, 40, 210, 220, 230, 50, 51], &[50, 51]);
+        assert_kept(&dxf(&[a]), "ARC", &[10, 20, 30, 40, 210, 220, 230, 50, 51], &[50, 51], &[]);
     }
 }
 
@@ -123,4 +141,82 @@ fn a_property_edit_keeps_the_geometry_and_a_geometry_edit_drops_it() {
     let got = record(&cadcraft_io::write_dxf(&d), "LINE");
     assert!(!got.iter().any(|t| t.code == 210), "a geometry edit writes the model: {got:?}");
     assert_eq!(bits(&got, 11), vec![5.0f64.to_bits()]);
+}
+
+const PLANES: [&str; 4] = ["210 0\n220 0\n230 -1", "210 1e-8\n220 -2e-8\n230 -0.99999999999999978", "210 0.6\n220 0\n230 0.8", "210 0\n220 0\n230 1"];
+
+#[test]
+fn a_point_and_a_solid_keep_their_plane_and_geometry_through_every_save() {
+    for plane in PLANES {
+        let point = format!("0 POINT\n5 120\n100 AcDbEntity\n8 0\n100 AcDbPoint\n39 0.5\n10 1.25\n20 2.5\n30 3.75\n{plane}\n50 12.5");
+        assert_kept(&dxf(&[&point]), "POINT", &[39, 10, 20, 30, 210, 220, 230, 50], &[50], &[]);
+        let solid = format!(
+            "0 SOLID\n5 121\n100 AcDbEntity\n8 0\n100 AcDbTrace\n10 0.5\n20 0.25\n30 2.5\n11 3.5\n21 0.25\n31 2.5\n12 0.5\n22 4.5\n32 2.5\n13 3.5\n23 4.5\n33 2.5\n39 -1.5\n{plane}"
+        );
+        assert_kept(&dxf(&[&solid]), "SOLID", &[39, 10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 33, 210, 220, 230], &[], &[]);
+    }
+}
+
+#[test]
+fn text_and_multiline_text_keep_their_plane_and_geometry_through_every_save() {
+    for plane in PLANES {
+        let text = format!(
+            "0 TEXT\n5 130\n100 AcDbEntity\n8 0\n100 AcDbText\n39 0.5\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n1 Hello\n50 33.5\n41 0.8\n51 12\n7 Standard\n72 1\n11 4.5\n21 5.5\n31 3.75\n{plane}\n100 AcDbText\n73 2"
+        );
+        assert_kept(&dxf(&[&text]), "TEXT", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230, 73], &[50, 51], &[]);
+        let mtext = format!(
+            "0 MTEXT\n5 131\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n41 30\n71 5\n72 1\n1 Two\\Plines\n7 Standard\n{plane}\n11 0.6\n21 0.8\n31 0\n73 1\n44 1.5"
+        );
+        assert_kept(&dxf(&[&mtext]), "MTEXT", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 210, 220, 230, 44], &[], &[]);
+    }
+}
+
+#[test]
+fn inserts_and_attributes_keep_their_plane_and_geometry_through_every_save() {
+    let attdef = "0 ATTDEF\n5 202\n100 AcDbEntity\n8 0\n100 AcDbText\n10 0.25\n20 0.5\n30 0.75\n40 0.5\n1 default\n50 15\n72 0\n100 AcDbAttributeDefinition\n3 Prompt\n2 TAG\n70 0\n74 2";
+    for plane in PLANES {
+        let insert = format!(
+            "0 INSERT\n5 140\n100 AcDbEntity\n8 0\n100 AcDbBlockReference\n66 1\n2 B\n10 7.5\n20 -8.5\n30 9.5\n41 -1\n42 2.5\n43 0.5\n50 33.25\n{plane}"
+        );
+        let attrib = format!(
+            "0 ATTRIB\n5 141\n100 AcDbEntity\n8 0\n100 AcDbText\n10 7.75\n20 -8.25\n30 9.75\n40 0.5\n1 value\n50 48.25\n{plane}\n100 AcDbAttribute\n2 TAG\n70 0\n74 1"
+        );
+        let source = dxf_with_block(&[attdef], &[&insert, &attrib, "0 SEQEND\n5 142\n100 AcDbEntity\n8 0"]);
+        assert_kept(&source, "INSERT", &[10, 20, 30, 41, 42, 43, 50, 210, 220, 230], &[50], &[]);
+        assert_kept(&source, "ATTRIB", &[10, 20, 30, 40, 50, 210, 220, 230, 74], &[50], &[210, 220, 230]);
+    }
+}
+
+#[test]
+fn a_text_edit_keeps_the_plane_and_writes_the_new_text() {
+    let source = dxf(&[
+        "0 TEXT\n5 130\n100 AcDbEntity\n8 0\n100 AcDbText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n1 Hello\n210 0\n220 0\n230 -1\n100 AcDbText",
+        "0 MTEXT\n5 131\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n41 30\n71 5\n1 Old\n210 0\n220 0\n230 -1",
+    ]);
+    let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let handles: Vec<_> = d.model.iter().map(|e| e.handle).collect();
+    for h in &handles {
+        d.modify_entity(*h, |e| match &mut e.kind {
+            EntityKind::Text(t) => t.value = "Changed".into(),
+            EntityKind::MText(t) => t.contents = "Changed".into(),
+            _ => {}
+        })
+        .unwrap();
+    }
+    let text = cadcraft_io::write_dxf(&d);
+    for kind in ["TEXT", "MTEXT"] {
+        let got = record(&text, kind);
+        assert_eq!(bits(&got, 230), vec![(-1.0f64).to_bits()], "{kind} keeps its plane");
+        assert!(got.iter().any(|t| t.code == 1 && t.str() == "Changed"), "{kind} has the new text: {got:?}");
+    }
+    // A height edit is a geometry edit: the MTEXT is written from the model.
+    d.modify_entity(handles[1], |e| {
+        if let EntityKind::MText(t) = &mut e.kind {
+            t.height = 4.0;
+        }
+    })
+    .unwrap();
+    let got = record(&cadcraft_io::write_dxf(&d), "MTEXT");
+    assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
+    assert_eq!(bits(&got, 40), vec![4.0f64.to_bits()]);
 }
