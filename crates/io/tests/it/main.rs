@@ -23,6 +23,8 @@ mod dimtfill_roundtrip;
 mod drafting_spacing;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
+#[cfg(not(target_arch = "wasm32"))]
+mod dwg_keeps_unknown;
 mod dwg_layout_owner;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_roundtrip_losses;
