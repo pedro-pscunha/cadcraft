@@ -25,7 +25,7 @@ fn point(d: &mut Drawing, p: (f64, f64)) -> Handle {
     put(d, EntityKind::Point(DPoint { p: v(p.0, p.1), angle: 0.0 }))
 }
 fn ellipse(d: &mut Drawing, c: (f64, f64), major: (f64, f64), ratio: f64, start: f64, end: f64) -> Handle {
-    put(d, EntityKind::Ellipse(DEllipse { center: v(c.0, c.1), major: v(major.0, major.1), ratio, start, end }))
+    put(d, EntityKind::Ellipse(DEllipse { center: v(c.0, c.1), major: v(major.0, major.1), normal: Vec3::Z, ratio, start, end }))
 }
 fn spline(d: &mut Drawing, pts: &[(f64, f64)]) -> Handle {
     let s = GSpline::from_control(pts.iter().map(|p| Vec2::new(p.0, p.1)).collect(), 3);
