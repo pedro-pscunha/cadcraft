@@ -640,7 +640,7 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
         // programs read only this; CADCraft prefers its own xdata below when present.
         for name in &v.frozen_layers {
             if let Some(h) = w.layers.get(&name.to_ascii_uppercase()).cloned() {
-                w.s(341, h);
+                w.s(331, h);
             }
         }
         // One CADCraft xdata group holds both lists: readers stop at the first group of an app.

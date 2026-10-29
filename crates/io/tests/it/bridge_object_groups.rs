@@ -405,3 +405,70 @@ fn the_active_vport_keeps_its_view_and_visual_style() {
         assert_eq!(ucs, Some("Plan"), "{what}: named UCS");
     }
 }
+
+#[test]
+fn a_layout_keeps_its_active_viewport_and_ucs() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let named = add_ucs(&mut doc, "Sheet");
+    let base = add_ucs(&mut doc, "SheetBase");
+    let mut vp = Viewport::new();
+    vp.id = 2;
+    vp.width = 160.0;
+    vp.height = 100.0;
+    let viewport = doc.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), "Layout1").expect("add viewport");
+    let layout = doc
+        .objects
+        .values_mut()
+        .find_map(|o| match o {
+            ObjectType::Layout(l) if l.name == "Layout1" => Some(l),
+            _ => None,
+        })
+        .expect("Layout1");
+    layout.viewport = viewport;
+    layout.named_ucs = named;
+    layout.base_ucs = base;
+    for (what, back) in saves(&doc) {
+        let layout = back
+            .objects
+            .values()
+            .find_map(|o| match o {
+                ObjectType::Layout(l) if l.name == "Layout1" => Some(l),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{what}: Layout1 lost"));
+        assert!(
+            matches!(back.get_entity(layout.viewport), Some(EntityType::Viewport(v)) if v.width == 160.0),
+            "{what}: active viewport {:?}",
+            layout.viewport
+        );
+        let name_of = |h: Handle| back.ucss.iter().find(|u| u.handle == h).map_or_else(|| format!("no UCS for {h:?}"), |u| u.name.clone());
+        assert_eq!(name_of(layout.named_ucs), "Sheet", "{what}: named UCS");
+        assert_eq!(name_of(layout.base_ucs), "SheetBase", "{what}: base UCS");
+    }
+}
+
+#[test]
+fn a_layout_viewport_keeps_its_frozen_layers() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let mut layer = Layer::new("Walls");
+    layer.set_handle(doc.allocate_handle());
+    let walls = layer.handle;
+    doc.layers.add(layer).expect("add layer");
+    let mut vp = Viewport::new();
+    vp.id = 2;
+    vp.width = 160.0;
+    vp.height = 100.0;
+    vp.frozen_layers = vec![walls];
+    doc.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), "Layout1").expect("add viewport");
+    for (what, back) in saves(&doc) {
+        let vp = back
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Viewport(v) if v.width == 160.0 => Some(v.as_ref()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{what}: viewport lost"));
+        let names: Vec<&str> = vp.frozen_layers.iter().filter_map(|h| back.layers.iter().find(|l| l.handle == *h)).map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["Walls"], "{what}: frozen layers");
+    }
+}

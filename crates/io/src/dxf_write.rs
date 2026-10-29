@@ -49,7 +49,7 @@ struct W {
     emitted: HashMap<Handle, Vec<Handle>>,
     /// Upper-case plot style name → its `ACDBPLACEHOLDER` handle (group 390 of layers and objects).
     pstyles: HashMap<String, String>,
-    /// Upper-case layer name → its LAYER table record handle (group 341 of viewports).
+    /// Upper-case layer name → its LAYER table record handle (group 331 of viewports).
     layers: HashMap<String, String>,
     /// Persistent reactors of boundary objects: each source object of an associative hatch →
     /// the hatches (groups `{ACAD_REACTORS 330 …}`), from [`hatch_reactors`].

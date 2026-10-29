@@ -65,7 +65,7 @@ struct Rx {
     pstyles: HashMap<String, String>,
     /// Upper-case block name → associative array parameters from its BLOCK_RECORD.
     block_arrays: HashMap<String, cadcraft_doc::ArrayParams>,
-    /// LAYER record handle (upper case) → layer name (VIEWPORT group 341 frozen layers).
+    /// LAYER record handle (upper case) → layer name (VIEWPORT group 331 frozen layers).
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
     dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,

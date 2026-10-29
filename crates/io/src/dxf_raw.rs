@@ -80,8 +80,10 @@ fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
 
 /// Groups of a layout's `AcDbLayout` subclass the writer has no model for: its flags (paper space
 /// linetype scaling, limits checking), limits, insertion base, extents, elevation, UCS and
-/// orthographic view type.
-const LAYOUT_FRAME_CODES: &[i32] = &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76];
+/// orthographic view type, and the pointers after its block record: the viewport last active (331) and
+/// the named and base UCS (345, 346).
+const LAYOUT_FRAME_CODES: &[i32] =
+    &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76, 331, 345, 346];
 /// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
 /// shade plot mode, resolution and DPI, and the paper image origin.
 const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
@@ -129,7 +131,7 @@ fn first_group(from: &[RawTag], code: i32) -> Option<&RawTag> {
 
 /// A written layout with the groups it has constants for taken from the file's (`kept`, see
 /// [`layout_groups`]), and the Model layout's plot settings replaced by the file's.
-fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
+fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<String>) -> Vec<Tag> {
     let at = kept.iter().position(|t| t.code == 100 && layout_part(&t.value) == LayoutPart::Frame).unwrap_or(kept.len());
     let (plot, frame) = (kept.get(1..at).unwrap_or(&[]), kept.get(at + 1..).unwrap_or(&[]));
     let model = b
@@ -151,6 +153,18 @@ fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
             if part == LayoutPart::Plot && model && !plot.is_empty() {
                 out.extend(plot.iter().map(tag));
             }
+            continue;
+        }
+        // The pointers of the layout the writer has none for follow its block record, those still
+        // naming an object of the saved file.
+        if part == LayoutPart::Frame && t.code == 330 {
+            out.push(t.clone());
+            out.extend(
+                [331, 345, 346]
+                    .into_iter()
+                    .filter_map(|c| first_group(frame, c))
+                    .filter_map(|k| Some(Tag::s(k.code, saved(&k.value).filter(|h| h != "0")?))),
+            );
             continue;
         }
         let replaced = match part {
@@ -420,7 +434,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
 /// read: a viewport's view (direction, target, twist, lens, clipping), UCS (345, 346, 79 and its
 /// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
 /// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
-/// model writes, or keeps elsewhere (frozen layers by 341 and xdata, the sun by link), is not one.
+/// model writes, or keeps elsewhere (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
@@ -621,6 +635,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for x in f.entities.values().chain(f.records.values()) {
         note(&x.xdata);
         note(&x.props);
+        note(&x.layout);
     }
     for e in all_entities(d) {
         note(&e.common.xdata);
@@ -1468,7 +1483,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let patched;
     let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
         Some(x) => {
-            patched = patch_layout(b, &x.layout);
+            patched = patch_layout(b, &x.layout, |h| map.get(h));
             patched.as_slice()
         }
         None => b,
