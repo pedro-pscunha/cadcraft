@@ -14,6 +14,21 @@ fn eval(s: &mut Session, code: &str) -> Result<String, String> {
     eval_with(s, code, Vec::new())
 }
 
+#[test]
+fn canonical_entmod_refuses_before_decode_or_layer_creation() {
+    let mut s = session();
+    ok(&mut s, "(entmake '((0 . \"LINE\") (10 0.0 0.0 0.0) (11 5.0 0.0 0.0)))");
+    let mut entity = s.doc().unwrap().model.iter().last().unwrap().as_ref().clone();
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+    s.doc_mut().unwrap().model.push(entity);
+    let before = s.doc().unwrap().model.clone();
+    let layers = s.doc().unwrap().layers.clone();
+    let error = eval(&mut s, "(setq d (entget (entlast))) (entmod (subst (cons 8 \"CANONICAL-ENTMOD\") (assoc 8 d) d))").unwrap_err();
+    assert!(error.contains("canonical"), "{error}");
+    assert_eq!(s.doc().unwrap().model, before);
+    assert_eq!(s.doc().unwrap().layers, layers);
+}
+
 fn eval_with(s: &mut Session, code: &str, inputs: Vec<Value>) -> Result<String, String> {
     match s.lisp_eval(code, false, true, inputs) {
         Ok(Some(Ok(v))) => Ok(to_text(&v, true)),
