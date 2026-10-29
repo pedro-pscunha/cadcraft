@@ -1,5 +1,5 @@
 use super::blocks::table_size;
-use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, text_tags};
+use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
 use super::ctx::Ctx;
 use super::layout::paper_view;
 use super::{
@@ -320,6 +320,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 w.s(100, "AcDbEntity");
                 let (c, base) = attrib_common(d, e, i, a);
                 layer_and_props(w, &c, Some(&base));
+                plot_style(w, &c.plot_style);
                 // Hidden with its definition (a dynamic block's visibility state hides it).
                 if !base.visible {
                     w.i(60, 1);

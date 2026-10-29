@@ -963,10 +963,17 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         .iter()
         .map(String::as_str)
         .chain(d.layers.iter().map(|l| l.plot_style.as_str()))
-        .chain(every.iter().map(|e| e.common.plot_style.as_str()));
+        .chain(every.iter().map(|e| e.common.plot_style.as_str()))
+        .chain(
+            every
+                .iter()
+                .filter_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i) } else { None })
+                .flat_map(|i| &i.attribs)
+                .filter_map(|a| a.props.plot_style.as_deref()),
+        );
     for n in named {
         let n = n.trim();
-        let logical = n.is_empty() || n.eq_ignore_ascii_case("bylayer") || n.eq_ignore_ascii_case("byblock");
+        let logical = ["", "bylayer", "byblock", "bydictionarydefault"].iter().any(|l| n.eq_ignore_ascii_case(l));
         if !logical && pstyle_names.len() < dxf_ext::MAX_PLOT_STYLE_NAMES && !pstyle_names.iter().any(|x| x.eq_ignore_ascii_case(n)) {
             pstyle_names.push(n.to_string());
         }

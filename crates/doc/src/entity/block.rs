@@ -144,6 +144,9 @@ pub struct AttribProps {
     pub linetype: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineweight: Option<Lineweight>,
+    /// A plot style name, or ByBlock (see `Common::plot_style`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plot_style: Option<String>,
 }
 
 impl AttribProps {
@@ -158,6 +161,7 @@ impl AttribProps {
             color: self.color.unwrap_or(base.color),
             linetype: self.linetype.clone().unwrap_or_else(|| base.linetype.clone()),
             lineweight: self.lineweight.unwrap_or(base.lineweight),
+            plot_style: self.plot_style.clone().unwrap_or_else(|| base.plot_style.clone()),
             ..base.clone()
         }
     }

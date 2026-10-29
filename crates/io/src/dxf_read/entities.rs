@@ -398,7 +398,8 @@ pub(super) fn plot_style_names(secs: &[cadcraft_dxf::Section]) -> HashMap<String
     out
 }
 
-/// The named plot style an entity record points at (group 390 among its AcDbEntity groups).
+/// The plot style an entity record names among its AcDbEntity groups: ByBlock (group 380 = 1), the
+/// dictionary default (380 = 2) or the named style its placeholder (group 390) stands for.
 pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
     let mut in_entity = false;
     for t in tags {
@@ -407,6 +408,8 @@ pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
                 return None;
             }
             in_entity = t.str() == "AcDbEntity";
+        } else if t.code == 380 && in_entity && matches!(t.i64(), 1 | 2) {
+            return Some(if t.i64() == 1 { "ByBlock" } else { "ByDictionaryDefault" }.into());
         } else if t.code == 390 && in_entity {
             return rx.pstyles.get(&t.str().trim().to_ascii_uppercase()).cloned();
         }
@@ -529,7 +532,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
 }
 
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
-pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_layer: &str) -> Vec<Attrib> {
+pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_layer: &str, rx: &Rx) -> Vec<Attrib> {
     let mut attribs = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
         if k2 == "ATTRIB" {
@@ -545,7 +548,7 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
             attribs.push(Attrib {
                 handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
                 invisible: own.i(70).unwrap_or(0) & 1 != 0,
-                props: attrib_props(&tt, ins_layer),
+                props: attrib_props(&tt, ins_layer, entity_plot_style(t2, rx)),
                 multiline,
                 modes: attrib_modes(own.0),
                 ..Attrib::new(own.s(2).unwrap_or_default(), text)

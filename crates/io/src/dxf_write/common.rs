@@ -106,12 +106,23 @@ pub(super) fn common_x(w: &mut W, e: &Entity, owner: &str, paper: bool, subclass
     if let Some(v) = transparency_440(e.common.transparency) {
         w.i(440, v);
     }
-    // A named plot style (not ByLayer/ByBlock): its placeholder object.
-    if let Some(h) = w.pstyles.get(&e.common.plot_style.trim().to_ascii_uppercase()).cloned() {
-        w.s(390, h);
-    }
+    plot_style(w, &e.common.plot_style);
     if !subclass.is_empty() {
         w.s(100, subclass);
+    }
+}
+
+/// An object's plot style: a named one by its placeholder object (380 = 3 and 390); ByBlock and the
+/// dictionary default by their type (380 = 1, 2); ByLayer by nothing.
+pub(super) fn plot_style(w: &mut W, style: &str) {
+    let style = style.trim();
+    if let Some(h) = w.pstyles.get(&style.to_ascii_uppercase()).cloned() {
+        w.i(380, 3);
+        w.s(390, h);
+    } else if style.eq_ignore_ascii_case("byblock") {
+        w.i(380, 1);
+    } else if style.eq_ignore_ascii_case("bydictionarydefault") {
+        w.i(380, 2);
     }
 }
 
