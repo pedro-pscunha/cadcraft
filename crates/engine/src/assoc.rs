@@ -531,25 +531,35 @@ mod revision_tests {
         }
     }
 
-    /// The drawing after the line's end moved to (5, 0), with `edit` applied to the line and the dimension.
-    fn moved(before: &Drawing, line: Handle, dim: Handle, edit: impl Fn(&mut cadcraft_doc::Entity, bool)) -> Arc<Drawing> {
+    /// Give the entity `h` of `d` canonical geometry. A runtime callback cannot install it (that is the guard), so the
+    /// store replaces the record.
+    fn make_canonical(d: &mut Drawing, h: Handle) {
+        d.model.modify(h, |e| e.geometry_revision = GeometryRevision::CanonicalV2);
+    }
+
+    /// The drawing after the line's end moved to (5, 0), with the line and/or the dimension then made canonical.
+    fn moved(before: &Drawing, line: Handle, dim: Handle, canonical_line: bool, canonical_dim: bool) -> Arc<Drawing> {
         let mut after = before.clone();
         after
             .modify_entity(line, |e| {
                 if let EntityKind::Line(l) = &mut e.kind {
                     l.b = Vec3::new(5.0, 0.0, 0.0);
                 }
-                edit(e, true);
             })
             .unwrap();
-        after.modify_entity(dim, |e| edit(e, false)).unwrap();
+        if canonical_line {
+            make_canonical(&mut after, line);
+        }
+        if canonical_dim {
+            make_canonical(&mut after, dim);
+        }
         Arc::new(after)
     }
 
     #[test]
     fn a_legacy_source_updates_its_dimension() {
         let (before, line, dim) = drawing();
-        let mut after = moved(&before, line, dim, |_, _| {});
+        let mut after = moved(&before, line, dim, false, false);
         assert!(update(&mut after, &before) >= 1);
         assert!((dimension(&after, dim).p14.x - 5.0).abs() < 1e-9);
     }
@@ -557,11 +567,7 @@ mod revision_tests {
     #[test]
     fn a_dimension_keeps_its_links_when_the_source_has_canonical_geometry() {
         let (before, line, dim) = drawing();
-        let mut after = moved(&before, line, dim, |e, is_line| {
-            if is_line {
-                e.geometry_revision = GeometryRevision::CanonicalV2;
-            }
-        });
+        let mut after = moved(&before, line, dim, true, false);
         let was = dimension(&after, dim);
         assert_eq!(update(&mut after, &before), 0);
         assert_eq!(dimension(&after, dim), was, "no 2D recomputation from a canonical source");
@@ -571,11 +577,7 @@ mod revision_tests {
     #[test]
     fn a_dimension_with_canonical_geometry_is_not_recomputed() {
         let (before, line, dim) = drawing();
-        let mut after = moved(&before, line, dim, |e, is_line| {
-            if !is_line {
-                e.geometry_revision = GeometryRevision::CanonicalV2;
-            }
-        });
+        let mut after = moved(&before, line, dim, false, true);
         let was = dimension(&after, dim);
         assert_eq!(update(&mut after, &before), 0);
         assert_eq!(dimension(&after, dim), was);
@@ -589,7 +591,7 @@ mod revision_tests {
         let own = |d: &Drawing| find_snap(d, &Space::Model, at).map(|f| f.0);
         assert!(own(&d).is_some());
         let mut canonical = (*d).clone();
-        canonical.modify_entity(line, |e| e.geometry_revision = GeometryRevision::CanonicalV2).unwrap();
+        make_canonical(&mut canonical, line);
         // Only the line was there to attach to, but the dimension's own points are not snaps.
         assert_eq!(own(&canonical).filter(|h| *h == line), None);
         assert_eq!(SnapIndex::new(&canonical, &Space::Model).find(at).filter(|f| f.0 == line), None);
