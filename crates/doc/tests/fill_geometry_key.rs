@@ -1,6 +1,9 @@
 //! Every canonical wipeout field is part of the replay key, so changing it alone retires the source snapshot.
 
-use cadcraft_doc::{Common, EntityKind, Helix, HelixConstrain, HelixFrame, Wipeout, WipeoutFrame, geometry_key};
+use cadcraft_doc::{
+    Common, EntityKind, Helix, HelixConstrain, HelixFrame, MLine, MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, Wipeout, WipeoutFrame,
+    geometry_key,
+};
 use cadcraft_geom::{Vec2, Vec3};
 
 fn wipeout() -> Wipeout {
@@ -94,4 +97,53 @@ fn each_helix_frame_field_alone_changes_the_key() {
             assert_ne!(a, b);
         }
     }
+}
+
+fn mline() -> MLine {
+    let mut m = MLine::new(&MLineStyle::default(), &[], false, MLineJust::Zero, 2.0);
+    for p in [Vec3::new(0.0, 0.0, 1.0), Vec3::new(3.0, 0.0, 5.0)] {
+        let mut v = MLineVertex::new(p);
+        v.frame =
+            Some(MLineVertexFrame { dir: Vec3::new(0.6, 0.0, 0.8), miter: Vec3::new(0.0, 1.0, 0.0), params: vec![vec![1.0, 5.0], vec![-1.0, 5.0]] });
+        m.vertices.push(v);
+    }
+    m
+}
+
+#[test]
+fn each_mline_frame_field_alone_changes_the_key() {
+    let common = Common { extrusion: Vec3::new(0.0, 2.0, 0.0), ..Common::default() };
+    let key = |m: &MLine, c: &Common| geometry_key(&EntityKind::MLine(m.clone()), c).unwrap();
+    let base = key(&mline(), &common);
+    type Mutation = fn(&mut MLine, &mut Common);
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("vertex z", |m, _| m.vertices[1].p.z += 0.5),
+        ("direction y", |m, _| m.vertices[0].frame.as_mut().unwrap().dir.y += 0.5),
+        ("direction z", |m, _| m.vertices[1].frame.as_mut().unwrap().dir.z += 0.5),
+        ("miter x", |m, _| m.vertices[1].frame.as_mut().unwrap().miter.x += 0.5),
+        ("miter z", |m, _| m.vertices[0].frame.as_mut().unwrap().miter.z += 0.5),
+        ("parameter", |m, _| m.vertices[0].frame.as_mut().unwrap().params[1][1] += 0.5),
+        ("break", |m, _| m.vertices[1].frame.as_mut().unwrap().params[0].extend([1.0, 2.0])),
+        ("scale", |m, _| m.scale += 0.5),
+        ("closed", |m, _| m.closed = true),
+        ("start caps", |m, _| m.no_start_caps = true),
+        ("normal x", |_, c| c.extrusion.x += 0.5),
+        ("normal y", |_, c| c.extrusion.y += 0.5),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let (mut m, mut c) = (mline(), common.clone());
+        mutate(&mut m, &mut c);
+        let k = key(&m, &c);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    for (i, a) in keys.iter().enumerate() {
+        for b in &keys[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+    let mut renamed = mline();
+    renamed.style = "Other".into();
+    assert_eq!(key(&renamed, &common), base, "the style name is a property");
 }

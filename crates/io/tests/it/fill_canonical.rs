@@ -3,16 +3,23 @@
 
 use acadrust::DwgReader;
 use acadrust::entities::EntityType;
-use cadcraft_doc::{Common, Drawing, Entity, EntityKind, GeometryRevision, Helix, HelixConstrain, HelixFrame, Wipeout, WipeoutFrame};
+use cadcraft_doc::{
+    Common, Drawing, Entity, EntityKind, GeometryRevision, Helix, HelixConstrain, HelixFrame, MLine, MLineJust, MLineStyle, MLineVertex,
+    MLineVertexFrame, Wipeout, WipeoutFrame,
+};
 use cadcraft_dxf::{Tag, records, sections};
 use cadcraft_geom::{Vec2, Vec3};
 
 fn drawing(kind: EntityKind) -> Drawing {
+    drawing_in(kind, Vec3::Z)
+}
+
+fn drawing_in(kind: EntityKind, normal: Vec3) -> Drawing {
     let mut d = Drawing::new_metric();
     let handle = d.new_handle();
     let mut e = Entity::new(handle, kind);
     e.geometry_revision = GeometryRevision::CanonicalV2;
-    e.common = Common::default();
+    e.common = Common { extrusion: normal, ..Common::default() };
     d.model.push(e);
     d
 }
@@ -206,4 +213,89 @@ fn the_canonical_reader_returns_a_helix_as_the_canonical_writer_wrote_it() {
 fn the_canonical_reader_refuses_a_helix_without_an_axis() {
     let tags = vec![Tag::s(100, "AcDbHelix"), Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(30, 0.0), Tag::f(11, 1.0), Tag::f(21, 0.0), Tag::f(31, 0.0)];
     assert!(cadcraft_io::canonical_fill_from_groups("HELIX", &tags).is_none());
+}
+
+fn mline() -> MLine {
+    let mut m = MLine::new(&MLineStyle::default(), &[], false, MLineJust::Zero, 2.0);
+    for (p, dir) in [(Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.6, 0.0, 0.8)), (Vec3::new(3.0, 0.0, 5.0), Vec3::new(0.6, 0.0, 0.8))] {
+        let mut v = MLineVertex::new(p);
+        v.frame = Some(MLineVertexFrame { dir, miter: Vec3::new(0.0, 1.0, 0.0), params: vec![vec![1.0, 5.0], vec![-1.0, 5.0]] });
+        m.vertices.push(v);
+    }
+    m
+}
+
+fn dxf_in(kind: EntityKind, normal: Vec3) -> String {
+    dxf(&drawing_in(kind, normal))
+}
+
+#[test]
+fn each_mline_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut MLine, &mut Vec3);
+    let normal = Vec3::new(0.0, 2.0, 0.0);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("vertex z", |m, _| m.vertices[1].p.z = 5.5),
+        ("direction x", |m, _| m.vertices[0].frame.as_mut().unwrap().dir.x = 0.8),
+        ("direction z", |m, _| m.vertices[1].frame.as_mut().unwrap().dir.z = 0.6),
+        ("miter x", |m, _| m.vertices[1].frame.as_mut().unwrap().miter.x = 0.25),
+        ("miter z", |m, _| m.vertices[0].frame.as_mut().unwrap().miter.z = 0.5),
+        ("parameter", |m, _| m.vertices[0].frame.as_mut().unwrap().params[1][1] = 4.0),
+        ("break", |m, _| m.vertices[1].frame.as_mut().unwrap().params[0].extend([1.0, 2.0])),
+        ("normal x", |_, n| n.x = 0.5),
+        ("normal y", |_, n| n.y = 2.5),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut m, mut n) = (mline(), normal);
+        mutate(&mut m, &mut n);
+        (drawing_in(EntityKind::MLine(m.clone()), n), m, n)
+    };
+    let base = groups(&dxf(&make(|_, _| {}).0), "MLINE");
+    for (name, mutate) in cases {
+        let (d, m, n) = make(mutate);
+        let g = groups(&dxf(&d), "MLINE");
+        assert_ne!(g, base, "{name}");
+        let all = |code: i32| -> Vec<f64> { g.iter().filter(|t| t.0 == code).map(|t| t.1.trim().parse().unwrap()).collect() };
+        let triples = |code: i32| -> Vec<Vec3> {
+            all(code).into_iter().zip(all(code + 10)).zip(all(code + 20)).map(|((x, y), z)| Vec3::new(x, y, z)).collect()
+        };
+        let frames: Vec<_> = m.vertices.iter().map(|v| v.frame.as_ref().unwrap()).collect();
+        assert_eq!(triples(11), m.vertices.iter().map(|v| v.p).collect::<Vec<_>>(), "{name}");
+        assert_eq!(triples(12), frames.iter().map(|f| f.dir).collect::<Vec<_>>(), "{name}");
+        assert_eq!(triples(13), frames.iter().map(|f| f.miter).collect::<Vec<_>>(), "{name}");
+        assert!(near(triples(210)[0], n), "{name}");
+        let written: Vec<f64> = all(41);
+        let want: Vec<f64> = frames.iter().flat_map(|f| f.params.iter().flatten().copied()).collect();
+        assert_eq!(written, want, "{name}: the parameters are written as held");
+        let stored = DwgReader::from_stream(std::io::Cursor::new(cadcraft_io::write(&d, "x.dwg").unwrap())).read().unwrap();
+        let s = stored.entities().find_map(|e| if let EntityType::MLine(s) = e { Some(s.clone()) } else { None }).expect("an MLINE");
+        let v = |p: acadrust::types::Vector3| Vec3::new(p.x, p.y, p.z);
+        assert!(near(v(s.normal), n), "{name}: DWG normal {:?}", s.normal);
+        for (k, sv) in s.vertices.iter().enumerate() {
+            let f = frames[k];
+            assert!(near(v(sv.position), m.vertices[k].p) && near(v(sv.direction), f.dir) && near(v(sv.miter), f.miter), "{name}: DWG vertex {k}");
+            let params: Vec<Vec<f64>> = sv.segments.iter().map(|g| g.parameters.clone()).collect();
+            assert_eq!(params, f.params, "{name}: DWG parameters at vertex {k}");
+        }
+    }
+}
+
+#[test]
+fn the_canonical_reader_returns_an_mline_as_the_canonical_writer_wrote_it() {
+    let normal = Vec3::new(0.0, 2.0, 0.0);
+    let out = dxf_in(EntityKind::MLine(mline()), normal);
+    let (c, kind) = cadcraft_io::canonical_fill_from_groups("MLINE", &record(&out, "MLINE")).unwrap();
+    assert_eq!(c.extrusion, normal);
+    let EntityKind::MLine(read) = kind else { panic!("not an MLINE") };
+    let want = mline();
+    assert_eq!(read.vertices, want.vertices);
+    assert_eq!((read.scale, read.justification, read.closed), (want.scale, want.justification, want.closed));
+}
+
+#[test]
+fn the_canonical_reader_refuses_an_mline_without_a_plane() {
+    let out = dxf_in(EntityKind::MLine(mline()), Vec3::Z);
+    let mut tags = record(&out, "MLINE");
+    tags.retain(|t| t.code != 210 && t.code != 220 && t.code != 230);
+    tags.extend([Tag::f(210, 0.0), Tag::f(220, 0.0), Tag::f(230, 0.0)]);
+    assert!(cadcraft_io::canonical_fill_from_groups("MLINE", &tags).is_none());
 }

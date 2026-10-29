@@ -55,6 +55,7 @@ mod layout;
 mod layout_canonical;
 mod mesh;
 mod mleader;
+mod mline_canonical;
 mod text;
 mod text_canonical;
 

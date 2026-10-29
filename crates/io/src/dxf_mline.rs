@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cadcraft_color::Color;
 use cadcraft_doc::{
     Drawing, Entity, EntityKind, EntityStore, MAX_MLINE_CUTS, MAX_MLINE_ELEMENTS, MAX_MLINE_VERTICES, MLine, MLineCaps, MLineCut, MLineElement,
-    MLineJust, MLineStyle, MLineVertex, STANDARD_MLINE_STYLE,
+    MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, STANDARD_MLINE_STYLE,
 };
 use cadcraft_dxf::{Section, Tag};
 use cadcraft_geom::{Vec2, Vec3};
@@ -50,6 +50,16 @@ struct RawVertex {
 /// The MLINE entity's own groups (after the `AcDbMline` marker when present). The style's
 /// elements are recovered from the vertex data; [`resolve`] replaces them with the style's.
 pub(crate) fn read_entity(tags: &[Tag]) -> MLine {
+    read(tags, None)
+}
+
+/// The MLINE as a canonical multiline of the plane of `normal`: each vertex keeps its direction, miter and element
+/// parameters as the record holds them, and the elements' offsets are measured in that plane.
+pub(crate) fn read_canonical(tags: &[Tag], normal: Vec3) -> MLine {
+    read(tags, Some(normal))
+}
+
+fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
     let start = tags.iter().position(|t| t.code == 100 && t.str() == "AcDbMline").unwrap_or(0);
     let tags = tags.get(start..).unwrap_or(&[]);
     let mut style = String::new();
@@ -111,12 +121,25 @@ pub(crate) fn read_entity(tags: &[Tag]) -> MLine {
     // first segment.
     let first = verts.first();
     let pts: Vec<Vec2> = verts.iter().map(|r| r.p.xy()).collect();
-    let dir0 = first.map(|r| r.dir.xy().normalized()).filter(|d| *d != Vec2::ZERO).unwrap_or_else(|| match (pts.first(), pts.get(1)) {
-        (Some(a), Some(b)) => (*b - *a).normalized(),
-        _ => Vec2::X,
-    });
-    let miter0 = first.map(|r| r.miter.xy().normalized()).filter(|d| *d != Vec2::ZERO).unwrap_or(dir0.perp());
-    let across = miter0.dot(dir0.perp());
+    let across = match plane {
+        Some(normal) => {
+            // The same measure in the plane of the multiline: the miter's share of the direction across the segment.
+            let dir0 = first.map(|r| r.dir.normalized()).filter(|d| *d != Vec3::ZERO).unwrap_or_else(|| match (verts.first(), verts.get(1)) {
+                (Some(a), Some(b)) => (b.p - a.p).normalized(),
+                _ => Vec3::new(1.0, 0.0, 0.0),
+            });
+            let across = normal.normalized().cross(dir0);
+            first.map(|r| r.miter.normalized()).filter(|d| *d != Vec3::ZERO).map_or(1.0, |m| m.dot(across))
+        }
+        None => {
+            let dir0 = first.map(|r| r.dir.xy().normalized()).filter(|d| *d != Vec2::ZERO).unwrap_or_else(|| match (pts.first(), pts.get(1)) {
+                (Some(a), Some(b)) => (*b - *a).normalized(),
+                _ => Vec2::X,
+            });
+            let miter0 = first.map(|r| r.miter.xy().normalized()).filter(|d| *d != Vec2::ZERO).unwrap_or(dir0.perp());
+            miter0.dot(dir0.perp())
+        }
+    };
     let s = if scale.abs() > 1e-12 { scale } else { 1.0 };
     let elements: Vec<MLineElement> = (0..nelem)
         .map(|e| {
@@ -128,12 +151,16 @@ pub(crate) fn read_entity(tags: &[Tag]) -> MLine {
     let vertices = verts
         .iter()
         .map(|r| {
+            if plane.is_some() {
+                let frame = MLineVertexFrame { dir: r.dir, miter: r.miter, params: r.params.clone() };
+                return MLineVertex { p: r.p, cuts: Vec::new(), frame: Some(frame) };
+            }
             let mut cuts = Vec::new();
             for (e, list) in r.params.iter().enumerate() {
                 cuts.extend(gaps(list).into_iter().map(|(start, end)| MLineCut { element: e, start, end }));
             }
             cuts.truncate(MAX_MLINE_CUTS);
-            MLineVertex { p: r.p, cuts }
+            MLineVertex { p: r.p, cuts, frame: None }
         })
         .collect();
     MLine {
@@ -193,7 +220,7 @@ fn params(along: f64, on: &[(f64, f64)], len: f64) -> Vec<f64> {
 }
 
 /// The MLINE groups after the common entity groups.
-pub(crate) fn entity_tags(m: &MLine, style_handle: &str) -> Vec<Tag> {
+pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Option<Vec3>) -> Vec<Tag> {
     let mut t = Vec::new();
     let p = |t: &mut Vec<Tag>, c: i32, v: Vec3| {
         t.push(Tag::f(c, v.x));
@@ -210,6 +237,22 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str) -> Vec<Tag> {
     t.push(Tag::i(72, m.vertices.len() as i64));
     t.push(Tag::i(73, m.def.elements.len() as i64));
     p(&mut t, 10, m.vertices.first().map(|v| v.p).unwrap_or_default());
+    if let Some(normal) = canonical_normal.filter(|_| m.canonical_frames().is_ok()) {
+        // A canonical multiline writes the plane, directions, miters and parameters it holds.
+        p(&mut t, 210, normal);
+        for v in &m.vertices {
+            let Some(f) = &v.frame else { continue };
+            p(&mut t, 11, v.p);
+            p(&mut t, 12, f.dir);
+            p(&mut t, 13, f.miter);
+            for list in &f.params {
+                t.push(Tag::i(74, list.len() as i64));
+                t.extend(list.iter().map(|x| Tag::f(41, *x)));
+                t.push(Tag::i(75, 0));
+            }
+        }
+        return t;
+    }
     p(&mut t, 210, Vec3::Z);
     let pts = m.points();
     let n = pts.len();

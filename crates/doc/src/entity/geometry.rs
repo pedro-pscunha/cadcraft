@@ -152,6 +152,12 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::Tolerance(t) => {
             let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
         }
+        EntityKind::MLine(m) => {
+            // The vertices with their cuts and canonical frames (direction, miter, element parameters), the offset
+            // scale, the justification, the closure and the cap switches; not the style's elements and caps.
+            let vertices: Vec<_> = m.vertices.iter().map(|v| (v.p, &v.cuts, &v.frame)).collect();
+            let _ = write!(s, "MLINE{:?}{plane:?}", (vertices, m.scale, m.justification.to_dxf(), m.closed, m.no_start_caps, m.no_end_caps));
+        }
         EntityKind::Helix(h) => {
             let _ = write!(s, "HELIX{h:?}{plane:?}");
         }

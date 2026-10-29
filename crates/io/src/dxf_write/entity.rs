@@ -238,7 +238,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         EntityKind::MLine(m) => {
             w.s(0, "MLINE");
             common(w, e, owner, paper, "AcDbMline");
-            w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style)));
+            w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style), canonical_plane(e)));
         }
         EntityKind::PolylineMesh(mesh) => polyline_mesh(w, e, owner, paper, mesh),
         EntityKind::Polyline3d(p) => {

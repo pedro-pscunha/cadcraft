@@ -165,11 +165,26 @@ pub struct MLineVertex {
     /// Breaks in the segment that starts here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cuts: Vec<MLineCut>,
+    /// The record's own direction, miter and element parameters of a canonical multiline (see [`MLineVertexFrame`]).
+    /// A canonical multiline has it at every vertex, and then `cuts` is empty: the parameters hold the breaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<MLineVertexFrame>,
+}
+
+/// What a canonical MLINE holds at a vertex, as its record does (DXF groups 12, 13, 74 and 41): the direction of the
+/// segment that starts there and the miter direction, both WCS vectors kept as read, and for each style element the
+/// groups 41 (its distance from the vertex along the miter, then where it runs and breaks on that segment).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MLineVertexFrame {
+    pub dir: Vec3,
+    pub miter: Vec3,
+    pub params: Vec<Vec<f64>>,
 }
 
 impl MLineVertex {
     pub fn new(p: Vec3) -> Self {
-        MLineVertex { p, cuts: Vec::new() }
+        MLineVertex { p, cuts: Vec::new(), frame: None }
     }
 }
 
