@@ -473,8 +473,9 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
             Some(b) => d.block(b).and_then(|b| b.entities.get(*h)),
             None => d.entity(*h),
         };
-        let Some(EntityKind::MLeader(m)) = current.map(|e| &e.kind) else { continue };
-        let mut m = m.clone();
+        let Some(current) = current else { continue };
+        let mut entity = current.as_ref().clone();
+        let EntityKind::MLeader(m) = &mut entity.kind else { continue };
         if let Some(s) = pend.style.as_ref().and_then(|s| names.get(s)).filter(|n| !n.is_empty()) {
             m.style = s.clone();
         }
@@ -486,15 +487,18 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
                 ins.attribs = a;
             }
         }
-        let set = |e: &mut Entity| e.kind = EntityKind::MLeader(m);
         match block_of {
             Some(b) => {
                 if let Some(b) = d.blocks.get_mut(b) {
-                    Arc::make_mut(b).entities.modify(*h, set);
+                    Arc::make_mut(b).entities.replace(entity);
                 }
             }
             None => {
-                let _ = d.modify_entity(*h, set);
+                if let Some(space) = d.space_of(*h)
+                    && let Some(store) = d.space_mut(&space)
+                {
+                    store.replace(entity);
+                }
             }
         }
     }

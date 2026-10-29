@@ -108,11 +108,13 @@ fn a_dimension_drawn_from_its_block_is_picked_on_the_block_text() {
         preview: None,
     };
     d.blocks.insert("*D1".into(), std::sync::Arc::new(block));
-    d.model.modify(dim, |e| {
-        if let EntityKind::Dimension(dm) = &mut e.kind {
-            dm.block = Some("*D1".into());
-        }
-    });
+    d.model
+        .modify(dim, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind {
+                dm.block = Some("*D1".into());
+            }
+        })
+        .unwrap();
     let d = s.doc().unwrap();
     let m = render::layout_mtext_entity(
         d,

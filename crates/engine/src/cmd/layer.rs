@@ -241,13 +241,13 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(nn) = new_name {
         l.name = nn.clone();
         // Re-point entities in model space, every layout and every block definition.
-        repoint(&mut d.model, &old, &nn);
+        repoint(&mut d.model, &old, &nn)?;
         for layout in &mut d.layouts {
-            repoint(&mut layout.entities, &old, &nn);
+            repoint(&mut layout.entities, &old, &nn)?;
         }
         for block in d.blocks.values_mut() {
             if block.entities.iter().any(|e| e.common.layer.eq_ignore_ascii_case(&old)) {
-                repoint(&mut std::sync::Arc::make_mut(block).entities, &old, &nn);
+                repoint(&mut std::sync::Arc::make_mut(block).entities, &old, &nn)?;
             }
         }
         if cur.eq_ignore_ascii_case(&old) {
@@ -257,11 +257,12 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
-fn repoint(store: &mut cadcraft_doc::EntityStore, old: &str, new: &str) {
+fn repoint(store: &mut cadcraft_doc::EntityStore, old: &str, new: &str) -> Result<()> {
     let hs: Vec<_> = store.iter().filter(|e| e.common.layer.eq_ignore_ascii_case(old)).map(|e| e.handle).collect();
     for h in hs {
-        store.modify(h, |e| e.common.layer = new.to_string());
+        store.modify_metadata(h, |common| common.layer = new.to_string())?;
     }
+    Ok(())
 }
 
 fn run_current(s: &mut Session, p: &Value) -> Result<Value> {
@@ -327,7 +328,10 @@ fn run_laymch(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     d.ensure_layer(&layer);
     for h in &hs {
-        d.modify_entity(*h, |e| e.common.layer = layer.clone())?;
+        d.try_modify_metadata(*h, |common| {
+            common.layer = layer.clone();
+            Ok(())
+        })?;
     }
     Ok(json!({ "changed": hs.len() }))
 }
@@ -337,7 +341,10 @@ fn run_laycur(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     let cur = d.header.str("CLAYER", "0");
     for h in &hs {
-        d.modify_entity(*h, |e| e.common.layer = cur.clone())?;
+        d.try_modify_metadata(*h, |common| {
+            common.layer = cur.clone();
+            Ok(())
+        })?;
     }
     Ok(json!({ "changed": hs.len() }))
 }

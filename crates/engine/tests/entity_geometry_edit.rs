@@ -2,6 +2,12 @@ use cadcraft_doc::{Common, EntityKind, Space, Unknown};
 use cadcraft_engine::Session;
 use serde_json::json;
 
+fn canonical_entity(session: &Session, handle: cadcraft_doc::Handle) -> cadcraft_doc::Entity {
+    let mut entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+    entity
+}
+
 #[test]
 fn a_failed_typed_transform_restores_the_current_input_step() {
     let mut session = Session::new();
@@ -26,7 +32,8 @@ fn unmigrated_grip_operations_refuse_canonical_geometry_atomically() {
         let mut session = Session::new();
         let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
         let handle = cadcraft_doc::Handle::parse_hex(&line).unwrap();
-        session.doc_mut().unwrap().modify_entity(handle, |entity| entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2).unwrap();
+        let entity = canonical_entity(&session, handle);
+        session.doc_mut().unwrap().model.push(entity);
         let before = session.doc().unwrap().model.clone();
         let result = match operation {
             "single" => session.execute("grip.stretch", &json!({"handle": line, "index": 0, "to": [2, 3]})),
@@ -51,13 +58,8 @@ fn nonlinear_curve_edits_refuse_canonical_targets_and_cutting_edges() {
         let target = session.execute("line", &json!({"points": [[0, 0], [end, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
         let edge = session.execute("line", &json!({"points": [[5, -2], [5, 2]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
         let canonical = if canonical_target { &target } else { &edge };
-        session
-            .doc_mut()
-            .unwrap()
-            .modify_entity(cadcraft_doc::Handle::parse_hex(canonical).unwrap(), |entity| {
-                entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
-            })
-            .unwrap();
+        let entity = canonical_entity(&session, cadcraft_doc::Handle::parse_hex(canonical).unwrap());
+        session.doc_mut().unwrap().model.push(entity);
         let before = session.doc().unwrap().model.clone();
         let params = if command == "offset" {
             json!({"handle": target, "distance": 1, "side": [1, 1], "erase": true})
@@ -85,13 +87,8 @@ fn a_mixed_crossing_edit_refuses_before_it_changes_a_legacy_target() {
         session.execute("line", &json!({"points": [[0, 0], [end, 0]]})).unwrap();
         let canonical = session.execute("line", &json!({"points": [[0, 1], [end, 1]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
         let edge = session.execute("line", &json!({"points": [[5, -2], [5, 3]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
-        session
-            .doc_mut()
-            .unwrap()
-            .modify_entity(cadcraft_doc::Handle::parse_hex(&canonical).unwrap(), |entity| {
-                entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
-            })
-            .unwrap();
+        let entity = canonical_entity(&session, cadcraft_doc::Handle::parse_hex(&canonical).unwrap());
+        session.doc_mut().unwrap().model.push(entity);
         let before = session.doc().unwrap().model.clone();
         let result = session.execute(command, &json!({"crossing": [[2, -0.2], [1.8, 1.2]], "edges": [edge]}));
         let error = result.unwrap_err();
@@ -105,19 +102,14 @@ fn appearance_properties_keep_canonical_geometry_and_the_source_snapshot() {
     let mut session = Session::new();
     let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
     let handle = cadcraft_doc::Handle::parse_hex(&line).unwrap();
-    session
-        .doc_mut()
-        .unwrap()
-        .modify_entity(handle, |entity| {
-            entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
-            entity.common.extrusion = cadcraft_geom::Vec3::new(0.0, 0.8, 0.6);
-            entity.common.thickness = 1.5;
-            entity.common.geometry = Some(std::sync::Arc::new(cadcraft_doc::GeometrySnapshot {
-                records: Vec::new(),
-                model: cadcraft_doc::geometry_key(&entity.kind, &entity.common).unwrap(),
-            }));
-        })
-        .unwrap();
+    let mut entity = canonical_entity(&session, handle);
+    entity.common.extrusion = cadcraft_geom::Vec3::new(0.0, 0.8, 0.6);
+    entity.common.thickness = 1.5;
+    entity.common.geometry = Some(std::sync::Arc::new(cadcraft_doc::GeometrySnapshot {
+        records: Vec::new(),
+        model: cadcraft_doc::geometry_key(&entity.kind, &entity.common).unwrap(),
+    }));
+    session.doc_mut().unwrap().model.push(entity);
     let before = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
     session.execute("properties.set", &json!({"handle": line, "layer": "metadata", "color": 3, "visible": false, "ltscale": 2})).unwrap();
     let after = session.doc().unwrap().entity(handle).unwrap();
@@ -135,6 +127,12 @@ fn appearance_properties_keep_canonical_geometry_and_the_source_snapshot() {
     let error = session.execute("properties.set", &json!({"handle": line, "color": 2, "start": [2, 3]})).unwrap_err();
     assert!(error.to_string().contains("canonical"));
     assert_eq!(session.doc().unwrap().model, before_geometry_edit);
+    session.execute("laymch", &json!({"handle": line, "layer": "matching"})).unwrap();
+    assert_eq!(session.doc().unwrap().entity(handle).unwrap().common.layer, "matching");
+    session.execute("laycur", &json!({"handle": line})).unwrap();
+    let after = session.doc().unwrap().entity(handle).unwrap();
+    assert_eq!(after.common.layer, "0");
+    assert!(std::sync::Arc::ptr_eq(after.common.geometry.as_ref().unwrap(), before.common.geometry.as_ref().unwrap()));
 }
 
 #[test]

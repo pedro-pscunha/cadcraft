@@ -86,9 +86,10 @@ fn fill(kind: &mut EntityKind, allocate: &mut impl FnMut() -> Handle) {
 }
 
 fn fill_store(store: &mut EntityStore, allocate: &mut impl FnMut() -> Handle) {
-    let hs: Vec<_> = store.iter().filter(|e| e.kind.attributes().iter().any(|a| a.handle.is_none())).map(|e| e.handle).collect();
-    for h in hs {
-        store.modify(h, |e| fill(&mut e.kind, allocate));
+    let missing: Vec<_> = store.iter().filter(|e| e.kind.attributes().iter().any(|a| a.handle.is_none())).map(|e| e.as_ref().clone()).collect();
+    for mut entity in missing {
+        fill(&mut entity.kind, allocate);
+        store.replace(entity);
     }
 }
 

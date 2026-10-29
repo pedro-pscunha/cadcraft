@@ -75,7 +75,8 @@ pub fn find_snap(d: &Drawing, space: &Space, p: Vec2) -> Option<(Handle, AssocSn
     }
     let store = d.space(space)?;
     let mut best: Option<(usize, Handle, AssocSnap)> = None;
-    for e in store.iter() {
+    // Canonical geometry offers no projected 2D snaps.
+    for e in store.iter().filter(|e| e.require_legacy_geometry().is_ok()) {
         for (i, (snap, q)) in candidates(&e.kind).into_iter().enumerate() {
             let rank = snap_rank(&snap, i);
             if close(p, q) && best.as_ref().is_none_or(|b| rank < b.0) {
@@ -112,7 +113,7 @@ pub struct SnapIndex {
 impl SnapIndex {
     pub fn new(d: &Drawing, space: &Space) -> Self {
         let mut pts = Vec::new();
-        for e in d.space(space).into_iter().flat_map(|st| st.iter()) {
+        for e in d.space(space).into_iter().flat_map(|st| st.iter()).filter(|e| e.require_legacy_geometry().is_ok()) {
             for (i, (snap, q)) in candidates(&e.kind).into_iter().enumerate() {
                 if q.is_finite() {
                     pts.push((q, snap_rank(&snap, i), pts.len(), e.handle, snap));
@@ -143,7 +144,9 @@ impl SnapIndex {
 
 /// A circle or arc (centre, radius) by handle.
 fn circle_of(d: &Drawing, h: Handle) -> Option<(Vec2, f64)> {
-    match &d.entity(h)?.kind {
+    let e = d.entity(h)?;
+    e.require_legacy_geometry().ok()?;
+    match &e.kind {
         EntityKind::Circle(c) => Some((c.center.xy(), c.radius)),
         EntityKind::Arc(a) => Some((a.center.xy(), a.radius)),
         _ => None,
@@ -152,7 +155,7 @@ fn circle_of(d: &Drawing, h: Handle) -> Option<(Vec2, f64)> {
 
 /// A circle or arc whose centre is at `c` (and radius `r`, when given).
 fn circle_at(d: &Drawing, space: &Space, c: Vec2, r: Option<f64>) -> Option<Handle> {
-    d.space(space)?.iter().find_map(|e| {
+    d.space(space)?.iter().filter(|e| e.require_legacy_geometry().is_ok()).find_map(|e| {
         let (cc, rr) = match &e.kind {
             EntityKind::Circle(x) => (x.center.xy(), x.radius),
             EntityKind::Arc(x) => (x.center.xy(), x.radius),
@@ -318,6 +321,13 @@ fn vertex_topology_changed(before: &Drawing, after: &Drawing, handle: Handle) ->
     }
 }
 
+/// Whether a link of the dimension `owner` names a source with canonical geometry (the object itself, or the second line
+/// of an intersection). Such a dimension is not recomputed from the old 2D snaps and its links are not dropped.
+fn has_canonical_source(d: &Drawing, owner: Handle, link: &DimAssoc) -> bool {
+    let canonical = |h: Handle| d.association_entity(owner, h).is_some_and(|e| e.require_legacy_geometry().is_err());
+    canonical(link.handle) || matches!(link.snap, AssocSnap::Intersection { other } if canonical(other))
+}
+
 /// Evaluate the entire changed set before mutating a point. Unlike model reassociation this
 /// never drops an unresolved link and then resurrects its association list after partial work.
 fn recompute_raw(h: Handle, dm: &Dimension, links: &[DimAssoc], before: &Drawing, after: &Drawing) -> Option<Dimension> {
@@ -386,6 +396,14 @@ fn update_in_scope(after: &mut Arc<Drawing>, before: &Drawing, scope: UpdateScop
         for store in stores {
             for e in store.iter() {
                 let EntityKind::Dimension(dm) = &e.kind else { continue };
+                // A dimension with canonical geometry never gets the 2D recomputation. An opaque link keeps its AutoCAD
+                // association and is reported as not updated; a modelled one stays as it is.
+                if e.require_legacy_geometry().is_err() {
+                    if d.has_raw_dimassoc(e.handle) && d.raw_dimassoc_targets(e.handle).any(|target| src_changed(before, d, target)) {
+                        blocked.insert(e.handle);
+                    }
+                    continue;
+                }
                 if d.has_raw_dimassoc(e.handle) {
                     // A copied/new raw dimension already arrives with its transformed cache;
                     // creation is not a geometry edit relative to a pre-existing raw owner.
@@ -418,7 +436,7 @@ fn update_in_scope(after: &mut Arc<Drawing>, before: &Drawing, scope: UpdateScop
                 let touched = dm.assoc.iter().any(|a| {
                     src_changed(before, d, a.handle) || matches!(a.snap, AssocSnap::Intersection { other } if src_changed(before, d, other))
                 });
-                if !touched {
+                if !touched || dm.assoc.iter().any(|a| has_canonical_source(d, e.handle, a)) {
                     continue;
                 }
                 let prev = match before.entity_including_blocks(e.handle).map(|x| &x.kind) {
@@ -488,4 +506,93 @@ pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid:
         notes.extend(unupdated_note_in_scope(&st.doc, Some(before), scope));
     }
     notes.into_iter().for_each(|n| s.echo(n));
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+    use crate::Session;
+    use cadcraft_doc::GeometryRevision;
+    use serde_json::json;
+
+    /// An associative linear dimension on the line (0, 0)-(4, 0): the drawing, the line and the dimension.
+    fn drawing() -> (Arc<Drawing>, Handle, Handle) {
+        let mut s = Session::new();
+        let line = s.execute("line", &json!({ "points": [[0, 0], [4, 0]] })).unwrap();
+        let dim = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [4, 0], "at": [2, 1] })).unwrap();
+        let handle = |v: &serde_json::Value| Handle::parse_hex(v["handle"].as_str().or_else(|| v["handles"][0].as_str()).unwrap()).unwrap();
+        (s.state().unwrap().doc.clone(), handle(&line), handle(&dim))
+    }
+
+    fn dimension(d: &Drawing, h: Handle) -> Dimension {
+        match &d.entity(h).unwrap().kind {
+            EntityKind::Dimension(dm) => dm.clone(),
+            k => panic!("not a dimension: {k:?}"),
+        }
+    }
+
+    /// The drawing after the line's end moved to (5, 0), with `edit` applied to the line and the dimension.
+    fn moved(before: &Drawing, line: Handle, dim: Handle, edit: impl Fn(&mut cadcraft_doc::Entity, bool)) -> Arc<Drawing> {
+        let mut after = before.clone();
+        after
+            .modify_entity(line, |e| {
+                if let EntityKind::Line(l) = &mut e.kind {
+                    l.b = Vec3::new(5.0, 0.0, 0.0);
+                }
+                edit(e, true);
+            })
+            .unwrap();
+        after.modify_entity(dim, |e| edit(e, false)).unwrap();
+        Arc::new(after)
+    }
+
+    #[test]
+    fn a_legacy_source_updates_its_dimension() {
+        let (before, line, dim) = drawing();
+        let mut after = moved(&before, line, dim, |_, _| {});
+        assert!(update(&mut after, &before) >= 1);
+        assert!((dimension(&after, dim).p14.x - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_dimension_keeps_its_links_when_the_source_has_canonical_geometry() {
+        let (before, line, dim) = drawing();
+        let mut after = moved(&before, line, dim, |e, is_line| {
+            if is_line {
+                e.geometry_revision = GeometryRevision::CanonicalV2;
+            }
+        });
+        let was = dimension(&after, dim);
+        assert_eq!(update(&mut after, &before), 0);
+        assert_eq!(dimension(&after, dim), was, "no 2D recomputation from a canonical source");
+        assert_eq!(was.assoc.len(), 2, "and no link dropped");
+    }
+
+    #[test]
+    fn a_dimension_with_canonical_geometry_is_not_recomputed() {
+        let (before, line, dim) = drawing();
+        let mut after = moved(&before, line, dim, |e, is_line| {
+            if !is_line {
+                e.geometry_revision = GeometryRevision::CanonicalV2;
+            }
+        });
+        let was = dimension(&after, dim);
+        assert_eq!(update(&mut after, &before), 0);
+        assert_eq!(dimension(&after, dim), was);
+    }
+
+    #[test]
+    fn canonical_geometry_offers_no_snaps_to_attach_to() {
+        let (d, line, _) = drawing();
+        // The line's end and the circle-free corner are found while the line is legacy.
+        let at = Vec2::new(4.0, 0.0);
+        let own = |d: &Drawing| find_snap(d, &Space::Model, at).map(|f| f.0);
+        assert!(own(&d).is_some());
+        let mut canonical = (*d).clone();
+        canonical.modify_entity(line, |e| e.geometry_revision = GeometryRevision::CanonicalV2).unwrap();
+        // Only the line was there to attach to, but the dimension's own points are not snaps.
+        assert_eq!(own(&canonical).filter(|h| *h == line), None);
+        assert_eq!(SnapIndex::new(&canonical, &Space::Model).find(at).filter(|f| f.0 == line), None);
+        assert!(SnapIndex::new(&d, &Space::Model).find(at).is_some());
+    }
 }

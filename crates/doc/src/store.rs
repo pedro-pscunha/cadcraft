@@ -157,19 +157,24 @@ impl EntityStore {
         self.len = self.len.saturating_sub(1);
         Some(e)
     }
-    /// Modify an entity in place through a closure (copy-on-write).
-    pub fn modify<F: FnOnce(&mut Entity)>(&mut self, h: Handle, f: F) -> bool {
-        let Some(id) = self.chunk_id(h) else { return false };
-        let Some(pos) = self.chunk_pos(id) else { return false };
-        let Some(c) = self.chunks.get_mut(pos) else { return false };
-        let chunk = Arc::make_mut(c);
-        match chunk.items.iter_mut().find(|x| x.handle == h) {
-            Some(slot) => {
-                f(Arc::make_mut(slot));
-                true
-            }
-            None => false,
-        }
+    /// Modify legacy geometry through a checked candidate, without partial store changes.
+    pub fn modify<F: FnOnce(&mut Entity)>(&mut self, h: Handle, f: F) -> crate::Result<bool> {
+        let Some(source) = self.get(h) else { return Ok(false) };
+        let (candidate, ()) = source.legacy_edited(|entity| {
+            f(entity);
+            Ok(())
+        })?;
+        Ok(self.replace(candidate))
+    }
+
+    /// Modify appearance metadata without exposing the geometry payload to the callback.
+    pub fn modify_metadata<F: FnOnce(&mut crate::Common)>(&mut self, h: Handle, f: F) -> crate::Result<bool> {
+        let Some(source) = self.get(h) else { return Ok(false) };
+        let (candidate, ()) = source.metadata_edited(|common| {
+            f(common);
+            Ok(())
+        })?;
+        Ok(self.replace(candidate))
     }
     pub fn bring_to_front(&mut self, h: Handle) -> bool {
         match self.remove(h) {
@@ -302,7 +307,7 @@ mod tests {
         }
         let snap = s.clone();
         s.remove(Handle(3));
-        s.modify(Handle(4), |e| e.common.layer = "X".into());
+        s.modify_metadata(Handle(4), |common| common.layer = "X".into()).unwrap();
         assert!(snap.get(Handle(3)).is_some());
         assert_eq!(snap.get(Handle(4)).map(|e| e.common.layer.as_str()), Some("0"));
         assert_eq!(s.get(Handle(4)).map(|e| e.common.layer.as_str()), Some("X"));

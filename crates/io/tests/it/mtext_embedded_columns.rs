@@ -146,11 +146,13 @@ fn a_column_text_is_drawn_with_all_its_text() {
     let d = cadcraft_io::read_dxf(dxf(ACAD_31E46).as_bytes()).unwrap();
     let mut bare = d.clone();
     let h = bare.model.iter().next().unwrap().handle;
-    bare.model.modify(h, |e| {
-        if let EntityKind::MText(t) = &mut e.kind {
-            t.columns = None;
-        }
-    });
+    bare.model
+        .modify(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind {
+                t.columns = None;
+            }
+        })
+        .unwrap();
     let (with, without) = (prims(&d), prims(&bare));
     assert!(!with.prims.is_empty(), "the text is drawn");
     assert_eq!(with.prims.len(), without.prims.len(), "one column draws as the text does");

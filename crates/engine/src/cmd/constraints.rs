@@ -109,6 +109,24 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// The first of `extra` or of the objects any constraint holds that has canonical geometry (its own revision or a nested one).
+/// The solver reads and moves the projected 2D points of the objects it holds, so it never starts on such a drawing.
+fn canonical_input(d: &Drawing, extra: impl IntoIterator<Item = Handle>) -> Option<Handle> {
+    let held = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle));
+    held.chain(extra).find(|h| d.entity(*h).is_some_and(|e| e.require_legacy_geometry().is_err()))
+}
+
+/// Refuse a solver entry point whole when an input has canonical geometry; nothing has changed yet.
+fn require_legacy_solver_inputs(d: &Drawing, extra: impl IntoIterator<Item = Handle>) -> Result<()> {
+    match canonical_input(d, extra) {
+        Some(h) => Err(EngineError::Other(format!(
+            "object {} has canonical geometry, which the constraint solver does not read yet. Nothing was changed",
+            h.hex()
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn err(e: cs::SolveError) -> EngineError {
     EngineError::Other(e.to_string())
 }
@@ -204,6 +222,9 @@ fn object_size(kind: &EntityKind) -> f64 {
 
 fn resolve(d: &Drawing, h: Handle, hint: Hint, want: Want, aperture: f64) -> std::result::Result<GeomRef, String> {
     let e = d.entity(h).ok_or_else(|| format!("no such object {}", h.hex()))?;
+    if e.require_legacy_geometry().is_err() {
+        return Err(format!("object {} has canonical geometry, which cannot be constrained yet", h.hex()));
+    }
     if !cs::supported(&e.kind) {
         return Err(format!("{} objects cannot be constrained", e.kind.type_name()));
     }
@@ -268,6 +289,9 @@ fn resolve(d: &Drawing, h: Handle, hint: Hint, want: Want, aperture: f64) -> std
 /// The closest pair of characteristic points of two objects (COINCIDENT with no hints).
 fn closest_points(d: &Drawing, a: Handle, b: Handle) -> Option<(GeomRef, GeomRef)> {
     let (ea, eb) = (d.entity(a)?, d.entity(b)?);
+    if ea.require_legacy_geometry().is_err() || eb.require_legacy_geometry().is_err() {
+        return None;
+    }
     let pa: Vec<_> = object_points(d, a, &ea.kind).into_iter().filter(|c| c.0 != Sub::Mid).collect();
     let pb: Vec<_> = object_points(d, b, &eb.kind).into_iter().filter(|c| c.0 != Sub::Mid).collect();
     let mut best: Option<(f64, Sub, Sub)> = None;
@@ -313,6 +337,9 @@ fn build_refs(s: &Session, kind: K, picks: &[(Handle, Hint)]) -> std::result::Re
     if kind == K::Coincident
         && let [(a, Hint::None), (b, Hint::None)] = picks
     {
+        if let Some(h) = [a, b].into_iter().find(|h| d.entity(**h).is_some_and(|e| e.require_legacy_geometry().is_err())) {
+            return Err(format!("object {} has canonical geometry, which cannot be constrained yet", h.hex()));
+        }
         return closest_points(d, *a, *b).map(|(x, y)| vec![x, y]).ok_or_else(|| "Select two points".into());
     }
     let ap = aperture(s);
@@ -327,6 +354,7 @@ fn build_refs(s: &Session, kind: K, picks: &[(Handle, Hint)]) -> std::result::Re
 fn add_constraint(s: &mut Session, c: Constraint) -> Result<u32> {
     let keep: Vec<Handle> = c.refs.first().map(|r| r.handle).into_iter().collect();
     let prefer_move: Vec<Handle> = c.refs.iter().skip(1).map(|r| r.handle).filter(|h| !keep.contains(h)).collect();
+    require_legacy_solver_inputs(s.doc()?, c.refs.iter().map(|r| r.handle))?;
     let mut d = s.doc()?.clone();
     let id = cs::add(&mut d, c, &cs::SolveOptions { keep, prefer_move, ..Default::default() }).map_err(err)?;
     *s.doc_mut()? = d;
@@ -820,6 +848,7 @@ fn run_autoconstrain(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = p.get("types").and_then(Value::as_array) {
         o.types = t.iter().filter_map(Value::as_str).map(|n| kind_from_name(n).map_or_else(|| n.to_string(), |k| k.name().to_string())).collect();
     }
+    require_legacy_solver_inputs(s.doc()?, hs.iter().copied())?;
     let mut d = s.doc()?.clone();
     let ids = cs::autoconstrain(&mut d, &hs, &o);
     if !ids.is_empty() {
@@ -884,6 +913,8 @@ fn run_parameters(s: &mut Session, p: &Value) -> Result<Value> {
             (None, Some(v)) if v.is_finite() => cs::format_value(v),
             _ => return Err(bad("parameters", "`expr` or `value` is required")),
         };
+        // A new value re-solves every constrained object.
+        require_legacy_solver_inputs(s.doc()?, [])?;
         let mut d = s.doc()?.clone();
         cs::set_parameter(&mut d, name.trim(), &expr, &cs::SolveOptions::default()).map_err(err)?;
         if let Some(desc) = str_param(p, "description")
@@ -1023,6 +1054,7 @@ impl Interactive for InferM {
 
 fn run_inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let d = s.doc()?;
+    require_legacy_solver_inputs(d, [])?;
     let dof = cs::dof(d, &[]).ok().map(|r| json!({ "dof": r.dof, "status": r.status, "redundant": r.redundant, "message": r.message }));
     Ok(json!({
         "constraints": d.constraints,
@@ -1038,6 +1070,7 @@ fn run_inspect(s: &mut Session, _p: &Value) -> Result<Value> {
 /// or of every constrained object.
 fn run_dof(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
+    require_legacy_solver_inputs(s.doc()?, hs.iter().copied())?;
     let r = cs::dof(s.doc()?, &hs).map_err(err)?;
     serde_json::to_value(&r).map_err(|e| EngineError::Other(e.to_string()))
 }
@@ -1062,7 +1095,16 @@ fn infer_after(s: &mut Session, before: &Drawing) {
     }
     let Some(store) = d.space(&space) else { return };
     let changed = |e: &Arc<cadcraft_doc::Entity>| before.entity(e.handle).is_none_or(|b| !Arc::ptr_eq(b, e) && **b != **e);
-    let placed: Vec<Handle> = store.iter().filter(|e| cs::supported(&e.kind) && changed(e)).map(|e| e.handle).take(MAX_INFER_PLACED + 1).collect();
+    // Inference reads and solves projected 2D points: not when a constrained object has canonical geometry, and never for one.
+    if canonical_input(d, []).is_some() {
+        return;
+    }
+    let placed: Vec<Handle> = store
+        .iter()
+        .filter(|e| e.require_legacy_geometry().is_ok() && cs::supported(&e.kind) && changed(e))
+        .map(|e| e.handle)
+        .take(MAX_INFER_PLACED + 1)
+        .collect();
     if placed.is_empty() || placed.len() > MAX_INFER_PLACED {
         return;
     }
@@ -1096,7 +1138,7 @@ fn infer_after(s: &mut Session, before: &Drawing) {
     let mut parallel: Option<(f64, Handle)> = None;
     let near = pts.first().copied().unwrap_or_default();
     for e in store.iter().take(MAX_INFER_SCAN) {
-        if placed.contains(&e.handle) || !cs::supported(&e.kind) || !d.is_visible(e) {
+        if placed.contains(&e.handle) || !cs::supported(&e.kind) || e.require_legacy_geometry().is_err() || !d.is_visible(e) {
             continue;
         }
         let b = cadcraft_doc::entity_bounds(d, e, 0).expand(tol);
@@ -1144,6 +1186,12 @@ pub fn after_command(s: &mut Session, before: Option<&Arc<Drawing>>, ok: bool) {
     }
     let (Some(before), Ok(st)) = (before, s.state()) else { return };
     if st.doc.constraints.is_empty() || Arc::ptr_eq(before, &st.doc) {
+        return;
+    }
+    // The re-solve reads and moves projected 2D points: it does not start when a constrained object has canonical geometry.
+    if let Some(h) = canonical_input(&st.doc, []) {
+        let msg = format!("Constraints were not solved: object {} has canonical geometry.", h.hex());
+        s.echo(msg);
         return;
     }
     let mut d = (*st.doc).clone();

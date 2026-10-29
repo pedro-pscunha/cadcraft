@@ -504,10 +504,11 @@ fn put_xdata(d: &mut Drawing, mut xdata: HashMap<Handle, Vec<RawTag>>) {
         return;
     }
     let mut give = |store: &mut cadcraft_doc::EntityStore| {
-        let hs: Vec<Handle> = store.iter().map(|e| e.handle).filter(|h| xdata.contains_key(h)).collect();
-        for h in hs {
-            if let Some(xd) = xdata.remove(&h) {
-                store.modify(h, |e| e.common.xdata = xd);
+        let records: Vec<_> = store.iter().filter(|e| xdata.contains_key(&e.handle)).map(|e| e.as_ref().clone()).collect();
+        for mut entity in records {
+            if let Some(xd) = xdata.remove(&entity.handle) {
+                entity.common.xdata = xd;
+                store.replace(entity);
             }
         }
     };

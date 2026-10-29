@@ -61,6 +61,14 @@ pub(super) fn dims_of(s: &Session, hs: &[Handle]) -> Vec<Handle> {
 
 pub(super) fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = dims_of(s, &targets(s, p)?);
+    // The association is found from the 2D definition points: a dimension with canonical geometry refuses the
+    // whole command before anything changes.
+    if let Some(h) = hs.iter().find(|h| s.doc().ok().and_then(|d| d.entity(**h)).is_some_and(|e| e.require_legacy_geometry().is_err())) {
+        return Err(bad(
+            "dimreassociate",
+            format!("dimension {} has canonical geometry, which cannot be reassociated yet. Nothing was changed", h.hex()),
+        ));
+    }
     let space = s.space();
     let mut plan = Vec::new();
     {

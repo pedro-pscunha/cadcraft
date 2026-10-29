@@ -417,20 +417,19 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
 }
 
 fn fill(store: &mut EntityStore, by_name: &HashMap<String, MLineStyle>, by_entity: &HashMap<cadcraft_doc::Handle, String>) {
-    let hs: Vec<cadcraft_doc::Handle> = store.iter().filter(|e| matches!(e.kind, EntityKind::MLine(_))).map(|e| e.handle).collect();
-    for h in hs {
-        store.modify(h, |e| {
-            if let EntityKind::MLine(m) = &mut e.kind {
-                if let Some(name) = by_entity.get(&h) {
-                    m.style.clone_from(name);
-                }
-                if let Some(st) = by_name.get(&key(&m.style))
-                    && st.elements.len() == m.def.elements.len()
-                {
-                    m.def = st.clone();
-                }
+    let records: Vec<_> = store.iter().filter(|e| matches!(e.kind, EntityKind::MLine(_))).map(|e| e.as_ref().clone()).collect();
+    for mut entity in records {
+        if let EntityKind::MLine(m) = &mut entity.kind {
+            if let Some(name) = by_entity.get(&entity.handle) {
+                m.style.clone_from(name);
             }
-        });
+            if let Some(st) = by_name.get(&key(&m.style))
+                && st.elements.len() == m.def.elements.len()
+            {
+                m.def = st.clone();
+            }
+        }
+        store.replace(entity);
     }
 }
 

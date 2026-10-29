@@ -135,7 +135,7 @@ fn edit(s: &mut Session, name: &str, tag: &str, c: &Change) -> Result<String> {
                 }
                 result = a.tag.clone();
             }
-        });
+        })?;
         Ok(())
     })?;
     Ok(result)

@@ -382,6 +382,7 @@ fn delta(old: &Val, new: &Val, connection: &str) -> f64 {
 
 /// Move entity `e` by `v`: the listed vertices of a line or polyline, else the whole object.
 fn move_entity(e: &mut Entity, vertices: Option<&[i32]>, v: Vec2) -> Result<(), String> {
+    e.require_legacy_geometry().map_err(|error| error.to_string())?;
     match (&mut e.kind, vertices) {
         (EntityKind::LwPolyline(pl), Some(idx)) => {
             for i in idx {
@@ -452,11 +453,16 @@ fn apply_candidate(
     set: &BTreeMap<i32, Val>,
     direct: i32,
 ) -> Result<(), String> {
+    let entity = d.entity(insert).ok_or("No such object.")?;
+    entity.require_legacy_geometry().map_err(|error| error.to_string())?;
     let m = dynamic_block(d, definition).ok_or("Not a dynamic block reference.")?;
-    let EntityKind::Insert(ins) = &d.entity(insert).ok_or("No such object.")?.kind else { return Err("Not a block reference.".into()) };
+    let EntityKind::Insert(ins) = &entity.kind else { return Err("Not a block reference.".into()) };
     let ins = ins.clone();
     let def = d.block(definition).cloned().ok_or("The dynamic block is missing.")?;
     let src = d.block(&ins.block).cloned().ok_or("The reference's block is missing.")?;
+    for entity in def.entities.iter().chain(src.entities.iter()) {
+        entity.require_legacy_geometry().map_err(|error| error.to_string())?;
+    }
     // The dynamic block's objects and the reference's copies of them, by element tag.
     let def_tags: HashMap<Handle, i64> = by_tag(d, &def).into_iter().map(|(t, h)| (h, t)).collect();
     let src_by_tag: HashMap<i64, Handle> = by_tag(d, &src).into_iter().collect();
@@ -574,7 +580,7 @@ fn apply_candidate(
         }
         b.entities.push(c);
     }
-    refill_hatches(&mut b);
+    refill_hatches(&mut b)?;
     let def_record = Some(record_handle(d, definition).unwrap_or_else(|| {
         let h = d.new_handle();
         let f = std::sync::Arc::make_mut(&mut d.foreign);
@@ -617,7 +623,7 @@ fn apply_candidate(
 
 /// Associative hatches of block `b` whose loop is one closed polyline of the block take its
 /// outline again (it may have been stretched).
-fn refill_hatches(b: &mut Block) {
+fn refill_hatches(b: &mut Block) -> Result<(), String> {
     let outlines: HashMap<Handle, Vec<cadcraft_geom::PolyVertex>> = b
         .entities
         .iter()
@@ -628,18 +634,21 @@ fn refill_hatches(b: &mut Block) {
         .collect();
     let hatches: Vec<Handle> = b.entities.iter().filter(|e| matches!(&e.kind, EntityKind::Hatch(h) if h.associative)).map(|e| e.handle).collect();
     for h in hatches {
-        b.entities.modify(h, |e| {
-            if let EntityKind::Hatch(hh) = &mut e.kind {
-                for l in &mut hh.loops {
-                    if let [s] = l.sources.as_slice()
-                        && let Some(vs) = outlines.get(s)
-                    {
-                        l.vertices.clone_from(vs);
+        b.entities
+            .modify(h, |e| {
+                if let EntityKind::Hatch(hh) = &mut e.kind {
+                    for l in &mut hh.loops {
+                        if let [s] = l.sources.as_slice()
+                            && let Some(vs) = outlines.get(s)
+                        {
+                            l.vertices.clone_from(vs);
+                        }
                     }
                 }
-            }
-        });
+            })
+            .map_err(|error| error.to_string())?;
     }
+    Ok(())
 }
 
 /// The value records of the references to the dynamic block whose record is `def_record` (from
@@ -981,6 +990,18 @@ mod tests {
             e.common.xdata = vec![tag(1001, ETAG), tag(1071, v)];
         }
         e
+    }
+
+    #[test]
+    fn a_partial_dynamic_stretch_refuses_canonical_payloads_before_mutation() {
+        let mut legacy = tagged(1, None);
+        move_entity(&mut legacy, Some(&[0]), Vec2::new(2.0, 3.0)).unwrap();
+        let mut canonical = tagged(2, None);
+        canonical.geometry_revision = crate::GeometryRevision::CanonicalV2;
+        let before = canonical.clone();
+        let error = move_entity(&mut canonical, Some(&[0]), Vec2::new(2.0, 3.0)).unwrap_err();
+        assert!(error.contains("canonical"));
+        assert_eq!(canonical, before);
     }
 
     #[test]

@@ -7,14 +7,22 @@ enum ResolutionError {
     Unresolvable,
 }
 
+/// The entity a link names, when its projected 2D geometry may be read: an entity with canonical geometry
+/// (its own revision or a nested one) is not given to a snap that reads `xy()` fields, so its links are unsupported.
+fn source<'a>(entity: &impl Fn(Handle) -> Option<&'a Entity>, handle: Handle) -> Result<&'a Entity, ResolutionError> {
+    let e = entity(handle).ok_or(ResolutionError::Unsupported)?;
+    e.require_legacy_geometry().map_err(|_| ResolutionError::Unsupported)?;
+    Ok(e)
+}
+
 fn resolve<'a>(link: &DimAssoc, entity: impl Fn(Handle) -> Option<&'a Entity>) -> Result<Vec2, ResolutionError> {
-    let e = entity(link.handle).ok_or(ResolutionError::Unsupported)?;
+    let e = source(&entity, link.handle)?;
     let arc = |a: &crate::Arc| crate::geom::Arc::new(a.center.xy(), a.radius, a.start, a.end);
     let point = match (&e.kind, &link.snap) {
         (EntityKind::Line(l), AssocSnap::Start) => Some(l.a.xy()),
         (EntityKind::Line(l), AssocSnap::End) => Some(l.b.xy()),
         (EntityKind::Line(l), AssocSnap::Mid) => Some(l.a.xy().mid(l.b.xy())),
-        (EntityKind::Line(l), AssocSnap::Intersection { other }) => match &entity(*other).ok_or(ResolutionError::Unsupported)?.kind {
+        (EntityKind::Line(l), AssocSnap::Intersection { other }) => match &source(&entity, *other)?.kind {
             EntityKind::Line(m) => crate::geom::line_line_infinite(l.a.xy(), l.b.xy(), m.a.xy(), m.b.xy()).map(|x| x.0),
             _ => return Err(ResolutionError::Unsupported),
         },
@@ -67,5 +75,27 @@ mod tests {
         assert!(association_point(&link, lookup).is_none());
         link.snap = AssocSnap::Center;
         assert!(!association_supported(&link, lookup), "Center/Line is unsupported, not just temporarily unsolvable");
+    }
+
+    #[test]
+    fn a_source_with_canonical_geometry_is_unsupported_not_read_as_projected_2d() {
+        let line =
+            |h: u64, y: f64| Entity::new(Handle(h), EntityKind::Line(crate::Line { a: Vec3::new(0.0, y, 0.0), b: Vec3::new(10.0, y + 5.0, 3.0) }));
+        let (mut a, mut b) = (line(1, 0.0), line(2, 5.0));
+        let ask = |a: &Entity, b: &Entity, snap: AssocSnap| {
+            let link = DimAssoc { point: "p13".into(), handle: Handle(1), snap };
+            let lookup = |h: Handle| [a, b].into_iter().find(|e| e.handle == h);
+            (association_supported(&link, lookup), association_point(&link, lookup))
+        };
+        assert_eq!(ask(&a, &b, AssocSnap::End), (true, Some(crate::geom::Vec2::new(10.0, 5.0))));
+        // The source's own revision.
+        a.geometry_revision = crate::GeometryRevision::CanonicalV2;
+        assert_eq!(ask(&a, &b, AssocSnap::End), (false, None));
+        // The other line of an intersection.
+        a.geometry_revision = crate::GeometryRevision::LegacyProjectedV1;
+        b.geometry_revision = crate::GeometryRevision::CanonicalV2;
+        assert_eq!(ask(&a, &b, AssocSnap::Intersection { other: Handle(2) }), (false, None));
+        b.geometry_revision = crate::GeometryRevision::LegacyProjectedV1;
+        assert!(ask(&a, &b, AssocSnap::Intersection { other: Handle(2) }).0);
     }
 }
