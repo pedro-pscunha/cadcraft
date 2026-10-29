@@ -420,6 +420,31 @@ fn breakline_json_symbol_size_extension_and_location() {
 }
 
 #[test]
+fn a_breakline_symbol_refuses_canonical_block_geometry() {
+    let mut s = Session::new();
+    s.execute("layer.current", &json!({"name": "Defpoints"})).unwrap();
+    s.execute("point", &json!({"at": [0, 0]})).unwrap();
+    s.execute("point", &json!({"at": [2, 0]})).unwrap();
+    s.execute("layer.current", &json!({"name": "0"})).unwrap();
+    s.execute("line", &json!({"points": [[0, 0], [1, 1], [2, 0]]})).unwrap();
+    let handles: Vec<_> = s.doc().unwrap().model.iter().map(|entity| entity.handle.hex()).collect();
+    s.execute("block", &json!({"name": "PEAK", "base": [0, 0], "handles": handles, "keep": "delete"})).unwrap();
+    {
+        let d = s.doc_mut().unwrap();
+        let block = std::sync::Arc::make_mut(d.blocks.get_mut("PEAK").unwrap());
+        let mut entity = block.entities.iter().find(|entity| matches!(entity.kind, EntityKind::Line(_))).unwrap().as_ref().clone();
+        entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+        block.entities.push(entity);
+    }
+    let before = s.doc().unwrap().model.clone();
+    let seed = s.doc().unwrap().handseed;
+    let error = s.execute("breakline", &json!({"p1": [0, 0], "p2": [10, 0], "block": "PEAK"})).unwrap_err();
+    assert!(error.to_string().contains("canonical"));
+    assert_eq!(s.doc().unwrap().model, before);
+    assert_eq!(s.doc().unwrap().handseed, seed);
+}
+
+#[test]
 fn breakline_block_symbol_runs_between_its_defpoints() {
     let mut s = Session::new();
     s.execute("layer.current", &json!({"name": "Defpoints"})).unwrap();
