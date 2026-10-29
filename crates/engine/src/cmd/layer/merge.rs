@@ -71,18 +71,18 @@ fn resolve_sources(d: &Drawing, cmd: &str, names: &[String], delete: bool) -> Re
 /// Every entity store whose objects belong to this drawing: model space, layouts and the block
 /// definitions (an attached xref's blocks are left alone; they come from its file).
 /// `f` gets each store with objects on the `set` layers and returns how many it changed.
-fn for_each_store(d: &mut Drawing, set: &HashSet<String>, mut f: impl FnMut(&mut EntityStore) -> usize) -> usize {
-    let mut n = f(&mut d.model);
+fn for_each_store(d: &mut Drawing, set: &HashSet<String>, mut f: impl FnMut(&mut EntityStore) -> Result<usize>) -> Result<usize> {
+    let mut n = f(&mut d.model)?;
     for layout in &mut d.layouts {
-        n += f(&mut layout.entities);
+        n += f(&mut layout.entities)?;
     }
     for block in d.blocks.values_mut() {
         // Copy-on-write: only definitions that use the layers are touched.
         if block.xref_path.is_none() && on_layers(&block.entities, set).next().is_some() {
-            n += f(&mut std::sync::Arc::make_mut(block).entities);
+            n += f(&mut std::sync::Arc::make_mut(block).entities)?;
         }
     }
-    n
+    Ok(n)
 }
 
 fn on_layers<'a>(store: &'a EntityStore, set: &'a HashSet<String>) -> impl Iterator<Item = Handle> + 'a {
@@ -92,7 +92,7 @@ fn on_layers<'a>(store: &'a EntityStore, set: &'a HashSet<String>) -> impl Itera
 /// Drop the removed layers from every layout viewport's frozen list and colour overrides.
 pub(super) fn forget_in_viewports(d: &mut Drawing, set: &HashSet<String>) {
     for layout in &mut d.layouts {
-        let hs: Vec<Handle> = layout
+        let records: Vec<_> = layout
             .entities
             .iter()
             .filter(|e| match &e.kind {
@@ -102,15 +102,14 @@ pub(super) fn forget_in_viewports(d: &mut Drawing, set: &HashSet<String>) {
                 }
                 _ => false,
             })
-            .map(|e| e.handle)
+            .map(|e| e.as_ref().clone())
             .collect();
-        for h in hs {
-            layout.entities.modify(h, |e| {
-                if let EntityKind::Viewport(v) = &mut e.kind {
-                    v.frozen_layers.retain(|l| !set.contains(&l.to_ascii_lowercase()));
-                    v.layer_colors.retain(|(l, _)| !set.contains(&l.to_ascii_lowercase()));
-                }
-            });
+        for mut entity in records {
+            if let EntityKind::Viewport(viewport) = &mut entity.kind {
+                viewport.frozen_layers.retain(|layer| !set.contains(&layer.to_ascii_lowercase()));
+                viewport.layer_colors.retain(|(layer, _)| !set.contains(&layer.to_ascii_lowercase()));
+            }
+            layout.entities.replace(entity);
         }
     }
 }
@@ -137,10 +136,10 @@ pub(super) fn run_laymrg(s: &mut Session, p: &Value) -> Result<Value> {
     let moved = for_each_store(d, &set, |store| {
         let hs: Vec<Handle> = on_layers(store, &set).collect();
         for h in &hs {
-            store.modify(*h, |e| e.common.layer = target.clone());
+            store.modify_metadata(*h, |common| common.layer = target.clone())?;
         }
-        hs.len()
-    });
+        Ok(hs.len())
+    })?;
     forget_in_viewports(d, &set);
     d.layers.retain(|l| !set.contains(&l.name.to_ascii_lowercase()));
     let mut msg = format!("Merged {} into \"{target}\": {} moved.", quoted(&sources), plural(moved, "object"));
@@ -166,8 +165,8 @@ pub(super) fn run_laydel(s: &mut Session, p: &Value) -> Result<Value> {
         for h in &hs {
             store.remove(*h);
         }
-        hs.len()
-    });
+        Ok(hs.len())
+    })?;
     forget_in_viewports(d, &set);
     d.layers.retain(|l| !set.contains(&l.name.to_ascii_lowercase()));
     s.set_selection(Vec::new());

@@ -65,12 +65,14 @@ fn constant_attributes_come_from_the_definition() {
     let d = s.doc_mut().unwrap();
     let b = std::sync::Arc::make_mut(d.blocks.get_mut("PUMP").unwrap());
     let h = b.entities.iter().find(|e| matches!(e.kind, EntityKind::AttDef(_))).unwrap().handle;
-    b.entities.modify(h, |e| {
-        if let EntityKind::AttDef(a) = &mut e.kind {
-            a.constant = true;
-            a.text.value = "FIXED".into();
-        }
-    });
+    b.entities
+        .modify(h, |e| {
+            if let EntityKind::AttDef(a) = &mut e.kind {
+                a.constant = true;
+                a.text.value = "FIXED".into();
+            }
+        })
+        .unwrap();
     let pump = s.doc().unwrap().model.iter().find(|e| matches!(&e.kind, EntityKind::Insert(i) if i.block == "PUMP")).unwrap().handle;
     s.doc_mut()
         .unwrap()

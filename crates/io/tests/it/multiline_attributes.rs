@@ -267,11 +267,13 @@ fn a_multiline_attribute_is_drawn() {
     let mut bare = d.clone();
     let first = bare.model.iter().next().map(|e| e.handle);
     if let Some(e) = first {
-        bare.model.modify(e, |e| {
-            if let EntityKind::Insert(i) = &mut e.kind {
-                i.attribs.clear();
-            }
-        });
+        bare.model
+            .modify(e, |e| {
+                if let EntityKind::Insert(i) = &mut e.kind {
+                    i.attribs.clear();
+                }
+            })
+            .unwrap();
     }
     let without = cadcraft_render::build(&bare, &cadcraft_doc::Space::Model, &opts);
     assert!(
@@ -298,11 +300,13 @@ fn multiline_attributes_survive_a_save() {
 fn an_edited_value_replaces_the_multiline_text() {
     let mut d = read_dxf(dxf(FIXTURE).as_bytes()).unwrap();
     let h = d.model.iter().next().map(|e| e.handle).unwrap();
-    d.model.modify(h, |e| {
-        if let EntityKind::Insert(i) = &mut e.kind {
-            i.attribs[0].text.value = "SOUTH {A}\nWELL 8".into();
-        }
-    });
+    d.model
+        .modify(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.attribs[0].text.value = "SOUTH {A}\nWELL 8".into();
+            }
+        })
+        .unwrap();
     let a = &reference(&d).attribs[0];
     assert_eq!(a.multiline_text().map(|m| m.contents), Some("SOUTH \\{A\\}\\PWELL 8".to_string()));
     let again = read_dxf(save(&d).as_bytes()).unwrap();

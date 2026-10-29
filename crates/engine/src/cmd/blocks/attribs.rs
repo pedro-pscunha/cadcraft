@@ -151,8 +151,9 @@ pub(super) fn update_reference_entities(
         let hs = references(store.iter(), name);
         for h in hs {
             let mut entity = store.get(h).ok_or_else(|| EngineError::Other("missing block reference".into()))?.as_ref().clone();
+            entity.require_legacy_geometry()?;
             update(&mut entity)?;
-            n += usize::from(store.modify(h, |current| *current = entity));
+            n += usize::from(store.modify(h, |current| *current = entity)?);
         }
     }
     for (bname, b) in d.blocks.iter_mut() {
@@ -164,8 +165,9 @@ pub(super) fn update_reference_entities(
             let b = Arc::make_mut(b);
             for h in hs {
                 let mut entity = b.entities.get(h).ok_or_else(|| EngineError::Other("missing nested block reference".into()))?.as_ref().clone();
+                entity.require_legacy_geometry()?;
                 update(&mut entity)?;
-                n += usize::from(b.entities.modify(h, |current| *current = entity));
+                n += usize::from(b.entities.modify(h, |current| *current = entity)?);
             }
         }
     }

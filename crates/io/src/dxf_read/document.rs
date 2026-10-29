@@ -313,7 +313,7 @@ pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) -> super::Result<
                     continue;
                 }
                 entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m)).map_err(|error| super::IoError::Format(error.to_string()))?;
-                store.modify(h, |current| *current = entity);
+                store.replace(entity);
             }
         }
     }

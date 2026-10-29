@@ -821,7 +821,7 @@ fn run_style_rename(s: &mut Session, p: &Value) -> Result<Value> {
         if !hs.is_empty() {
             let b = std::sync::Arc::make_mut(block);
             for h in hs {
-                b.entities.modify(h, |e| repoint(&mut e.kind));
+                b.entities.modify(h, |e| repoint(&mut e.kind))?;
             }
         }
     }
@@ -982,7 +982,7 @@ fn run_dimstyle_rename(s: &mut Session, p: &Value) -> Result<Value> {
                 EntityKind::Dimension(dm) => dm.style = to.clone(),
                 EntityKind::Leader(l) => l.style = to.clone(),
                 _ => {}
-            });
+            })?;
         }
     }
     Ok(dimstyles_json(d))
@@ -1199,14 +1199,17 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
             let mut hs = users(&d.model);
             hs.extend(d.layouts.iter().flat_map(|l| users(&l.entities)));
             for h in hs {
-                d.modify_entity(h, |e| fix(&mut e.common.linetype))?;
+                d.try_modify_metadata(h, |common| {
+                    fix(&mut common.linetype);
+                    Ok(())
+                })?;
             }
             for block in d.blocks.values_mut() {
                 let hs = users(&block.entities);
                 if !hs.is_empty() {
                     let b = std::sync::Arc::make_mut(block);
                     for h in hs {
-                        b.entities.modify(h, |e| fix(&mut e.common.linetype));
+                        b.entities.modify_metadata(h, |common| fix(&mut common.linetype))?;
                     }
                 }
             }

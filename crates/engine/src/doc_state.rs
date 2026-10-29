@@ -149,12 +149,13 @@ impl DocState {
                 }
                 let doc = Arc::make_mut(&mut self.doc);
                 if let Some(store) = doc.space_mut(&self.space.clone()) {
-                    store.modify(h, |e| {
-                        if let cadcraft_doc::EntityKind::Viewport(x) = &mut e.kind {
-                            x.view_center = center;
-                            x.view_height = height;
-                        }
-                    });
+                    let Some(source) = store.get(h) else { return false };
+                    let mut entity = source.as_ref().clone();
+                    if let cadcraft_doc::EntityKind::Viewport(viewport) = &mut entity.kind {
+                        viewport.view_center = center;
+                        viewport.view_height = height;
+                    }
+                    store.replace(entity);
                 }
             }
             return true;

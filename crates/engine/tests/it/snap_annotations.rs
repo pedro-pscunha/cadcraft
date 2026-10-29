@@ -31,11 +31,13 @@ fn dimensions_snap_to_their_lines_and_definition_points() {
     s.execute("block", &json!({ "name": "DIMGEOM", "base": [0, 0], "handles": [l], "keep": "delete" })).unwrap();
     let d = s.doc_mut().unwrap();
     let dim = d.model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).unwrap().handle;
-    d.model.modify(dim, |e| {
-        if let EntityKind::Dimension(dm) = &mut e.kind {
-            dm.block = Some("DIMGEOM".into());
-        }
-    });
+    d.model
+        .modify(dim, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind {
+                dm.block = Some("DIMGEOM".into());
+            }
+        })
+        .unwrap();
     assert_eq!(snap_at(&s, Vec2::new(10.0, 7.0), mode::END), Some((Vec2::new(10.0, 7.0), mode::END)));
 }
 

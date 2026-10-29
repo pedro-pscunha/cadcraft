@@ -168,26 +168,25 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
 /// Resolve image definitions under a shared copied-string budget.
 /// When strings no longer fit, keep applying pixel-size and resolution metadata.
 fn fill(store: &mut EntityStore, by_image: &HashMap<Handle, &Def>, budget: &mut usize) {
-    let hs: Vec<Handle> =
-        store.iter().filter(|e| matches!(e.kind, EntityKind::Image(_)) && by_image.contains_key(&e.handle)).map(|e| e.handle).collect();
-    for h in hs {
-        let Some(def) = by_image.get(&h) else { continue };
+    let images: Vec<_> =
+        store.iter().filter(|e| matches!(e.kind, EntityKind::Image(_)) && by_image.contains_key(&e.handle)).map(|e| e.as_ref().clone()).collect();
+    for mut entity in images {
+        let Some(def) = by_image.get(&entity.handle) else { continue };
         // Charge the bytes this copy adds; once the shared budget is spent, stop copying strings
         // (geometry fields are still applied) so retained memory stays bounded.
         let cost = def.path.len() + def.name.len();
         let copy_strings = budget.checked_sub(cost).map(|left| *budget = left).is_some();
-        store.modify(h, |e| {
-            if let EntityKind::Image(i) = &mut e.kind {
-                if copy_strings {
-                    i.path = def.path.clone();
-                    i.name = def.name.clone();
-                }
-                if let Some(p) = def.pixel_size {
-                    i.pixel_size = p;
-                }
-                i.resolution_units = def.units;
+        if let EntityKind::Image(i) = &mut entity.kind {
+            if copy_strings {
+                i.path = def.path.clone();
+                i.name = def.name.clone();
             }
-        });
+            if let Some(p) = def.pixel_size {
+                i.pixel_size = p;
+            }
+            i.resolution_units = def.units;
+        }
+        store.replace(entity);
     }
 }
 

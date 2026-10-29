@@ -179,7 +179,7 @@ fn preview_filter_excludes_each_kind_it_names() {
     if let Some(l) = d.layers.iter_mut().find(|l| l.name == "LOCKED") {
         l.locked = true;
     }
-    d.model.modify(line.handle, |e| e.common.layer = "LOCKED".into());
+    d.model.modify_metadata(line.handle, |common| common.layer = "LOCKED".into()).unwrap();
     d.groups.push(cadcraft_engine::doc::Group { name: "G".into(), description: String::new(), selectable: true, members: vec![mtext.handle] });
     let d = s.doc().unwrap();
     let line = d.entity(line.handle).unwrap();

@@ -104,11 +104,13 @@ fn renaming_attrib_keeps_its_fields() {
 fn edited_attrib_fields(edit: impl FnOnce(&mut cadcraft_doc::Insert)) {
     let mut d = cadcraft_io::read_dxf(field_dxf().as_bytes()).unwrap();
     let h = d.model.iter().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle;
-    d.model.modify(h, |e| {
-        if let EntityKind::Insert(i) = &mut e.kind {
-            edit(i);
-        }
-    });
+    d.model
+        .modify(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                edit(i);
+            }
+        })
+        .unwrap();
     let saved = cadcraft_io::write_dxf(&d);
     assert_fields(&saved);
     let back = cadcraft_io::read_dxf(saved.as_bytes()).unwrap();
@@ -123,11 +125,13 @@ fn removed_attrib_or_insert_drops_its_fields() {
         if remove_insert {
             d.model.remove(h);
         } else {
-            d.model.modify(h, |e| {
-                if let EntityKind::Insert(i) = &mut e.kind {
-                    i.attribs.retain(|a| a.text.value != "live");
-                }
-            });
+            d.model
+                .modify(h, |e| {
+                    if let EntityKind::Insert(i) = &mut e.kind {
+                        i.attribs.retain(|a| a.text.value != "live");
+                    }
+                })
+                .unwrap();
         }
         let saved = cadcraft_io::write_dxf(&d);
         assert!(section(&saved, "OBJECTS").iter().all(|(k, _)| k != "FIELD"));

@@ -29,7 +29,7 @@ fn repoint(d: &mut Drawing, uses: &dyn Fn(&EntityKind) -> bool, fix: &dyn Fn(&mu
         if !hs.is_empty() {
             let b = Arc::make_mut(block);
             for h in hs {
-                b.entities.modify(h, |e| fix(&mut e.kind));
+                b.entities.modify(h, |e| fix(&mut e.kind))?;
             }
         }
     }

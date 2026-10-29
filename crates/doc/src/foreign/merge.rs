@@ -49,12 +49,12 @@ fn remap_kind(kind: &mut EntityKind, map: &BTreeMap<Handle, Handle>) {
     }
 }
 fn remap_store(store: &mut EntityStore, map: &BTreeMap<Handle, Handle>) {
-    let changed: Vec<_> = store.iter().filter(|e| references(&e.common.xdata, map) || kind_references(&e.kind, map)).map(|e| e.handle).collect();
-    for h in changed {
-        store.modify(h, |e| {
-            remap_tags(&mut e.common.xdata, map);
-            remap_kind(&mut e.kind, map);
-        });
+    let changed: Vec<_> =
+        store.iter().filter(|e| references(&e.common.xdata, map) || kind_references(&e.kind, map)).map(|e| e.as_ref().clone()).collect();
+    for mut entity in changed {
+        remap_tags(&mut entity.common.xdata, map);
+        remap_kind(&mut entity.kind, map);
+        store.replace(entity);
     }
 }
 

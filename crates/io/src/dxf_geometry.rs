@@ -494,18 +494,17 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
         return;
     }
     let give = |store: &mut cadcraft_doc::EntityStore| {
-        let hs: Vec<Handle> = store
+        let records: Vec<_> = store
             .iter()
             .filter(|e| snapshots.contains_key(&e.handle) || e.kind.attributes().iter().any(|a| a.handle.is_some_and(|h| snapshots.contains_key(&h))))
-            .map(|e| e.handle)
+            .map(|e| e.as_ref().clone())
             .collect();
-        for h in hs {
-            store.modify(h, |e| {
-                e.common.geometry = snapshots.get(&e.handle).cloned();
-                for a in e.kind.attributes_mut() {
-                    a.geometry = a.handle.and_then(|h| snapshots.get(&h)).cloned();
-                }
-            });
+        for mut entity in records {
+            entity.common.geometry = snapshots.get(&entity.handle).cloned();
+            for attribute in entity.kind.attributes_mut() {
+                attribute.geometry = attribute.handle.and_then(|h| snapshots.get(&h)).cloned();
+            }
+            store.replace(entity);
         }
     };
     give(&mut d.model);

@@ -270,11 +270,13 @@ fn a_dynamic_reference_with_its_own_values_opens_its_dynamic_block() {
     let door_block = d.block("Door").unwrap().clone();
     d.blocks.insert("*U7".into(), std::sync::Arc::new(Block { name: "*U7".into(), anonymous: true, ..(*door_block).clone() }));
     let h = cadcraft_engine::cmd::curves::handle_value(&a).unwrap();
-    d.model.modify(h, |e| {
-        if let EntityKind::Insert(i) = &mut e.kind {
-            i.block = "*U7".into();
-        }
-    });
+    d.model
+        .modify(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.block = "*U7".into();
+            }
+        })
+        .unwrap();
     let mut f = Foreign::default();
     let tag = |code, value: &str| RawTag { code, value: value.into() };
     f.records.insert(
