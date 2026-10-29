@@ -1219,9 +1219,8 @@ fn public_foreign(f: &Foreign) -> Foreign {
     let mut public = f.clone();
     let private: HashSet<String> = public.objects.iter().filter(|o| raw_dwg_object(o)).map(|o| up(&o.kind)).collect();
     public.objects.retain(|o| !raw_dwg_object(o));
-    public.classes.retain(|c| {
-        c.iter().find(|t| t.code == 1).is_none_or(|n| !private.contains(&up(&n.value)) || public.objects.iter().any(|o| up(&o.kind) == up(&n.value)))
-    });
+    let kept: HashSet<String> = public.objects.iter().map(|o| up(&o.kind)).collect();
+    public.classes.retain(|c| c.iter().find(|t| t.code == 1).map(|n| up(&n.value)).is_none_or(|n| !private.contains(&n) || kept.contains(&n)));
     public
 }
 
