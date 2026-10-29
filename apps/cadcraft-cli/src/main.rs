@@ -241,9 +241,16 @@ fn export(s: &Session, out: &str) -> Result<(), String> {
 
 fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), String> {
     let d = s.doc().map_err(|e| e.to_string())?;
-    let bytes = cadcraft_io::write_framed(d, out, window).map_err(|e| e.to_string())?;
+    let (bytes, notes) = if cadcraft_io::is_image(out) {
+        (cadcraft_io::write_framed(d, out, window).map_err(|e| e.to_string())?, Vec::new())
+    } else {
+        cadcraft_io::write_with_noted(d, out, &cadcraft_io::SaveOptions::default()).map_err(|e| e.to_string())?
+    };
     write_atomic(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
     eprintln!("wrote {out} ({} bytes)", bytes.len());
+    for note in notes {
+        eprintln!("{note}");
+    }
     if cadcraft_engine::cmd::file::drops_unknown(out) {
         let lost = cadcraft_engine::cmd::file::not_saved(d);
         if let Some(m) = cadcraft_engine::cmd::file::not_saved_message(&lost) {
