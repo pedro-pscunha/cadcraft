@@ -472,3 +472,20 @@ fn a_layout_viewport_keeps_its_frozen_layers() {
         assert_eq!(names, ["Walls"], "{what}: frozen layers");
     }
 }
+
+/// A table style's name is in its DWG object, as well as in its dictionary entry.
+#[test]
+fn a_table_style_keeps_its_name() {
+    let doc = CadDocument::with_version(DxfVersion::AC1032);
+    for (what, back) in saves(&doc) {
+        let names: Vec<String> = back
+            .objects
+            .values()
+            .filter_map(|o| match o {
+                ObjectType::TableStyle(s) => Some(s.name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["Standard"], "{what}: table style names");
+    }
+}

@@ -2,13 +2,15 @@ use super::{Drawing, Group, MLeaderStyle, TableStyle, W, dxf_ext};
 
 /// A TABLESTYLE object (DXF Reference, OBJECTS: TABLESTYLE): margins, title/header
 /// suppression and per row type (data, column header, title) text and border settings.
-pub(super) fn table_style_obj(w: &mut W, d: &Drawing, s: &TableStyle, h: &str, dict: &str) {
+/// A table style's name is its dictionary key, and group 3 is its description. The DWG bridge reads
+/// the name from group 3 (`bridge`), and writes it into the DWG object.
+pub(super) fn table_style_obj(w: &mut W, d: &Drawing, s: &TableStyle, h: &str, dict: &str, bridge: bool) {
     w.s(0, "TABLESTYLE");
     w.s(5, h);
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbTableStyle");
-    w.s(3, "");
+    w.s(3, if bridge { s.name.as_str() } else { "" });
     w.i(70, 0);
     w.i(71, 0);
     w.f(40, s.margin);
