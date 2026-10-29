@@ -283,7 +283,7 @@ fn block_definition_properties_and_constant_attdefs_roundtrip() {
     d.blocks.insert("Title".into(), std::sync::Arc::new(b));
     d.blocks.insert("Plain".into(), std::sync::Arc::new(Block::new("Plain")));
     d.bump_handseed(Handle(0x510));
-    let back = roundtrip(&d);
+    let back = read_dxf(dxf_at(&d, Version::R2018).as_bytes()).unwrap();
     let t = back.block("Title").unwrap();
     assert_eq!((t.description.as_str(), t.units, t.explodable), ("Drawing title block", 4, false));
     let flags: Vec<(String, bool, bool)> = t

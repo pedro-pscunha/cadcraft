@@ -419,6 +419,7 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
         nb.anonymous = b.anonymous;
         nb.explodable = b.explodable;
         nb.units = b.units;
+        nb.scale_uniformly = b.scale_uniformly;
         // Array parameters keep their kind and spacing; block names follow the block renaming, and
         // a source edit in progress in the referenced file is not carried over.
         nb.array = b.array.as_ref().map(|a| {

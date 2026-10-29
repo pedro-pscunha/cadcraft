@@ -212,3 +212,36 @@ fn the_maintenance_version_and_an_empty_node_marker_are_not_replayed() {
         assert!(node.iter().any(|t| t.code == 99 && t.i64() == 328), "{version:?}: its data stays");
     }
 }
+
+/// The block record's insertion units (70), explodability (280) and scalability (281) are AutoCAD 2007's, and
+/// AutoCAD writes all three on every record, also on the model space. A save keeps the scalability.
+#[test]
+fn a_block_record_has_units_explodability_and_scalability_from_2007() {
+    let mut d = Drawing::new_metric();
+    let mut b = cadcraft_doc::Block::new("Door");
+    (b.units, b.explodable, b.scale_uniformly) = (4, false, true);
+    d.blocks.insert("Door".into(), std::sync::Arc::new(b));
+    let groups = |text: &str| -> Vec<(String, Vec<i32>)> {
+        let tables = sections(&cadcraft_dxf::parse(text.as_bytes()).unwrap()).into_iter().find(|s| s.name == "TABLES").unwrap();
+        records(&tables.tags)
+            .into_iter()
+            .filter(|(k, _)| k == "BLOCK_RECORD")
+            .map(|(_, tags)| {
+                let name = tags.iter().find(|t| t.code == 2).map(|t| t.str().to_string()).unwrap_or_default();
+                (name, tags.iter().map(|t| t.code).filter(|c| [70, 280, 281].contains(c)).collect())
+            })
+            .collect()
+    };
+    for version in Version::ALL {
+        let records = groups(&save(&d, version));
+        assert!(records.len() >= 3, "{version:?}: {records:?}");
+        for (name, codes) in records {
+            let expected: &[i32] = if version >= Version::R2007 { &[70, 280, 281] } else { &[] };
+            assert_eq!(codes, expected, "{version:?}: {name}");
+        }
+    }
+    let door = |d: &Drawing| d.block("Door").map(|b| (b.units, b.explodable, b.scale_uniformly));
+    assert_eq!(door(&read_dxf(save(&d, Version::R2018).as_bytes()).unwrap()), Some((4, false, true)), "the user DXF");
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    assert_eq!(door(&cadcraft_io::read(&dwg, "x.dwg").unwrap()), Some((4, false, true)), "the DWG bridge");
+}

@@ -47,8 +47,8 @@ struct Rx {
     block_xdicts: HashMap<Handle, Handle>,
     /// LTYPE record handle (upper case) → linetype name (DIMLTYPE, DIMLTEX1, DIMLTEX2).
     ltypes: HashMap<String, String>,
-    /// Upper-case block name → (insertion units, explodable) from its BLOCK_RECORD.
-    block_props: HashMap<String, (u8, bool)>,
+    /// Upper-case block name → (insertion units, explodable, scale uniformly) from its BLOCK_RECORD.
+    block_props: HashMap<String, (u8, bool, bool)>,
     /// Upper-case names of anonymous `*T` blocks drawn by ACAD_TABLE entities.
     table_blocks: std::collections::HashSet<String>,
     /// Upper-case block names used by INSERTs.
