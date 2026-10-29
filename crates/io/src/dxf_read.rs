@@ -19,12 +19,14 @@ mod common;
 mod dimassoc;
 mod document;
 mod entities;
+mod fill_canonical;
 mod hatch;
 mod objects;
 mod tables;
 mod text;
 mod text_canonical;
 
+pub use fill_canonical::canonical_fill_from_groups;
 pub use text_canonical::{canonical_attrib_from_groups, canonical_layout_from_groups, canonical_text_from_groups};
 
 use document::{

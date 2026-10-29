@@ -12,7 +12,7 @@ fn line() -> EntityKind {
 
 fn wipeout() -> EntityKind {
     let b = [(2.0, 2.0), (8.0, 2.0), (8.0, 8.0), (2.0, 8.0)];
-    EntityKind::Wipeout(Wipeout { boundary: b.iter().map(|&(x, y)| Vec2::new(x, y)).collect() })
+    EntityKind::Wipeout(Wipeout { boundary: b.iter().map(|&(x, y)| Vec2::new(x, y)).collect(), frame: None })
 }
 
 /// A diagonal line and a square wipeout over its middle, in the given draw order.

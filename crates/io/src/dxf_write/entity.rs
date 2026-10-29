@@ -807,8 +807,33 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
     }
 }
 
+/// A canonical wipeout: the image frame and the clip as its record held them, with no closing vertex added.
+fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &cadcraft_doc::WipeoutFrame) {
+    w.s(0, "WIPEOUT");
+    common(w, e, owner, paper, "AcDbWipeout");
+    w.i(90, 0);
+    w.p(10, f.origin);
+    w.p(11, f.u);
+    w.p(12, f.v);
+    w.p2(13, f.size);
+    w.i(70, 7);
+    w.i(280, 1);
+    w.i(281, 50);
+    w.i(282, 50);
+    w.i(283, 0);
+    w.i(71, i64::from(f.clip_type));
+    w.i(91, f.clip.len() as i64);
+    for q in &f.clip {
+        w.p2(14, *q);
+    }
+}
+
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
+        if let Some(frame) = &wo.frame {
+            write_canonical_wipeout(w, e, owner, paper, frame);
+            return;
+        }
         // A 1x1 image spanning the boundary's extents. Clip vertices are in pixel space, whose origin is
         // the image's top-left corner with y pointing down: the reader maps each vertex back through
         // insert + u * (x + 0.5) + v * (0.5 - y).

@@ -156,7 +156,8 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(s, "HELIX{h:?}{plane:?}");
         }
         EntityKind::Wipeout(w) => {
-            let _ = write!(s, "WIPEOUT{:?}{plane:?}", w.boundary);
+            // The legacy outline, or the canonical image frame: origin, U and V, size, clip type and clip vertices.
+            let _ = write!(s, "WIPEOUT{:?}{plane:?}", (&w.boundary, &w.frame));
         }
         EntityKind::Spline(c) => {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));

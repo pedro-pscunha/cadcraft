@@ -1,5 +1,5 @@
 use super::common::Handle;
-use super::{Color, Deserialize, PolyVertex, Serialize, Vec2, one};
+use super::{Color, Deserialize, PolyVertex, Serialize, Vec2, Vec3, one};
 
 /// A hatch boundary loop: closed polyline with bulges.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,4 +58,23 @@ pub struct Gradient {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wipeout {
     pub boundary: Vec<Vec2>,
+    /// The source image frame and clip of a canonical wipeout (see [`WipeoutFrame`]). When it is set the wipeout is
+    /// `CanonicalV2`, `boundary` is empty and [`Wipeout::world_boundary`] gives the outline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<WipeoutFrame>,
+}
+
+/// The image frame of a canonical WIPEOUT as its record holds it: the origin and the per-pixel U and V vectors in WCS
+/// (groups 10, 11, 12), the image size in pixels (13), and the clip (71, 14) in pixel space, whose origin is the image's
+/// top-left corner with y pointing down.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WipeoutFrame {
+    pub origin: Vec3,
+    pub u: Vec3,
+    pub v: Vec3,
+    pub size: Vec2,
+    /// 1 rectangular (two corners), 2 polygonal.
+    pub clip_type: u8,
+    pub clip: Vec<Vec2>,
 }

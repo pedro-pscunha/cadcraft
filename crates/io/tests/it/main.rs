@@ -41,6 +41,7 @@ mod entity_normals;
 mod entity_plane_manifest;
 mod entity_props_roundtrip;
 mod entity_subclass_groups;
+mod fill_canonical;
 mod followups_626;
 mod foreign_passthrough;
 mod geometry_snapshot;
