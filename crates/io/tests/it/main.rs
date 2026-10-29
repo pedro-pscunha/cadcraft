@@ -48,6 +48,7 @@ mod header_pointers;
 mod heavy_polyline;
 mod helix_roundtrip;
 mod layout_paper_units;
+mod layout_plot_pointers;
 mod layout_plot_window;
 #[cfg(not(target_arch = "wasm32"))]
 mod low_handseed;

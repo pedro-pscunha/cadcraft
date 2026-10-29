@@ -85,8 +85,9 @@ fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
 const LAYOUT_FRAME_CODES: &[i32] =
     &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76, 331, 345, 346];
 /// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
-/// shade plot mode, resolution and DPI, and the paper image origin.
-const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
+/// shade plot mode, resolution and DPI, the paper image origin, and the shade plot handle (333, a
+/// pointer to a visual style).
+const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149, 333];
 /// Plot layout flag bits (group 70) that `PageSetup` models: show plot styles, centred, standard
 /// scale, lineweights. The others (plot with plot styles, draw viewports first, hide objects,
 /// scale lineweights...) stay as read.
@@ -139,6 +140,8 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
         .skip_while(|t| !(t.code == 100 && layout_part(&t.str()) == LayoutPart::Frame))
         .find(|t| t.code == 1)
         .is_some_and(|t| t.str().trim().eq_ignore_ascii_case("Model"));
+    // A kept plot group, a pointer remapped to the saved object (null when it is gone).
+    let plot_tag = |k: &RawTag| if is_pointer(k.code) { Tag::s(k.code, saved(&k.value).unwrap_or_else(|| "0".into())) } else { tag(k) };
     let mut out = Vec::with_capacity(b.len() + plot.len());
     let mut part = LayoutPart::Other;
     let mut plot_codes: HashSet<i32> = HashSet::new();
@@ -146,12 +149,12 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
         if t.code == 100 {
             let next = layout_part(&t.str());
             if part == LayoutPart::Plot && next == LayoutPart::Frame && !model {
-                out.extend([76, 77, 78].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(tag));
+                out.extend([76, 77, 78, 333].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(plot_tag));
             }
             part = next;
             out.push(t.clone());
             if part == LayoutPart::Plot && model && !plot.is_empty() {
-                out.extend(plot.iter().map(tag));
+                out.extend(plot.iter().map(plot_tag));
             }
             continue;
         }
@@ -176,7 +179,7 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
                         .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED))),
                     // The paper's canonical name: the model keeps it with spaces, the writer writes underscores.
                     4 => first_group(plot, 4).filter(|k| k.value.replace('_', " ") == t.str().replace('_', " ")).map(tag),
-                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(tag),
+                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(plot_tag),
                 }
             }
             LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
