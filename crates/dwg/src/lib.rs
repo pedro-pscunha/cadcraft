@@ -134,8 +134,10 @@ mod native {
             notes.push(format!("DWG: {orphans} DGN line style component{s} that no line style definition uses {were} left out"));
         }
         let mut out = CappedWriter { buf: Vec::new(), limit: limits.max_dxf_bytes, exceeded: false };
-        let written = std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DxfWriter::new(&doc).write_to_writer(&mut out)))
-            .map_err(|_| "the DWG→DXF conversion failed on this file".to_string())?;
+        let written = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            acadrust::DxfWriter::new(&doc).for_dwg_bridge().keep_heavy_polylines().write_to_writer(&mut out)
+        }))
+        .map_err(|_| "the DWG→DXF conversion failed on this file".to_string())?;
         if out.exceeded {
             return Err(format!(
                 "DWG: converting this {} file produced more than {} of drawing data (the limit); \

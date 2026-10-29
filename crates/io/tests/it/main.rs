@@ -67,6 +67,8 @@ mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
 mod polyline_owned_vertices;
+#[cfg(not(target_arch = "wasm32"))]
+mod raw_dwg_bridge;
 mod region_roundtrip;
 mod roundtrip_audit;
 mod skipped_records;

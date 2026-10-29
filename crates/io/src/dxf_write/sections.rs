@@ -1111,7 +1111,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     if let Some(t) = w.t.get_mut(seed_pos + 1) {
         *t = Tag::s(5, seed);
     }
-    crate::dxf_raw::finish(&mut w.t, d);
+    crate::dxf_raw::finish(&mut w.t, d, dwg_bridge);
     // Every entity now has its final emitted records, including raw passthrough. Flatten lowered
     // multileaders and region loops into their source entity's position, and reuse restored xdicts.
     let written = super::sortents::written(&mut w);
