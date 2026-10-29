@@ -1077,7 +1077,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         }
     }
     for (n, h, ents) in &dim_defs {
-        block(&mut w, (n, ""), h, Vec3::ZERO, 1, &mut ents.iter(), false);
+        // A dimension can use a named block (`DIMBLOCK1-…`): only a `*` name is anonymous.
+        block(&mut w, (n, ""), h, Vec3::ZERO, i64::from(n.starts_with('*')), &mut ents.iter(), false);
     }
     for (n, h, ents) in &arrow_defs {
         block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut ents.iter(), false);

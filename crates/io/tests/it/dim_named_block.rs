@@ -39,6 +39,15 @@ fn a_named_dimension_block_stays_the_dimensions_block() {
     assert_eq!(dim_refs, ["DIMBLOCK1-X"], "the dimension keeps its block");
     assert!(!blocks.iter().any(|b| b.starts_with("*D")), "no regenerated *D block: {blocks:?}");
     assert_eq!(blocks.iter().filter(|b| *b == "DIMBLOCK1-X").count(), 1, "the block is written once");
+    // Only a `*` name is anonymous: AutoCAD's AUDIT reports a named block with flag 1 as an
+    // invalid anonymous block.
+    let flags: Vec<&str> = (0..p.len())
+        .filter(|&i| p[i] == (0, "BLOCK".into()))
+        .map(|i| p[i + 1..].iter().take_while(|t| t.0 != 0).collect::<Vec<_>>())
+        .filter(|rec| rec.iter().any(|t| **t == (2, "DIMBLOCK1-X".into())))
+        .filter_map(|rec| rec.iter().find(|t| t.0 == 70).map(|t| t.1.as_str()))
+        .collect();
+    assert_eq!(flags, ["0"], "the named dimension block is not anonymous");
     let marker = p
         .windows(4)
         .any(|w| w[0] == (10, "3".into()) && w[1] == (20, "7".into()) || w[0].0 == 10 && w[0].1.starts_with("3.0") && w[1].1.starts_with("7.0"));
