@@ -55,6 +55,9 @@ pub(super) struct Ctx {
     pub(super) target: Version,
     /// This DXF is internal transport to acadrust, not a file to open in AutoCAD.
     pub(super) dwg_bridge: bool,
+    /// One entity's groups for AutoLISP (`entity_groups`), not a file: an MTEXT's columns stay the
+    /// documented groups (75, 76, 78, 79, 48, 49, 50).
+    pub(super) entget: bool,
 }
 
 impl Ctx {

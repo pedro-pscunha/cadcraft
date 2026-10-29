@@ -197,7 +197,7 @@ fn bridge_code_page(tags: &mut [Tag], page: &str) {
 pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
     // One record is not a file: no global handle reservation is needed for entget.
     let mut w = W::default();
-    let cx = Ctx { target: Version::R2018, ..Ctx::default() };
+    let cx = Ctx { target: Version::R2018, entget: true, ..Ctx::default() };
     let paper = d.space_of(e.handle).is_some_and(|s| !matches!(s, cadcraft_doc::Space::Model));
     entity(&mut w, d, e, "0", paper, &cx);
     let mut tags = w.t.into_iter();

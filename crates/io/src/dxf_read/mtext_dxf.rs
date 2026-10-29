@@ -101,6 +101,68 @@ pub(crate) fn read_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
     Some((c, first(48).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
 }
 
+/// The columns of an R2018+ MTEXT, from its embedded object (group 101 and after): the column type
+/// (71), count (72), width (44), gutter (45), auto height (73), flow (74), and a height (46) per column
+/// of manual columns; the rectangle width (40) and height (41). Returns them with the column width.
+pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
+    let at = tags.iter().position(|t| t.code == 101)?;
+    let block: Vec<&Tag> = tags.get(at + 1..)?.iter().take_while(|t| t.code < 1000 && t.code != 0 && t.code != 100).collect();
+    let first = |code: i32| block.iter().find(|t| t.code == code).copied();
+    let kind = match first(71).map(|t| t.i64()) {
+        Some(1) => MTextColumnType::Static,
+        Some(2) => MTextColumnType::Dynamic,
+        _ => return None,
+    };
+    let auto_height = first(73).map(|t| t.i64()).unwrap_or(0) != 0;
+    let manual = kind == MTextColumnType::Dynamic && !auto_height;
+    let heights: Vec<f64> = block.iter().filter(|t| t.code == 46).take(MAX_COLUMNS).map(|t| finite(t.f64()).max(0.0)).collect();
+    let count = first(72).map(|t| t.i64()).unwrap_or(heights.len() as i64).clamp(1, MAX_COLUMNS as i64);
+    let rect = first(41).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0);
+    let height = if manual { heights.iter().copied().fold(0.0, f64::max) } else { rect };
+    let c = MTextColumns {
+        kind,
+        count: u16::try_from(count).unwrap_or(1),
+        gutter: first(45).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0),
+        height,
+        auto_height,
+        heights: if manual { heights } else { Vec::new() },
+        flow_reversed: first(74).map(|t| t.i64()).unwrap_or(0) != 0,
+    };
+    Some((c, first(44).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
+}
+
+/// The embedded object (group 101) of an R2018+ MTEXT with columns, as AutoCAD writes it: the
+/// attachment, X-axis direction, insertion point, rectangle size, extents (not modelled: 0) and the columns.
+pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
+    let Some(c) = &t.columns else { return Vec::new() };
+    let manual = c.kind == MTextColumnType::Dynamic && !c.auto_height;
+    let count = if manual { c.heights.len().max(1) } else { usize::from(c.count.max(1)) };
+    let mut v = vec![
+        Tag::s(101, "Embedded Object"),
+        Tag::i(70, i64::from(t.attach)),
+        Tag::f(10, t.rotation.cos()),
+        Tag::f(20, t.rotation.sin()),
+        Tag::f(30, 0.0),
+        Tag::f(11, t.insert.x),
+        Tag::f(21, t.insert.y),
+        Tag::f(31, t.insert.z),
+        Tag::f(40, c.total_width(t.width)),
+        Tag::f(41, if manual { 0.0 } else { c.height }),
+        Tag::f(42, 0.0),
+        Tag::f(43, 0.0),
+        Tag::i(71, if c.kind == MTextColumnType::Dynamic { 2 } else { 1 }),
+        Tag::i(72, count as i64),
+        Tag::f(44, t.width),
+        Tag::f(45, c.gutter),
+        Tag::i(73, i64::from(c.auto_height)),
+        Tag::i(74, i64::from(c.flow_reversed)),
+    ];
+    if manual {
+        v.extend(c.heights.iter().map(|h| Tag::f(46, *h)));
+    }
+    v
+}
+
 /// The column groups of an MTEXT with columns.
 pub(crate) fn column_tags(t: &MText) -> Vec<Tag> {
     let Some(c) = &t.columns else { return Vec::new() };

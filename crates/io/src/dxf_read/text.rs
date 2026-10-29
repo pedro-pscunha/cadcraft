@@ -51,7 +51,9 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     }
     contents.push_str(&t.s(1).unwrap_or_default());
     let contents = mtext_dxf::decode_contents(&contents);
-    let columns = mtext_dxf::read_columns(tags);
+    // The columns are groups of the MTEXT (75...) or, from R2018, its embedded object (101).
+    let from_embedded = mtext_dxf::read_columns(tags).is_none();
+    let columns = mtext_dxf::read_columns(tags).or_else(|| mtext_dxf::read_embedded_columns(tags));
     // The direction comes from the MTEXT's own groups only: in an R2018+ embedded object
     // (group 101), 11 is the insertion point, not the X-axis direction (#667, as in #834).
     let own = T(mtext_dxf::before_columns(tags));
@@ -75,6 +77,8 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
         width: match &columns {
+            // The column width of the embedded object is the text's width; the rectangle's (41) is the whole.
+            Some((_, w)) if from_embedded && *w > 0.0 => *w,
             Some((_, w)) if t.fd(41, 0.0) <= 0.0 => *w,
             _ => t.fd(41, 0.0).max(0.0),
         },
