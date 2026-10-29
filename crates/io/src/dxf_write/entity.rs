@@ -130,6 +130,39 @@ fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex)
     plot_style_xdata(w, &vertex.record.common.plot_style, start);
 }
 
+fn polyline_mesh(w: &mut W, e: &Entity, owner: &str, paper: bool, mesh: &cadcraft_doc::PolylineMesh) {
+    let (parent_class, vertex_class) = match mesh.kind {
+        cadcraft_doc::MeshKind::Polyface => ("AcDbPolyFaceMesh", "AcDbPolyFaceMeshVertex"),
+        cadcraft_doc::MeshKind::Polygon => ("AcDbPolygonMesh", "AcDbPolygonMeshVertex"),
+    };
+    w.s(0, "POLYLINE");
+    common(w, e, owner, paper, parent_class);
+    w.i(66, 1);
+    w.p(10, Vec3::ZERO);
+    thickness(w, e);
+    w.p(210, e.common.extrusion);
+    w.i(70, mesh.dxf_flags());
+    for (code, value) in [(71, mesh.m_count), (72, mesh.n_count), (73, mesh.m_density), (74, mesh.n_density), (75, mesh.smooth_type)] {
+        w.i(code, value);
+    }
+    for record in &mesh.vertices {
+        let v = &record.vertex;
+        let start = polyline_child(w, e, Some(&v.record), "VERTEX", if record.is_face() { "AcDbFaceRecord" } else { "AcDbVertex" });
+        if !record.is_face() {
+            w.s(100, vertex_class);
+        }
+        w.p(10, v.position);
+        w.i(70, v.flags);
+        if record.is_face() {
+            for (code, value) in (71..=74).zip(record.indices) {
+                w.i(code, value);
+            }
+        }
+        plot_style_xdata(w, &v.record.common.plot_style, start);
+    }
+    polyline_child(w, e, mesh.seqend.as_ref(), "SEQEND", "");
+}
+
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     match &e.kind {
         EntityKind::Line(l) => {
@@ -205,6 +238,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             common(w, e, owner, paper, "AcDbMline");
             w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style)));
         }
+        EntityKind::PolylineMesh(mesh) => polyline_mesh(w, e, owner, paper, mesh),
         EntityKind::Polyline3d(p) => {
             w.s(0, "POLYLINE");
             common(w, e, owner, paper, "AcDb3dPolyline");

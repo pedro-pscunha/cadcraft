@@ -62,6 +62,7 @@ pub(crate) fn flatten_kind(k: &mut EntityKind) {
         EntityKind::Polyline3d(p) => {
             *k = lwpoly(p.points.iter().map(|q| PolyVertex::new(q.xy())).collect(), p.closed);
         }
+        EntityKind::PolylineMesh(mesh) => mesh.vertices.iter_mut().for_each(|v| z(&mut v.vertex.position)),
         EntityKind::Ray(r) | EntityKind::XLine(r) => {
             z(&mut r.base);
             r.dir.z = 0.0;

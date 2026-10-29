@@ -1,5 +1,5 @@
 //! Another program's file can name a $HANDSEED below handles it uses. Entities CADCraft makes
-//! while reading (the faces a polyface mesh becomes) must not take handles that records further
+//! while reading, including child records, must not take handles that records further
 //! on still have: a DWG keeps one object per handle, so the duplicates were lost on save.
 
 use std::collections::HashSet;
@@ -34,16 +34,29 @@ fn dxf() -> String {
 }
 
 fn counts(d: &Drawing) -> (usize, usize) {
-    let faces = d.block("MESH").map_or(0, |b| b.entities.iter().filter(|e| matches!(e.kind, EntityKind::Face3d(_))).count());
+    let faces = d.block("MESH").map_or(0, |b| {
+        b.entities
+            .iter()
+            .map(|e| match &e.kind {
+                EntityKind::PolylineMesh(mesh) => mesh.faces().len(),
+                _ => 0,
+            })
+            .sum()
+    });
     let lines = d.model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
     (faces, lines)
 }
 
 #[test]
-fn faces_made_while_reading_do_not_take_the_files_handles() {
+fn mesh_children_do_not_take_the_files_handles() {
     let d = cadcraft_io::read_dxf(dxf().as_bytes()).unwrap();
     assert_eq!(counts(&d), (3, 3));
-    let handles: Vec<Handle> = d.model.iter().chain(d.block("MESH").unwrap().entities.iter()).map(|e| e.handle).collect();
+    let handles: Vec<Handle> = d
+        .model
+        .iter()
+        .chain(d.block("MESH").unwrap().entities.iter())
+        .flat_map(|e| std::iter::once(e.handle).chain(e.kind.polyline_records().filter_map(|r| r.handle)))
+        .collect();
     let unique: HashSet<Handle> = handles.iter().copied().collect();
     assert_eq!(unique.len(), handles.len(), "duplicate handles: {handles:?}");
     // The file's own handles stay with their entities.

@@ -93,9 +93,9 @@ const DAMAGED: &str = "
 fn records_the_reader_cannot_place_are_counted_by_section() {
     let d = cadcraft_io::read_dxf(&dxf(DAMAGED)).unwrap();
     // ENTITIES: a VERTEX and an ATTRIB with no POLYLINE/INSERT before them, a HATCH without
-    // boundary data, a polyface mesh without faces. BLOCKS: a CIRCLE before any BLOCK, a VERTEX
-    // inside one. Outside sections: the LINE between HEADER and BLOCKS.
-    let expected = BTreeMap::from([("(no section)".to_string(), 1), ("BLOCKS".to_string(), 2), ("ENTITIES".to_string(), 4)]);
+    // boundary data. The empty polyface mesh stays in the database. BLOCKS: a CIRCLE before any
+    // BLOCK, a VERTEX inside one. Outside sections: the LINE between HEADER and BLOCKS.
+    let expected = BTreeMap::from([("(no section)".to_string(), 1), ("BLOCKS".to_string(), 2), ("ENTITIES".to_string(), 3)]);
     assert_eq!(d.skipped_records, expected);
     // What could be placed still is.
     assert_eq!(d.model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count(), 1);

@@ -23,18 +23,9 @@ pub(super) fn parse_entities(
         {
             c.plot_style = n;
         }
-        // More entities from this record (the faces of a polyface or polygon mesh).
-        let mut extra: Vec<EntityKind> = Vec::new();
         i += 1;
         match kind.as_str() {
-            "POLYLINE" => {
-                let Some((c, k, more)) = polyline_entity(recs, &mut i, &t, d, rx) else {
-                    *skipped = skipped.saturating_add(1);
-                    continue;
-                };
-                extra = more;
-                kindent = Some((c, k));
-            }
+            "POLYLINE" => kindent = Some(polyline_entity(recs, &mut i, &t, d, rx)),
             "INSERT" if t.i(66) == Some(1) => {
                 let ins_layer = kindent.as_ref().map(|(c, _)| c.layer.clone()).unwrap_or_default();
                 let attribs = insert_attribs(recs, &mut i, &ins_layer, rx);
@@ -59,10 +50,7 @@ pub(super) fn parse_entities(
                 None => d.new_handle(),
             };
             entity_extras(kind, tags, h, &mut k, rx);
-            let more: Vec<_> =
-                extra.into_iter().map(|f| (owner.clone(), paper, Entity { handle: d.new_handle(), common: c.clone(), kind: f })).collect();
             out.push((owner, paper, Entity { handle: h, common: c, kind: k }));
-            out.extend(more);
         } else if kind == "HATCH" {
             // Without boundary data. The other records `entity` returns nothing for are read
             // elsewhere (the writer's paper viewport, the loops of a region).

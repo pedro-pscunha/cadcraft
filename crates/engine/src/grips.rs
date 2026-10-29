@@ -134,6 +134,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
             stretch_polyline(p, index, to, delta)?;
         }
         EntityKind::Polyline3d(p) => set_xy(p.points.get_mut(index)?, to),
+        EntityKind::PolylineMesh(mesh) => set_xy(&mut mesh.vertices.iter_mut().filter(|v| !v.is_face()).nth(index)?.vertex.position, to),
         EntityKind::Spline(sp) => {
             if sp.fit.is_empty() {
                 *sp.control.get_mut(index)? = to;
