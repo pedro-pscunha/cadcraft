@@ -52,6 +52,7 @@ pub(super) fn header(tags: &[Tag], d: &mut Drawing) {
                 HVal::Real(r) if name == "ANGBASE" => HVal::Real(r.to_radians()),
                 hv => hv,
             };
+            d.header.dxf_codes.insert(name.clone(), vals.iter().map(|t| t.code).collect());
             d.header.set(&name, hv);
         } else {
             i += 1;

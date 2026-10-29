@@ -52,6 +52,9 @@ impl HVal {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Header {
     pub vars: BTreeMap<String, HVal>,
+    /// Original DXF value-group codes, for writing read variables not owned by the model.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dxf_codes: BTreeMap<String, Vec<i32>>,
 }
 
 impl Header {

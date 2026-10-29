@@ -37,6 +37,7 @@ mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
 mod hatch_pattern_def;
+mod header_fidelity;
 mod helix_roundtrip;
 mod layout_paper_units;
 mod layout_plot_window;

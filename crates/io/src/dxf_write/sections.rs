@@ -292,7 +292,7 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx) {
     w.s(0, "ENDTAB");
 }
 
-fn write_header(w: &mut W, d: &Drawing, version: Version) -> usize {
+fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> usize {
     w.s(0, "SECTION");
     w.s(2, "HEADER");
     w.s(9, "$ACADVER");
@@ -306,7 +306,7 @@ fn write_header(w: &mut W, d: &Drawing, version: Version) -> usize {
         w.s(9, "$EXTMAX");
         w.p(10, ext.max.to3(0.0));
     }
-    header_vars(w, d);
+    header_vars(w, d, target);
     let seed_pos = w.t.len();
     w.s(9, "$HANDSEED");
     w.s(5, "0");
@@ -969,7 +969,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     let model_layout = w.h();
     let layout_handles: Vec<String> = ps_brs.iter().map(|_| w.h()).collect();
 
-    let seed_pos = write_header(&mut w, d, version);
+    let seed_pos = write_header(&mut w, d, version, target);
 
     write_classes(&mut w, &cx, &every);
 
