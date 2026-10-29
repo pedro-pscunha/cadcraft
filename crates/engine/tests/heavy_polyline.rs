@@ -17,4 +17,12 @@ fn move_and_reverse_keep_the_heavy_polyline_representation() {
     let saved = cadcraft_io::write_dxf(session.doc().unwrap());
     assert!(saved.lines().any(|line| line.trim() == "POLYLINE"));
     assert!(!saved.lines().any(|line| line.trim() == "LWPOLYLINE"));
+    session.execute("pedit", &json!({"handles": ["100"], "option": "width", "width": 2.5})).unwrap();
+    for format in ["saved.dxf", "saved.dwg"] {
+        let bytes = cadcraft_io::write(session.doc().unwrap(), format).unwrap();
+        let drawing = cadcraft_io::read(&bytes, format).unwrap();
+        let EntityKind::LwPolyline(polyline) = &drawing.entity(Handle(0x100)).unwrap().kind else { panic!("polyline") };
+        assert!(polyline.heavy);
+        assert!(polyline.vertices.iter().all(|v| v.start_width == 2.5 && v.end_width == 2.5), "{format}: {polyline:?}");
+    }
 }

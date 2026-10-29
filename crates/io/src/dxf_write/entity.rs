@@ -76,8 +76,8 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.s(100, "AcDbVertex");
         w.s(100, "AcDb2dVertex");
         w.p(10, Vec3::new(v.p.x, v.p.y, 0.0));
-        w.f(40, v.start_width);
-        w.f(41, v.end_width);
+        w.f(40, if p.const_width > 0.0 { p.const_width } else { v.start_width });
+        w.f(41, if p.const_width > 0.0 { p.const_width } else { v.end_width });
         w.f(42, v.bulge);
         w.i(70, 0);
     }
