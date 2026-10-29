@@ -34,26 +34,41 @@ fn unnamed_styles_survive_without_becoming_selectable_by_name() {
     for _ in 0..2 {
         assert!(d.text_style("").is_none());
         assert!(d.dim_style("").is_none());
-        let text = cadcraft_io::write_dxf(&d);
-        check_unnamed_styles(text.as_bytes());
-        let dwg = cadcraft_dwg::dxf_to_dwg(text.as_bytes()).unwrap();
+        // A DWG keeps the records nameless, as AutoCAD files have them.
+        let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
         let back = cadcraft_dwg::dwg_to_dxf(&dwg).unwrap();
-        check_unnamed_styles(&back);
+        check_unnamed_styles(&back, false);
+        // A user DXF names them: AutoCAD refuses a table record with an empty name.
+        check_unnamed_styles(cadcraft_io::write_dxf(&d).as_bytes(), true);
         d = cadcraft_io::read_dxf(&back).unwrap();
     }
 }
 
-fn check_unnamed_styles(text: &[u8]) {
+/// The unnamed STYLE and DIMSTYLE of `text`: nameless (a DWG), or with a name of their own, not that of
+/// another record (`named`, a user DXF).
+fn check_unnamed_styles(text: &[u8], named: bool) {
     let tags = cadcraft_dxf::parse(text).unwrap();
     let records: Vec<_> = sections(&tags).iter().filter(|s| s.name == "TABLES").flat_map(|s| records(&s.tags)).collect();
     let value = |tags: &[Tag], code| tags.iter().find(|t| t.code == code).map(Tag::str).unwrap_or_default();
-    let styles: Vec<_> = records.iter().filter(|(k, t)| k == "STYLE" && value(t, 2).is_empty()).collect();
-    let dims: Vec<_> = records.iter().filter(|(k, t)| k == "DIMSTYLE" && value(t, 2).is_empty()).collect();
-    assert_eq!(styles.len(), 1, "one unselectable unnamed STYLE");
-    assert_eq!(dims.len(), 1, "one unselectable unnamed DIMSTYLE");
+    // The records that hold the source's TXT.SHX font, and the dimension style that points at one.
+    let styles: Vec<_> = records.iter().filter(|(k, t)| k == "STYLE" && value(t, 3) == "TXT.SHX").collect();
+    let dims: Vec<_> = records.iter().filter(|(k, t)| k == "DIMSTYLE" && t.iter().any(|t| t.code == 40 && t.f64() == 2.5)).collect();
+    assert_eq!((styles.len(), dims.len()), (1, 1), "the unnamed STYLE and DIMSTYLE are kept");
     assert_eq!(value(&styles[0].1, 3), "TXT.SHX");
     assert_eq!(value(&dims[0].1, 340), value(&styles[0].1, 5));
-    assert_eq!(dims[0].1.iter().find(|t| t.code == 40).unwrap().f64(), 2.5);
+    for (kind, record) in [("STYLE", &styles[0].1), ("DIMSTYLE", &dims[0].1)] {
+        let name = value(record, 2);
+        assert_eq!(!name.trim().is_empty(), named, "{kind} name {name:?}");
+        if named {
+            let same = records.iter().filter(|(k, t)| k == kind && value(t, 2).eq_ignore_ascii_case(&name)).count();
+            assert_eq!(same, 1, "{kind} name {name:?} is unique");
+        }
+    }
+    // The tables count the records.
+    for kind in ["STYLE", "DIMSTYLE"] {
+        let table = records.iter().find(|(k, t)| k == "TABLE" && value(t, 2) == kind).map(|(_, t)| value(t, 70).trim().parse::<usize>().unwrap());
+        assert_eq!(table, Some(records.iter().filter(|(k, _)| k == kind).count()), "{kind} table count");
+    }
 }
 
 #[test]
