@@ -494,26 +494,6 @@ mod native {
         }
     }
 
-    /// The current dimension style (`$DIMSTYLE`) by its name: the DXF gives the name, and the
-    /// handle read with it needn't be the style's in the document, in which case the DWG writer
-    /// fell back to Standard and AutoCAD opened the drawing with Standard current (#1051).
-    fn current_dimstyle(doc: &mut acadrust::CadDocument) {
-        let name = doc.header.current_dimstyle_name.clone();
-        if let Some(h) = doc.dim_styles.iter().find(|ds| ds.name.eq_ignore_ascii_case(&name)).map(|ds| ds.handle) {
-            doc.header.current_dimstyle_handle = h;
-        }
-    }
-
-    /// The current text style (`$TEXTSTYLE`) by its name, the same way as [`current_dimstyle`]:
-    /// the handle read with the DXF needn't be the style's in the document, in which case the DWG
-    /// writer fell back to Standard and AutoCAD opened the drawing with Standard current (#1650).
-    fn current_text_style(doc: &mut acadrust::CadDocument) {
-        let name = doc.header.current_text_style_name.clone();
-        if let Some(h) = doc.text_styles.iter().find(|ts| ts.name.eq_ignore_ascii_case(&name)).map(|ts| ts.handle) {
-            doc.header.current_text_style_handle = h;
-        }
-    }
-
     fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>, source_code_page: Option<&str>) -> Result<(Vec<u8>, Vec<String>), String> {
         // Reject a pathologically large DXF before handing it to the third-party decoder, which
         // allocates tables and section buffers from the input's declared sizes and cannot be
@@ -548,9 +528,7 @@ mod native {
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
-        current_dimstyle(&mut doc);
         add_variable_dictionary(&mut doc);
-        current_text_style(&mut doc);
         std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
             .map_err(|_| "the DWG writer failed on this drawing".to_string())?
             .map_err(|e| format!("DWG write: {e}"))
@@ -714,6 +692,19 @@ mod tests {
         let romans = doc.text_styles.iter().find(|ts| ts.name == "ROMANS").map(|ts| ts.handle);
         assert!(romans.is_some(), "ROMANS is missing from the DWG");
         assert_eq!(Some(doc.header.current_text_style_handle), romans);
+    }
+
+    /// The DXF reader resolves `$DIMSTYLE` by name before the DWG writer runs (#1051).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn current_dimension_style_reaches_the_dwg() {
+        let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$DIMSTYLE\n2\nDetail\n0\nENDSEC\n\
+0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nDIMSTYLE\n70\n1\n0\nDIMSTYLE\n105\n1F0\n100\nAcDbSymbolTableRecord\n100\nAcDbDimStyleTableRecord\n2\nDetail\n70\n0\n0\nENDTAB\n0\nENDSEC\n0\nEOF\n";
+        let dwg = dxf_to_dwg(dxf.as_bytes()).unwrap();
+        let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+        let detail = doc.dim_styles.iter().find(|style| style.name == "Detail").map(|style| style.handle);
+        assert!(detail.is_some());
+        assert_eq!(Some(doc.header.current_dimstyle_handle), detail);
     }
 
     #[test]
