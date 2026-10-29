@@ -350,8 +350,7 @@ fn settings_bars_checkbox_clears_exceptions() {
 
 fn make_canonical(s: &mut Session, h: &str) {
     let h = Handle::parse_hex(h).unwrap();
-    // The store replaces the record: a runtime edit callback may not install canonical geometry.
-    s.doc_mut().unwrap().model.modify(h, |e| e.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2);
+    crate::assoc::install_canonical_fixture(s.doc_mut().unwrap(), h);
 }
 
 #[test]

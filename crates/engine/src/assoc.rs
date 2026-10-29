@@ -508,11 +508,19 @@ pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid:
     notes.into_iter().for_each(|n| s.echo(n));
 }
 
+/// Test input: the entity `h` of `d` as a record with canonical geometry. A runtime edit callback or the store's modify
+/// cannot install it (that is the guard), so the record is built and pushed, as the other canonical fixtures are.
+#[cfg(test)]
+pub(crate) fn install_canonical_fixture(d: &mut Drawing, h: Handle) {
+    let mut entity = d.entity(h).expect("an entity to make canonical").as_ref().clone();
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+    d.model.push(entity);
+}
+
 #[cfg(test)]
 mod revision_tests {
     use super::*;
     use crate::Session;
-    use cadcraft_doc::GeometryRevision;
     use serde_json::json;
 
     /// An associative linear dimension on the line (0, 0)-(4, 0): the drawing, the line and the dimension.
@@ -531,11 +539,7 @@ mod revision_tests {
         }
     }
 
-    /// Give the entity `h` of `d` canonical geometry. A runtime callback cannot install it (that is the guard), so the
-    /// store replaces the record.
-    fn make_canonical(d: &mut Drawing, h: Handle) {
-        d.model.modify(h, |e| e.geometry_revision = GeometryRevision::CanonicalV2);
-    }
+    use super::install_canonical_fixture as make_canonical;
 
     /// The drawing after the line's end moved to (5, 0), with the line and/or the dimension then made canonical.
     fn moved(before: &Drawing, line: Handle, dim: Handle, canonical_line: bool, canonical_dim: bool) -> Arc<Drawing> {
