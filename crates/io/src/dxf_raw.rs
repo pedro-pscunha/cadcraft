@@ -807,6 +807,10 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
             }
             path.push(current);
             let Some((kind, _, tags)) = objects.get(current) else { break false };
+            // The VX table has no owner (its control record's is null): the bridge keeps it for the DWG.
+            if up(kind) == VX_CONTROL {
+                break true;
+            }
             let header = head(tags);
             let (Some(handle), Some(owner)) = (header.handle, header.owner) else { break false };
             if by_handle.get(&handle) != Some(&current) {
@@ -1284,10 +1288,20 @@ fn raw_dwg_object(object: &ForeignObject) -> bool {
     object.tags.iter().any(|t| t.code == 100 && t.value == "AcDbAcadrustRawDwgObject")
 }
 
+/// The private records with which the DWG bridge carries the VX table (the viewport entity headers of a drawing
+/// of 2004 or later, which AutoCAD's DXFOUT does not write): the control record and one record per entry.
+const VX_CONTROL: &str = "ACADRUST_VXCONTROL";
+const VX_RECORD: &str = "ACADRUST_VXRECORD";
+
+fn vx_table_object(object: &ForeignObject) -> bool {
+    let kind = up(&object.kind);
+    kind == VX_CONTROL || kind == VX_RECORD
+}
+
 fn public_foreign(f: &Foreign) -> Foreign {
     let mut public = f.clone();
     let private: HashSet<String> = public.objects.iter().filter(|o| raw_dwg_object(o)).map(|o| up(&o.kind)).collect();
-    public.objects.retain(|o| !raw_dwg_object(o));
+    public.objects.retain(|o| !raw_dwg_object(o) && !vx_table_object(o));
     // AutoCAD writes a dynamic block's purge preventer without its block (group 340), and refuses
     // a DXF preventer that has one; the DWG bridge keeps it.
     for o in public.objects.iter_mut().filter(|o| up(&o.kind) == "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION") {
@@ -1459,6 +1473,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     for o in f.objects.iter().filter(|o| is_proxy(&o.kind) && renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str())))).is_none()) {
         alive_memo.insert(o.handle.hex(), false);
     }
+    // The VX table's control record has no owner: the bridge keeps it, and its records with it.
+    alive_memo.extend(f.objects.iter().filter(|o| up(&o.kind) == VX_CONTROL).map(|o| (o.handle.hex(), true)));
     for o in &f.objects {
         let mut path: Vec<String> = Vec::new();
         let mut cur = o.handle.hex();
