@@ -30,6 +30,7 @@ fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segme
         {
             continue;
         }
+        e.require_legacy_geometry()?;
         if edges.implied
             && let Some(segs) = implied_edge(&e.kind)
         {
@@ -97,6 +98,7 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
     let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
+    e.require_legacy_geometry()?;
     let cut = edge_segments(s, edges, h)?;
     let pieces: Vec<EntityKind> = match &e.kind {
         EntityKind::Line(l) => {
@@ -280,6 +282,7 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
     let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
+    e.require_legacy_geometry()?;
     let cut = edge_segments(s, edges, h)?;
     let new_kind = match &e.kind {
         EntityKind::Line(l) => {

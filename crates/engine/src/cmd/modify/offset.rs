@@ -19,7 +19,7 @@ fn offsettable(k: &EntityKind) -> bool {
 }
 
 /// Offset an entity by `dist` towards `side`. Returns the new geometry.
-pub(crate) fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<EntityKind> {
+fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<EntityKind> {
     match k {
         EntityKind::Line(l) => {
             let ln = Line::new(l.a.xy(), l.b.xy());
@@ -199,6 +199,7 @@ pub(super) fn run_offset(s: &mut Session, p: &Value) -> Result<Value> {
     let dist = f64_req("offset", p, "distance")?;
     let side = point_req("offset", p, "side")?;
     let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| bad("offset", "no such object"))?;
+    e.require_legacy_geometry()?;
     let k = offset_kind(&e.kind, dist.abs(), side).ok_or_else(|| bad("offset", "cannot offset that object"))?;
     let current_layer = match str_param(p, "layer").map(str::to_ascii_lowercase).as_deref() {
         None | Some("source") => false,
@@ -452,6 +453,7 @@ impl Interactive for OffsetM {
                 let e = s.doc()?.entity(h).map(|e| (**e).clone());
                 let mut made = None;
                 if let Some(e) = e {
+                    e.require_legacy_geometry()?;
                     let dist = match self.dist {
                         Some(d) => d,
                         None => {
@@ -488,6 +490,9 @@ impl Interactive for OffsetM {
         }
         let (Some(h), Ok(d)) = (self.picked, s.doc()) else { return Vec::new() };
         let Some(e) = d.entity(h) else { return Vec::new() };
+        if e.require_legacy_geometry().is_err() {
+            return Vec::new();
+        }
         let dist = match self.dist {
             Some(x) => x,
             None => crate::select::entity_distance(d, e, c, 1e-3),
