@@ -575,3 +575,17 @@ fn linetype_rename_updates_references() {
     assert!(s.execute("rename", &json!({ "table": "linetype", "from": "ByLayer", "to": "X" })).is_err());
     assert_eq!(s.doc().unwrap().entity(by_layer).unwrap().common.linetype, "ByLayer");
 }
+
+#[test]
+fn reassociating_a_dimension_with_canonical_geometry_is_refused_whole() {
+    let mut s = Session::new();
+    line(&mut s, [0.0, 0.0], [4.0, 0.0]);
+    let d = h(&s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [4, 0], "at": [2, 1] })).unwrap());
+    let other = h(&s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [4, 0], "at": [2, 2] })).unwrap());
+    s.execute("dimdisassociate", &json!({ "handles": [d.hex(), other.hex()] })).unwrap();
+    s.doc_mut().unwrap().modify_entity(d, |e| e.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2).unwrap();
+    let before = s.doc().unwrap().clone();
+    let e = s.execute("dimreassociate", &json!({ "handles": [d.hex(), other.hex()] })).unwrap_err().to_string();
+    assert!(e.contains("canonical") && e.contains("Nothing was changed"), "{e}");
+    assert_eq!(*s.doc().unwrap(), before, "the legacy dimension is not reassociated either");
+}

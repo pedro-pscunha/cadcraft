@@ -347,3 +347,66 @@ fn settings_bars_checkbox_clears_exceptions() {
     assert!(s.doc().unwrap().parametric.settings.bar_exceptions.is_empty());
     assert!(bar(&s, &a) && bar(&s, &b));
 }
+
+fn make_canonical(s: &mut Session, h: &str) {
+    let h = Handle::parse_hex(h).unwrap();
+    s.doc_mut().unwrap().modify_entity(h, |e| e.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2).unwrap();
+}
+
+#[test]
+fn an_object_with_canonical_geometry_cannot_be_picked_for_a_constraint() {
+    let mut s = Session::new();
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.5]);
+    let c = line(&mut s, [0.0, 5.0], [10.0, 7.0]);
+    make_canonical(&mut s, &c);
+    let before = s.doc().unwrap().clone();
+    for (cmd, p) in [
+        ("gchorizontal", json!({ "h1": c })),
+        ("geomconstraint", json!({ "type": "parallel", "h1": a, "h2": c })),
+        ("gccoincident", json!({ "h1": a, "h2": c })),
+        ("dcaligned", json!({ "h1": c, "expr": "3" })),
+    ] {
+        let e = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(e.contains("canonical"), "{cmd}: {e}");
+        assert_eq!(*s.doc().unwrap(), before, "{cmd} changes nothing");
+    }
+}
+
+#[test]
+fn the_solver_never_starts_while_a_constrained_object_has_canonical_geometry() {
+    let mut s = Session::new();
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.5]);
+    let b = line(&mut s, [10.2, 0.3], [10.5, 6.0]);
+    let free = line(&mut s, [20.0, 0.0], [30.0, 4.0]);
+    s.execute("gchorizontal", &json!({ "h1": a })).unwrap();
+    s.execute("dcaligned", &json!({ "h1": a, "expr": "8" })).unwrap();
+    make_canonical(&mut s, &a);
+    let before = s.doc().unwrap().clone();
+    for (cmd, p) in [
+        ("gcvertical", json!({ "h1": b })),
+        ("autoconstrain", json!({ "handles": [free] })),
+        ("parameters", json!({ "name": "d1", "expr": "12" })),
+        ("constraints.inspect", json!({})),
+        ("constraints.dof", json!({ "handles": [free] })),
+    ] {
+        let e = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(e.contains("canonical") && e.contains("Nothing was changed"), "{cmd}: {e}");
+        assert_eq!(*s.doc().unwrap(), before, "{cmd} changes nothing");
+    }
+}
+
+#[test]
+fn an_edit_does_not_re_solve_constraints_that_hold_a_canonical_object() {
+    let mut s = Session::new();
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.5]);
+    let b = line(&mut s, [10.2, 0.3], [10.5, 6.0]);
+    s.execute("gchorizontal", &json!({ "h1": a })).unwrap();
+    s.execute("gccoincident", &json!({ "h1": a, "h2": b })).unwrap();
+    let (start0, start1) = ends(&s, &b);
+    make_canonical(&mut s, &a);
+    // `b` is a legacy line that a constraint holds: a move of it is a normal edit, and no solver pass follows.
+    s.execute("move", &json!({ "handles": [b], "delta": [0.0, 1.0] })).unwrap();
+    assert!(s.log.iter().any(|l| l.contains("Constraints were not solved") && l.contains("canonical")), "{:?}", s.log);
+    let (b0, b1) = ends(&s, &b);
+    assert!(b0.near(start0 + Vec2::new(0.0, 1.0), 1e-9) && b1.near(start1 + Vec2::new(0.0, 1.0), 1e-9), "{b0:?} {b1:?}");
+}
