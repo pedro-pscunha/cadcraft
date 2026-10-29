@@ -7,10 +7,10 @@
 //! them. The groups are kept in file order, each subclass after its marker, and replace the groups
 //! the writer made from the model for that subclass.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use cadcraft_doc::foreign::{Foreign, GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
-use cadcraft_doc::{Drawing, Handle, RawTag};
+use cadcraft_doc::{Drawing, Entity, GeometryRecord, GeometrySnapshot, Handle, RawTag, attrib_geometry_key, geometry_key};
 use cadcraft_dxf::Tag;
 
 type Spec = &'static [(&'static str, &'static [i32])];
@@ -168,8 +168,7 @@ fn hatch_restore(generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -
 /// The geometry keys of the entities and attributes of `d` whose handle `wanted` accepts.
 fn keys(d: &Drawing, wanted: impl Fn(Handle) -> bool) -> HashMap<Handle, String> {
     let mut out = HashMap::new();
-    let all = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
-    for e in all.flat_map(|s| s.iter()) {
+    for e in all_entities(d) {
         if wanted(e.handle)
             && let Some(key) = geometry_key(&e.kind, &e.common)
         {
@@ -184,35 +183,77 @@ fn keys(d: &Drawing, wanted: impl Fn(Handle) -> bool) -> HashMap<Handle, String>
     out
 }
 
+/// Every entity of the drawing (model space, layouts, blocks).
+fn all_entities(d: &Drawing) -> impl Iterator<Item = &Entity> {
+    let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
+    stores.flat_map(|s| s.iter().map(|e| e.as_ref()))
+}
+
 fn handle_of(tags: &[Tag]) -> Option<Handle> {
     tags.iter().find(|t| matches!(t.code, 5 | 105)).and_then(|t| Handle::parse_hex(&t.str()))
 }
 
-/// Keep the geometry groups of the source `records` (type and groups after it) of the entities of
-/// `d` that keep a snapshot, in the entities' foreign data. A handle that two records share names
-/// no entity.
-pub(crate) fn capture_all<'a>(f: &mut Foreign, d: &Drawing, records: impl Iterator<Item = (&'a str, &'a [Tag])>) {
+/// Give the entities and attributes of `d` the geometry snapshot of their source `records` (type
+/// and groups after it). A handle that two records share names no entity.
+pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'a str, &'a [Tag])>) {
     let records: Vec<_> = records.filter_map(|(kind, tags)| Some((kind, tags, handle_of(tags)?))).collect();
     let mut seen: HashMap<Handle, usize> = HashMap::new();
     for (.., h) in &records {
         *seen.entry(*h).or_default() += 1;
     }
     let keys = keys(d, |h| seen.get(&h) == Some(&1));
+    let mut snapshots: HashMap<Handle, Arc<GeometrySnapshot>> = HashMap::new();
     for (kind, tags, h) in records {
         if let Some(model) = keys.get(&h)
             && let Some(groups) = capture(kind, tags)
         {
             let record = GeometryRecord { kind: kind.to_string(), groups };
-            f.entities.entry(h).or_default().geometry = Some(GeometrySnapshot { records: vec![record], model: model.clone() });
+            snapshots.insert(h, Arc::new(GeometrySnapshot { records: vec![record], model: model.clone() }));
         }
+    }
+    if snapshots.is_empty() {
+        return;
+    }
+    let give = |store: &mut cadcraft_doc::EntityStore| {
+        let hs: Vec<Handle> = store
+            .iter()
+            .filter(|e| snapshots.contains_key(&e.handle) || e.kind.attributes().iter().any(|a| a.handle.is_some_and(|h| snapshots.contains_key(&h))))
+            .map(|e| e.handle)
+            .collect();
+        for h in hs {
+            store.modify(h, |e| {
+                e.common.geometry = snapshots.get(&e.handle).cloned();
+                for a in e.kind.attributes_mut() {
+                    a.geometry = a.handle.and_then(|h| snapshots.get(&h)).cloned();
+                }
+            });
+        }
+    };
+    give(&mut d.model);
+    for l in &mut d.layouts {
+        give(&mut l.entities);
+    }
+    for b in d.blocks.values_mut() {
+        give(&mut Arc::make_mut(b).entities);
     }
 }
 
-/// The entities and attributes whose snapshot (in `f`) still describes their geometry.
-pub(crate) fn eligible(f: &Foreign, d: &Drawing) -> HashSet<Handle> {
-    let snapshots: HashMap<Handle, &str> = f.entities.iter().filter_map(|(h, x)| Some((*h, x.geometry.as_ref()?.model.as_str()))).collect();
-    if snapshots.is_empty() {
-        return HashSet::new();
+/// The snapshots of the entities and attributes of `d` that still describe their geometry.
+pub(crate) fn eligible(d: &Drawing) -> HashMap<Handle, Arc<GeometrySnapshot>> {
+    let mut out = HashMap::new();
+    for e in all_entities(d) {
+        if let Some(g) = e.common.geometry.as_ref()
+            && geometry_key(&e.kind, &e.common).as_deref() == Some(g.model.as_str())
+        {
+            out.insert(e.handle, g.clone());
+        }
+        for a in e.kind.attributes() {
+            if let (Some(h), Some(g)) = (a.handle, a.geometry.as_ref())
+                && attrib_geometry_key(a) == g.model
+            {
+                out.insert(h, g.clone());
+            }
+        }
     }
-    keys(d, |h| snapshots.contains_key(&h)).into_iter().filter(|(h, key)| snapshots.get(h) == Some(&key.as_str())).map(|(h, _)| h).collect()
+    out
 }

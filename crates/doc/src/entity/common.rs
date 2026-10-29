@@ -103,6 +103,10 @@ pub struct Common {
     /// object (COPY, MIRROR, ARRAY, paste) carries it, as in AutoCAD.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub xdata: Vec<RawTag>,
+    /// The source geometry groups of the entity, written back by a save while its geometry is as
+    /// it was read (see [`super::GeometrySnapshot`]). Not part of the entity's public data.
+    #[serde(skip)]
+    pub geometry: Option<std::sync::Arc<super::GeometrySnapshot>>,
 }
 
 impl Default for Common {
@@ -120,6 +124,7 @@ impl Default for Common {
             plot_style: "ByLayer".into(),
             anno_scales: Vec::new(),
             xdata: Vec::new(),
+            geometry: None,
         }
     }
 }

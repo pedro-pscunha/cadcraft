@@ -1,7 +1,9 @@
 //! The source geometry of an entity, kept so that a save with no geometry edit writes it back
 //! exactly (entity planes, Z values, angles and scale signs that the model flattens).
 //!
-//! A [`GeometrySnapshot`] holds the geometry groups of the entity's source record and a key of
+//! The snapshot is part of the entity ([`Common::geometry`], [`Attrib::geometry`]), so a copy of
+//! the entity carries it, within a drawing and to another one, and undo restores it with the
+//! entity. A [`GeometrySnapshot`] holds the geometry groups of the entity's source record and a key of
 //! the model geometry the reader made from them. The writer replays the groups only while the
 //! entity's current [`geometry_key`] is the same string; a property edit leaves the key as it was,
 //! a geometry edit changes it, and the entity is written from the model as before.
@@ -11,7 +13,7 @@
 
 use std::fmt::Write;
 
-use crate::{Attrib, Common, EntityKind, RawTag, Text};
+use super::{Attrib, Common, EntityKind, RawTag, Text};
 
 /// The geometry groups of one source record (see [`GeometrySnapshot::records`]).
 #[derive(Clone, Debug, PartialEq)]

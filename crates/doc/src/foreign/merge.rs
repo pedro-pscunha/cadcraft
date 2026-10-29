@@ -13,7 +13,6 @@ fn extra_references(extra: &ForeignExtra, map: &BTreeMap<Handle, Handle>) -> boo
         || references(&extra.xdata, map)
         || references(&extra.props, map)
         || references(&extra.subclass, map)
-        || extra.geometry.as_ref().is_some_and(|g| g.records.iter().any(|r| references(&r.groups, map)))
 }
 fn kind_references(kind: &EntityKind, map: &BTreeMap<Handle, Handle>) -> bool {
     match kind {
@@ -111,11 +110,6 @@ impl Drawing {
             remap_tags(&mut extra.xdata, &map);
             remap_tags(&mut extra.props, &map);
             remap_tags(&mut extra.subclass, &map);
-            if let Some(g) = &mut extra.geometry {
-                for r in &mut g.records {
-                    remap_tags(&mut r.groups, &map);
-                }
-            }
         }
         for (_, h) in &mut foreign.dictionary {
             *h = map.get(h).copied().unwrap_or(*h);
