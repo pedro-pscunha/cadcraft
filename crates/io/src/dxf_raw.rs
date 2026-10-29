@@ -320,8 +320,21 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             out.entry(h).or_insert(k);
         }
     };
+    // The tiles of one VPORT configuration share its name: each tile the reader keeps is a role of
+    // its own, numbered in file order (the first by the name alone).
+    let mut tiles: HashMap<String, usize> = HashMap::new();
     for (kind, _, t) in tables {
-        let name = up(&val(t, 2).unwrap_or_default());
+        let mut name = up(&val(t, 2).unwrap_or_default());
+        if kind == "VPORT" {
+            let n = tiles.entry(name.clone()).or_default();
+            if !crate::dxf_read::kept_vport(t) || *n >= crate::dxf_read::MAX_VPORT_TILES {
+                continue;
+            }
+            if *n > 0 {
+                name = format!("{name}|{n}");
+            }
+            *n += 1;
+        }
         if kind == "TABLE" || !name.is_empty() {
             put(head(t).handle, (if kind == "TABLE" { "TABLE".into() } else { kind.clone() }, name));
         }
@@ -1125,6 +1138,7 @@ impl<'a> Extras<'a> {
     fn of(&self, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
         let f = self.f;
         match (rec.sec.as_str(), rec.kind.as_str()) {
+            ("TABLES", "VPORT") => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
             ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "ENDBLK") => None,

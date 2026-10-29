@@ -60,8 +60,8 @@ pub(super) fn paper_view(w: &mut W, d: &Drawing, e: &Entity, owner: &str, cx: &C
     w.s(1000, dxf_ext::PAPER_VIEW);
 }
 
-/// The VPORT table: the `*Active` model space tiles (one viewport on the extents when there is no
-/// tiled configuration) and the saved configurations, each tile a record, the current one first.
+/// The VPORT table: the `*Active` model space tiles as read (one viewport on the extents when the
+/// drawing has none) and the saved configurations, each tile a record, the current one first.
 pub(super) fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
     let single = VportTile {
         min: Vec2::ZERO,
@@ -70,8 +70,8 @@ pub(super) fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
         height: if ext.is_empty() { 9.0 } else { (ext.height() * 1.1).max(1e-6) },
         aspect: 1.6,
     };
-    let tiled = d.vports.iter().find(|c| c.is_active() && c.tiles.len() > 1);
-    let mut records: Vec<(&str, &VportTile)> = match tiled {
+    let active = d.vports.iter().find(|c| c.is_active());
+    let mut records: Vec<(&str, &VportTile)> = match active {
         Some(c) => c.tiles.iter().map(|t| (VportConfig::ACTIVE, t)).collect(),
         None => vec![(VportConfig::ACTIVE, &single)],
     };

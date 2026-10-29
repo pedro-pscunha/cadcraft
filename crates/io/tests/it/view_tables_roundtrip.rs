@@ -100,10 +100,10 @@ fn tiled_viewports_and_saved_configurations_round_trip() {
     assert_eq!(r.vports, d.vports);
     // The first *ACTIVE record still carries the snap base.
     assert_eq!(r.header.point("SNAPBASE").map(|p| p.xy()), Some(Vec2::new(1.0, 2.0)));
-    // No tiling: one *ACTIVE record, read back as no configuration.
+    // No tiling: one *ACTIVE record keeps its own view.
     let mut single = Drawing::new_imperial();
-    single.vports = vec![VportConfig { name: VportConfig::ACTIVE.into(), tiles: vec![tile((0.0, 0.0), (1.0, 1.0), (0.0, 0.0), 1.0)] }];
-    assert!(round_trip(&single).vports.is_empty());
+    single.vports = vec![VportConfig { name: VportConfig::ACTIVE.into(), tiles: vec![tile((0.0, 0.0), (1.0, 1.0), (7.0, 8.0), 3.0)] }];
+    assert_eq!(round_trip(&single).vports, single.vports);
 }
 
 /// VPORT records with corners outside 0..1, no area (or turned around), or an unusable view
