@@ -228,7 +228,7 @@ impl Objects {
         }
     }
 
-    pub(super) fn apply(self, d: &mut Drawing, rx: &Rx) {
+    pub(super) fn apply(self, d: &mut Drawing, rx: &Rx) -> crate::Result<()> {
         if let Some(v) = self.wipeout_frame {
             d.header.set_i64("WIPEOUTFRAME", v);
         }
@@ -261,7 +261,7 @@ impl Objects {
             d.plot_style_tables = tables;
         }
         self.apply_mleader_styles(d, rx);
-        crate::dxf_mleader::apply(d, &rx.mleader_fix, &self.names);
+        crate::dxf_mleader::apply(d, &rx.mleader_fix, &self.names)?;
         for (name, view) in &self.layout_views {
             if let Some(l) = d.layouts.iter_mut().find(|l| l.name == *name) {
                 l.view = Some(*view);
@@ -272,6 +272,7 @@ impl Objects {
         for tags in &self.dimassocs {
             dimassoc(d, tags);
         }
+        Ok(())
     }
 }
 

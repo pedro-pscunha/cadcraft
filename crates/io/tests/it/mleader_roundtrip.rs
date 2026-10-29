@@ -97,9 +97,9 @@ fn spline_leader_with_block_content_and_attributes() {
     let blk = d.block("BUBBLE").unwrap().clone();
     let xf = ins.transform(blk.base.xy());
     let Some(EntityKind::AttDef(ad)) = blk.entities.iter().nth(1).map(|e| &e.kind) else { unreachable!() };
-    let mut k = EntityKind::Text(ad.text.clone());
-    k.transform(&xf);
-    let EntityKind::Text(mut placed) = k else { unreachable!() };
+    let mut entity = Entity::new(Handle(0), EntityKind::Text(ad.text.clone()));
+    entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&xf)).unwrap();
+    let EntityKind::Text(mut placed) = entity.kind else { unreachable!() };
     placed.value = "42".into();
     ins.attribs.push(Attrib::new("NUM", placed));
     let m = MLeader {

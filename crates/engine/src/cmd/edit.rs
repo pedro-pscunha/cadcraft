@@ -661,15 +661,7 @@ impl Interactive for PasteM {
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::EntityKind> {
         let m = Mat3::translate(c - s.clipboard_base);
-        s.clipboard
-            .iter()
-            .take(500)
-            .map(|e| {
-                let mut k = e.kind.clone();
-                k.transform(&m);
-                k
-            })
-            .collect()
+        s.clipboard.iter().take(500).filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind)).collect()
     }
 }
 

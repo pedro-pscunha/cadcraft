@@ -36,11 +36,20 @@ impl Session {
                 return Err(EngineError::Internal(id.into(), msg));
             }
         };
-        let violation = before.as_ref().and_then(|b| cmd::blocks::refedit::after_command(self, &b.0, spec.id));
+        let violation = result.as_ref().ok().and(before.as_ref()).and_then(|b| cmd::blocks::refedit::after_command(self, &b.0, spec.id));
         let result = match (violation, result) {
             (Some(m), Ok(_)) => Err(EngineError::Other(m)),
             (_, r) => r,
         };
+        if result.is_err() && spec.undoable {
+            if let Some((doc, selection, uid)) = &before
+                && let Some(state) = self.docs.iter_mut().find(|state| state.uid == *uid)
+            {
+                state.doc = doc.clone();
+                state.selection = selection.clone();
+            }
+            return result;
+        }
         // Restoring a snapshot is not an edit of its targets. Never run mutation passes or
         // produce new edit warnings from the reverse delta between undo/redo snapshots.
         let restoring = Self::restores_snapshot(spec.id);

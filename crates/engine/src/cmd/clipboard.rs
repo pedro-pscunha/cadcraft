@@ -84,7 +84,7 @@ pub(crate) fn paste(s: &mut Session, m: &Mat3) -> Result<Vec<Handle>> {
     let mut out = Vec::new();
     let entities = ents.iter().map(|e| adopt(e, &renames)).collect();
     for mut e in d.duplicate_entities(vec![entities], source) {
-        e.kind.transform(m);
+        e.try_transform(&cadcraft_geom::Mat4::from_mat3(m))?;
         d.ensure_layer(&e.common.layer);
         out.push(e.handle);
         if let Some(st) = d.space_mut(&space) {

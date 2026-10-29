@@ -21,7 +21,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             continue;
         }
         if d.space_of(*h).is_some() {
-            d.modify_entity(*h, |e| e.kind.transform(m))?;
+            d.try_modify_entity(*h, |e| e.try_transform(&cadcraft_geom::Mat4::from_mat3(m)))?;
             out.push(*h);
         }
     }
@@ -40,17 +40,8 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
     }
     let sets = transforms
         .into_iter()
-        .map(|m| {
-            originals
-                .iter()
-                .map(|(_, e)| {
-                    let mut e = e.clone();
-                    e.kind.transform(&m);
-                    e
-                })
-                .collect()
-        })
-        .collect();
+        .map(|m| originals.iter().map(|(_, e)| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m))).collect::<cadcraft_doc::Result<Vec<_>>>())
+        .collect::<cadcraft_doc::Result<Vec<_>>>()?;
     let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
     let mut out = Vec::new();
     for (entity, (space, _)) in copies.into_iter().zip(originals.iter().cycle()) {

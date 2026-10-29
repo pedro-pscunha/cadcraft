@@ -25,9 +25,10 @@ fn run_burst(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What a block reference bursts into: EXPLODE's pieces without the attribute definitions, then
 /// a text (multiline text for a multiline attribute) for each visible attribute.
-fn burst_pieces(d: &Drawing, e: &Entity) -> Option<Vec<Entity>> {
-    let EntityKind::Insert(ins) = &e.kind else { return None };
-    let mut out: Vec<Entity> = explode_kind(d, e)?.into_iter().filter(|p| !matches!(p.kind, EntityKind::AttDef(_))).collect();
+fn burst_pieces(d: &Drawing, e: &Entity) -> Result<Option<Vec<Entity>>> {
+    let EntityKind::Insert(ins) = &e.kind else { return Ok(None) };
+    let Some(parts) = explode_kind(d, e)? else { return Ok(None) };
+    let mut out: Vec<Entity> = parts.into_iter().filter(|p| !matches!(p.kind, EntityKind::AttDef(_))).collect();
     for a in ins.attribs.iter().filter(|a| !a.invisible) {
         let kind = match a.multiline_text() {
             Some(m) => EntityKind::MText(m),
@@ -35,7 +36,7 @@ fn burst_pieces(d: &Drawing, e: &Entity) -> Option<Vec<Entity>> {
         };
         out.push(Entity { handle: Handle(0), common: attrib_common(d, e, ins, &a.tag, &a.props), kind });
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// The properties an attribute is drawn with: its own, else its definition's; layer 0 is the

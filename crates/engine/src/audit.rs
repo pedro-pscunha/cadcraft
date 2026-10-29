@@ -334,7 +334,7 @@ fn handseed(d: &mut Drawing, out: &mut Vec<Issue>) {
 
 /// Why `e`'s geometry is invalid, if it is.
 fn invalid_geometry(e: &Entity) -> Option<&'static str> {
-    if !crate::finite::is_finite(e) {
+    if !cadcraft_doc::has_finite_numbers(e) {
         return Some("has infinite or undefined numbers");
     }
     match &e.kind {

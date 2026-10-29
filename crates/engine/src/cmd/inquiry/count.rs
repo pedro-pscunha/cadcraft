@@ -265,11 +265,10 @@ fn self_check(t: &Tally) -> Value {
 
 /// A translation-free signature of an object's geometry: objects with equal keys are copies of
 /// each other (moved, not rotated or scaled). Coordinates are rounded to 1e-6.
-fn shape_key(k: &EntityKind) -> Option<String> {
-    let origin = k.grips().first().copied().filter(|p| p.is_finite())?;
-    let mut k = k.clone();
-    k.transform(&Mat3::translate(Vec2::ZERO - origin));
-    let mut v = serde_json::to_value(&k).ok()?;
+fn shape_key(entity: &Entity) -> Option<String> {
+    let origin = entity.kind.grips().first().copied().filter(|p| p.is_finite())?;
+    let transformed = entity.transformed(&cadcraft_geom::Mat4::from_mat3(&Mat3::translate(Vec2::ZERO - origin))).ok()?;
+    let mut v = serde_json::to_value(&transformed.kind).ok()?;
     round(&mut v, 0);
     Some(v.to_string())
 }
@@ -354,7 +353,7 @@ fn count_like(d: &Drawing, scope: &Scope, nested: bool, h: Handle) -> Result<Val
         return Ok(count_block(d, scope, nested, &i.block));
     }
     let ty = e.kind.type_name();
-    let key = shape_key(&e.kind).ok_or_else(|| bad("count", format!("a {ty} can't be counted by shape")))?;
+    let key = shape_key(e).ok_or_else(|| bad("count", format!("a {ty} can't be counted by shape")))?;
     let mut check = SelfCheck::new();
     let mut hs: Vec<Handle> = Vec::new();
     let mut capped = false;
@@ -365,7 +364,7 @@ fn count_like(d: &Drawing, scope: &Scope, nested: bool, h: Handle) -> Result<Val
             continue;
         }
         check.analyzed(1);
-        if shape_key(&o.kind).as_deref() == Some(key.as_str()) {
+        if shape_key(o).as_deref() == Some(key.as_str()) {
             if hs.len() < MAX_HANDLES {
                 hs.push(o.handle);
             } else {

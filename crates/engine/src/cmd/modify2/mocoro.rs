@@ -277,11 +277,7 @@ impl Interactive for MocoroM {
             .iter()
             .take(500)
             .filter_map(|h| d.entity(*h))
-            .map(|e| {
-                let mut k = e.kind.clone();
-                k.transform(&m);
-                k
-            })
+            .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
             .collect();
         out.push(line(self.base, c));
         out

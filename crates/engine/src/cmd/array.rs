@@ -127,7 +127,7 @@ pub(crate) fn make_assoc(s: &mut Session, objs: &[Handle], base: Vec2, mut p: Ar
     let mut src = Block::new(&src_name);
     let to_local = Mat3::translate(-base);
     for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
-        e.kind.transform(&to_local);
+        e.try_transform(&cadcraft_geom::Mat4::from_mat3(&to_local))?;
         src.entities.push(e);
     }
     d.blocks.insert(src_name.clone(), Arc::new(src));
@@ -173,31 +173,30 @@ fn create(s: &mut Session, objs: &[Handle], base: Vec2, p: ArrayParams, assoc: b
 
 /// EXPLODE of an associative array: every item becomes the objects of its block (the source
 /// objects, or a replacement block's reference), in world coordinates. `None` for other objects.
-pub(crate) fn explode_array(d: &Drawing, e: &Entity) -> Option<Vec<Entity>> {
-    let EntityKind::Insert(ins) = &e.kind else { return None };
-    let p = d.array_params(e)?;
-    let blk = d.block(&ins.block)?;
+pub(crate) fn explode_array(d: &Drawing, e: &Entity) -> Result<Option<Vec<Entity>>> {
+    let EntityKind::Insert(ins) = &e.kind else { return Ok(None) };
+    let Some(p) = d.array_params(e) else { return Ok(None) };
+    let Some(blk) = d.block(&ins.block) else { return Ok(None) };
     let m = ins.transform(blk.base.xy());
     let mut out = Vec::new();
     for item in blk.entities.iter() {
-        let item = placed(e, item, &m);
+        let item = placed(e, item, &m)?;
         let source = match &item.kind {
             EntityKind::Insert(i) if i.block.eq_ignore_ascii_case(&p.source) => d.block(&i.block).map(|b| (i.transform(b.base.xy()), b)),
             _ => None,
         };
         match source {
-            Some((im, b)) => out.extend(b.entities.iter().map(|se| placed(&item, se, &im))),
+            Some((im, b)) => out.extend(b.entities.iter().map(|se| placed(&item, se, &im)).collect::<Result<Vec<_>>>()?),
             None => out.push(item),
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// `child` of a block referenced by `parent`, moved by `m`, with layer 0 and ByBlock properties
 /// taken from the reference (as EXPLODE does).
-fn placed(parent: &Entity, child: &Entity, m: &Mat3) -> Entity {
-    let mut ne = child.clone();
-    ne.kind.transform(m);
+fn placed(parent: &Entity, child: &Entity, m: &Mat3) -> Result<Entity> {
+    let mut ne = child.transformed(&cadcraft_geom::Mat4::from_mat3(m))?;
     if ne.common.layer == "0" {
         ne.common.layer = parent.common.layer.clone();
     }
@@ -210,7 +209,7 @@ fn placed(parent: &Entity, child: &Entity, m: &Mat3) -> Entity {
     if ne.common.lineweight == cadcraft_doc::Lineweight::ByBlock {
         ne.common.lineweight = parent.common.lineweight;
     }
-    ne
+    Ok(ne)
 }
 
 fn bounds(d: &Drawing, hs: &[Handle]) -> Bounds2 {
@@ -251,7 +250,7 @@ fn copy_all(s: &mut Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) ->
 /// The objects transformed by each matrix, for the preview.
 fn preview_copies(s: &Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) -> Vec<EntityKind> {
     let Ok(d) = s.doc() else { return Vec::new() };
-    let src: Vec<EntityKind> = hs.iter().take(PREVIEW_LIMIT).filter_map(|h| d.entity(*h)).map(|e| e.kind.clone()).collect();
+    let src: Vec<Entity> = hs.iter().take(PREVIEW_LIMIT).filter_map(|h| d.entity(*h)).map(|e| (**e).clone()).collect();
     if src.is_empty() {
         return Vec::new();
     }
@@ -261,9 +260,9 @@ fn preview_copies(s: &Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) 
             if out.len() >= PREVIEW_LIMIT {
                 return out;
             }
-            let mut k = k.clone();
-            k.transform(&m);
-            out.push(k);
+            if let Ok(entity) = k.transformed(&cadcraft_geom::Mat4::from_mat3(&m)) {
+                out.push(entity.kind);
+            }
         }
     }
     out

@@ -11,6 +11,7 @@ mod association;
 mod constraint;
 mod entity;
 mod extents;
+mod finite;
 mod gdt;
 mod header;
 mod identity;
@@ -30,6 +31,7 @@ pub use cadcraft_geom as geom;
 pub use constraint::*;
 pub use entity::*;
 pub use extents::{MAX_BLOCK_DEPTH, entity_bounds};
+pub use finite::has_finite_numbers;
 pub use gdt::*;
 pub use header::{HVal, Header};
 pub use plotstyle::*;
@@ -370,6 +372,17 @@ impl Drawing {
         let store = self.space_mut(&sp).ok_or(DocError::NoEntity(h))?;
         if store.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
     }
+    /// Commit one candidate edit only after the operation succeeds.
+    pub fn try_modify_entity<F, T>(&mut self, h: Handle, edit: F) -> Result<T>
+    where
+        F: FnOnce(&mut Entity) -> Result<T>,
+    {
+        let mut candidate = self.entity(h).ok_or(DocError::NoEntity(h))?.as_ref().clone();
+        let result = edit(&mut candidate)?;
+        self.modify_entity(h, |entity| *entity = candidate)?;
+        Ok(result)
+    }
+
     /// Modify a globally unique record in model/layout space or a block definition.
     pub fn modify_entity_including_blocks<F: FnOnce(&mut Entity)>(&mut self, h: Handle, f: F) -> Result<()> {
         if self.space_of(h).is_some() {

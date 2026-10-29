@@ -148,9 +148,10 @@ fn visible_attributes_of_a_missing_block_still_count() {
 
 #[test]
 fn transform_arc_mirror_keeps_shape() {
-    let mut k = EntityKind::Arc(Arc { center: Vec3::ZERO, radius: 1.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 });
-    k.transform(&Mat3::mirror(Vec2::ZERO, Vec2::Y));
-    if let EntityKind::Arc(a) = k {
+    let k = EntityKind::Arc(Arc { center: Vec3::ZERO, radius: 1.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 });
+    let mut entity = Entity::new(Handle(0), k);
+    entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&Mat3::mirror(Vec2::ZERO, Vec2::Y))).unwrap();
+    if let EntityKind::Arc(a) = entity.kind {
         let g = cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end);
         assert!(g.mid_point().near(Vec2::from_angle(3.0 * std::f64::consts::FRAC_PI_4), 1e-9));
     } else {

@@ -70,7 +70,7 @@ fn replace(s: &mut Session, old: &str, new: &str, purge: bool) -> Result<(usize,
     let n = update_reference_entities(d, &old, |e| {
         if let EntityKind::Insert(ins) = &mut e.kind {
             ins.block.clone_from(&blk.name);
-            ins.attribs = synced(&blk, &defs, ins);
+            ins.attribs = synced(&blk, &defs, ins)?;
         }
         // A reference of an annotative block is annotative, as INSERT makes it.
         if !blk.annotative {
@@ -78,7 +78,8 @@ fn replace(s: &mut Session, old: &str, new: &str, purge: bool) -> Result<(usize,
         } else if e.common.anno_scales.is_empty() {
             e.common.anno_scales = vec![scale.clone()];
         }
-    });
+        Ok(())
+    })?;
     let key = d.blocks.keys().find(|k| k.eq_ignore_ascii_case(&old)).cloned();
     let purged = purge && !referenced(d, &old) && key.is_some_and(|k| d.blocks.remove(&k).is_some());
     Ok((n, purged))

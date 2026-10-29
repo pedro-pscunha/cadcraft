@@ -277,6 +277,7 @@ impl Session {
     pub(crate) fn feed(&mut self, input: Option<Input>) -> Result<()> {
         let base = if matches!(input, Some(Input::Point(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
         let Some(mut run) = self.running.take() else { return Ok(()) };
+        let before_step = self.state().ok().map(|state| (state.doc.clone(), state.selection.clone(), state.uid));
         let step = match input {
             Some(Input::Cancel) => Ok(Step::Cancel),
             Some(i) => {
@@ -300,6 +301,13 @@ impl Session {
                 run.machine.begin(self)
             }
         };
+        if step.is_err()
+            && let Some((doc, selection, uid)) = before_step
+            && let Some(state) = self.docs.iter_mut().find(|state| state.uid == uid)
+        {
+            state.doc = doc;
+            state.selection = selection;
+        }
         // Redraw what the command has added so far (LINE adds a segment per point), not only when it ends.
         if let Ok(st) = self.state_mut()
             && !Arc::ptr_eq(&run.before, &st.doc)

@@ -41,6 +41,25 @@ fn a_dimensions_clone_point_moves_its_graphics_into_place() {
 }
 
 #[test]
+fn unsupported_graphics_keep_their_source_data_and_report_the_projection_limit() {
+    let source = shifted_dimension_dxf()
+        .replace("0\nENDBLK", "0\nSHAPE\n5\n99\n8\n0\n100\nAcDbEntity\n100\nAcDbShape\n10\n1000\n20\n5000\n30\n0\n40\n1\n2\nsynthetic\n0\nENDBLK");
+    let drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    check_in_place(&drawing, "known graphics");
+    assert!(drawing.read_notes.iter().any(|note| note.contains("99") && note.contains("unsupported geometry")));
+    let unknown = drawing
+        .blocks
+        .values()
+        .flat_map(|block| block.entities.iter())
+        .find_map(|entity| match &entity.kind {
+            EntityKind::Unknown(unknown) => Some(unknown),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(unknown.tags.iter().find(|tag| tag.code == 10).unwrap().value.parse::<f64>().unwrap().to_bits(), 1000.0_f64.to_bits());
+}
+
+#[test]
 fn the_graphics_stay_in_place_through_dxf_and_dwg_saves() {
     let d = cadcraft_io::read_dxf(shifted_dimension_dxf().as_bytes()).unwrap();
     let dxf = cadcraft_io::write_dxf(&d);

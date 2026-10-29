@@ -64,7 +64,7 @@ fn to_host(to_world: &Mat3, e: &Entity, h: Handle, ghost: bool) -> Result<Entity
     crate::cmd::modify::check_ellipse_transform(e, to_world)?;
     let mut c = e.clone();
     c.handle = h;
-    c.kind.transform(to_world);
+    c.try_transform(&cadcraft_geom::Mat4::from_mat3(to_world))?;
     if ghost {
         c.common.transparency = Transparency::Percent(GHOST_FADE);
     }
@@ -76,7 +76,7 @@ fn to_block(inv: &Mat3, e: &Entity, h: Handle) -> Result<Entity> {
     crate::cmd::modify::check_ellipse_transform(e, inv)?;
     let mut c = e.clone();
     c.handle = h;
-    c.kind.transform(inv);
+    c.try_transform(&cadcraft_geom::Mat4::from_mat3(inv))?;
     Ok(c)
 }
 
