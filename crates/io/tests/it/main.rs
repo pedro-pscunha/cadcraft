@@ -41,6 +41,7 @@ mod entity_normals;
 mod entity_plane_manifest;
 mod entity_props_roundtrip;
 mod entity_subclass_groups;
+mod fill_canonical;
 mod followups_626;
 mod foreign_passthrough;
 mod geometry_snapshot;
@@ -53,6 +54,7 @@ mod header_pointers;
 #[cfg(not(target_arch = "wasm32"))]
 mod heavy_polyline;
 mod helix_roundtrip;
+mod layout_canonical;
 mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;

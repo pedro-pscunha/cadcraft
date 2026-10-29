@@ -48,10 +48,14 @@ mod curves;
 mod dim;
 mod edit;
 mod fill;
+mod fill_canonical;
 mod geometry;
+mod helix_canonical;
 mod layout;
+mod layout_canonical;
 mod mesh;
 mod mleader;
+mod mline_canonical;
 mod text;
 mod text_canonical;
 
@@ -62,7 +66,7 @@ pub use curves::{
     Solid,
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader};
-pub use fill::{Gradient, Hatch, HatchLoop, Wipeout};
+pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutFrame};
 pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};

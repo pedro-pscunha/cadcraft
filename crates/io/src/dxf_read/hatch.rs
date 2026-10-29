@@ -1,5 +1,6 @@
 use super::common::T;
 use super::{Color, EntityKind, Gradient, Handle, Hatch, HatchLoop, PolyVertex, Rgb, Spline, Tag, Vec2};
+use cadcraft_doc::{HatchEdge, HatchSpline};
 
 pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
     let (origin, background) = hatch_xdata(tags);
@@ -24,7 +25,7 @@ pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
             verts.pop();
         }
         let sources = boundary_sources(tags, &mut i);
-        loops.push(HatchLoop { vertices: verts, outer, sources });
+        loops.push(HatchLoop { vertices: verts, outer, sources, ..Default::default() });
     }
     let solid = solid || pattern.eq_ignore_ascii_case("SOLID");
     let (scale, angle) = (t.fd(41, 1.0), t.fd(52, 0.0).to_radians());
@@ -47,6 +48,126 @@ pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
         background,
         pattern_lines,
     }))
+}
+
+/// A HATCH whose loops keep their exact edges (see `HatchLoop::edges`): the hatch the legacy reader makes, with each
+/// loop's vertices replaced by its flags and edges as the record holds them. `None` when an edge is of a kind we do not
+/// model or its data is cut short.
+pub(super) fn exact_hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
+    let EntityKind::Hatch(mut h) = hatch(tags, t)? else { return None };
+    let mut i = tags.iter().position(|x| x.code == 91).map(|i| i + 1)?;
+    for l in &mut h.loops {
+        seek_code(tags, &mut i, 92);
+        let flags = tags.get(i)?.i64();
+        i += 1;
+        l.edges = if flags & 2 != 0 { vec![exact_polyline(tags, &mut i)?] } else { exact_edges(tags, &mut i)? };
+        l.flags = u32::try_from(flags).ok()?;
+        l.vertices.clear();
+        boundary_sources(tags, &mut i);
+    }
+    Some(EntityKind::Hatch(h))
+}
+
+fn exact_polyline(tags: &[Tag], index: &mut usize) -> Option<HatchEdge> {
+    // The closed flag (73) comes between the bulge flag (72) and the vertex count (93).
+    let closed = tags.get(*index..)?.iter().take_while(|g| g.code != 93).find(|g| g.code == 73).is_none_or(|g| g.i64() != 0);
+    Some(HatchEdge::Polyline { vertices: polyline_boundary(tags, index)?, closed })
+}
+
+fn exact_edges(tags: &[Tag], index: &mut usize) -> Option<Vec<HatchEdge>> {
+    seek_code(tags, index, 93);
+    let count = tags.get(*index)?.i64().clamp(0, 1_000_000) as usize;
+    *index += 1;
+    let mut edges = Vec::new();
+    for _ in 0..count {
+        seek_code(tags, index, 72);
+        let kind = tags.get(*index)?.i64();
+        *index += 1;
+        let v = |k: usize| edge_value(tags, *index + k);
+        let point = |k: usize| Vec2::new(v(k), v(k + 1));
+        let flag = |k: usize| tags.get(*index + k).map(Tag::i64).unwrap_or(1) != 0;
+        let edge = match kind {
+            1 => {
+                let edge = HatchEdge::Line { a: point(0), b: point(2) };
+                *index += 4;
+                edge
+            }
+            2 => {
+                let edge = HatchEdge::Arc { center: point(0), radius: v(2), start: v(3).to_radians(), end: v(4).to_radians(), ccw: flag(5) };
+                *index += 6;
+                edge
+            }
+            3 => {
+                let edge = HatchEdge::Ellipse {
+                    center: point(0),
+                    major: point(2),
+                    ratio: v(4),
+                    start: v(5).to_radians(),
+                    end: v(6).to_radians(),
+                    ccw: tags.get(*index + 7).filter(|g| g.code == 73).map(Tag::i64).unwrap_or(1) != 0,
+                };
+                *index += 8;
+                edge
+            }
+            4 => HatchEdge::Spline(exact_spline(tags, index)),
+            _ => return None,
+        };
+        edges.push(edge);
+    }
+    Some(edges)
+}
+
+/// A spline edge's groups after its type: degree (94), rational (73), periodic (74), knot and control counts (95, 96),
+/// the knots (40), the controls (10, with 42 weights when rational), then the fit data (97 count, 11 points, 12 and 13
+/// tangents) when present.
+fn exact_spline(tags: &[Tag], index: &mut usize) -> HatchSpline {
+    let get = |i: usize| tags.get(i);
+    let (mut degree, mut rational, mut periodic, mut knot_count, mut control_count) = (3, false, false, 0, 0);
+    while let Some(tag) = get(*index).filter(|tag| matches!(tag.code, 94 | 73 | 74 | 95 | 96)) {
+        let count = tag.i64().clamp(0, 100_000) as usize;
+        match tag.code {
+            94 => degree = count.min(100) as u32,
+            73 => rational = count != 0,
+            74 => periodic = count != 0,
+            95 => knot_count = count,
+            _ => control_count = count,
+        }
+        *index += 1;
+    }
+    let mut knots = Vec::new();
+    while knots.len() < knot_count && get(*index).is_some_and(|tag| tag.code == 40) {
+        knots.push(edge_value(tags, *index));
+        *index += 1;
+    }
+    let (mut control, mut weights) = (Vec::new(), Vec::new());
+    while control.len() < control_count && get(*index).is_some_and(|tag| tag.code == 10) {
+        control.push(Vec2::new(edge_value(tags, *index), edge_value(tags, *index + 1)));
+        *index += 2;
+        if get(*index).is_some_and(|tag| tag.code == 42) {
+            weights.push(edge_value(tags, *index));
+            *index += 1;
+        }
+    }
+    let mut fit = Vec::new();
+    if get(*index).is_some_and(|tag| tag.code == 97) {
+        let count = get(*index).map(Tag::i64).unwrap_or(0).clamp(0, 100_000) as usize;
+        *index += 1;
+        while fit.len() < count && get(*index).is_some_and(|tag| tag.code == 11) {
+            fit.push(Vec2::new(edge_value(tags, *index), edge_value(tags, *index + 1)));
+            *index += 2;
+        }
+    }
+    let mut tangent = |code: i32| {
+        if get(*index).is_some_and(|tag| tag.code == code) {
+            let t = Vec2::new(edge_value(tags, *index), edge_value(tags, *index + 1));
+            *index += 2;
+            t
+        } else {
+            Vec2::ZERO
+        }
+    };
+    let (start_tangent, end_tangent) = (tangent(12), tangent(13));
+    HatchSpline { degree, rational, periodic, knots, control, weights, fit, start_tangent, end_tangent }
 }
 
 fn seek_code(tags: &[Tag], index: &mut usize, code: i32) {

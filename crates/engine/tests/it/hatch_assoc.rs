@@ -166,7 +166,10 @@ fn hostile_sources_never_panic() {
     let k = EntityKind::Hatch(Hatch {
         pattern: "ANSI31".into(),
         solid: false,
-        loops: vec![HatchLoop { vertices: sq, outer: true, sources: sources.clone() }, HatchLoop { vertices: nan, outer: false, sources }],
+        loops: vec![
+            HatchLoop { vertices: sq, outer: true, sources: sources.clone(), ..Default::default() },
+            HatchLoop { vertices: nan, outer: false, sources, ..Default::default() },
+        ],
         scale: 1.0,
         angle: 0.0,
         associative: true,

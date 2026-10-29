@@ -150,6 +150,9 @@ pub struct TableCell {
 #[serde(rename_all = "camelCase")]
 pub struct Table {
     pub insert: Vec3,
+    /// The table's horizontal direction (DXF group 11, WCS). A canonical table keeps it whole; a legacy one is +X.
+    #[serde(default = "table_x_axis", skip_serializing_if = "is_table_x_axis")]
+    pub dir: Vec3,
     pub col_widths: Vec<f64>,
     pub row_heights: Vec<f64>,
     pub cells: Vec<Vec<TableCell>>,
@@ -172,6 +175,14 @@ pub struct Table {
     /// The CSV file the cells come from (DATALINK).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_link: Option<crate::DataLink>,
+}
+
+fn table_x_axis() -> Vec3 {
+    Vec3::new(1.0, 0.0, 0.0)
+}
+
+fn is_table_x_axis(v: &Vec3) -> bool {
+    *v == table_x_axis()
 }
 
 fn default_text_h() -> f64 {

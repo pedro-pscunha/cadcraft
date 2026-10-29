@@ -173,6 +173,7 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
     }
     Table {
         insert: origin.to3(t.insert.z),
+        dir: t.dir,
         col_widths: t.col_widths.clone(),
         row_heights: rows.iter().map(|r| t.row_heights.get(*r).copied().unwrap_or(0.0)).collect(),
         row_styles: rows.iter().map(|r| t.row_style(*r).to_string()).collect(),

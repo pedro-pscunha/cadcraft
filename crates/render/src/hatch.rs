@@ -594,6 +594,7 @@ mod tests {
             ],
             outer: true,
             sources: vec![],
+            ..Default::default()
         };
         let loop2 = loop1.clone();
         let hatch = Hatch {

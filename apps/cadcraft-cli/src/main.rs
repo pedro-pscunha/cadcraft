@@ -695,7 +695,7 @@ fn perf(args: &[String]) -> Result<(), String> {
     // One edit, then a pick: only the touched chunk is re-indexed.
     let mut edited = d.clone();
     if let Some(h) = edited.model.last().map(|e| e.handle) {
-        edited.model.modify(h, |e| e.common.layer = "0".into());
+        edited.model.modify_metadata(h, |c| c.layer = "0".into()).map_err(|e| e.to_string())?;
     }
     let t = Instant::now();
     let _ = select::pick(&edited, &Space::Model, pts.first().copied().unwrap_or(Vec2::ZERO), ap);

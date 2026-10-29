@@ -238,7 +238,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         EntityKind::MLine(m) => {
             w.s(0, "MLINE");
             common(w, e, owner, paper, "AcDbMline");
-            w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style)));
+            w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style), canonical_plane(e)));
         }
         EntityKind::PolylineMesh(mesh) => polyline_mesh(w, e, owner, paper, mesh),
         EntityKind::Polyline3d(p) => {
@@ -295,10 +295,21 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             }
         }
         EntityKind::Helix(h) => {
-            // A cubic spline through points on the helix, then the helix data (DXF Reference).
+            // A cubic spline through points on the helix, then the helix data (DXF Reference). A canonical helix writes
+            // its own axis and start point and its control points in WCS; one whose frame cannot be built is not written.
+            let (s, controls, start, axis) = match &h.frame {
+                Some(f) => match h.world_spline3() {
+                    Ok((s, controls)) => (s, controls, f.start, f.axis),
+                    Err(_) => return,
+                },
+                None => {
+                    let (s, z) = h.spline3();
+                    let controls = s.control.iter().zip(&z).map(|(c, z)| c.to3(*z)).collect();
+                    (s, controls, h.start_point(), Vec3::Z)
+                }
+            };
             w.s(0, "HELIX");
             common(w, e, owner, paper, "AcDbSpline");
-            let (s, z) = h.spline3();
             w.i(70, 0);
             w.i(71, s.degree as i64);
             w.i(72, s.knots.len() as i64);
@@ -309,15 +320,15 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             for k in &s.knots {
                 w.f(40, *k);
             }
-            for (c, z) in s.control.iter().zip(&z) {
-                w.p(10, c.to3(*z));
+            for c in &controls {
+                w.p(10, *c);
             }
             w.s(100, "AcDbHelix");
             w.i(90, 29);
             w.i(91, 63);
             w.p(10, h.center);
-            w.p(11, h.start_point());
-            w.p(12, Vec3::Z);
+            w.p(11, start);
+            w.p(12, axis);
             w.f(40, h.base_radius);
             w.f(41, h.turns);
             w.f(42, h.turn_height());
@@ -575,11 +586,15 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         common(w, e, owner, paper, "AcDbBlockReference");
         w.s(2, bname);
         w.p(10, t.insert);
+        // A canonical table has the plane of its entity, kept as read.
+        if let Some(normal) = canonical_plane(e) {
+            w.p(210, normal);
+        }
         w.s(100, "AcDbTable");
         w.i(280, 0);
         w.s(342, cx.table_style(&t.style));
         w.s(343, brh);
-        w.p(11, Vec3::new(1.0, 0.0, 0.0));
+        w.p(11, t.dir);
         w.i(90, 0);
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
@@ -692,27 +707,106 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
     }
 }
 
+/// A canonical loop: its flags and exact edges as its record held them (DXF Reference, HATCH group codes 92 to 74).
+fn canonical_loop(w: &mut W, l: &cadcraft_doc::HatchLoop, cx: &Ctx) {
+    use cadcraft_doc::HatchEdge;
+    w.i(92, i64::from(l.flags));
+    if let [HatchEdge::Polyline { vertices, closed }] = l.edges.as_slice() {
+        let has_bulge = vertices.iter().any(|v| v.bulge != 0.0);
+        w.i(72, i64::from(has_bulge));
+        w.i(73, i64::from(*closed));
+        w.i(93, vertices.len() as i64);
+        for v in vertices {
+            w.p2(10, v.p);
+            if has_bulge {
+                w.f(42, v.bulge);
+            }
+        }
+        return;
+    }
+    w.i(93, l.edges.len() as i64);
+    for edge in &l.edges {
+        match edge {
+            HatchEdge::Line { a, b } => {
+                w.i(72, 1);
+                w.p2(10, *a);
+                w.p2(11, *b);
+            }
+            HatchEdge::Arc { center, radius, start, end, ccw } => {
+                w.i(72, 2);
+                w.p2(10, *center);
+                w.f(40, *radius);
+                w.f(50, start.to_degrees());
+                w.f(51, end.to_degrees());
+                w.i(73, i64::from(*ccw));
+            }
+            HatchEdge::Ellipse { center, major, ratio, start, end, ccw } => {
+                w.i(72, 3);
+                w.p2(10, *center);
+                w.p2(11, *major);
+                w.f(40, *ratio);
+                w.f(50, start.to_degrees());
+                w.f(51, end.to_degrees());
+                w.i(73, i64::from(*ccw));
+            }
+            HatchEdge::Spline(sp) => {
+                w.i(72, 4);
+                w.i(94, i64::from(sp.degree));
+                w.i(73, i64::from(sp.rational));
+                w.i(74, i64::from(sp.periodic));
+                w.i(95, sp.knots.len() as i64);
+                w.i(96, sp.control.len() as i64);
+                for k in &sp.knots {
+                    w.f(40, *k);
+                }
+                for (i, c) in sp.control.iter().enumerate() {
+                    w.p2(10, *c);
+                    if sp.rational {
+                        w.f(42, sp.weights.get(i).copied().unwrap_or(1.0));
+                    }
+                }
+                // The fit data count (97) exists from AutoCAD 2010 on, and from a DWG made by the bridge.
+                if cx.target >= Version::R2010 || cx.dwg_bridge {
+                    w.i(97, sp.fit.len() as i64);
+                    for f in &sp.fit {
+                        w.p2(11, *f);
+                    }
+                    if !sp.fit.is_empty() {
+                        w.p2(12, sp.start_tangent);
+                        w.p2(13, sp.end_tangent);
+                    }
+                }
+            }
+            HatchEdge::Polyline { .. } => {}
+        }
+    }
+}
+
 fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     if let EntityKind::Hatch(h) = &e.kind {
         w.s(0, "HATCH");
         common(w, e, owner, paper, "AcDbHatch");
         w.p(10, Vec3::new(0.0, 0.0, h.elevation));
-        w.p(210, Vec3::Z);
+        w.p(210, canonical_plane(e).unwrap_or(Vec3::Z));
         w.s(2, &h.pattern);
         w.i(70, i64::from(h.solid));
         w.i(71, i64::from(h.associative));
         w.i(91, h.loops.len() as i64);
         for l in &h.loops {
-            w.i(92, 2 | if l.outer { 1 } else { 0 });
-            let has_bulge = l.vertices.iter().any(|v| v.bulge != 0.0);
-            w.i(72, i64::from(has_bulge));
-            w.i(73, 1);
-            w.i(93, l.vertices.len() as i64);
-            for v in &l.vertices {
-                w.p2(10, v.p);
-                if has_bulge {
-                    w.f(42, v.bulge);
+            if l.edges.is_empty() {
+                w.i(92, 2 | if l.outer { 1 } else { 0 });
+                let has_bulge = l.vertices.iter().any(|v| v.bulge != 0.0);
+                w.i(72, i64::from(has_bulge));
+                w.i(73, 1);
+                w.i(93, l.vertices.len() as i64);
+                for v in &l.vertices {
+                    w.p2(10, v.p);
+                    if has_bulge {
+                        w.f(42, v.bulge);
+                    }
                 }
+            } else {
+                canonical_loop(w, l, cx);
             }
             // Source boundary objects of an associative hatch (the ones still beside it, in
             // its space or block, which carry the hatch as a reactor).
@@ -803,8 +897,33 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
     }
 }
 
+/// A canonical wipeout: the image frame and the clip as its record held them, with no closing vertex added.
+fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &cadcraft_doc::WipeoutFrame) {
+    w.s(0, "WIPEOUT");
+    common(w, e, owner, paper, "AcDbWipeout");
+    w.i(90, 0);
+    w.p(10, f.origin);
+    w.p(11, f.u);
+    w.p(12, f.v);
+    w.p2(13, f.size);
+    w.i(70, 7);
+    w.i(280, 1);
+    w.i(281, 50);
+    w.i(282, 50);
+    w.i(283, 0);
+    w.i(71, i64::from(f.clip_type));
+    w.i(91, f.clip.len() as i64);
+    for q in &f.clip {
+        w.p2(14, *q);
+    }
+}
+
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
+        if let Some(frame) = &wo.frame {
+            write_canonical_wipeout(w, e, owner, paper, frame);
+            return;
+        }
         // A 1x1 image spanning the boundary's extents. Clip vertices are in pixel space, whose origin is
         // the image's top-left corner with y pointing down: the reader maps each vertex back through
         // insert + u * (x + 0.5) + v * (0.5 - y).
@@ -848,6 +967,9 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.p(10, t.insert);
             w.s(1, &t.text);
             w.p(11, t.dir);
+            if let Some(normal) = canonical_plane(e) {
+                w.p(210, normal);
+            }
         }
         // Entity types CADCraft doesn't model aren't written; the save command reports them.
         EntityKind::Unknown(_) => {}

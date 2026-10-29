@@ -244,19 +244,14 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             let v = t.p(12);
             // Clip vertices are in pixel space: origin at the image's top-left corner, y pointing down.
             let pts: Vec<Vec2> = t.pts(14).into_iter().map(|q| o.xy() + u.xy() * (q.x + 0.5) + v.xy() * (0.5 - q.y)).collect();
-            EntityKind::Wipeout(Wipeout { boundary: pts })
+            EntityKind::Wipeout(Wipeout { boundary: pts, frame: None })
         }
         // The file path comes from the IMAGEDEF object (`dxf_image::resolve`).
         "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
         "TOLERANCE" => {
             let dir = t.p(11);
             let dir = if dir.xy().is_finite() && dir.xy().len() > 1e-12 { dir } else { Vec3::new(1.0, 0.0, 0.0) };
-            EntityKind::Tolerance(Tolerance {
-                insert: t.p(10),
-                dir,
-                style: t.s(3).unwrap_or_else(|| "Standard".into()),
-                text: t.s(1).unwrap_or_default().chars().take(MAX_FRAME_CHARS).collect(),
-            })
+            EntityKind::Tolerance(tolerance_from(&t, dir))
         }
         other => EntityKind::Unknown(Unknown {
             dxf_type: other.to_string(),
@@ -264,6 +259,16 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
         }),
     };
     Some((c, k))
+}
+
+/// A TOLERANCE from its groups, with the frame direction `dir`.
+pub(super) fn tolerance_from(t: &T, dir: Vec3) -> Tolerance {
+    Tolerance {
+        insert: t.p(10),
+        dir,
+        style: t.s(3).unwrap_or_else(|| "Standard".into()),
+        text: t.s(1).unwrap_or_default().chars().take(MAX_FRAME_CHARS).collect(),
+    }
 }
 
 /// An ACAD_TABLE entity: sizes, cell texts and merges (DXF Reference), plus CADCraft's
@@ -622,20 +627,27 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
     attribs
 }
 
-/// A HELIX (DXF Reference): the axis base point, start point, axis, radius, turns, turn height,
-/// handedness and constraint after the AcDbHelix marker; the top radius is how far the end of its
-/// spline (AcDbSpline: the last control point, else fit point) lies from the axis.
-fn helix(tags: &[Tag]) -> Helix {
+/// The last point of a HELIX's spline (AcDbSpline: the last control point, else fit point), from the record's groups.
+pub(super) fn helix_spline_end(tags: &[Tag]) -> Option<Vec3> {
     let hs = tags.iter().position(|t| t.code == 100 && t.str() == "AcDbHelix").unwrap_or(tags.len());
     let ss = tags.iter().position(|t| t.code == 100 && t.str() == "AcDbSpline").unwrap_or(0).min(hs);
     let spline = tags.get(ss..hs).unwrap_or(&[]);
-    let t = T(tags.get(hs..).unwrap_or(&[]));
     // The last point of the spline (3D) with group `code`.
     let last = |code: i32| {
         let i = spline.iter().rposition(|g| g.code == code)?;
         let f = |c: i32| spline.get(i..).and_then(|r| r.iter().find(|g| g.code == c)).map(Tag::f64).unwrap_or(0.0);
         Some(Vec3::new(f(code), f(code + 10), f(code + 20)))
     };
+    last(10).or_else(|| last(11))
+}
+
+/// A HELIX (DXF Reference): the axis base point, start point, axis, radius, turns, turn height,
+/// handedness and constraint after the AcDbHelix marker; the top radius is how far the end of its
+/// spline (AcDbSpline: the last control point, else fit point) lies from the axis.
+pub(super) fn helix(tags: &[Tag]) -> Helix {
+    let hs = tags.iter().position(|t| t.code == 100 && t.str() == "AcDbHelix").unwrap_or(tags.len());
+    let t = T(tags.get(hs..).unwrap_or(&[]));
+    let end = helix_spline_end(tags);
     let center = t.p(10);
     let start = t.p(11);
     let axis = t.p(12);
@@ -648,7 +660,6 @@ fn helix(tags: &[Tag]) -> Helix {
     };
     let base_radius = t.f(40).filter(|r| r.is_finite() && *r >= 0.0).unwrap_or_else(|| radius(start));
     let turns = t.fd(41, 1.0);
-    let end = last(10).or_else(|| last(11));
     let height = match (t.f(42), end) {
         (Some(th), _) if th.is_finite() => th * turns,
         (_, Some(e)) => e.z - center.z,
@@ -663,6 +674,7 @@ fn helix(tags: &[Tag]) -> Helix {
         start_angle: center.xy().angle_to(start.xy()),
         ccw: t.i(290).unwrap_or(1) != 0,
         constrain: HelixConstrain::from_dxf(t.i(280).unwrap_or(2)),
+        frame: None,
     }
     .sanitized()
 }

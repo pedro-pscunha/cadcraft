@@ -145,16 +145,25 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(s, "MLEADER{:?}{plane:?}", (roots, m.context, m.spline, text, block));
         }
         EntityKind::Table(t) => {
-            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, &t.row_heights, &t.col_widths));
+            // The layout geometry: direction, sizes, the merged spans and the cells' own text heights; not the cell text.
+            let cells: Vec<Vec<_>> = t.cells.iter().map(|row| row.iter().map(|c| (c.merged, c.text_height)).collect()).collect();
+            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, t.dir, &t.row_heights, &t.col_widths, cells));
         }
         EntityKind::Tolerance(t) => {
             let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
+        }
+        EntityKind::MLine(m) => {
+            // The vertices with their cuts and canonical frames (direction, miter, element parameters), the offset
+            // scale, the justification, the closure and the cap switches; not the style's elements and caps.
+            let vertices: Vec<_> = m.vertices.iter().map(|v| (v.p, &v.cuts, &v.frame)).collect();
+            let _ = write!(s, "MLINE{:?}{plane:?}", (vertices, m.scale, m.justification.to_dxf(), m.closed, m.no_start_caps, m.no_end_caps));
         }
         EntityKind::Helix(h) => {
             let _ = write!(s, "HELIX{h:?}{plane:?}");
         }
         EntityKind::Wipeout(w) => {
-            let _ = write!(s, "WIPEOUT{:?}{plane:?}", w.boundary);
+            // The legacy outline, or the canonical image frame: origin, U and V, size, clip type and clip vertices.
+            let _ = write!(s, "WIPEOUT{:?}{plane:?}", (&w.boundary, &w.frame));
         }
         EntityKind::Spline(c) => {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
@@ -164,7 +173,8 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         }
         EntityKind::Hatch(h) => {
             // The boundary objects (`sources`) are references, not geometry.
-            let loops: Vec<_> = h.loops.iter().map(|l| (&l.vertices, l.outer)).collect();
+            // A canonical loop also has its record flags and exact edges.
+            let loops: Vec<_> = h.loops.iter().map(|l| (&l.vertices, l.outer, l.flags, &l.edges)).collect();
             let _ = write!(s, "HATCH{:?}{plane:?}", (&h.pattern, h.solid, loops, h.scale, h.angle, h.style, h.elevation, h.origin, &h.pattern_lines));
         }
         _ => return None,

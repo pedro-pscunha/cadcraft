@@ -54,6 +54,19 @@ pub struct Helix {
     pub ccw: bool,
     #[serde(default)]
     pub constrain: HelixConstrain,
+    /// The axis and start point of a canonical helix, as its record holds them (see [`HelixFrame`]). When it is set the
+    /// helix is `CanonicalV2`: `center` is the WCS axis base point, `start_angle` is unused and the heights run along
+    /// the axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<HelixFrame>,
+}
+
+/// The WCS axis vector (DXF group 12, kept with its source magnitude) and start point (group 11) of a canonical HELIX.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelixFrame {
+    pub axis: Vec3,
+    pub start: Vec3,
 }
 
 fn yes() -> bool {
