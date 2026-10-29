@@ -374,3 +374,102 @@ fn layer_xdata_the_model_does_not_reproduce_is_kept_and_the_rest_written_once() 
         assert_eq!(strings(&opaque, "AcAecLayerStandard"), ["", ""]);
     }
 }
+
+/// A file where the active VPORT and a paper space viewport each own a SUN (hard-owned objects
+/// that group 361 of their owner points at).
+fn suns() -> String {
+    let sun = |handle: &'static str, owner: &'static str| {
+        vec![
+            (0, "SUN"),
+            (5, handle),
+            (330, owner),
+            (100, "AcDbSun"),
+            (90, "1"),
+            (290, "0"),
+            (63, "7"),
+            (40, "1"),
+            (291, "1"),
+            (91, "2455826"),
+            (92, "54000000"),
+            (292, "0"),
+            (70, "2"),
+            (71, "256"),
+            (280, "1"),
+        ]
+    };
+    let mut g: Vec<(i32, &str)> = vec![
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "VPORT"),
+        (70, "1"),
+        (0, "VPORT"),
+        (5, "70"),
+        (100, "AcDbSymbolTableRecord"),
+        (100, "AcDbViewportTableRecord"),
+        (2, "*Active"),
+        (70, "0"),
+        (10, "0"),
+        (20, "0"),
+        (11, "1"),
+        (21, "1"),
+        (12, "50"),
+        (22, "50"),
+        (40, "100"),
+        (41, "1.6"),
+        (361, "71"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "VIEWPORT"),
+        (5, "40"),
+        (100, "AcDbEntity"),
+        (67, "1"),
+        (8, "0"),
+        (100, "AcDbViewport"),
+        (10, "50"),
+        (20, "40"),
+        (30, "0"),
+        (40, "80"),
+        (41, "60"),
+        (68, "2"),
+        (69, "2"),
+        (12, "10"),
+        (22, "10"),
+        (45, "50"),
+        (90, "32768"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "OBJECTS"),
+        (0, "DICTIONARY"),
+        (5, "C"),
+        (330, "0"),
+        (100, "AcDbDictionary"),
+    ];
+    g.extend(sun("71", "70"));
+    g.extend(sun("72", "40"));
+    g.extend([(0, "ENDSEC"), (0, "EOF")]);
+    dxf(&g)
+}
+
+/// A SUN stays with the active VPORT or the viewport that owns it, and its owner points at it. A
+/// DWG keeps the VPORT's link; acadrust's DXF reader has no group 361 for a viewport entity.
+#[test]
+fn suns_stay_linked_to_their_vport_and_viewport() {
+    let d = cadcraft_io::read_dxf(suns().as_bytes()).unwrap();
+    for (i, text) in saved_twice(&d).into_iter().enumerate() {
+        let objs = section(&text, "OBJECTS");
+        let suns: Vec<&Vec<Tag>> = objs.iter().filter(|(k, _)| k == "SUN").map(|(_, t)| t).collect();
+        assert_eq!(suns.len(), 2, "{text}");
+        let owned_by = |owner: &str| suns.iter().find(|t| val(t, 330) == owner).map(|t| val(t, 5));
+        let vport =
+            section(&text, "TABLES").into_iter().find(|(k, t)| k == "VPORT" && val(t, 2).eq_ignore_ascii_case("*Active")).map(|(_, t)| t).unwrap();
+        assert_eq!(Some(val(&vport, 361)), owned_by(&val(&vport, 5)), "the VPORT points at its sun: {text}");
+        if i == 0 {
+            let ents = section(&text, "ENTITIES");
+            let viewport = ents.iter().find(|(k, t)| k == "VIEWPORT" && val(t, 5) == "40").map(|(_, t)| t.clone()).expect("the viewport");
+            assert_eq!(Some(val(&viewport, 361)), owned_by("40"), "the viewport points at its sun: {text}");
+        }
+    }
+}

@@ -375,6 +375,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
     let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
+    let viewports: HashSet<String> =
+        blocks.iter().chain(&entities).filter(|(k, _, _)| k == "VIEWPORT").filter_map(|(_, _, t)| head(t).handle).collect();
     let scan = Scan {
         objects: &objects,
         entities: &ents,
@@ -383,6 +385,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         root_entries: &root_entries,
         xdict_of: &xdict_of,
         modelled_assoc: &modelled_assoc,
+        viewports: &viewports,
     };
     let memo = retained_objects(&scan);
     let mut f = Foreign::default();
@@ -434,6 +437,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             f.records.entry(key).or_insert(x);
         }
     }
+    link_suns(&mut f, &viewports, &ids);
     // The classes of kept objects and of entities of types CADCraft doesn't model.
     let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
     types.extend(all_entities(d).filter_map(|e| match &e.kind {
@@ -496,6 +500,22 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
 }
 
+/// A sun is hard-owned by the viewport or VPORT record it lights, which points at it (group 361).
+/// The owner is written from the model, so the link is rebuilt from the sun's owner (a DWG's
+/// viewport entity has none in its DXF text).
+fn link_suns(f: &mut Foreign, viewports: &HashSet<String>, ids: &HashMap<String, ForeignKey>) {
+    let owner_of = |o: &ForeignObject| cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())));
+    let suns: Vec<(Handle, RawTag)> =
+        f.objects.iter().filter(|o| up(&o.kind) == "SUN").filter_map(|o| Some((owner_of(o)?, RawTag { code: 361, value: o.handle.hex() }))).collect();
+    for (owner, link) in suns {
+        if viewports.contains(&owner.hex()) {
+            f.entities.entry(owner).or_default().props.push(link);
+        } else if let Some(key) = ids.get(&owner.hex()).filter(|k| k.0 == "VPORT") {
+            f.records.entry(key.clone()).or_default().props.push(link);
+        }
+    }
+}
+
 fn entity_types(drawing: &Drawing) -> HashMap<String, bool> {
     let mut types = HashMap::new();
     for entity in all_entities(drawing) {
@@ -540,9 +560,16 @@ struct Scan<'a> {
     /// Extension dictionaries: owner → dictionary.
     xdict_of: &'a HashMap<String, String>,
     modelled_assoc: &'a HashSet<String>,
+    /// The viewport entities of the file.
+    viewports: &'a HashSet<String>,
 }
 
 impl Scan<'_> {
+    /// Whether `owner` is a viewport or a VPORT record, which hard-own a SUN (and write group 361).
+    fn sun_owner(&self, owner: &str) -> bool {
+        self.viewports.contains(owner) || self.records.get(owner).is_some_and(|key| key.0 == "VPORT")
+    }
+
     /// Whether object `index` is the extension dictionary of something CADCraft writes itself: an
     /// entity, a table record or block, or an object of [`MODELLED_OBJECTS`] (not of another object).
     fn is_xdict(&self, index: usize) -> bool {
@@ -576,7 +603,7 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 break false;
             }
             path.push(current);
-            let Some((_, _, tags)) = objects.get(current) else { break false };
+            let Some((kind, _, tags)) = objects.get(current) else { break false };
             let header = head(tags);
             let (Some(handle), Some(owner)) = (header.handle, header.owner) else { break false };
             if by_handle.get(&handle) != Some(&current) {
@@ -595,7 +622,7 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 current = parent;
                 continue;
             }
-            break entities.get(&owner) == Some(&true);
+            break entities.get(&owner) == Some(&true) || (kind == "SUN" && scan.sun_owner(&owner));
         };
         for visited in path {
             retained.insert(visited, keep);
@@ -1078,6 +1105,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             attached.insert(dictionary);
         }
     }
+    // The viewports written: a kept SUN hangs on one of them (or on a written VPORT record).
+    let viewports: HashSet<String> =
+        all_entities(d).filter(|e| matches!(e.kind, EntityKind::Viewport(_))).map(|e| e.handle.hex()).filter(|h| written.contains(h)).collect();
     // Which kept objects are written: those whose owner chain ends at a written owner.
     let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
     let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
@@ -1107,7 +1137,10 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             if attached.contains(&cur) {
                 break true;
             }
-            break unknown.contains(&owner) && written.contains(&owner);
+            let sun = o.kind.eq_ignore_ascii_case("SUN")
+                && (viewports.contains(&owner)
+                    || handle(&owner).and_then(|h| f.targets.get(&h)).is_some_and(|key| key.0 == "VPORT" && roles.contains_key(key)));
+            break (unknown.contains(&owner) && written.contains(&owner)) || sun;
         };
         for p in path {
             alive_memo.insert(p, verdict);
@@ -1251,8 +1284,9 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
-    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata.
-    let props_at = if entity {
+    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
+    // groups, such as the sun it points at, follow its AcDbViewport groups).
+    let props_at = if entity && r.kind != "VIEWPORT" {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
