@@ -200,4 +200,3 @@ fn dimstyle_fidelity_true_colors_survive_dwg() {
         assert_eq!(back.dim_style("RGB"), Some(&st), "{version:?}");
     }
 }
-
