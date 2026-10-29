@@ -1326,6 +1326,14 @@ fn release_form(kind: &str, release: u32) -> Option<u32> {
     }
 }
 
+/// The form a constraint group record has, by its groups: the DWG bridge writes the registry layout (1) whatever the
+/// release, and AutoCAD below 2013 writes each node's class name (group 1) followed by its owner (330), the inline
+/// layout (0).
+fn constraint_group_form(record: &[Tag]) -> u32 {
+    let inline = record.iter().skip_while(|t| t.code != 1).nth(1).is_some_and(|t| t.code == 330);
+    u32::from(!inline)
+}
+
 /// The kept records that were written for release `source` and are not in the form of release `target` (both
 /// `$ACADVER` numbers) are written again in that form, by acadrust. A record that is already in it stays as it
 /// is, and so does one acadrust does not read. The DWG bridge's embedded entity bytes say their own release in
@@ -1339,7 +1347,8 @@ pub(crate) fn reform_for_version(tags: &mut Vec<Tag>, source: u32, target: u32) 
         let record = tags.get(start..end).unwrap_or_default();
         let kind = record.first().map(|t| up(&t.str())).unwrap_or_default();
         let from = record.iter().find(|t| t.code == 455).map_or(source, |t| u32::try_from(t.i64()).unwrap_or(source));
-        let reformed = (release_form(&kind, from) != release_form(&kind, target) && release_form(&kind, target).is_some())
+        let have = if kind == "ACDBASSOC2DCONSTRAINTGROUP" { Some(constraint_group_form(record)) } else { release_form(&kind, from) };
+        let reformed = (have != release_form(&kind, target) && release_form(&kind, target).is_some())
             .then(|| {
                 let groups: Vec<(i32, String)> = record.iter().map(|t| (t.code, t.str())).collect();
                 cadcraft_dwg::reform_object(&kind, &groups, &format!("AC{from}"), &format!("AC{target}"))
@@ -1881,4 +1890,21 @@ fn seed(tags: &[Tag]) -> u64 {
 /// The largest handle of a record (groups 5 and 105).
 fn max_handle(tags: &[Tag]) -> u64 {
     tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| Handle::parse_hex(&t.str())).map(|h| h.0).max().unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_constraint_group_form_is_told_by_its_groups_not_by_the_release() {
+        let record = |tags: &[(i32, &str)]| tags.iter().map(|(c, v)| Tag::s(*c, *v)).collect::<Vec<_>>();
+        // AutoCAD below 2013: each node's class name is followed by its owner.
+        let inline = record(&[(0, "ACDBASSOC2DCONSTRAINTGROUP"), (90, "40"), (90, "1"), (1, "AcFixedConstraint"), (330, "5"), (90, "1")]);
+        // The DWG bridge, and AutoCAD from 2013: the class names are listed with their ids.
+        let registry = record(&[(0, "ACDBASSOC2DCONSTRAINTGROUP"), (90, "40"), (90, "1"), (1, "AcFixedConstraint"), (90, "1"), (70, "0")]);
+        assert_eq!((constraint_group_form(&inline), constraint_group_form(&registry)), (0, 1));
+        assert_eq!((release_form("ACDBASSOC2DCONSTRAINTGROUP", 1024), release_form("ACDBASSOC2DCONSTRAINTGROUP", 1027)), (Some(0), Some(1)));
+        assert_eq!(release_form("LINE", 1032), None);
+    }
 }
