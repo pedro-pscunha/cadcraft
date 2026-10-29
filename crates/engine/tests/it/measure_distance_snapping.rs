@@ -37,12 +37,15 @@ fn viewport(d: &Drawing, paper: &Space) -> Handle {
     d.space(paper).unwrap().iter().find(|e| matches!(e.kind, EntityKind::Viewport(_))).unwrap().handle
 }
 
+/// Installs the edited viewport as an input record: the malformed cases (NaN, infinite sizes)
+/// are drawings a file can hold, which a runtime edit refuses to create.
 fn edit_viewport(d: &mut Drawing, paper: &Space, edit: impl FnOnce(&mut Viewport)) {
-    d.modify_entity(viewport(d, paper), |e| match &mut e.kind {
+    let mut e = d.entity(viewport(d, paper)).unwrap().as_ref().clone();
+    match &mut e.kind {
         EntityKind::Viewport(vp) => edit(vp),
         _ => panic!("viewport fixture"),
-    })
-    .unwrap();
+    }
+    d.space_mut(paper).unwrap().push(e);
 }
 
 fn session(d: Drawing) -> Session {
