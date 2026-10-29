@@ -1,5 +1,7 @@
 use super::blocks::table_size;
-use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
+use super::common::{
+    attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, plot_style_xdata, text_tags,
+};
 use super::ctx::Ctx;
 use super::layout::paper_view;
 use super::{
@@ -44,6 +46,7 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     write_viewport_entity(w, d, e, owner, paper, cx);
     write_wipeout_entity(w, d, e, owner, paper, cx);
     write_other_entity(w, d, e, owner, paper, cx);
+    plot_style_xdata(w, &e.common.plot_style, start);
     let mut top_level = false;
     let mut handles = Vec::new();
     for tag in w.t.get(start..).unwrap_or_default() {
@@ -378,6 +381,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
         if !i.attribs.is_empty() {
             for a in &i.attribs {
                 let ah = w.attribute_handle(a.handle);
+                let start = w.t.len();
                 w.s(0, "ATTRIB");
                 w.s(5, ah);
                 w.s(330, e.handle.hex());
@@ -394,6 +398,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }
+                plot_style_xdata(w, &c.plot_style, start);
             }
             let sh = w.h();
             w.s(0, "SEQEND");

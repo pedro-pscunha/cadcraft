@@ -409,6 +409,18 @@ pub(super) fn plot_style_names(secs: &[cadcraft_dxf::Section]) -> HashMap<String
 /// The plot style an entity record names among its AcDbEntity groups: ByBlock (group 380 = 1), the
 /// dictionary default (380 = 2) or the named style its placeholder (group 390) stands for.
 pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
+    let mut own = false;
+    for (i, tag) in tags.iter().enumerate() {
+        if tag.code == 1001 {
+            own = tag.str() == crate::dxf_ext::APP;
+        } else if own
+            && tag.code == 1000
+            && tag.str() == "PLOTSTYLE"
+            && let Some(value) = tags.get(i + 1).filter(|t| t.code == 1070 && matches!(t.i64(), 1 | 2))
+        {
+            return Some(if value.i64() == 1 { "ByBlock" } else { "ByDictionaryDefault" }.into());
+        }
+    }
     let mut in_entity = false;
     for t in tags {
         if t.code == 100 {

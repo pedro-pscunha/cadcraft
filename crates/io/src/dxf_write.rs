@@ -42,6 +42,7 @@ use sections::tags_for;
 #[derive(Default)]
 struct W {
     t: Vec<Tag>,
+    dwg_bridge: bool,
     next: u64,
     first: u64,
     used: HashSet<Handle>,
@@ -68,6 +69,7 @@ impl W {
         tests::SCANNED.with(|count| count.set(count.get().saturating_add(used.len())));
         Self {
             t: Vec::new(),
+            dwg_bridge: false,
             next: first,
             first,
             used,

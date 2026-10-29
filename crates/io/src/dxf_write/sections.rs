@@ -883,7 +883,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     }
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
-    let mut w = W { reactors: hatch_reactors(d), ..W::new(d) };
+    let mut w = W { reactors: hatch_reactors(d), dwg_bridge, ..W::new(d) };
     // Pre-allocate handles for block records.
     let paper_layouts = d.paper_space_layouts();
     let ms_br = w.h();
