@@ -3,7 +3,7 @@ use cadcraft_engine::doc::{EntityKind, Handle};
 use serde_json::json;
 
 #[test]
-fn geometry_edits_decurve_a_fitted_polyline_without_restoring_its_old_control_points() {
+fn whole_polyline_edits_keep_the_source_fit() {
     let source = b"0\nSECTION\n2\nENTITIES\n0\nPOLYLINE\n5\n100\n8\n0\n70\n4\n75\n6\n0\nVERTEX\n10\n0\n20\n0\n70\n16\n0\nVERTEX\n10\n10\n20\n0\n70\n16\n0\nVERTEX\n10\n0\n20\n0\n70\n8\n0\nVERTEX\n10\n5\n20\n3\n70\n8\n0\nVERTEX\n10\n10\n20\n0\n70\n8\n0\nSEQEND\n0\nENDSEC\n0\nEOF\n";
     for (command, parameters) in [
         ("move", json!({"handles": ["100"], "from": [0, 0], "to": [3, 4]})),
@@ -18,7 +18,10 @@ fn geometry_edits_decurve_a_fitted_polyline_without_restoring_its_old_control_po
             let drawing = cadcraft_io::read(&bytes, format).unwrap();
             let EntityKind::LwPolyline(polyline) = &drawing.entity(Handle(0x100)).unwrap().kind else { panic!("polyline") };
             assert!(polyline.heavy);
-            assert!(polyline.fit.is_none(), "{command}: {format}");
+            let fit = polyline.saved_fit().unwrap_or_else(|| panic!("{command}: {format}: lost fit"));
+            assert_eq!(fit.flags, 4);
+            assert_eq!(fit.smooth_type, 6);
+            assert_eq!(fit.vertices.iter().map(|v| v.flags).collect::<Vec<_>>(), vec![16, 16, 8, 8, 8]);
             assert_eq!(polyline.vertices.len(), 3, "{command}: {format}");
         }
     }

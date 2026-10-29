@@ -1,6 +1,6 @@
 use super::{
-    EntityKind, Handle, Input, Interactive, LwPolyline, Mat3, PolyVertex, Prompt, Result, SelOutcome, SelectPhase, Session, Space, Step, Value,
-    curves, json, lwpoly, other, set_kind, str_param, targets,
+    EntityKind, Handle, Input, Interactive, Mat3, PolyVertex, Prompt, Result, SelOutcome, SelectPhase, Session, Space, Step, Value, curves, json,
+    lwpoly, other, set_kind, str_param, targets,
 };
 
 // =====================================================================================
@@ -10,7 +10,7 @@ use super::{
 pub(crate) fn reverse_kind(k: &EntityKind) -> Option<EntityKind> {
     Some(match k {
         EntityKind::Line(l) => EntityKind::Line(cadcraft_doc::Line { a: l.b, b: l.a }),
-        EntityKind::LwPolyline(p) => EntityKind::LwPolyline(LwPolyline { vertices: curves::reverse_vertices(&p.vertices, p.closed), ..p.clone() }),
+        EntityKind::LwPolyline(p) => EntityKind::LwPolyline(curves::reverse_polyline(p)),
         EntityKind::Polyline3d(p) => {
             EntityKind::Polyline3d(cadcraft_doc::Polyline3d { points: p.points.iter().rev().copied().collect(), closed: p.closed })
         }

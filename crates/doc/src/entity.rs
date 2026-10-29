@@ -314,17 +314,7 @@ impl EntityKind {
                     }
                 }
             }
-            EntityKind::LwPolyline(p) => {
-                for v in &mut p.vertices {
-                    v.p = m.apply(v.p);
-                    v.start_width *= s;
-                    v.end_width *= s;
-                    if mirror {
-                        v.bulge = -v.bulge;
-                    }
-                }
-                p.const_width *= s;
-            }
+            EntityKind::LwPolyline(p) => p.transform(m),
             EntityKind::Polyline3d(p) => p.points.iter_mut().for_each(t3),
             EntityKind::Spline(sp) => sp.transform(m),
             EntityKind::Helix(h) => {
