@@ -46,6 +46,8 @@ fn explode_mtext(e: &Entity, m: &cadcraft_doc::MText) -> Vec<Entity> {
                     style: m.style.clone(),
                     halign: Default::default(),
                     valign: Default::default(),
+                    backward: false,
+                    upside_down: false,
                 }),
             }
         })
@@ -126,6 +128,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
+                direction: None,
             }),
         });
     }

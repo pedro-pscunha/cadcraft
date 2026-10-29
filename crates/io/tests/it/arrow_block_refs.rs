@@ -57,6 +57,7 @@ fn mleader() -> MLeader {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         }),
         style: "NoArrow".into(),
         arrow_size: 0.3,

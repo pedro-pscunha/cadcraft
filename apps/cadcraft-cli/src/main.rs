@@ -602,6 +602,8 @@ fn synthetic(n: usize, side: f64) -> Result<cadcraft_engine::doc::Drawing, Strin
                 style: "Standard".into(),
                 halign: d::HAlign::Left,
                 valign: d::VAlign::Baseline,
+                backward: false,
+                upside_down: false,
             }),
         };
         dr.add(&Space::Model, Common::default(), kind).map_err(|e| e.to_string())?;

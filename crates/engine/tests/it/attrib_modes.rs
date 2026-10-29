@@ -22,6 +22,8 @@ fn references_take_lock_position_from_the_definition() {
         style: "Standard".into(),
         halign: Default::default(),
         valign: Default::default(),
+        backward: false,
+        upside_down: false,
     };
     let modes = AttribModes { verify: true, preset: true, lock_position: true };
     let def = Attrib { prompt: "Mark".into(), modes, ..Attrib::new("MARK", text) };

@@ -20,6 +20,8 @@ fn text(value: &str) -> EntityKind {
         style: "Standard".into(),
         halign: Default::default(),
         valign: Default::default(),
+        backward: false,
+        upside_down: false,
     })
 }
 

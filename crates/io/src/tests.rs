@@ -43,6 +43,8 @@ fn sample() -> Drawing {
             style: "Standard".into(),
             halign: HAlign::Left,
             valign: VAlign::Baseline,
+            backward: false,
+            upside_down: false,
         }),
     )
     .unwrap();
@@ -60,6 +62,7 @@ fn sample() -> Drawing {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         }),
     )
     .unwrap();
@@ -275,6 +278,8 @@ fn block_definition_properties_and_constant_attdefs_roundtrip() {
         style: "Standard".into(),
         halign: HAlign::Left,
         valign: VAlign::Baseline,
+        backward: false,
+        upside_down: false,
     };
     let attdef = |tag: &str, invisible: bool, constant: bool| Attrib { invisible, constant, ..Attrib::new(tag, text.clone()) };
     for (i, a) in [attdef("COMPANY", false, true), attdef("SECRET", true, true), attdef("SHEET", false, false)].into_iter().enumerate() {
@@ -1468,6 +1473,8 @@ fn intl_text(value: &str) -> Text {
         style: "Standard".into(),
         halign: HAlign::Left,
         valign: VAlign::Baseline,
+        backward: false,
+        upside_down: false,
     }
 }
 
@@ -1492,6 +1499,7 @@ fn intl_sample() -> Drawing {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            direction: None,
         }),
     )
     .unwrap();
@@ -1713,6 +1721,7 @@ fn mleader_is_written_as_multileader() {
         line_spacing: 1.0,
         line_spacing_exact: false,
         columns: None,
+        direction: None,
     };
     let m = cadcraft_doc::MLeader {
         roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::new(10.0, 5.0, 0.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],
@@ -1747,6 +1756,8 @@ fn attdef_prompt_survives_dxf_roundtrip() {
         style: "Standard".into(),
         halign: HAlign::Left,
         valign: VAlign::Baseline,
+        backward: false,
+        upside_down: false,
     };
     let attdef = |prompt: &str| EntityKind::AttDef(Attrib { prompt: prompt.into(), ..Attrib::new("TAG1", text.clone()) });
     d.add(&Space::Model, Default::default(), attdef("Enter value")).unwrap();
