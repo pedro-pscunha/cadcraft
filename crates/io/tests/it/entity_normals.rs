@@ -84,6 +84,15 @@ fn an_ellipse_plane_and_numeric_bits_survive_two_dwg_saves() {
 }
 
 #[test]
+fn a_thin_ellipse_retains_its_exact_source_ratio() {
+    let mut tags = cadcraft_dxf::parse(&ellipse_source([-1e-9, 0.0, -1.0])).unwrap();
+    *tags.iter_mut().find(|t| t.code == 40).unwrap() = Tag::f(40, 1e-12);
+    let source = cadcraft_dxf::write_ascii(&tags);
+    let drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert_geometry(&ellipse_tags(source.as_bytes()), &ellipse_tags(cadcraft_io::write_dxf(&drawing).as_bytes()));
+}
+
+#[test]
 fn an_ellipse_property_edit_keeps_source_geometry() {
     let source = ellipse_source([-1e-9, 0.0, -1.0]);
     let mut drawing = cadcraft_io::read_dxf(&source).unwrap();

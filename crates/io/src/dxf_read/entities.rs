@@ -26,14 +26,7 @@ fn arc(c: &Common, t: &T) -> Arc {
 }
 
 fn ellipse(c: &Common, t: &T) -> Ellipse {
-    Ellipse {
-        center: t.p(10),
-        major: t.p(11),
-        normal: c.extrusion,
-        ratio: t.fd(40, 1.0).clamp(1e-9, 1.0),
-        start: t.fd(41, 0.0),
-        end: t.fd(42, std::f64::consts::TAU),
-    }
+    Ellipse { center: t.p(10), major: t.p(11), normal: c.extrusion, ratio: t.fd(40, 1.0), start: t.fd(41, 0.0), end: t.fd(42, std::f64::consts::TAU) }
 }
 
 /// A LWPOLYLINE, or the region CADCraft wrote as one.

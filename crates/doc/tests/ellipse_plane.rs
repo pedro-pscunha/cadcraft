@@ -25,6 +25,16 @@ fn projected_ellipse_endpoints_follow_the_source_plane() {
 }
 
 #[test]
+fn ellipse_serde_defaults_legacy_data_and_retains_new_planes() {
+    let source = ellipse(Vec3::new(0.0, 0.8, 0.6), Vec3::new(5.0, 1.2, -1.6));
+    let encoded = serde_json::to_value(&source).unwrap();
+    assert_eq!(serde_json::from_value::<Ellipse>(encoded.clone()).unwrap(), source);
+    let mut legacy = encoded;
+    legacy.as_object_mut().unwrap().remove("normal");
+    assert_eq!(serde_json::from_value::<Ellipse>(legacy).unwrap().normal, Vec3::Z);
+}
+
+#[test]
 fn projected_grips_use_the_same_axes_as_the_display() {
     let kind = EntityKind::Ellipse(ellipse(Vec3::new(0.0, 0.8, 0.6), Vec3::new(1.0, 0.0, 0.0)));
     let Prim::Ellipse(projected) = kind.prims()[0] else { panic!("ellipse primitive") };
