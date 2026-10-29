@@ -56,13 +56,38 @@ fn private_header_variables_stay_in_the_dwg_bridge() {
         ("DIMMZS", 1, HVal::Str("m".into())),
         ("DIMALTMZF", 40, HVal::Real(1.0)),
         ("DIMALTMZS", 1, HVal::Str("cm".into())),
+        ("TITLE", 1, HVal::Str("Plan".into())),
+        ("SUBJECT", 1, HVal::Str("Garden".into())),
+        ("AUTHOR", 1, HVal::Str("Arterra".into())),
+        ("KEYWORDS", 1, HVal::Str("landscape".into())),
+        ("COMMENTS", 1, HVal::Str("none".into())),
+        ("LASTSAVEDBY", 1, HVal::Str("User".into())),
+        ("REVISIONNUMBER", 1, HVal::Str("3".into())),
     ] {
         d.header.set(name, value);
         d.header.dxf_codes.insert(name.into(), vec![code]);
     }
     let public = tags(&d, Version::R2018);
     let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap();
-    for name in ["ISOLINES", "FACETRES", "TEXTQLTY", "PELLIPSE", "DIMMZF", "DIMMZS", "DIMALTMZF", "DIMALTMZS"] {
+    // The drawing properties are not DXF header variables: AutoCAD reports `$LASTSAVEDBY` as an
+    // unknown variable, and its own DXFOUT writes none of them.
+    for name in [
+        "ISOLINES",
+        "FACETRES",
+        "TEXTQLTY",
+        "PELLIPSE",
+        "DIMMZF",
+        "DIMMZS",
+        "DIMALTMZF",
+        "DIMALTMZS",
+        "TITLE",
+        "SUBJECT",
+        "AUTHOR",
+        "KEYWORDS",
+        "COMMENTS",
+        "LASTSAVEDBY",
+        "REVISIONNUMBER",
+    ] {
         let variable = format!("${name}");
         assert!(!public.iter().any(|t| t.code == 9 && t.str() == variable), "public {variable}");
         assert!(bridge.iter().any(|t| t.code == 9 && t.str() == variable), "bridge {variable}");

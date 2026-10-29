@@ -161,8 +161,29 @@ fn header_since(name: &str, source: Version) -> Version {
     }
 }
 
+/// Variables the DWG bridge needs that a user DXF must not hold: private header slots, and the
+/// drawing properties, which AutoCAD neither writes nor knows as header variables.
 fn bridge_header(name: &str) -> bool {
-    matches!(name, "ISOLINES" | "FACETRES" | "TEXTQLTY" | "PELLIPSE" | "DIMMZF" | "DIMMZS" | "DIMALTMZF" | "DIMALTMZS")
+    matches!(
+        name,
+        "ISOLINES"
+            | "FACETRES"
+            | "TEXTQLTY"
+            | "PELLIPSE"
+            | "DIMMZF"
+            | "DIMMZS"
+            | "DIMALTMZF"
+            | "DIMALTMZS"
+            | "TITLE"
+            | "SUBJECT"
+            | "AUTHOR"
+            | "KEYWORDS"
+            | "COMMENTS"
+            | "LASTSAVEDBY"
+            | "REVISIONNUMBER"
+            | "CUSTOMPROPERTYTAG"
+            | "CUSTOMPROPERTY"
+    )
 }
 
 /// Values are current model values, not a replay of the old header. A pointer (an object
