@@ -221,7 +221,7 @@ fn wide_pline(verts: &[(f64, f64, f64, f64, f64)], closed: bool, const_width: f6
     // (x, y, start width, end width, bulge) per vertex.
     let mut d = Drawing::new_metric();
     let vertices = verts.iter().map(|&(x, y, s, e, b)| PolyVertex { p: Vec2::new(x, y), bulge: b, start_width: s, end_width: e }).collect();
-    let kind = EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width, elevation: 0.0, plinegen: false, heavy: false });
+    let kind = EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width, elevation: 0.0, plinegen: false, heavy: false, fit: None });
     d.add(&Space::Model, Common::default(), kind).unwrap();
     d.extents(&Space::Model)
 }

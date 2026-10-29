@@ -22,6 +22,7 @@ fn rectangle() -> Drawing {
         elevation: 0.0,
         plinegen: false,
         heavy: false,
+        fit: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::LwPolyline(pl)).expect("add the rectangle");
     d

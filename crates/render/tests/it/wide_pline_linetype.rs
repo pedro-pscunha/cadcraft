@@ -15,6 +15,7 @@ fn drawing(xs: &[f64], lt: &str, plinegen: bool) -> Drawing {
         elevation: 0.0,
         plinegen,
         heavy: false,
+        fit: None,
     };
     d.add(&Space::Model, Common { linetype: lt.into(), ..Default::default() }, EntityKind::LwPolyline(p)).unwrap();
     d

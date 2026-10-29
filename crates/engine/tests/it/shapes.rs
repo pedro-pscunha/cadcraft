@@ -11,7 +11,7 @@ const EPS: f64 = 1e-9;
 /// Add a polyline through `(x, y, bulge)` vertices to model space.
 fn pline(s: &mut Session, pts: &[(f64, f64, f64)], closed: bool) {
     let vertices = pts.iter().map(|&(x, y, b)| PolyVertex::with_bulge(Vec2::new(x, y), b)).collect();
-    let k = EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false });
+    let k = EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None });
     s.doc_mut().unwrap().add(&Space::Model, Common::default(), k).unwrap();
 }
 

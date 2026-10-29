@@ -48,8 +48,10 @@ fn breakatpoint_keeps_line_z() {
 fn break_keeps_polyline_elevation() {
     let mut s = Session::new();
     let vertices = vec![PolyVertex::new(Vec2::new(0.0, 0.0)), PolyVertex::new(Vec2::new(10.0, 0.0))];
-    let h =
-        add(&mut s, EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: 0.0, elevation: 7.0, plinegen: false, heavy: false }));
+    let h = add(
+        &mut s,
+        EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: 0.0, elevation: 7.0, plinegen: false, heavy: false, fit: None }),
+    );
     let r = s.execute("break", &json!({"handle": h, "p1": [4, 0], "p2": [6, 0]})).unwrap();
     let ps = pieces(&s, &r);
     assert_eq!(ps.len(), 2);

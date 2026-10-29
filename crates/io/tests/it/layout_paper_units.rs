@@ -31,6 +31,7 @@ fn drawing() -> Drawing {
         elevation: 0.0,
         plinegen: false,
         heavy: false,
+        fit: None,
     };
     d.add(&Space::Paper("SHEET".into()), Common::default(), EntityKind::LwPolyline(pl)).unwrap();
     d

@@ -94,6 +94,7 @@ fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
         elevation: t.fd(38, 0.0),
         plinegen: flags & 128 != 0,
         heavy: false,
+        fit: None,
     };
     // A region CADCraft wrote as polylines (`dxf_region`).
     crate::dxf_region::from_polyline(tags, pl)
@@ -490,12 +491,21 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
 pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T) -> Option<(Common, EntityKind, Vec<EntityKind>)> {
     let flags = t.i(70).unwrap_or(0);
     let mut pts: Vec<(Vec3, f64, f64, f64)> = Vec::new();
+    let mut fit_vertices = Vec::new();
     // Polyface face records (VERTEX 70 bit 128 without 64): vertex indices 71–74.
     let mut faces: Vec<[i64; 4]> = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
         if k2 == "VERTEX" {
             let tt = T(t2);
             let vflags = tt.i(70).unwrap_or(0);
+            fit_vertices.push(cadcraft_doc::PolylineFitVertex {
+                position: tt.p(10),
+                flags: vflags,
+                start_width: tt.fd(40, t.fd(40, 0.0)),
+                end_width: tt.fd(41, t.fd(41, 0.0)),
+                bulge: tt.fd(42, 0.0),
+                tangent: tt.fd(50, 0.0).to_radians(),
+            });
             if vflags & 128 != 0 && vflags & 64 == 0 {
                 faces.push([71, 72, 73, 74].map(|c| tt.i(c).unwrap_or(0)));
             } else if vflags & 16 == 0 {
@@ -524,14 +534,33 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
         let m = if c.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+        let vertices: Vec<_> =
+            pts.iter().map(|p| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 }).collect();
+        let fit = (flags & 6 != 0 || t.i(75).unwrap_or(0) != 0 || fit_vertices.iter().any(|v| v.flags != 0 || v.tangent != 0.0)).then(|| {
+            cadcraft_doc::PolylineFit {
+                flags,
+                smooth_type: t.i(75).unwrap_or(0),
+                m_count: t.i(71).unwrap_or(0),
+                n_count: t.i(72).unwrap_or(0),
+                m_density: t.i(73).unwrap_or(0),
+                n_density: t.i(74).unwrap_or(0),
+                start_width: t.fd(40, 0.0),
+                end_width: t.fd(41, 0.0),
+                elevation: t.p(10).z,
+                extrusion: c.extrusion,
+                vertices: fit_vertices,
+                display_vertices: vertices.clone(),
+            }
+        });
         EntityKind::LwPolyline(LwPolyline {
-            vertices: pts.iter().map(|p| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 }).collect(),
+            vertices,
             closed: flags & 1 != 0,
             // The effective widths live on each vertex, including inherited defaults.
             const_width: 0.0,
             elevation: t.p(10).z,
             plinegen: flags & 128 != 0,
             heavy: true,
+            fit,
         })
     };
     Some((c, k, extra))

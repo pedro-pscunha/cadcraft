@@ -24,6 +24,7 @@ fn sample() -> Drawing {
             elevation: 0.0,
             plinegen: false,
             heavy: false,
+            fit: None,
         }),
     )
     .unwrap();
@@ -195,6 +196,7 @@ fn lwpolyline_elevation_roundtrips() {
                 elevation,
                 plinegen: false,
                 heavy: false,
+                fit: None,
             }),
         )
         .unwrap();
@@ -882,6 +884,7 @@ fn file_arrowhead_blocks_with_standard_names_are_kept() {
         elevation: 0.0,
         plinegen: false,
         heavy: false,
+        fit: None,
     };
     for (name, kind) in [("_Dot", EntityKind::LwPolyline(donut)), ("_DotSmall", EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 0.0625 }))] {
         let mut b = Block::new(name);
@@ -953,6 +956,7 @@ fn many_entities(n: usize) -> Drawing {
                 elevation: 0.0,
                 plinegen: false,
                 heavy: false,
+                fit: None,
             }),
         };
         d.add(&Space::Model, Common::default(), kind).unwrap();
@@ -1074,6 +1078,7 @@ fn dimension_associativity_roundtrips() {
                 elevation: 0.0,
                 plinegen: false,
                 heavy: false,
+                fit: None,
             }),
         )
         .unwrap();
@@ -1155,6 +1160,7 @@ fn polyline_vertex_references_name_the_segment() {
         elevation: 0.0,
         plinegen: false,
         heavy: false,
+        fit: None,
     };
     let refs = |p: &LwPolyline| (0..p.vertices.len()).map(|i| crate::dxf_write::polyline_vertex_ref(p, i)).collect::<Vec<_>>();
     // Open: vertex 0 is the start of segment 1, vertex k the end of segment k.
@@ -1191,6 +1197,7 @@ fn polyline_vertex_dimensions_round_trip_by_segment() {
                 elevation: 0.0,
                 plinegen: false,
                 heavy: false,
+                fit: None,
             }),
         )
         .unwrap();

@@ -74,6 +74,7 @@ fn joins_shape_the_corner() {
             elevation: 0.0,
             plinegen: false,
             heavy: false,
+            fit: None,
         };
         d.add(&Space::Model, red(), EntityKind::LwPolyline(pl)).unwrap();
         let mut l = build_plot(&d, &Space::Model, &table(EndStyle::Butt, join, FillStyle::Object));

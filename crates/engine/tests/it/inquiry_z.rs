@@ -23,6 +23,7 @@ fn contour(elevation: f64) -> EntityKind {
         elevation,
         plinegen: false,
         heavy: false,
+        fit: None,
     })
 }
 

@@ -27,7 +27,8 @@ fn hatch(loops: Vec<HatchLoop>, associative: bool) -> Hatch {
 }
 
 fn poly(d: &mut Drawing, vs: Vec<PolyVertex>) -> Handle {
-    let k = EntityKind::LwPolyline(LwPolyline { vertices: vs, closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false });
+    let k =
+        EntityKind::LwPolyline(LwPolyline { vertices: vs, closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None });
     d.add(&Space::Model, Common::default(), k).expect("add")
 }
 
@@ -131,6 +132,7 @@ fn a_hatch_in_a_block_keeps_its_boundary_and_the_boundary_its_reactor() {
         elevation: 0.0,
         plinegen: false,
         heavy: false,
+        fit: None,
     });
     b.entities.push(Entity::new(outline, k));
     let loops = vec![HatchLoop { vertices: square(0.0, 10.0), outer: true, sources: vec![outline] }];

@@ -51,6 +51,48 @@ pub struct LwPolyline {
     /// Keep the POLYLINE/VERTEX representation of a source 2D polyline.
     #[serde(default)]
     pub heavy: bool,
+    /// Source fit data, used only while the displayed geometry is unchanged.
+    #[serde(default)]
+    pub fit: Option<PolylineFit>,
+}
+
+impl LwPolyline {
+    pub fn saved_fit(&self) -> Option<&PolylineFit> {
+        self.fit.as_ref().filter(|fit| {
+            self.vertices == fit.display_vertices
+                && self.closed == (fit.flags & 1 != 0)
+                && self.plinegen == (fit.flags & 128 != 0)
+                && self.elevation == fit.elevation
+                && self.const_width == 0.0
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PolylineFit {
+    pub flags: i64,
+    pub smooth_type: i64,
+    pub m_count: i64,
+    pub n_count: i64,
+    pub m_density: i64,
+    pub n_density: i64,
+    pub start_width: f64,
+    pub end_width: f64,
+    pub elevation: f64,
+    pub extrusion: Vec3,
+    pub vertices: Vec<PolylineFitVertex>,
+    pub display_vertices: Vec<PolyVertex>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PolylineFitVertex {
+    pub position: Vec3,
+    pub flags: i64,
+    pub start_width: f64,
+    pub end_width: f64,
+    pub bulge: f64,
+    /// Curve-fit tangent direction in radians.
+    pub tangent: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

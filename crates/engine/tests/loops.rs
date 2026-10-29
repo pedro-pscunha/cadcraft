@@ -74,7 +74,7 @@ fn loop_facts_match_shapes() {
         .add(
             &Space::Model,
             Common::default(),
-            EntityKind::LwPolyline(LwPolyline { vertices, closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false }),
+            EntityKind::LwPolyline(LwPolyline { vertices, closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None }),
         )
         .unwrap();
     let shapes = s.execute("shapes", &json!({})).unwrap();

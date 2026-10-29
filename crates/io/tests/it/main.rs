@@ -68,6 +68,8 @@ mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
+#[cfg(not(target_arch = "wasm32"))]
+mod polyline_fit;
 mod polyline_owned_vertices;
 #[cfg(not(target_arch = "wasm32"))]
 mod raw_dwg_bridge;
