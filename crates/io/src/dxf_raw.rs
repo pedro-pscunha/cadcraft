@@ -575,8 +575,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(&unknown) = ents.get(&h) else { continue };
         let mut x = extra(kind, t, true, unknown, &kept);
         let Some(hh) = handle(&h) else { continue };
-        // Attribute instances own their extras by Handle; other entities carry xdata in Common.
-        if kind != "ATTRIB" {
+        // Child instances own their extras by Handle; top-level entities carry xdata in Common.
+        if !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") {
             let xd = std::mem::take(&mut x.xdata);
             if !xd.is_empty() {
                 xdata_of.entry(hh).or_insert(xd);
@@ -679,7 +679,7 @@ fn entity_types(drawing: &Drawing) -> HashMap<String, bool> {
     let mut types = HashMap::new();
     for entity in all_entities(drawing) {
         types.entry(entity.handle.hex()).or_insert(matches!(entity.kind, EntityKind::Unknown(_)));
-        for h in entity.kind.attributes().iter().filter_map(|a| a.handle) {
+        for h in entity.kind.attributes().iter().filter_map(|a| a.handle).chain(entity.kind.polyline_records().filter_map(|r| r.handle)) {
             types.entry(h.hex()).or_insert(false);
         }
     }

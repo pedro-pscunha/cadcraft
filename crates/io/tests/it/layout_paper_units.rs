@@ -25,6 +25,7 @@ fn drawing() -> Drawing {
     d.layouts.push(l);
     let frame = [(10.0, 10.0), (287.0, 10.0), (287.0, 200.0), (10.0, 200.0)];
     let pl = LwPolyline {
+        records: Default::default(),
         vertices: frame.iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect(),
         closed: true,
         const_width: 0.0,

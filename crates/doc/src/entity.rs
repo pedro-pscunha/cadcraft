@@ -47,7 +47,10 @@ mod text;
 
 pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
-pub use curves::{Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, RayLine, Solid};
+pub use curves::{
+    Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
+    Solid,
+};
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, MLeader};
 pub use fill::{Gradient, Hatch, HatchLoop, Wipeout};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
@@ -567,6 +570,7 @@ mod grip_tests {
         // once rather than rebuilt per vertex (CWE-407, row 35).
         let verts: Vec<PolyVertex> = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)].iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect();
         let e = EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
             vertices: verts,
             closed: false,
             const_width: 0.0,

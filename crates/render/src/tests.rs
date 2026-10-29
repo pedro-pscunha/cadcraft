@@ -926,7 +926,16 @@ fn thin_wide_polyline_keeps_every_side_at_every_zoom() {
     let square = |const_width: f64| {
         let mut d = Drawing::new_imperial();
         let vertices = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)].map(|(x, y)| PolyVertex::new(Vec2::new(x, y))).to_vec();
-        let p = cadcraft_doc::LwPolyline { vertices, closed: true, const_width, elevation: 0.0, plinegen: false, heavy: false, fit: None };
+        let p = cadcraft_doc::LwPolyline {
+            records: Default::default(),
+            vertices,
+            closed: true,
+            const_width,
+            elevation: 0.0,
+            plinegen: false,
+            heavy: false,
+            fit: None,
+        };
         d.add(&Space::Model, Common::default(), EntityKind::LwPolyline(p)).unwrap();
         d
     };
@@ -965,7 +974,16 @@ fn wide_polyline_centre_line_is_drawn_on_screen_only() {
             let mut d = Drawing::new_imperial();
             d.linetypes.extend(cadcraft_doc::library::standard_linetypes().into_iter().filter(|l| l.name == "DASHED"));
             let vertices = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0)].map(|(x, y)| PolyVertex::new(Vec2::new(x, y))).to_vec();
-            let p = cadcraft_doc::LwPolyline { vertices, closed: false, const_width: 0.2, elevation: 0.0, plinegen: false, heavy: false, fit: None };
+            let p = cadcraft_doc::LwPolyline {
+                records: Default::default(),
+                vertices,
+                closed: false,
+                const_width: 0.2,
+                elevation: 0.0,
+                plinegen: false,
+                heavy: false,
+                fit: None,
+            };
             let common = Common {
                 color: Color::Index(1),
                 linetype: lt.into(),

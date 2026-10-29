@@ -28,7 +28,7 @@ pub(super) fn parse_entities(
         i += 1;
         match kind.as_str() {
             "POLYLINE" => {
-                let Some((c, k, more)) = polyline_entity(recs, &mut i, &t) else {
+                let Some((c, k, more)) = polyline_entity(recs, &mut i, &t, d, rx) else {
                     *skipped = skipped.saturating_add(1);
                     continue;
                 };

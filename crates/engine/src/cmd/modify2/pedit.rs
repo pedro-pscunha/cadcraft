@@ -232,6 +232,9 @@ fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value
                     if let Some(v) = pl.vertices.get_mut(i) {
                         v.bulge = 0.0;
                     }
+                    if pl.records.vertices.len() == n {
+                        pl.records.vertices.insert(i + 1, Default::default());
+                    }
                     pl.vertices.insert(i + 1, PolyVertex::new(to));
                 }
                 "straighten" => {

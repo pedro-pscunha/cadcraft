@@ -21,7 +21,7 @@ pub(super) fn run_3dpoly(s: &mut Session, p: &Value) -> Result<Value> {
     if pts.len() < 2 || pts.len() > MAX_GEN {
         return Err(bad("3dpoly", "`points` needs 2 or more [x,y,z] points"));
     }
-    added(s.add_entity(EntityKind::Polyline3d(Polyline3d { points: pts, closed: bool_or(p, "closed", false) }))?)
+    added(s.add_entity(EntityKind::Polyline3d(Polyline3d { records: Default::default(), points: pts, closed: bool_or(p, "closed", false) }))?)
 }
 
 #[derive(Default)]
@@ -32,7 +32,7 @@ pub(super) struct Poly3dM {
 
 impl Poly3dM {
     fn sync(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        let k = EntityKind::Polyline3d(Polyline3d { points: self.pts.iter().map(|p| v3(*p)).collect(), closed });
+        let k = EntityKind::Polyline3d(Polyline3d { records: Default::default(), points: self.pts.iter().map(|p| v3(*p)).collect(), closed });
         match (self.handle, self.pts.len() >= 2) {
             (Some(h), true) => s.doc_mut()?.modify_entity(h, |e| e.kind = k)?,
             (None, true) => self.handle = Some(s.add_entity(k)?),

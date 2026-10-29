@@ -16,6 +16,7 @@ fn rectangle() -> Drawing {
     let mut d = Drawing::new_metric();
     let corners = [(0.0, 0.0), (4.0, 0.0), (4.0, 2.0), (0.0, 2.0)];
     let pl = LwPolyline {
+        records: Default::default(),
         vertices: corners.iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect(),
         closed: true,
         const_width: 0.0,

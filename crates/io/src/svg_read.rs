@@ -449,7 +449,16 @@ impl Parser {
             return Ok(());
         }
         let vertices = pts.iter().map(|p| PolyVertex::new(*p)).collect();
-        self.add(EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None }))
+        self.add(EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
+            vertices,
+            closed,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+            heavy: false,
+            fit: None,
+        }))
     }
 
     // --- path data ----------------------------------------------------------
@@ -551,6 +560,7 @@ impl Parser {
         if run.len() >= 2 {
             let vertices = std::mem::take(run);
             self.add(EntityKind::LwPolyline(LwPolyline {
+                records: Default::default(),
                 vertices,
                 closed,
                 const_width: 0.0,

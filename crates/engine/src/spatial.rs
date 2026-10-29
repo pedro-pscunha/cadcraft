@@ -316,6 +316,7 @@ mod tests {
                 2 => EntityKind::Circle(cadcraft_doc::Circle { center: v3(x, y), radius: s * 0.5 }),
                 3 => EntityKind::Arc(cadcraft_doc::Arc { center: v3(x, y), radius: s * 0.5, start: r.r(0.0, 3.0), end: r.r(3.2, 6.2) }),
                 4 => EntityKind::LwPolyline(cadcraft_doc::LwPolyline {
+                    records: Default::default(),
                     vertices: (0..5)
                         .map(|k| PolyVertex {
                             p: Vec2::new(x + f64::from(k) * s * 0.3, y + r.r(-s, s) * 0.3),

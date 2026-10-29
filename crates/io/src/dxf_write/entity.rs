@@ -83,11 +83,12 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.f(41, p.const_width);
         w.p(210, e.common.extrusion);
         let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
-        for vertex in &p.vertices {
+        for (index, vertex) in p.vertices.iter().enumerate() {
             heavy_vertex(
                 w,
                 e,
                 &cadcraft_doc::PolylineFitVertex {
+                    record: p.records.vertices.get(index).cloned().unwrap_or_default(),
                     position: Vec3::new(ocs_x * vertex.p.x, vertex.p.y, 0.0),
                     flags: 0,
                     start_width: if p.const_width > 0.0 { p.const_width } else { vertex.start_width },
@@ -98,22 +99,27 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
             );
         }
     }
-    let handle = w.h();
-    w.s(0, "SEQEND");
-    w.s(5, handle);
-    w.s(330, e.handle.hex());
-    w.s(100, "AcDbEntity");
-    w.s(8, &e.common.layer);
+    polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
+}
+
+fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::PolylineRecord>, kind: &str, subclass: &str) -> usize {
+    let handle = w.instance_handle(record.and_then(|r| r.handle));
+    let child = Entity {
+        handle,
+        common: record.map_or_else(|| cadcraft_doc::Common { layer: parent.common.layer.clone(), ..Default::default() }, |r| r.common.clone()),
+        kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
+    };
+    let start = w.t.len();
+    w.s(0, kind);
+    common(w, &child, &parent.handle.hex(), false, subclass);
+    if subclass.is_empty() {
+        plot_style_xdata(w, &child.common.plot_style, start);
+    }
+    start
 }
 
 fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex) {
-    let handle = w.h();
-    w.s(0, "VERTEX");
-    w.s(5, handle);
-    w.s(330, e.handle.hex());
-    w.s(100, "AcDbEntity");
-    w.s(8, &e.common.layer);
-    w.s(100, "AcDbVertex");
+    let start = polyline_child(w, e, Some(&vertex.record), "VERTEX", "AcDbVertex");
     w.s(100, "AcDb2dVertex");
     w.p(10, vertex.position);
     w.f(40, vertex.start_width);
@@ -121,6 +127,7 @@ fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex)
     w.f(42, vertex.bulge);
     w.i(70, vertex.flags);
     w.f(50, vertex.tangent.to_degrees());
+    plot_style_xdata(w, &vertex.record.common.plot_style, start);
 }
 
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
@@ -205,24 +212,17 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.p(10, Vec3::ZERO);
             thickness(w, e);
             w.i(70, 8 | i64::from(p.closed));
-            for q in &p.points {
-                let vh = w.h();
-                w.s(0, "VERTEX");
-                w.s(5, vh);
-                w.s(330, e.handle.hex());
-                w.s(100, "AcDbEntity");
-                w.s(8, &e.common.layer);
-                w.s(100, "AcDbVertex");
+            for (index, q) in p.points.iter().enumerate() {
+                let record = p.records.vertices.get(index);
+                let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
                 w.p(10, *q);
                 w.i(70, 32);
+                if let Some(record) = record {
+                    plot_style_xdata(w, &record.common.plot_style, start);
+                }
             }
-            let sh = w.h();
-            w.s(0, "SEQEND");
-            w.s(5, sh);
-            w.s(330, e.handle.hex());
-            w.s(100, "AcDbEntity");
-            w.s(8, &e.common.layer);
+            polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
         }
         EntityKind::Spline(s) => {
             w.s(0, "SPLINE");
@@ -382,7 +382,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
         }
         if !i.attribs.is_empty() {
             for a in &i.attribs {
-                let ah = w.attribute_handle(a.handle);
+                let ah = w.instance_handle(a.handle).hex();
                 let start = w.t.len();
                 w.s(0, "ATTRIB");
                 w.s(5, ah);

@@ -17,6 +17,7 @@ fn z(s: &mut Session, at: [f64; 2]) -> f64 {
 
 fn contour(elevation: f64) -> EntityKind {
     EntityKind::LwPolyline(LwPolyline {
+        records: Default::default(),
         vertices: vec![PolyVertex::new(Vec2::new(0.0, 50.0)), PolyVertex::new(Vec2::new(40.0, 55.0)), PolyVertex::new(Vec2::new(80.0, 50.0))],
         closed: false,
         const_width: 0.0,

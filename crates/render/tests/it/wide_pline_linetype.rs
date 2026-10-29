@@ -9,6 +9,7 @@ fn drawing(xs: &[f64], lt: &str, plinegen: bool) -> Drawing {
     let mut d = Drawing::new_imperial();
     d.linetypes.extend(library::standard_linetypes().into_iter().filter(|l| l.name == "DASHED"));
     let p = LwPolyline {
+        records: Default::default(),
         vertices: xs.iter().map(|&x| PolyVertex::new(Vec2::new(x, 0.0))).collect(),
         closed: false,
         const_width: 0.2,

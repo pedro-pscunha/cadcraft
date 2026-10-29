@@ -334,7 +334,13 @@ fn has_entity_metadata(foreign: &Foreign, entities: &[Vec<Entity>]) -> bool {
     entities.iter().flatten().any(|entity| {
         foreign.entities.contains_key(&entity.handle)
             || matches!(entity.kind, EntityKind::Unknown(_))
-            || entity.kind.attributes().iter().filter_map(|a| a.handle).any(|h| foreign.entities.contains_key(&h))
+            || entity
+                .kind
+                .attributes()
+                .iter()
+                .filter_map(|a| a.handle)
+                .chain(entity.kind.polyline_records().filter_map(|r| r.handle))
+                .any(|h| foreign.entities.contains_key(&h))
     })
 }
 
@@ -507,6 +513,13 @@ impl crate::Drawing {
                     roots.insert(old, new);
                 }
             }
+            entity.kind.edit_polyline_records(|record| {
+                let handle = match record.handle {
+                    Some(old) => *roots.entry(old).or_insert_with(|| self.new_handle()),
+                    None => self.new_handle(),
+                };
+                record.handle = Some(handle);
+            });
         }
         roots
     }

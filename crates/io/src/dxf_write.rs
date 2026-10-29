@@ -80,13 +80,13 @@ impl W {
         }
     }
 
-    fn attribute_handle(&mut self, wanted: Option<Handle>) -> String {
+    fn instance_handle(&mut self, wanted: Option<Handle>) -> Handle {
         if let Some(h) = wanted.filter(|h| h.0 != 0 && h.0 < self.first)
             && self.used.insert(h)
         {
-            return h.hex();
+            return h;
         }
-        self.h()
+        self.allocate_handle()
     }
 
     fn s(&mut self, c: i32, v: impl Into<String>) {
@@ -108,13 +108,16 @@ impl W {
         self.f(c + 10, p.y);
     }
     fn h(&mut self) -> String {
+        self.allocate_handle().hex()
+    }
+    fn allocate_handle(&mut self) -> Handle {
         while self.used.contains(&Handle(self.next)) {
             self.next = self.next.checked_add(1).unwrap_or(1);
         }
         let h = Handle(self.next);
         self.used.insert(h);
         self.next = self.next.checked_add(1).unwrap_or(1);
-        h.hex()
+        h
     }
     /// A `102 {NAME` … `102 }` group of handles.
     fn group(&mut self, name: &str, code: i32, handles: &[&str]) {

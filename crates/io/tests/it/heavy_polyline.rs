@@ -9,6 +9,16 @@ const DXF: &str = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n\
 
 #[test]
 fn a_heavy_polyline_keeps_its_type_vertices_and_properties() {
+    check("saved.dxf");
+}
+
+#[test]
+#[ignore = "needs acadrust arterra/polyline-children (VERTEX/SEQEND identity)"]
+fn a_heavy_polyline_keeps_its_dwg_child_identities() {
+    check("saved.dwg");
+}
+
+fn check(format: &str) {
     let original = cadcraft_io::read_dxf(DXF.as_bytes()).unwrap();
     let original_poly = original
         .model
@@ -18,7 +28,7 @@ fn a_heavy_polyline_keeps_its_type_vertices_and_properties() {
             _ => None,
         })
         .unwrap();
-    for format in ["saved.dxf", "saved.dwg"] {
+    {
         let mut drawing = original.clone();
         for _ in 0..2 {
             let bytes = cadcraft_io::write(&drawing, format).unwrap();

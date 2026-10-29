@@ -50,7 +50,16 @@ fn break_keeps_polyline_elevation() {
     let vertices = vec![PolyVertex::new(Vec2::new(0.0, 0.0)), PolyVertex::new(Vec2::new(10.0, 0.0))];
     let h = add(
         &mut s,
-        EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: 0.0, elevation: 7.0, plinegen: false, heavy: false, fit: None }),
+        EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
+            vertices,
+            closed: false,
+            const_width: 0.0,
+            elevation: 7.0,
+            plinegen: false,
+            heavy: false,
+            fit: None,
+        }),
     );
     let r = s.execute("break", &json!({"handle": h, "p1": [4, 0], "p2": [6, 0]})).unwrap();
     let ps = pieces(&s, &r);

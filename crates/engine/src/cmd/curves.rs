@@ -586,7 +586,9 @@ pub fn reverse_spline(sp: &Spline) -> Spline {
 pub fn reverse_polyline(p: &cadcraft_doc::LwPolyline) -> cadcraft_doc::LwPolyline {
     let vertices = reverse_vertices(&p.vertices, p.closed);
     let fit = p.saved_fit().map(|fit| fit.reversed(vertices.clone()));
-    cadcraft_doc::LwPolyline { vertices, fit, ..p.clone() }
+    let mut records = p.records.clone();
+    records.vertices.reverse();
+    cadcraft_doc::LwPolyline { vertices, fit, records, ..p.clone() }
 }
 
 /// Reverse an LWPOLYLINE's vertex order, keeping its shape (bulges and widths move with segments).

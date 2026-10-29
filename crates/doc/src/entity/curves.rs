@@ -39,6 +39,8 @@ pub struct Ellipse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LwPolyline {
+    #[serde(default)]
+    pub records: PolylineRecords,
     pub vertices: Vec<PolyVertex>,
     pub closed: bool,
     #[serde(default)]
@@ -172,6 +174,8 @@ impl PolylineFit {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PolylineFitVertex {
+    #[serde(default)]
+    pub record: PolylineRecord,
     pub position: Vec3,
     pub flags: i64,
     pub start_width: f64,
@@ -181,8 +185,23 @@ pub struct PolylineFitVertex {
     pub tangent: f64,
 }
 
+/// The persistent identity and common properties of a POLYLINE child record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PolylineRecord {
+    pub handle: Option<super::Handle>,
+    pub common: super::Common,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PolylineRecords {
+    pub vertices: Vec<PolylineRecord>,
+    pub seqend: Option<PolylineRecord>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Polyline3d {
+    #[serde(default)]
+    pub records: PolylineRecords,
     pub points: Vec<Vec3>,
     pub closed: bool,
 }

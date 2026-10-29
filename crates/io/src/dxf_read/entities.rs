@@ -88,6 +88,7 @@ fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
         }
     }
     let pl = LwPolyline {
+        records: Default::default(),
         vertices: verts,
         closed: flags & 1 != 0,
         const_width: t.fd(43, 0.0),
@@ -503,10 +504,26 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
 /// can't be placed are counted in `skipped`.
 /// The entity of a POLYLINE, with its mesh faces (advancing `i` past its VERTEX records). `None`
 /// for a mesh without faces.
-pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T) -> Option<(Common, EntityKind, Vec<EntityKind>)> {
+pub(super) fn polyline_entity(
+    recs: &[(String, Vec<Tag>)],
+    i: &mut usize,
+    t: &T,
+    d: &mut super::Drawing,
+    rx: &Rx,
+) -> Option<(Common, EntityKind, Vec<EntityKind>)> {
     let flags = t.i(70).unwrap_or(0);
     let mut pts: Vec<(Vec3, f64, f64, f64)> = Vec::new();
     let mut fit_vertices = Vec::new();
+    let mut seqend = None;
+    let mut record = |tags: &[Tag]| {
+        let tt = T(tags);
+        let mut c = common(&tt);
+        if let Some(style) = entity_plot_style(tags, rx) {
+            c.plot_style = style;
+        }
+        let handle = tt.s(5).and_then(|h| Handle::parse_hex(&h)).unwrap_or_else(|| d.new_handle());
+        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c }
+    };
     // Polyface face records (VERTEX 70 bit 128 without 64): vertex indices 71–74.
     let mut faces: Vec<[i64; 4]> = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
@@ -514,6 +531,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             let tt = T(t2);
             let vflags = tt.i(70).unwrap_or(0);
             fit_vertices.push(cadcraft_doc::PolylineFitVertex {
+                record: record(t2),
                 position: tt.p(10),
                 flags: vflags,
                 start_width: tt.fd(40, t.fd(40, 0.0)),
@@ -529,11 +547,14 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             *i += 1;
         } else {
             if k2 == "SEQEND" {
+                seqend = Some(record(t2));
                 *i += 1;
             }
             break;
         }
     }
+    let records =
+        cadcraft_doc::PolylineRecords { vertices: fit_vertices.iter().filter(|v| v.flags & 16 == 0).map(|v| v.record.clone()).collect(), seqend };
     let c = common(t);
     let mut extra: Vec<EntityKind> = Vec::new();
     let k = if flags & (16 | 64) != 0 {
@@ -545,7 +566,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
         extra.extend(fs);
         first
     } else if flags & 8 != 0 {
-        EntityKind::Polyline3d(Polyline3d { points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
+        EntityKind::Polyline3d(Polyline3d { records, points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
         let m = if c.extrusion.z < 0.0 { -1.0 } else { 1.0 };
@@ -568,6 +589,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             }
         });
         EntityKind::LwPolyline(LwPolyline {
+            records,
             vertices,
             closed: flags & 1 != 0,
             // The effective widths live on each vertex, including inherited defaults.

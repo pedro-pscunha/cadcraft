@@ -16,6 +16,7 @@ fn drawing(locked: bool, on: bool) -> (Drawing, Handle, Handle) {
     let sheet = Space::Paper(d.layouts[0].name.clone());
     let l = [[10.0, 10.0], [110.0, 10.0], [110.0, 60.0], [60.0, 60.0], [60.0, 110.0], [10.0, 110.0]];
     let poly = LwPolyline {
+        records: Default::default(),
         vertices: l.iter().map(|p| PolyVertex::new(Vec2::new(p[0], p[1]))).collect(),
         closed: true,
         const_width: 0.0,
