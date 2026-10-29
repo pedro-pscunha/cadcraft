@@ -13,7 +13,6 @@ fn a_heavy_polyline_keeps_its_type_vertices_and_properties() {
 }
 
 #[test]
-#[ignore = "needs acadrust arterra/polyline-children (VERTEX/SEQEND identity)"]
 fn a_heavy_polyline_keeps_its_dwg_child_identities() {
     check("saved.dwg");
 }

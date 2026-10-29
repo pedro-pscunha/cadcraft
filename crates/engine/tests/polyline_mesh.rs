@@ -115,7 +115,6 @@ fn meshes_keep_one_entity_and_face_display_through_saves_and_affine_edits() {
 }
 
 #[test]
-#[ignore = "needs acadrust arterra/polyline-children (VERTEX/SEQEND identity)"]
 fn mesh_children_keep_identity_and_xdata_through_dwg() {
     for polyface in [false, true] {
         let drawing = cadcraft_io::read_dxf(&source(polyface)).unwrap();
@@ -130,7 +129,6 @@ fn smoothed_polygon_mesh_keeps_control_and_fitted_records() {
 }
 
 #[test]
-#[ignore = "needs acadrust arterra/polyline-children (mesh control-vertex flags)"]
 fn smoothed_polygon_mesh_keeps_control_and_fitted_records_in_dwg() {
     check_smoothed("smooth.dwg");
 }

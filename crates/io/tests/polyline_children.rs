@@ -38,7 +38,8 @@ fn check(bytes: &[u8], stage: &str) {
     let (_, vertex) = record("VERTEX", "101");
     assert!(vertex.iter().any(|t| t.code == 8 && t.str() == "VertexLayer"), "{stage}: vertex layer");
     assert!(vertex.iter().any(|t| t.code == 62 && t.i64() == 2), "{stage}: vertex color");
-    assert!(vertex.iter().any(|t| t.code == 6 && t.str() == "CONTINUOUS"), "{stage}: vertex linetype");
+    // A DWG names the linetype by a handle, so it comes back with the table spelling ("Continuous").
+    assert!(vertex.iter().any(|t| t.code == 6 && t.str().eq_ignore_ascii_case("CONTINUOUS")), "{stage}: vertex linetype");
     assert!(vertex.iter().any(|t| t.code == 1000 && t.str() == "vertex-data"), "{stage}: vertex xdata");
     let (_, end) = record("SEQEND", "190");
     assert!(end.iter().any(|t| t.code == 8 && t.str() == "EndLayer"), "{stage}: seqend layer");
@@ -94,7 +95,6 @@ fn copied_polyline_children_get_distinct_identities_and_owned_extras() {
 }
 
 #[test]
-#[ignore = "needs acadrust arterra/polyline-children (VERTEX/SEQEND identity)"]
 fn heavy_polyline_children_keep_identity_common_data_and_foreign_extras_in_dwg() {
     for flags in [0, 4, 8] {
         let mut drawing = cadcraft_io::read_dxf(&fixture(flags)).unwrap();

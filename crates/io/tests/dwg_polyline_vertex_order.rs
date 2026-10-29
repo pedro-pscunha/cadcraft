@@ -26,6 +26,7 @@ fn dwg_with_out_of_order_vertex_handles(version: DxfVersion) -> Vec<u8> {
             layer: "0".to_string(),
             position: Vector3::new(x, y, z),
             flags: 32,
+            common: None,
         })
         .collect();
     doc.add_entity(EntityType::Polyline3D(polyline)).expect("add the polyline");
