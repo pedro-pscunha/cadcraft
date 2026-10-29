@@ -7,22 +7,22 @@ use cadcraft_doc::Drawing;
 use cadcraft_dxf::{Tag, records, sections};
 
 /// A DXF text from (code, value) groups.
-fn dxf(groups: &[(i32, &str)]) -> String {
+pub(super) fn dxf(groups: &[(i32, &str)]) -> String {
     groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
 }
 
 /// The records of section `name` in a DXF text.
-fn section(text: &str, name: &str) -> Vec<(String, Vec<Tag>)> {
+pub(super) fn section(text: &str, name: &str) -> Vec<(String, Vec<Tag>)> {
     let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
     sections(&tags).into_iter().find(|s| s.name == name).map(|s| records(&s.tags)).unwrap_or_default()
 }
 
-fn val(tags: &[Tag], code: i32) -> String {
+pub(super) fn val(tags: &[Tag], code: i32) -> String {
     tags.iter().find(|t| t.code == code).map(Tag::str).unwrap_or_default()
 }
 
 /// The handle a dictionary names `key` (a soft or a hard owner entry).
-fn entry(dictionary: &[Tag], key: &str) -> String {
+pub(super) fn entry(dictionary: &[Tag], key: &str) -> String {
     let at = dictionary.iter().position(|t| t.code == 3 && t.str() == key);
     at.and_then(|i| dictionary.get(i + 1)).filter(|t| matches!(t.code, 350 | 360)).map(Tag::str).unwrap_or_default()
 }
@@ -33,13 +33,13 @@ fn apps(tags: &[Tag]) -> Vec<String> {
 }
 
 /// The text of a drawing's DXF after a save to DWG and a reopen: what a DWG keeps.
-fn through_dwg(d: &Drawing) -> String {
+pub(super) fn through_dwg(d: &Drawing) -> String {
     let dwg = cadcraft_io::write(d, "x.dwg").unwrap();
     cadcraft_io::write_dxf(&cadcraft_io::read(&dwg, "x.dwg").unwrap())
 }
 
 /// Every text a drawing is checked in: its DXF save and the DXF of its DWG save.
-fn saved_twice(d: &Drawing) -> [String; 2] {
+pub(super) fn saved_twice(d: &Drawing) -> [String; 2] {
     [cadcraft_io::write_dxf(d), through_dwg(d)]
 }
 
@@ -476,7 +476,7 @@ fn suns_stay_linked_to_their_vport_and_viewport() {
 
 /// Two layouts as AutoCAD writes them: the Model layout, whose page setup CADCraft has no model
 /// of, and a sheet with limits, extents, a UCS, a plot origin and shade plot settings.
-fn layouts() -> String {
+pub(super) fn layouts() -> String {
     let dictionary = |h: &'static str, owner: &'static str, entries: &[(&'static str, &'static str)]| -> Vec<(i32, &'static str)> {
         let mut g = vec![(0, "DICTIONARY"), (5, h), (330, owner), (100, "AcDbDictionary"), (281, "1")];
         for (key, target) in entries {
@@ -621,7 +621,7 @@ fn layouts() -> String {
 }
 
 /// The groups of subclass `name` of a record.
-fn subclass(tags: &[Tag], name: &str) -> Vec<(i32, String)> {
+pub(super) fn subclass(tags: &[Tag], name: &str) -> Vec<(i32, String)> {
     let Some(start) = tags.iter().position(|t| t.code == 100 && t.str() == name) else { return Vec::new() };
     tags.iter().skip(start + 1).take_while(|t| t.code != 100).map(|t| (t.code, t.str())).collect()
 }
@@ -631,7 +631,7 @@ fn num(groups: &[(i32, String)], code: i32) -> f64 {
     groups.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.trim().parse().ok()).unwrap_or(f64::NAN)
 }
 
-fn text_of(groups: &[(i32, String)], code: i32) -> String {
+pub(super) fn text_of(groups: &[(i32, String)], code: i32) -> String {
     groups.iter().find(|(c, _)| *c == code).map(|(_, v)| v.clone()).unwrap_or_default()
 }
 

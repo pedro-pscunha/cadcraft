@@ -85,8 +85,9 @@ fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
 const LAYOUT_FRAME_CODES: &[i32] =
     &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76, 331, 345, 346];
 /// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
-/// shade plot mode, resolution and DPI, and the paper image origin.
-const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
+/// shade plot mode, resolution and DPI, the paper image origin, and the shade plot handle (333, a
+/// pointer to a visual style).
+const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149, 333];
 /// Plot layout flag bits (group 70) that `PageSetup` models: show plot styles, centred, standard
 /// scale, lineweights. The others (plot with plot styles, draw viewports first, hide objects,
 /// scale lineweights...) stay as read.
@@ -139,6 +140,8 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
         .skip_while(|t| !(t.code == 100 && layout_part(&t.str()) == LayoutPart::Frame))
         .find(|t| t.code == 1)
         .is_some_and(|t| t.str().trim().eq_ignore_ascii_case("Model"));
+    // A kept plot group, a pointer remapped to the saved object (null when it is gone).
+    let plot_tag = |k: &RawTag| if is_pointer(k.code) { Tag::s(k.code, saved(&k.value).unwrap_or_else(|| "0".into())) } else { tag(k) };
     let mut out = Vec::with_capacity(b.len() + plot.len());
     let mut part = LayoutPart::Other;
     let mut plot_codes: HashSet<i32> = HashSet::new();
@@ -146,12 +149,12 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
         if t.code == 100 {
             let next = layout_part(&t.str());
             if part == LayoutPart::Plot && next == LayoutPart::Frame && !model {
-                out.extend([76, 77, 78].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(tag));
+                out.extend([76, 77, 78, 333].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(plot_tag));
             }
             part = next;
             out.push(t.clone());
             if part == LayoutPart::Plot && model && !plot.is_empty() {
-                out.extend(plot.iter().map(tag));
+                out.extend(plot.iter().map(plot_tag));
             }
             continue;
         }
@@ -176,7 +179,7 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
                         .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED))),
                     // The paper's canonical name: the model keeps it with spaces, the writer writes underscores.
                     4 => first_group(plot, 4).filter(|k| k.value.replace('_', " ") == t.str().replace('_', " ")).map(tag),
-                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(tag),
+                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(plot_tag),
                 }
             }
             LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
@@ -317,8 +320,21 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             out.entry(h).or_insert(k);
         }
     };
+    // The tiles of one VPORT configuration share its name: each tile the reader keeps is a role of
+    // its own, numbered in file order (the first by the name alone).
+    let mut tiles: HashMap<String, usize> = HashMap::new();
     for (kind, _, t) in tables {
-        let name = up(&val(t, 2).unwrap_or_default());
+        let mut name = up(&val(t, 2).unwrap_or_default());
+        if kind == "VPORT" {
+            let n = tiles.entry(name.clone()).or_default();
+            if !crate::dxf_read::kept_vport(t) || *n >= crate::dxf_read::MAX_VPORT_TILES {
+                continue;
+            }
+            if *n > 0 {
+                name = format!("{name}|{n}");
+            }
+            *n += 1;
+        }
         if kind == "TABLE" || !name.is_empty() {
             put(head(t).handle, (if kind == "TABLE" { "TABLE".into() } else { kind.clone() }, name));
         }
@@ -425,7 +441,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             x.color_book = Some((rgb, book));
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
-        x.props.extend(subclass_groups(kind, tags));
+        x.subclass = subclass_groups(kind, tags);
     }
     x
 }
@@ -433,8 +449,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
 /// read: a viewport's view (direction, target, twist, lens, clipping), UCS (345, 346, 79 and its
 /// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
-/// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
-/// model writes, or keeps elsewhere (frozen layers by 331 and xdata, the sun by link), is not one.
+/// offsets. The writer puts them after the groups it writes in that subclass, with handles
+/// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
+/// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
@@ -635,6 +652,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for x in f.entities.values().chain(f.records.values()) {
         note(&x.xdata);
         note(&x.props);
+        note(&x.subclass);
         note(&x.layout);
     }
     for e in all_entities(d) {
@@ -668,9 +686,9 @@ fn link_suns(f: &mut Foreign, viewports: &HashSet<String>, ids: &HashMap<String,
         f.objects.iter().filter(|o| up(&o.kind) == "SUN").filter_map(|o| Some((owner_of(o)?, RawTag { code: 361, value: o.handle.hex() }))).collect();
     for (owner, link) in suns {
         if viewports.contains(&owner.hex()) {
-            f.entities.entry(owner).or_default().props.push(link);
+            f.entities.entry(owner).or_default().subclass.push(link);
         } else if let Some(key) = ids.get(&owner.hex()).filter(|k| k.0 == "VPORT") {
-            f.records.entry(key.clone()).or_default().props.push(link);
+            f.records.entry(key.clone()).or_default().subclass.push(link);
         }
     }
 }
@@ -1120,6 +1138,7 @@ impl<'a> Extras<'a> {
     fn of(&self, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
         let f = self.f;
         match (rec.sec.as_str(), rec.kind.as_str()) {
+            ("TABLES", "VPORT") => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
             ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "ENDBLK") => None,
@@ -1219,9 +1238,8 @@ fn public_foreign(f: &Foreign) -> Foreign {
     let mut public = f.clone();
     let private: HashSet<String> = public.objects.iter().filter(|o| raw_dwg_object(o)).map(|o| up(&o.kind)).collect();
     public.objects.retain(|o| !raw_dwg_object(o));
-    public.classes.retain(|c| {
-        c.iter().find(|t| t.code == 1).is_none_or(|n| !private.contains(&up(&n.value)) || public.objects.iter().any(|o| up(&o.kind) == up(&n.value)))
-    });
+    let kept: HashSet<String> = public.objects.iter().map(|o| up(&o.kind)).collect();
+    public.classes.retain(|c| c.iter().find(|t| t.code == 1).map(|n| up(&n.value)).is_none_or(|n| !private.contains(&n) || kept.contains(&n)));
     public
 }
 
@@ -1507,9 +1525,10 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
-    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
-    // groups, such as the sun it points at, follow its AcDbViewport groups, a leader's its AcDbLeader's).
-    let props_at = if entity && !matches!(r.kind.as_str(), "VIEWPORT" | "LEADER") {
+    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata. The groups of
+    // the record's own subclass (a viewport's sun link, a leader's annotation) follow the groups
+    // the writer wrote in it, which is the end of the record before its xdata.
+    let props_at = if entity {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
@@ -1537,13 +1556,14 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
         if i == xdata_at
             && let Some(x) = x
         {
+            out.extend(x.subclass.iter().map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
         // A VPORT record's kept view replaces the plan view the writer wrote.
         if !entity
             && r.kind == "VPORT"
             && i < xdata_at
-            && x.is_some_and(|x| x.props.iter().any(|p| p.code == t.code))
+            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code))
             && !matches!(t.code, 0 | 5 | 100 | 330)
         {
             continue;
@@ -1583,6 +1603,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             out.extend(x.props.iter().map(|p| map.group(p)));
         }
         if xdata_at == b.len() {
+            out.extend(x.subclass.iter().map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
     }

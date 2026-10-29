@@ -12,6 +12,7 @@ fn extra_references(extra: &ForeignExtra, map: &BTreeMap<Handle, Handle>) -> boo
         || extra.reactors.iter().any(|h| map.contains_key(h))
         || references(&extra.xdata, map)
         || references(&extra.props, map)
+        || references(&extra.subclass, map)
 }
 fn kind_references(kind: &EntityKind, map: &BTreeMap<Handle, Handle>) -> bool {
     match kind {
@@ -108,6 +109,7 @@ impl Drawing {
             }
             remap_tags(&mut extra.xdata, &map);
             remap_tags(&mut extra.props, &map);
+            remap_tags(&mut extra.subclass, &map);
         }
         for (_, h) in &mut foreign.dictionary {
             *h = map.get(h).copied().unwrap_or(*h);

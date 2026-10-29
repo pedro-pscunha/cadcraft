@@ -31,6 +31,7 @@ use document::{
 use entities::acad_table;
 use entities::{entity, plot_style_names};
 use objects::Objects;
+pub(crate) use tables::{MAX_VPORT_TILES, kept_vport};
 use tables::{header, tables};
 
 pub(crate) mod mtext_dxf;

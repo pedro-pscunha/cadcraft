@@ -143,8 +143,11 @@ pub struct ForeignExtra {
     /// The colour book colour (group 430) and the true colour (group 420) it was read with: it is
     /// written back while the colour is unchanged.
     pub color_book: Option<(String, String)>,
-    /// Other unmodelled property groups (material 347, shadow mode 284) and the groups of a viewport's or leader's own subclass.
+    /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
+    /// The groups of the record's own subclass the model has no field for (a viewport's view, UCS
+    /// and sun link, a leader's annotation link, a VPORT record's view), as read.
+    pub subclass: Vec<RawTag>,
     /// A layout's plot settings and layout groups as read (each after its `100` subclass marker):
     /// the writer takes from them what it has no model for (limits, extents, UCS, plot origin...).
     pub layout: Vec<RawTag>,
@@ -157,6 +160,7 @@ impl ForeignExtra {
             && self.xdata.is_empty()
             && self.color_book.is_none()
             && self.props.is_empty()
+            && self.subclass.is_empty()
             && self.layout.is_empty()
     }
 }
@@ -349,6 +353,7 @@ fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
     extra.reactors = extra.reactors.iter().filter_map(|h| map.get(h).copied()).collect();
     remap_tags(&mut extra.xdata, map);
     remap_tags(&mut extra.props, map);
+    remap_tags(&mut extra.subclass, map);
 }
 
 fn remap_xdata(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>, source: DuplicationSource) {
