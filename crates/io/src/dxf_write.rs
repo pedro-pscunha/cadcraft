@@ -177,7 +177,6 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
     let mut tags = tags_for(d, Version::R2000, dwg, true);
     let page = cadcraft_dxf::single_byte_code_page(&d.header.str("DWGCODEPAGE", "ANSI_1252"));
-    bridge_markers(&mut tags);
     bridge_code_page(&mut tags, page);
     cadcraft_dxf::ascii_to_code_page(&cadcraft_dxf::write_ascii(&tags), page)
 }
@@ -188,18 +187,6 @@ fn bridge_code_page(tags: &mut [Tag], page: &str) {
     let Some(at) = tags.iter().position(|t| t.code == 9 && t.str().trim().eq_ignore_ascii_case("$DWGCODEPAGE")) else { return };
     if let Some(t) = tags.get_mut(at + 1).filter(|t| t.code == 3) {
         *t = Tag::s(3, page);
-    }
-}
-
-/// Subclass markers the DWG bridge knows by another spelling (it matches them exactly):
-/// AutoCAD writes a dynamic block lookup parameter's as `AcDbBlockLookUpParameter`, the bridge
-/// reads `AcDbBlockLookupParameter`; otherwise the parameter loses its name and its lookup
-/// action in the DWG, and AutoCAD's lookups stop working.
-fn bridge_markers(tags: &mut [Tag]) {
-    for t in tags.iter_mut().filter(|t| t.code == 100) {
-        if t.str().trim().eq_ignore_ascii_case("AcDbBlockLookupParameter") {
-            *t = Tag::s(100, "AcDbBlockLookupParameter");
-        }
     }
 }
 

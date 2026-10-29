@@ -96,8 +96,8 @@ debug = 0
 # Arterra fork of acadrust 0.6.8 (INSERT-owned ATTRIB xdata, polyline vertex properties, AcDs
 # bodies listed in two tables, clockwise hatch arc edges, exact sort keys, owned polyline
 # vertices, TABLESTYLE border linetypes and flags in the bridge, entity material and shadow mode,
-# VERTEX/SEQEND identity and polygon mesh vertex flags), until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "3a41e4ca169c8c6f34b0f7d42e6dddc138d431ce" }
+# VERTEX/SEQEND identity and polygon mesh vertex flags, AutoCAD-readable public DXF), until upstream.
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "b8cf872cda883324ef24668eed8fa994af16b06f" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
