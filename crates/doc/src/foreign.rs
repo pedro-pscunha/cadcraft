@@ -64,10 +64,60 @@ pub type ForeignKey = (String, String);
 
 /// Types of entity CADCraft keeps as read (it doesn't model them) that the DWG writer also keeps:
 /// the DWG bridge reads their DXF groups into entities of its own and writes them, and a round
-/// trip through DWG keeps them (`crates/io/tests/it/unknown_entity_block.rs`). Other unmodelled types are
-/// left out of a DWG save, and the save says so. The version matrix tests verify both types at
-/// the oldest supported DWG targets, 2000 and 2004; neither needs a version exclusion.
-pub const DWG_KEEPS_UNKNOWN: &[&str] = &["ARC_DIMENSION", "OLE2FRAME"];
+/// trip through DWG keeps them (`crates/io/tests/it/unknown_entity_block.rs`). Other unmodelled
+/// types are left out of a DWG save, and the save says so. The ACIS types (3DSOLID, REGION, BODY and
+/// the surfaces) are not listed: their geometry is data the writer has only from the data store.
+/// acadrust has no list of what its DWG writer writes: `dwg_keeps_unknown.rs` saves a record of
+/// each type to DWG at every version and checks this list against what comes back.
+pub const DWG_KEEPS_UNKNOWN: &[&str] = &[
+    "ARC_DIMENSION",
+    "LARGE_RADIAL_DIMENSION",
+    "MPOLYGON",
+    "SHAPE",
+    "MESH",
+    "LIGHT",
+    "SECTIONLINE",
+    "DRAWINGVIEW",
+    "PDFUNDERLAY",
+    "DWFUNDERLAY",
+    "DGNUNDERLAY",
+    "OLE2FRAME",
+    "OLEFRAME",
+    "CAMERA",
+    "SECTIONOBJECT",
+    "ARCALIGNEDTEXT",
+    "RTEXT",
+    "POSITIONMARKER",
+    "GEOPOSITIONMARKER",
+    "COORDINATION_MODEL",
+    "NAVISWORKSMODEL",
+    "ACDBPOINTCLOUD",
+    "POINTCLOUD",
+    "ACDBPOINTCLOUDEX",
+    "POINTCLOUDEX",
+    "FORMAT",
+    "ALIGNMENTPARAMETERENTITY",
+    "BASEPOINTPARAMETERENTITY",
+    "FLIPPARAMETERENTITY",
+    "LINEARPARAMETERENTITY",
+    "POINTPARAMETERENTITY",
+    "ROTATIONPARAMETERENTITY",
+    "VISIBILITYPARAMETERENTITY",
+    "XYPARAMETERENTITY",
+    "BLOCKANGULARCONSTRAINTPARAMETERENTITY",
+    "FLIPGRIPENTITY",
+    "LINEARGRIPENTITY",
+    "POLARGRIPENTITY",
+    "ROTATIONGRIPENTITY",
+    "VISIBILITYGRIPENTITY",
+    "XYGRIPENTITY",
+    "WALL",
+    "MCSDBOBJECT",
+    "NOTEPOSITION",
+    "SPDSLEVELMARK",
+    "SPDSRELATIONMARK",
+    "ACAD_PROXY_ENTITY_WRAPPER",
+];
 
 /// A non-graphical object of a type or role CADCraft does not model.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -95,11 +145,19 @@ pub struct ForeignExtra {
     pub color_book: Option<(String, String)>,
     /// Other unmodelled property groups (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
+    /// A layout's plot settings and layout groups as read (each after its `100` subclass marker):
+    /// the writer takes from them what it has no model for (limits, extents, UCS, plot origin...).
+    pub layout: Vec<RawTag>,
 }
 
 impl ForeignExtra {
     pub fn is_empty(&self) -> bool {
-        self.xdict.is_none() && self.reactors.is_empty() && self.xdata.is_empty() && self.color_book.is_none() && self.props.is_empty()
+        self.xdict.is_none()
+            && self.reactors.is_empty()
+            && self.xdata.is_empty()
+            && self.color_book.is_none()
+            && self.props.is_empty()
+            && self.layout.is_empty()
     }
 }
 

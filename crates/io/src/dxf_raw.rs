@@ -38,7 +38,12 @@ const MODELLED_KEYS: &[&str] = &[
 
 /// Extension dictionary entries always written from their models. Dimension associativity is
 /// modelled only when the writer can reproduce every point reference (see [`modelled_xdict_entry`]).
-const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
+const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS"];
+
+/// Objects CADCraft writes from its model, by name, in dictionaries of the named object
+/// dictionary. Their extension dictionary and xdata that the writer doesn't write are kept like
+/// those of a table record (`Foreign::records`, under the role `NOD/<dictionary>`).
+const MODELLED_OBJECTS: &[&str] = &["LAYOUT", "MLEADERSTYLE", "TABLESTYLE", "SCALE"];
 
 fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String>) -> bool {
     let key = up(key);
@@ -46,8 +51,128 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
 }
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
-/// (DSTYLE) on dimensions and dimension styles; elsewhere it is kept.
-const OWN_APPS: &[&str] = &["CADCRAFT", "ACADANNOTATIVE", "ACCMTRANSPARENCY", "ACAECLAYERSTANDARD"];
+/// (DSTYLE) on dimensions and dimension styles, `AcadAnnotative` the annotative flag of text and
+/// dimension styles while it is on (see [`annotative_on`]), `AcCmTransparency` and `AcAecLayerStandard` a layer's transparency and
+/// description (see [`layer_xdata_modelled`]); elsewhere they are kept.
+const OWN_APPS: &[&str] = &["CADCRAFT"];
+
+/// Whether `AcadAnnotative` xdata (`chunk`) has the annotative flag (its second `1070`) on, as the
+/// model reads it from a style and writes it back. With the flag off the data is kept as read.
+fn annotative_on(chunk: &[Tag]) -> bool {
+    chunk.iter().filter(|t| t.code == 1070).nth(1).is_some_and(|t| t.i64() != 0)
+}
+
+/// Whether a layer's xdata of `app` (upper case) holds what the model writes back: a transparency
+/// above 0 (or no value: acadrust drops a layer whose `AcCmTransparency` has none) for
+/// `AcCmTransparency`, a description (the second string, after the layer standard's name) for
+/// `AcAecLayerStandard`. Any other content is kept as read.
+fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
+    match app {
+        "ACCMTRANSPARENCY" => {
+            chunk.iter().find(|t| t.code == 1071).is_none_or(|t| crate::dxf_ext::transparency_from_dxf(t.i64()).is_some_and(|p| p > 0))
+        }
+        "ACAECLAYERSTANDARD" => {
+            let mut strings = chunk.iter().filter(|t| t.code == 1000);
+            strings.next().is_some_and(|name| name.str().is_empty()) && strings.next().is_some_and(|description| !description.str().is_empty())
+        }
+        _ => false,
+    }
+}
+
+/// Groups of a layout's `AcDbLayout` subclass the writer has no model for: its flags (paper space
+/// linetype scaling, limits checking), limits, insertion base, extents, elevation, UCS and
+/// orthographic view type.
+const LAYOUT_FRAME_CODES: &[i32] = &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76];
+/// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
+/// shade plot mode, resolution and DPI, and the paper image origin.
+const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
+/// Plot layout flag bits (group 70) that `PageSetup` models: show plot styles, centred, standard
+/// scale, lineweights. The others (plot with plot styles, draw viewports first, hide objects,
+/// scale lineweights...) stay as read.
+const PLOT_FLAGS_MODELLED: i64 = 2 | 4 | 16 | 128;
+
+#[derive(Clone, Copy, PartialEq)]
+enum LayoutPart {
+    Plot,
+    Frame,
+    Other,
+}
+
+fn layout_part(subclass: &str) -> LayoutPart {
+    match subclass.trim() {
+        "AcDbPlotSettings" => LayoutPart::Plot,
+        "AcDbLayout" => LayoutPart::Frame,
+        _ => LayoutPart::Other,
+    }
+}
+
+/// A layout's groups to keep: its whole plot settings (the Model layout has no page setup in the
+/// model) and the [`LAYOUT_FRAME_CODES`] of its layout groups, each part after its `100` marker.
+fn layout_groups(tags: &[Tag]) -> Vec<RawTag> {
+    let mut out = Vec::new();
+    let mut part = LayoutPart::Other;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        if t.code == 100 {
+            part = layout_part(&t.str());
+            if part != LayoutPart::Other {
+                out.push(raw(t));
+            }
+        } else if part == LayoutPart::Plot || (part == LayoutPart::Frame && LAYOUT_FRAME_CODES.contains(&t.code)) {
+            out.push(raw(t));
+        }
+    }
+    out
+}
+
+fn first_group(from: &[RawTag], code: i32) -> Option<&RawTag> {
+    from.iter().find(|t| t.code == code)
+}
+
+/// A written layout with the groups it has constants for taken from the file's (`kept`, see
+/// [`layout_groups`]), and the Model layout's plot settings replaced by the file's.
+fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
+    let at = kept.iter().position(|t| t.code == 100 && layout_part(&t.value) == LayoutPart::Frame).unwrap_or(kept.len());
+    let (plot, frame) = (kept.get(1..at).unwrap_or(&[]), kept.get(at + 1..).unwrap_or(&[]));
+    let model = b
+        .iter()
+        .skip_while(|t| !(t.code == 100 && layout_part(&t.str()) == LayoutPart::Frame))
+        .find(|t| t.code == 1)
+        .is_some_and(|t| t.str().trim().eq_ignore_ascii_case("Model"));
+    let mut out = Vec::with_capacity(b.len() + plot.len());
+    let mut part = LayoutPart::Other;
+    let mut plot_codes: HashSet<i32> = HashSet::new();
+    for t in b {
+        if t.code == 100 {
+            let next = layout_part(&t.str());
+            if part == LayoutPart::Plot && next == LayoutPart::Frame && !model {
+                out.extend([76, 77, 78].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(tag));
+            }
+            part = next;
+            out.push(t.clone());
+            if part == LayoutPart::Plot && model && !plot.is_empty() {
+                out.extend(plot.iter().map(tag));
+            }
+            continue;
+        }
+        let replaced = match part {
+            LayoutPart::Plot if model && !plot.is_empty() => continue,
+            LayoutPart::Plot => {
+                plot_codes.insert(t.code);
+                match t.code {
+                    70 => first_group(plot, 70)
+                        .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED))),
+                    // The paper's canonical name: the model keeps it with spaces, the writer writes underscores.
+                    4 => first_group(plot, 4).filter(|k| k.value.replace('_', " ") == t.str().replace('_', " ")).map(tag),
+                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(tag),
+                }
+            }
+            LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
+            LayoutPart::Other => None,
+        };
+        out.push(replaced.unwrap_or_else(|| t.clone()));
+    }
+    out
+}
 
 /// Most objects kept from one file.
 const MAX_OBJECTS: usize = 1_000_000;
@@ -205,7 +330,9 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             && is_dictionary(k)
         {
             for (name, eh) in entries(t) {
-                put(Some(eh), (format!("NOD/{}", up(&key)), up(&name)));
+                // A scale's dictionary key is arbitrary (the writer numbers them): its name is group 300.
+                let scale = by_handle.get(&eh).filter(|_| up(&key) == "ACAD_SCALELIST").and_then(|(_, t)| val(t, 300));
+                put(Some(eh), (format!("NOD/{}", up(&key)), up(&scale.unwrap_or(name))));
             }
         }
     }
@@ -224,7 +351,10 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let chunk = rest.get(i..i + 1 + len).unwrap_or(&[]);
         i += 1 + len;
         let app = up(&first.str());
-        let own = OWN_APPS.contains(&app.as_str()) || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"));
+        let own = OWN_APPS.contains(&app.as_str())
+            || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
+            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE") && annotative_on(chunk))
+            || (kind == "LAYER" && layer_xdata_modelled(&app, chunk));
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
         }
@@ -266,6 +396,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         xdata: foreign_xdata(kind, tags),
         ..ForeignExtra::default()
     };
+    if kind == "LAYOUT" && !entity {
+        x.layout = layout_groups(tags);
+    }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
     if !unknown && (entity || kind == "LAYER") {
@@ -328,8 +461,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             crate::dxf_write::dimassoc_reproducible(d, dimension, t).then(|| head(t).handle).flatten()
         })
         .collect();
-    // Extension dictionaries of entities and records: owner → dictionary.
-    let xdict_of = extension_dictionaries(&tables, &blocks, &entities);
+    // Extension dictionaries of entities, records and the objects CADCraft writes itself: owner → dictionary.
+    let xdict_of = extension_dictionaries(&tables, &blocks, &entities, &objects);
     // Objects by handle: the first of each, and none that has an entity's handle.
     let mut by_handle: HashMap<String, usize> = HashMap::new();
     for (i, (_, _, t)) in objects.iter().enumerate() {
@@ -340,14 +473,19 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
     let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
-    // An extension dictionary of an entity or record (not of another object).
-    let is_xdict = |k: usize| {
-        let Some((_, _, t)) = objects.get(k) else { return false };
-        let hd = head(t);
-        let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
-        !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
+    let viewports: HashSet<String> =
+        blocks.iter().chain(&entities).filter(|(k, _, _)| k == "VIEWPORT").filter_map(|(_, _, t)| head(t).handle).collect();
+    let scan = Scan {
+        objects: &objects,
+        entities: &ents,
+        records: &ids,
+        by_handle: &by_handle,
+        root_entries: &root_entries,
+        xdict_of: &xdict_of,
+        modelled_assoc: &modelled_assoc,
+        viewports: &viewports,
     };
-    let memo = retained_objects(&objects, &ents, &ids, &by_handle, &root_entries, &xdict_of, &modelled_assoc);
+    let memo = retained_objects(&scan);
     let mut f = Foreign::default();
     let mut kept: HashSet<String> = HashSet::new();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
@@ -356,7 +494,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
         let Some(h) = head(t).handle.and_then(|h| handle(&h)) else { continue };
         let mut tags: Vec<RawTag> = t.iter().map(raw).collect();
-        if is_xdict(i) {
+        if scan.is_xdict(i) {
             cadcraft_doc::foreign::strip_dictionary_entries(&mut tags, |key, target| modelled_xdict_entry(key, target, &modelled_assoc));
         }
         if head(t).owner == root
@@ -389,13 +527,15 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
-    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")) {
+    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
+    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
         let x = extra(kind, t, kind == "BLOCK", false, &kept);
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
         }
     }
+    link_suns(&mut f, &viewports, &ids);
     // The classes of kept objects and of entities of types CADCraft doesn't model.
     let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
     types.extend(all_entities(d).filter_map(|e| match &e.kind {
@@ -458,6 +598,22 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
 }
 
+/// A sun is hard-owned by the viewport or VPORT record it lights, which points at it (group 361).
+/// The owner is written from the model, so the link is rebuilt from the sun's owner (a DWG's
+/// viewport entity has none in its DXF text).
+fn link_suns(f: &mut Foreign, viewports: &HashSet<String>, ids: &HashMap<String, ForeignKey>) {
+    let owner_of = |o: &ForeignObject| cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())));
+    let suns: Vec<(Handle, RawTag)> =
+        f.objects.iter().filter(|o| up(&o.kind) == "SUN").filter_map(|o| Some((owner_of(o)?, RawTag { code: 361, value: o.handle.hex() }))).collect();
+    for (owner, link) in suns {
+        if viewports.contains(&owner.hex()) {
+            f.entities.entry(owner).or_default().props.push(link);
+        } else if let Some(key) = ids.get(&owner.hex()).filter(|k| k.0 == "VPORT") {
+            f.records.entry(key.clone()).or_default().props.push(link);
+        }
+    }
+}
+
 fn entity_types(drawing: &Drawing) -> HashMap<String, bool> {
     let mut types = HashMap::new();
     for entity in all_entities(drawing) {
@@ -473,9 +629,11 @@ fn extension_dictionaries(
     tables: &[(String, usize, &[Tag])],
     blocks: &[(String, usize, &[Tag])],
     entities: &[(String, usize, &[Tag])],
+    objects: &[(String, usize, &[Tag])],
 ) -> HashMap<String, String> {
     let mut dictionaries = HashMap::new();
-    for (kind, _, tags) in tables.iter().chain(blocks).chain(entities) {
+    let modelled = objects.iter().filter(|(kind, _, _)| MODELLED_OBJECTS.contains(&kind.as_str()));
+    for (kind, _, tags) in tables.iter().chain(blocks).chain(entities).chain(modelled) {
         if kind == "ENDBLK" {
             continue;
         }
@@ -487,24 +645,47 @@ fn extension_dictionaries(
     dictionaries
 }
 
-/// Determine which objects belong to unmodelled dictionary entries or owners.
-fn retained_objects(
-    objects: &[(String, usize, &[Tag])],
-    entities: &HashMap<String, bool>,
-    records: &HashMap<String, ForeignKey>,
-    by_handle: &HashMap<String, usize>,
-    root_entries: &[(String, String)],
-    xdict_of: &HashMap<String, String>,
-    modelled_assoc: &HashSet<String>,
-) -> HashMap<usize, bool> {
-    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
-    let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
-    let is_xdict = |index: usize| {
-        let Some((_, _, tags)) = objects.get(index) else { return false };
+/// What deciding which objects of a file are kept looks at.
+struct Scan<'a> {
+    objects: &'a Recs<'a>,
+    /// The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
+    entities: &'a HashMap<String, bool>,
+    /// The roles of the table records, blocks and named object dictionary entries.
+    records: &'a HashMap<String, ForeignKey>,
+    /// Objects by handle (those that are no entity).
+    by_handle: &'a HashMap<String, usize>,
+    root_entries: &'a [(String, String)],
+    /// Extension dictionaries: owner → dictionary.
+    xdict_of: &'a HashMap<String, String>,
+    modelled_assoc: &'a HashSet<String>,
+    /// The viewport entities of the file.
+    viewports: &'a HashSet<String>,
+}
+
+impl Scan<'_> {
+    /// Whether `owner` is a viewport or a VPORT record, which hard-own a SUN (and write group 361).
+    fn sun_owner(&self, owner: &str) -> bool {
+        self.viewports.contains(owner) || self.records.get(owner).is_some_and(|key| key.0 == "VPORT")
+    }
+
+    /// Whether object `index` is the extension dictionary of something CADCraft writes itself: an
+    /// entity, a table record or block, or an object of [`MODELLED_OBJECTS`] (not of another object).
+    fn is_xdict(&self, index: usize) -> bool {
+        let Some((_, _, tags)) = self.objects.get(index) else { return false };
         let header = head(tags);
         let (Some(handle), Some(owner)) = (header.handle, header.owner) else { return false };
-        !by_handle.contains_key(&owner) && xdict_of.get(&owner) == Some(&handle) && (entities.contains_key(&owner) || records.contains_key(&owner))
-    };
+        let by_model =
+            self.by_handle.get(&owner).is_none_or(|&i| self.objects.get(i).is_some_and(|(kind, _, _)| MODELLED_OBJECTS.contains(&kind.as_str())));
+        by_model && self.xdict_of.get(&owner) == Some(&handle) && (self.entities.contains_key(&owner) || self.records.contains_key(&owner))
+    }
+}
+
+/// Determine which objects belong to unmodelled dictionary entries or owners.
+fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
+    let Scan { objects, entities, root_entries, by_handle, modelled_assoc, .. } = *scan;
+    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
+    let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
+    let is_xdict = |index: usize| scan.is_xdict(index);
     let modelled_entry = |tags: &[Tag], handle: &str| {
         entries(tags).iter().any(|(key, entry_handle)| entry_handle == handle && modelled_xdict_entry(key, entry_handle, modelled_assoc))
     };
@@ -520,7 +701,7 @@ fn retained_objects(
                 break false;
             }
             path.push(current);
-            let Some((_, _, tags)) = objects.get(current) else { break false };
+            let Some((kind, _, tags)) = objects.get(current) else { break false };
             let header = head(tags);
             let (Some(handle), Some(owner)) = (header.handle, header.owner) else { break false };
             if by_handle.get(&handle) != Some(&current) {
@@ -529,6 +710,9 @@ fn retained_objects(
             if root.as_deref() == Some(owner.as_str()) {
                 break root_key(&handle).is_some_and(|key| !modelled_key(key));
             }
+            if is_xdict(current) {
+                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
+            }
             if let Some(&parent) = by_handle.get(&owner) {
                 if is_xdict(parent) && objects.get(parent).is_some_and(|object| modelled_entry(object.2, &handle)) {
                     break false;
@@ -536,10 +720,7 @@ fn retained_objects(
                 current = parent;
                 continue;
             }
-            if is_xdict(current) {
-                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
-            }
-            break entities.get(&owner) == Some(&true);
+            break entities.get(&owner) == Some(&true) || (kind == "SUN" && scan.sun_owner(&owner));
         };
         for visited in path {
             retained.insert(visited, keep);
@@ -865,21 +1046,32 @@ fn merge_xdict(map: &Map<'_>, foreign: &ForeignObject, written: &[Tag]) -> Vec<T
     merged
 }
 
-/// The extras of a written record, if the drawing keeps any for it.
-fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
-    match (rec.sec.as_str(), rec.kind.as_str()) {
-        ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
-        ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
-        ("BLOCKS", "ENDBLK") => None,
-        ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, handle(&head(body).handle?)?),
-        _ => None,
+/// What the extras of a written record are looked up in.
+struct Extras<'a> {
+    f: &'a Foreign,
+    xd: &'a XdataOf<'a>,
+    /// The written file's roles, which name the objects of [`MODELLED_OBJECTS`].
+    ids: &'a HashMap<String, ForeignKey>,
+}
+
+impl<'a> Extras<'a> {
+    /// The extras of a written record, if the drawing keeps any for it.
+    fn of(&self, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
+        let f = self.f;
+        match (rec.sec.as_str(), rec.kind.as_str()) {
+            ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
+            ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
+            ("BLOCKS", "ENDBLK") => None,
+            ("ENTITIES" | "BLOCKS", _) => entity_extra(f, self.xd, handle(&head(body).handle?)?),
+            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
+            _ => None,
+        }
     }
 }
 
 /// Plan standalone/merged xdict ownership separately from writing their object graphs.
 fn plan_xdict_attachments(
-    f: &Foreign,
-    xd: &XdataOf,
+    extras: &Extras,
     recs: &[Rec],
     tags: &[Tag],
     roles: &HashMap<ForeignKey, String>,
@@ -890,13 +1082,13 @@ fn plan_xdict_attachments(
     let mut merged = HashMap::new();
     for r in recs {
         let body = tags.get(r.start + 1..r.end).unwrap_or(&[]);
-        if let Some(x) = extra_for(f, xd, r, body)
+        if let Some(x) = extras.of(r, body)
             && let Some(dictionary) = x.xdict
         {
             let old = dictionary.hex();
             let header = head(body);
             let owned = owners.get(&old).is_some_and(|owner| {
-                let current = handle(owner).and_then(|h| f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
+                let current = handle(owner).and_then(|h| extras.f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
                 header.handle.as_ref() == Some(current)
             });
             if !(owned && objects.get(&old).is_some_and(|o| is_dictionary(&o.kind))) {
@@ -999,7 +1191,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         .iter()
         .filter_map(|o| Some((o.handle.hex(), cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())))?.hex())))
         .collect();
-    let (mut attached, merged) = plan_xdict_attachments(f, &xd, &recs, tags, &roles, &objs, &owners);
+    let extras = Extras { f, xd: &xd, ids: &ids };
+    let (mut attached, merged) = plan_xdict_attachments(&extras, &recs, tags, &roles, &objs, &owners);
     for (_, t) in planned.values().flatten() {
         let header = head(t.get(1..).unwrap_or(&[]));
         let x = header.handle.as_ref().and_then(|h| handle(h)).and_then(|h| entity_extra(f, &xd, h));
@@ -1010,6 +1203,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             attached.insert(dictionary);
         }
     }
+    // The viewports written: a kept SUN hangs on one of them (or on a written VPORT record).
+    let viewports: HashSet<String> =
+        all_entities(d).filter(|e| matches!(e.kind, EntityKind::Viewport(_))).map(|e| e.handle.hex()).filter(|h| written.contains(h)).collect();
     // Which kept objects are written: those whose owner chain ends at a written owner.
     let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
     let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
@@ -1039,7 +1235,10 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             if attached.contains(&cur) {
                 break true;
             }
-            break unknown.contains(&owner) && written.contains(&owner);
+            let sun = o.kind.eq_ignore_ascii_case("SUN")
+                && (viewports.contains(&owner)
+                    || handle(&owner).and_then(|h| f.targets.get(&h)).is_some_and(|key| key.0 == "VPORT" && roles.contains_key(key)));
+            break (unknown.contains(&owner) && written.contains(&owner)) || sun;
         };
         for p in path {
             alive_memo.insert(p, verdict);
@@ -1097,7 +1296,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             continue;
         }
         out.extend(tags.get(r.start).cloned());
-        let x = extra_for(f, &xd, r, b);
+        let x = extras.of(r, b);
         if x.is_none() && Some(r.start) != root {
             out.extend(b.iter().cloned());
             continue;
@@ -1179,12 +1378,21 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
 /// A written record with its kept extras, remapped references (unknown entities) and kept
 /// dictionary entries (the named object dictionary).
 fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool, root: bool, out: &mut Vec<Tag>) {
+    let patched;
+    let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
+        Some(x) => {
+            patched = patch_layout(b, &x.layout);
+            patched.as_slice()
+        }
+        None => b,
+    };
     let h = head(b);
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
-    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata.
-    let props_at = if entity {
+    // Where unmodelled properties go: the end of AcDbEntity, else before the xdata (a viewport's own
+    // groups, such as the sun it points at, follow its AcDbViewport groups).
+    let props_at = if entity && r.kind != "VIEWPORT" {
         b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))

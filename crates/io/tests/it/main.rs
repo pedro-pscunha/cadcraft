@@ -24,6 +24,8 @@ mod dimtfill_roundtrip;
 mod drafting_spacing;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
+#[cfg(not(target_arch = "wasm32"))]
+mod dwg_keeps_unknown;
 mod dwg_layout_owner;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_roundtrip_losses;
@@ -33,6 +35,7 @@ mod dxf_versions;
 mod dynblock_read;
 mod entity_props_roundtrip;
 mod followups_626;
+mod foreign_passthrough;
 mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
