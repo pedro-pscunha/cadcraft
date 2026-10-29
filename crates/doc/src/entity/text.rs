@@ -85,6 +85,41 @@ pub struct MText {
     pub columns: Option<MTextColumns>,
 }
 
+impl MText {
+    /// A key of what the laid-out extents depend on: the contents, style, height, width, line spacing and
+    /// the columns (not their extents), and not the place or the rotation.
+    pub fn layout_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.contents.hash(&mut h);
+        self.style.hash(&mut h);
+        for v in [self.height, self.width, self.line_spacing] {
+            v.to_bits().hash(&mut h);
+        }
+        (self.attach, self.line_spacing_exact).hash(&mut h);
+        if let Some(c) = &self.columns {
+            (c.kind as u8, c.count, c.auto_height, c.flow_reversed).hash(&mut h);
+            for v in std::iter::once(&c.gutter).chain(std::iter::once(&c.height)).chain(&c.heights) {
+                v.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    /// Keep `width` and `height` as the laid-out extents of this text as it is now.
+    pub fn set_column_extents(&mut self, width: f64, height: f64) {
+        let key = self.layout_key();
+        if let Some(c) = &mut self.columns {
+            c.extents = Some(ColumnExtents { width, height, key });
+        }
+    }
+
+    /// The laid-out extents a file gave, while the text is as it was then; else zeros (unknown).
+    pub fn column_extents(&self) -> (f64, f64) {
+        self.columns.as_ref().and_then(|c| c.extents).filter(|e| e.key == self.layout_key()).map_or((0.0, 0.0), |e| (e.width, e.height))
+    }
+}
+
 fn attach_tl() -> u8 {
     1
 }
@@ -118,6 +153,19 @@ pub struct MTextColumns {
     pub heights: Vec<f64>,
     /// Columns run right to left.
     pub flow_reversed: bool,
+    /// The extents of the laid-out text (DXF embedded object groups 42 and 43) as a file gave them, with
+    /// the key of the text they were measured for. CADCraft does not lay text out the way AutoCAD
+    /// does: the values are written back only while the text, its size and its columns are as read.
+    #[serde(skip)]
+    pub extents: Option<ColumnExtents>,
+}
+
+/// The laid-out extents of a column text and the [`MText::layout_key`] they belong to.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ColumnExtents {
+    pub width: f64,
+    pub height: f64,
+    pub key: u64,
 }
 
 impl MTextColumns {

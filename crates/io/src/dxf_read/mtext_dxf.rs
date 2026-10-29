@@ -97,6 +97,7 @@ pub(crate) fn read_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
         auto_height,
         heights: if manual { heights } else { Vec::new() },
         flow_reversed: first(78).map(Tag::i64).unwrap_or(0) != 0,
+        extents: None,
     };
     Some((c, first(48).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
 }
@@ -127,12 +128,125 @@ pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)>
         auto_height,
         heights: if manual { heights } else { Vec::new() },
         flow_reversed: first(74).map(|t| t.i64()).unwrap_or(0) != 0,
+        extents: None,
     };
     Some((c, first(44).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
 }
 
+/// The laid-out extents (42, 43) of the embedded object of an R2018+ MTEXT.
+pub(crate) fn read_embedded_extents(tags: &[Tag]) -> Option<(f64, f64)> {
+    let at = tags.iter().position(|t| t.code == 101)?;
+    let block: Vec<&Tag> = tags.get(at + 1..)?.iter().take_while(|t| t.code < 1000 && t.code != 0 && t.code != 100).collect();
+    let get = |code: i32| block.iter().find(|t| t.code == code).map(|t| finite(t.f64()).max(0.0));
+    Some((get(42)?, get(43)?))
+}
+
+/// The ACAD application's extended data of an entity record (from its `1001 ACAD` to the next application).
+pub(crate) fn acad_xdata(tags: &[Tag]) -> Option<&[Tag]> {
+    let start = tags.iter().position(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case("ACAD"))?;
+    let rest = tags.get(start..)?;
+    let end = rest.iter().skip(1).position(|t| t.code == 1001).map_or(rest.len(), |p| p + 1);
+    rest.get(..end)
+}
+
+/// The ACAD extended data AutoCAD 2007 to 2013 keeps the columns in (`ACAD_MTEXT_COLUMN_INFO_BEGIN`
+/// ... `_END`): 75 type, 79 auto height, 76 count, 78 flow reversed, 48 column width, 49 gutter,
+/// 50 and the number of column heights, then the heights. The record must be the application's only
+/// content; returns the columns and the column width.
+pub(crate) fn read_xdata_columns(xdata: &[Tag]) -> Option<(MTextColumns, f64)> {
+    let values = xdata_column_values(xdata)?;
+    let mut it = values.iter();
+    let (mut kind, mut auto_height, mut count, mut flow, mut width, mut gutter) = (0i64, false, 1i64, false, 0.0, 0.0);
+    let mut heights = Vec::new();
+    while let Some(code) = it.next() {
+        let value = it.next()?;
+        match code.i64() {
+            75 => kind = value.i64(),
+            79 => auto_height = value.i64() != 0,
+            76 => count = value.i64(),
+            78 => flow = value.i64() != 0,
+            48 => width = finite(value.f64()).max(0.0),
+            49 => gutter = finite(value.f64()).max(0.0),
+            50 => {
+                let n = usize::try_from(value.i64()).ok()?.min(MAX_COLUMNS);
+                for _ in 0..n {
+                    heights.push(finite(it.next()?.f64()).max(0.0));
+                }
+            }
+            _ => return None,
+        }
+    }
+    let kind = match kind {
+        1 => MTextColumnType::Static,
+        2 => MTextColumnType::Dynamic,
+        _ => return None,
+    };
+    let manual = kind == MTextColumnType::Dynamic && !auto_height;
+    let height = if manual { heights.iter().copied().fold(0.0, f64::max) } else { heights.first().copied().unwrap_or(0.0) };
+    let count = count.clamp(1, MAX_COLUMNS as i64);
+    let c = MTextColumns {
+        kind,
+        count: u16::try_from(count).unwrap_or(1),
+        gutter,
+        height,
+        auto_height,
+        heights: if manual { heights } else { Vec::new() },
+        flow_reversed: flow,
+        extents: None,
+    };
+    Some((c, width))
+}
+
+/// The (code, value) groups of the column record of the entity's ACAD xdata, between its markers; `None`
+/// unless the application holds just that record.
+fn xdata_column_values(xdata: &[Tag]) -> Option<Vec<&Tag>> {
+    let first = xdata.first().filter(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case("ACAD"))?;
+    let _ = first;
+    let rest = xdata.get(1..)?;
+    let (begin, end) = (rest.first()?, rest.last()?);
+    if begin.code != 1000
+        || begin.str().trim() != "ACAD_MTEXT_COLUMN_INFO_BEGIN"
+        || end.code != 1000
+        || end.str().trim() != "ACAD_MTEXT_COLUMN_INFO_END"
+    {
+        return None;
+    }
+    let inner = rest.get(1..rest.len() - 1)?;
+    inner.iter().all(|t| matches!(t.code, 1070 | 1040)).then(|| inner.iter().collect())
+}
+
+/// The ACAD xdata record of an MTEXT's columns for a file of 2007 to 2017, as AutoCAD writes it.
+pub(crate) fn xdata_column_tags(t: &MText) -> Vec<Tag> {
+    let Some(c) = &t.columns else { return Vec::new() };
+    let manual = c.kind == MTextColumnType::Dynamic && !c.auto_height;
+    let count = if manual { c.heights.len().max(1) } else { usize::from(c.count.max(1)) };
+    let mut v = vec![
+        Tag::s(1001, "ACAD"),
+        Tag::s(1000, "ACAD_MTEXT_COLUMN_INFO_BEGIN"),
+        Tag::i(1070, 75),
+        Tag::i(1070, if c.kind == MTextColumnType::Dynamic { 2 } else { 1 }),
+        Tag::i(1070, 79),
+        Tag::i(1070, i64::from(c.auto_height)),
+        Tag::i(1070, 76),
+        Tag::i(1070, count as i64),
+        Tag::i(1070, 78),
+        Tag::i(1070, i64::from(c.flow_reversed)),
+        Tag::i(1070, 48),
+        Tag::f(1040, t.width),
+        Tag::i(1070, 49),
+        Tag::f(1040, c.gutter),
+        Tag::i(1070, 50),
+        Tag::i(1070, if manual { c.heights.len() as i64 } else { 0 }),
+    ];
+    if manual {
+        v.extend(c.heights.iter().map(|h| Tag::f(1040, *h)));
+    }
+    v.push(Tag::s(1000, "ACAD_MTEXT_COLUMN_INFO_END"));
+    v
+}
+
 /// The embedded object (group 101) of an R2018+ MTEXT with columns, as AutoCAD writes it: the
-/// attachment, X-axis direction, insertion point, rectangle size, extents (not modelled: 0) and the columns.
+/// attachment, X-axis direction, insertion point, rectangle size, laid-out extents (kept from the file while the text is as read) and the columns.
 pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
     let Some(c) = &t.columns else { return Vec::new() };
     let manual = c.kind == MTextColumnType::Dynamic && !c.auto_height;
@@ -148,8 +262,8 @@ pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
         Tag::f(31, t.insert.z),
         Tag::f(40, c.total_width(t.width)),
         Tag::f(41, if manual { 0.0 } else { c.height }),
-        Tag::f(42, 0.0),
-        Tag::f(43, 0.0),
+        Tag::f(42, t.column_extents().0),
+        Tag::f(43, t.column_extents().1),
         Tag::i(71, if c.kind == MTextColumnType::Dynamic { 2 } else { 1 }),
         Tag::i(72, count as i64),
         Tag::f(44, t.width),

@@ -102,6 +102,7 @@ fn scale_scales_multileader_text_width_and_columns() {
             auto_height: true,
             heights: vec![3.0, 4.0],
             flow_reversed: false,
+            extents: None,
         }),
     };
     let mut s = Session::new();
