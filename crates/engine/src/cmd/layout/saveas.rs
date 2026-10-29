@@ -12,7 +12,7 @@ use cadcraft_doc::{Common, Drawing, Entity, EntityKind, EntityStore, Point};
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
-use super::super::file::{drops_unknown, io, not_saved, not_saved_message};
+use super::super::file::{SaveAs, drops_unknown, not_saved, not_saved_message, report_notes, write_document};
 use super::super::{bad, str_param};
 use super::layout_name;
 use super::prompts::current_layout;
@@ -102,10 +102,10 @@ pub(super) fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.state()?.drawing();
     let name = layout_name("layout.saveas", d, &name)?;
     let t = template_of(d, &name)?;
-    let hooks = io().ok_or_else(|| bad("layout.saveas", "file formats are not available in this build"))?;
-    let bytes = (hooks.write)(&t, &path).map_err(|e| bad("layout.saveas", e))?;
+    let (bytes, notes) = write_document(&t, "layout.saveas", &path, &SaveAs::default())?;
     store(&path, &bytes)?;
     let mut r = json!({ "name": name, "path": path, "bytes": bytes.len() });
+    report_notes(s, &mut r, notes);
     let lost = not_saved(&t);
     if drops_unknown(&path)
         && let Some(msg) = not_saved_message(&lost)

@@ -154,12 +154,17 @@ fn is_dxf(path: &str) -> bool {
 /// The drawing written to `path` with `opts`: through [`IoHooks::write`] when no option is set,
 /// else through the [`write_as`] hook.
 fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<NotedBytes> {
+    // A drawing file is the drawing outside the Block Editor; an image is what is shown.
+    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    write_document(d, cmd, path, opts)
+}
+
+/// Write an explicit drawing and retain every note from the host's format writer.
+pub(super) fn write_document(d: &Drawing, cmd: &str, path: &str, opts: &SaveAs) -> Result<NotedBytes> {
     let hooks = io().ok_or_else(|| bad(cmd, "file formats are not available in this build"))?;
     if opts.binary && !is_dxf(path) {
         return Err(bad(cmd, "binary applies to DXF files only"));
     }
-    // A drawing file is the drawing outside the Block Editor; an image is what is shown.
-    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
     if is_drawing_file(path)
         && let Some(write) = WRITE_NOTED.get()
     {
@@ -627,7 +632,7 @@ fn report_save_notes(s: &mut Session, result: &mut Value, path: &str, version: V
     report_notes(s, result, notes);
 }
 
-fn report_notes(s: &mut Session, result: &mut Value, notes: Vec<String>) {
+pub(super) fn report_notes(s: &mut Session, result: &mut Value, notes: Vec<String>) {
     if notes.is_empty() {
         return;
     }

@@ -15,5 +15,19 @@ fn a_save_reports_each_writer_omission() {
     assert_eq!(result["warnings"][0], "DWG: not saved: TESTCLASS (A1): source version differs");
     let result = session.execute("qsave", &json!({})).unwrap();
     assert_eq!(result["warnings"][0], "DWG: not saved: TESTCLASS (A1): source version differs");
+    let line = session.execute("line", &json!({"points": [[0, 0], [5, 5]]})).unwrap();
+    let handle = line["handles"][0].as_str().unwrap();
+    let layout = session.doc().unwrap().layouts[0].name.clone();
+    for (command, params) in [
+        ("export", json!({"format": "dwg"})),
+        ("export", json!({"format": "dwg", "path": path})),
+        ("wblock", json!({"handles": [handle], "path": path})),
+        ("layout.saveas", json!({"name": layout, "path": path})),
+    ] {
+        session.log.clear();
+        let result = session.execute(command, &params).unwrap();
+        assert_eq!(result["warnings"][0], "DWG: not saved: TESTCLASS (A1): source version differs", "{command}");
+        assert!(session.log.iter().any(|line| line.contains("TESTCLASS (A1)")), "{command}: session log");
+    }
     std::fs::remove_file(path).unwrap();
 }

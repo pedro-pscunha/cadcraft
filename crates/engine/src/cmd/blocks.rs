@@ -387,11 +387,12 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     for e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::OtherDrawing) {
         d.model.push(e);
     }
-    let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;
-    let bytes = (hooks.write)(&d, &path).map_err(|e| bad("wblock", e))?;
+    let (bytes, notes) = super::file::write_document(&d, "wblock", &path, &super::file::SaveAs::default())?;
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;
-    Ok(json!({ "path": path, "entities": d.model.len(), "bytes": bytes.len() }))
+    let mut result = json!({ "path": path, "entities": d.model.len(), "bytes": bytes.len() });
+    super::file::report_notes(s, &mut result, notes);
+    Ok(result)
 }
 
 fn run_base(s: &mut Session, p: &Value) -> Result<Value> {
