@@ -38,7 +38,7 @@ const MODELLED_KEYS: &[&str] = &[
 
 /// Extension dictionary entries always written from their models. Dimension associativity is
 /// modelled only when the writer can reproduce every point reference (see [`modelled_xdict_entry`]).
-const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
+const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS"];
 
 fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String>) -> bool {
     let key = up(key);
@@ -46,8 +46,9 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
 }
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
-/// (DSTYLE) on dimensions and dimension styles; elsewhere it is kept.
-const OWN_APPS: &[&str] = &["CADCRAFT", "ACADANNOTATIVE", "ACCMTRANSPARENCY", "ACAECLAYERSTANDARD"];
+/// (DSTYLE) on dimensions and dimension styles, `AcadAnnotative` the annotative flag of text and
+/// dimension styles; elsewhere they are kept.
+const OWN_APPS: &[&str] = &["CADCRAFT", "ACCMTRANSPARENCY", "ACAECLAYERSTANDARD"];
 
 /// Most objects kept from one file.
 const MAX_OBJECTS: usize = 1_000_000;
@@ -224,7 +225,9 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let chunk = rest.get(i..i + 1 + len).unwrap_or(&[]);
         i += 1 + len;
         let app = up(&first.str());
-        let own = OWN_APPS.contains(&app.as_str()) || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"));
+        let own = OWN_APPS.contains(&app.as_str())
+            || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
+            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE"));
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
         }

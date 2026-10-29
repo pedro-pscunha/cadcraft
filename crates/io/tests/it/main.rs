@@ -32,6 +32,7 @@ mod dxf_versions;
 mod dynblock_read;
 mod entity_props_roundtrip;
 mod followups_626;
+mod foreign_passthrough;
 mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
