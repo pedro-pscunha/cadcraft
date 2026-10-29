@@ -60,22 +60,24 @@ fn active(s: &Session, cmd: &str) -> Result<RefEdit> {
 }
 
 /// A block object as the drawing shows it through the edited reference.
-fn to_host(to_world: &Mat3, e: &Entity, h: Handle, ghost: bool) -> Entity {
+fn to_host(to_world: &Mat3, e: &Entity, h: Handle, ghost: bool) -> Result<Entity> {
+    crate::cmd::modify::check_ellipse_transform(e, to_world)?;
     let mut c = e.clone();
     c.handle = h;
     c.kind.transform(to_world);
     if ghost {
         c.common.transparency = Transparency::Percent(GHOST_FADE);
     }
-    c
+    Ok(c)
 }
 
 /// A drawing object as it belongs in the block, with the block object's handle `h`.
-fn to_block(inv: &Mat3, e: &Entity, h: Handle) -> Entity {
+fn to_block(inv: &Mat3, e: &Entity, h: Handle) -> Result<Entity> {
+    crate::cmd::modify::check_ellipse_transform(e, inv)?;
     let mut c = e.clone();
     c.handle = h;
     c.kind.transform(inv);
-    c
+    Ok(c)
 }
 
 fn put(d: &mut Drawing, r: &RefEdit, e: Entity) -> Result<()> {
@@ -147,6 +149,9 @@ fn run_refedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Some(v) => return Err(bad("refedit", format!("`objects` must be \"all\" or an array of handles, got {v}"))),
     };
+    for entity in blk.entities.iter() {
+        crate::cmd::modify::check_ellipse_transform(entity, &to_world)?;
+    }
     let was_visible = d.entity(ih).is_some_and(|e| e.common.visible);
     let mut r = RefEdit {
         block: blk.name.clone(),
@@ -162,7 +167,7 @@ fn run_refedit(s: &mut Session, p: &Value) -> Result<Value> {
     for e in blk.entities.iter() {
         let working = chosen.as_ref().is_none_or(|c| c.contains(&e.handle));
         let h = doc.new_handle();
-        put(doc, &r, to_host(&to_world, e, h, !working))?;
+        put(doc, &r, to_host(&to_world, e, h, !working)?)?;
         if working {
             r.items.push(WorkItem { copy: h, source: Some(e.handle) });
         } else {
@@ -213,6 +218,11 @@ fn apply_refset(s: &mut Session, add: &[Handle], remove: &[Handle]) -> Result<Va
         return Err(bad("refset", format!("object {} is not in the working set", h.hex())));
     }
     let blk = d.block(&r.block).cloned().ok_or_else(|| bad("refset", format!("block \"{}\" is gone; REFCLOSE Discard", r.block)))?;
+    for handle in remove {
+        if let Some(entity) = d.entity(*handle) {
+            crate::cmd::modify::check_ellipse_transform(entity, &inv)?;
+        }
+    }
     let (mut added, mut removed) = (0usize, 0usize);
     let doc = s.doc_mut()?;
     for h in add {
@@ -229,7 +239,7 @@ fn apply_refset(s: &mut Session, add: &[Handle], remove: &[Handle]) -> Result<Va
             };
             if let Some(cur) = cur {
                 let c = doc.new_handle();
-                put(doc, &r, to_host(&r.to_world, &cur, c, false))?;
+                put(doc, &r, to_host(&r.to_world, &cur, c, false)?)?;
                 r.items.push(WorkItem { copy: c, source: Some(src) });
                 added += 1;
             }
@@ -245,10 +255,10 @@ fn apply_refset(s: &mut Session, add: &[Handle], remove: &[Handle]) -> Result<Va
             && let Some(e) = doc.entity(*h).map(|e| (**e).clone())
         {
             // Back to the block, edits kept, shown faded.
-            let kept = to_block(&inv, &e, src);
+            let kept = to_block(&inv, &e, src)?;
             doc.remove_entity(*h);
             let g = doc.new_handle();
-            put(doc, &r, to_host(&r.to_world, &kept, g, true))?;
+            put(doc, &r, to_host(&r.to_world, &kept, g, true)?)?;
             r.ghosts.push((g, src));
             r.released.push(kept);
         }
@@ -296,7 +306,7 @@ fn commit_block(nd: &mut Drawing, r: &RefEdit) -> Result<usize> {
             // A working object the user erased leaves the block.
             Some(i) => {
                 if let Some(c) = nd.entity(i.copy) {
-                    ents.push(to_block(&inv, c, e.handle));
+                    ents.push(to_block(&inv, c, e.handle)?);
                 }
             }
             None => match r.released.iter().find(|x| x.handle == e.handle) {
@@ -310,7 +320,7 @@ fn commit_block(nd: &mut Drawing, r: &RefEdit) -> Result<usize> {
         if let Some(c) = nd.entity(i.copy).map(|c| (**c).clone()) {
             // REFSET relocates an existing object, not a copy. Keep the graph root identity
             // so xdict/FIELD/DIMASSOC ownership and references move with it.
-            ents.push(to_block(&inv, &c, c.handle));
+            ents.push(to_block(&inv, &c, c.handle)?);
             moved.push(i.copy);
         }
     }

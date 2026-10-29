@@ -205,6 +205,7 @@ fn adopt(e: &Entity, renames: &BTreeMap<String, String>) -> Entity {
 pub(super) fn explode_insert(s: &mut Session, h: Handle) -> Result<Vec<Handle>> {
     let space = s.space();
     let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
+    crate::cmd::modify::check_block_expansion(s.doc()?, &e, &cadcraft_geom::Mat3::IDENTITY, 0)?;
     let parts = explode_kind(s.doc()?, &e).unwrap_or_default();
     let d = s.doc_mut()?;
     d.remove_entity(h);

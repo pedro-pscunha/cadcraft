@@ -180,6 +180,7 @@ pub(crate) fn explode_with(
             continue;
         }
         let Some(e) = s.doc()?.entity(*h).map(|e| (**e).clone()) else { continue };
+        super::check_block_expansion(s.doc()?, &e, &cadcraft_geom::Mat3::IDENTITY, 0)?;
         let Some(mut parts) = pieces(s.doc()?, &e) else { continue };
         if !matches!(e.kind, EntityKind::Insert(_)) {
             for p in &mut parts {

@@ -280,7 +280,24 @@ fn run_block(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "block": name, "insert": r.map(|h| h.hex()) }))
 }
 
+fn check_exploded_insert(s: &Session, name: &str, at: Vec2, scale: Vec2, rotation: f64, base: Option<Vec2>) -> Result<()> {
+    let d = s.doc()?;
+    let block = d.block(name).ok_or_else(|| bad("insert", format!("Block \"{name}\" not found.")))?;
+    let insert = insert_entity(block, at, scale, rotation, base);
+    let entity = Entity::new(Handle(0), EntityKind::Insert(insert));
+    super::modify::check_block_expansion(d, &entity, &Mat3::IDENTITY, 0)
+}
+
 fn run_insert(s: &mut Session, p: &Value) -> Result<Value> {
+    let before = s.doc()?.clone();
+    let result = insert_params(s, p);
+    if result.is_err() {
+        *s.doc_mut()? = before;
+    }
+    result
+}
+
+fn insert_params(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &insert_file::json_params(s, p)?;
     let name = str_param(p, "name").ok_or_else(|| bad("insert", "`name` is required"))?.to_string();
     let at = point_req("insert", p, "at")?;
@@ -297,6 +314,9 @@ fn run_insert(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let rot = f64_or(p, "rotation", 0.0).to_radians();
     let vals = p.get("attribs").and_then(Value::as_object).cloned().unwrap_or_default();
+    if bool_or(p, "explode", false) {
+        check_exploded_insert(s, &name, at, scale, rot, point_param(p, "basePoint"))?;
+    }
     let h = insert_with(s, &name, at, scale, rot, point_param(p, "basePoint"), &vals)?;
     if bool_or(p, "explode", false) {
         // The EXPLODE command body, not `execute`: INSERT records the one undo step.
@@ -611,6 +631,9 @@ impl InsertM {
             && self.values.len() >= self.attdefs.len()
             && let (Some(n), Some(a), Some(sc), Some(r)) = (self.name.clone(), self.at, self.scale, self.rotation)
         {
+            if self.explode {
+                check_exploded_insert(s, &n, a, sc, r, self.base)?;
+            }
             let h = insert_with(s, &n, a, sc, r, self.base, &self.values)?;
             if self.explode {
                 insert_file::explode_insert(s, h)?;

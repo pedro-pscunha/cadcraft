@@ -159,6 +159,9 @@ fn run_import(s: &mut Session, p: &Value) -> Result<Value> {
 fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &str) -> Result<Value> {
     let m = Mat3::scale(scale, scale).then(Mat3::translate(at));
     let moved = at != Vec2::ZERO || scale != 1.0;
+    for entity in src.model.iter() {
+        super::modify::check_ellipse_transform(entity, &m)?;
+    }
     let space = s.space();
     let d = s.doc_mut()?;
     let (layers, styles) = merge_tables(d, src);

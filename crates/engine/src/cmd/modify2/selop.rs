@@ -54,6 +54,7 @@ pub(crate) fn flatten_kind(k: &mut EntityKind) {
         EntityKind::Circle(c) => z(&mut c.center),
         EntityKind::Arc(a) => z(&mut a.center),
         EntityKind::Ellipse(e) => {
+            e.flatten();
             z(&mut e.center);
             z(&mut e.major);
         }
@@ -122,6 +123,15 @@ pub(crate) fn flatten_kind(k: &mut EntityKind) {
 }
 
 fn flatten(s: &mut Session, hs: &[Handle]) -> Result<usize> {
+    for h in hs {
+        if !curves::is_locked(s, *h)
+            && let Some(e) = s.doc()?.entity(*h)
+            && let EntityKind::Ellipse(ellipse) = &e.kind
+            && !ellipse.clone().flatten()
+        {
+            return Err(other("An edge-on or invalid ellipse cannot be flattened into an ellipse."));
+        }
+    }
     let mut n = 0;
     for h in hs {
         if curves::is_locked(s, *h) {
@@ -190,6 +200,14 @@ fn chspace(s: &mut Session, hs: &[Handle], to: Option<&str>, vp: Option<Handle>)
         }
         None => Mat3::IDENTITY,
     };
+    for handle in hs {
+        if !curves::is_locked(s, *handle)
+            && s.doc()?.space_of(*handle).as_ref() == Some(&from)
+            && let Some(entity) = s.doc()?.entity(*handle)
+        {
+            crate::cmd::modify::check_ellipse_transform(entity, &m)?;
+        }
+    }
     let mut n = 0;
     for h in hs {
         if curves::is_locked(s, *h) {

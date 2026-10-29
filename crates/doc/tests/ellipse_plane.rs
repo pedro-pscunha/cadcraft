@@ -52,6 +52,19 @@ fn identity_transform_keeps_source_ellipse_bits() {
 }
 
 #[test]
+fn a_low_level_translation_moves_an_edge_on_ellipse_without_changing_its_plane() {
+    let mut kind = EntityKind::Ellipse(ellipse(Vec3::new(0.0, 1.0, 0.0), Vec3::new(5.0, 0.0, 0.0)));
+    let EntityKind::Ellipse(before) = kind.clone() else { panic!("ellipse") };
+    kind.transform(&Mat3::translate(Vec2::new(2.0, 3.0)));
+    let EntityKind::Ellipse(after) = kind else { panic!("ellipse") };
+    assert_eq!(after.center, before.center + Vec3::new(2.0, 3.0, 0.0));
+    assert_eq!(after.major, before.major);
+    assert_eq!(after.normal, before.normal);
+    assert_eq!(after.start.to_bits(), before.start.to_bits());
+    assert_eq!(after.end.to_bits(), before.end.to_bits());
+}
+
+#[test]
 fn an_ellipse_edit_never_pairs_a_flat_axis_with_a_tilted_normal() {
     let mut kind = EntityKind::Ellipse(ellipse(Vec3::new(0.0, 0.8, 0.6), Vec3::new(5.0, 1.2, -1.6)));
     kind.transform(&Mat3::translate(Vec2::new(2.0, 3.0)));
