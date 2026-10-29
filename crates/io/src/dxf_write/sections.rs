@@ -1122,6 +1122,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         *t = Tag::s(5, seed);
     }
     crate::dxf_raw::finish(&mut w.t, d, dwg_bridge);
+    if !dwg_bridge {
+        remove_embedded_layouts(&mut w.t);
+    }
     // Every entity now has its final emitted records, including raw passthrough. Flatten lowered
     // multileaders and region loops into their source entity's position, and reuse restored xdicts.
     let written = super::sortents::written(&mut w);
@@ -1184,6 +1187,28 @@ fn add_class_instance_counts(tags: &mut Vec<Tag>) {
         // Inserting the group shifts the next record's start by one.
         start = end + usize::from(inserted);
     }
+}
+
+/// The DWG layout version (group 455) the bridge records after the bytes of an embedded entity, in SOLID history
+/// steps and in surfaces. It is the bridge's own group: a user DXF holds only the groups of the DXF Reference.
+fn remove_embedded_layouts(tags: &mut Vec<Tag>) {
+    let mut in_record = false;
+    tags.retain(|t| {
+        if t.code == 0 {
+            in_record = matches!(
+                t.str().as_str(),
+                "ACSH_SWEEP_CLASS"
+                    | "ACSH_EXTRUSION_CLASS"
+                    | "ACSH_LOFT_CLASS"
+                    | "ACSH_REVOLVE_CLASS"
+                    | "EXTRUDEDSURFACE"
+                    | "LOFTEDSURFACE"
+                    | "REVOLVEDSURFACE"
+                    | "SWEPTSURFACE"
+            );
+        }
+        !(in_record && t.code == 455)
+    });
 }
 
 /// A DXF for AutoCAD 2000 has no group 91 in its CLASS records, kept classes of the source included.
