@@ -1215,11 +1215,11 @@ fn allocate_table_records(f: &Foreign, roles: &HashMap<ForeignKey, String>, aliv
 
 /// The names a user DXF gives the nameless STYLE and DIMSTYLE records kept from a DWG: AutoCAD
 /// refuses a table record with an empty name (it renames them itself, to AUDIT_I_...). Each name is
-/// unique among the written records of its table. A DWG keeps the records nameless.
-fn names_for_unnamed(f: &Foreign, tables: &Recs<'_>) -> HashMap<Handle, String> {
+/// unique among the written records of its table. A DWG bridge (`dwg_bridge`) keeps the records nameless.
+fn names_for_unnamed(f: &Foreign, tables: &Recs<'_>, dwg_bridge: bool) -> HashMap<Handle, String> {
     let mut used: HashSet<(String, String)> = tables.iter().map(|(kind, _, t)| (kind.clone(), up(&val(t, 2).unwrap_or_default()))).collect();
     let mut out = HashMap::new();
-    for o in f.table_records.iter().filter(|o| matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE")) {
+    for o in f.table_records.iter().filter(|o| !dwg_bridge && matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE")) {
         let n = (1..).map(|n| format!("UNNAMED_{}_{n}", o.kind)).find(|n| used.insert((o.kind.clone(), up(n)))).unwrap_or_default();
         out.insert(o.handle, n);
     }
@@ -1403,7 +1403,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     allocate_table_records(f, &roles, &mut alive, &mut next);
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
-    let unnamed = if dwg_bridge { HashMap::new() } else { names_for_unnamed(f, &tables) };
+    let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
     let map = Map { f, alive, objects: objs, owners, roles, entities };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
