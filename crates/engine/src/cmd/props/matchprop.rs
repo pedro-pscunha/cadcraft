@@ -218,7 +218,8 @@ fn copy_props(src: &Entity, dst: &mut Entity, m: &MatchProps) {
         (EntityKind::MLeader(a), EntityKind::MLeader(b)) if m.multileader => {
             b.style.clone_from(&a.style);
             b.arrow_size = a.arrow_size;
-            b.dogleg = a.dogleg;
+            let dogleg = a.dogleg();
+            b.roots.iter_mut().for_each(|r| r.dogleg = dogleg);
             b.spline = a.spline;
         }
         _ => {}

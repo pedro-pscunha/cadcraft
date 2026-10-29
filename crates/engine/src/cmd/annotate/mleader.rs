@@ -17,28 +17,22 @@ fn mleader_kind(s: &Session, pts: &[Vec2], text: &str, landing: bool) -> Option<
     let attach = if dir > 0.0 { 4 } else { 6 };
     let dogleg = if landing { st.dogleg } else { 0.0 };
     let tpos = *landing_pt + Vec2::new((dogleg + st.landing_gap) * dir, 0.0);
-    Some(EntityKind::MLeader(MLeader {
-        leaders: vec![arrow_pts.iter().map(|p| v3(*p)).collect()],
-        landing: v3(*landing_pt),
-        dogleg,
-        text: (!text.is_empty()).then(|| MText {
-            insert: v3(tpos),
-            height: th,
-            width: 0.0,
-            attach,
-            rotation: 0.0,
-            style: st.text_style.clone(),
-            contents: text.replace('\n', "\\P"),
-            line_spacing: 1.0,
-            line_spacing_exact: false,
-            columns: None,
-        }),
-        style: st.name.clone(),
-        arrow_size: st.arrow_size,
-        spline: false,
-        block: None,
-        arrow_block: String::new(),
-    }))
+    let text = (!text.is_empty()).then(|| MText {
+        insert: v3(tpos),
+        height: th,
+        width: 0.0,
+        attach,
+        rotation: 0.0,
+        style: st.text_style.clone(),
+        contents: text.replace('\n', "\\P"),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+    });
+    let mut m = MLeader::single(v3(*landing_pt), dogleg, dir < 0.0, vec![arrow_pts.iter().map(|p| v3(*p)).collect()], text);
+    m.style = st.name.clone();
+    m.arrow_size = st.arrow_size;
+    Some(EntityKind::MLeader(m))
 }
 
 pub(super) fn run_mleader(s: &mut Session, p: &Value) -> Result<Value> {

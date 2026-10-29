@@ -532,15 +532,19 @@ fn mleader_source(plane: (f64, f64, f64)) -> String {
         columns: None,
     };
     let m = MLeader {
-        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.5), Vec3::new(2.0, 1.0, 0.5)]],
-        landing: Vec3::new(5.0, 4.0, 0.5),
-        dogleg: 0.36,
+        roots: vec![cadcraft_doc::MLeaderRoot::new(
+            Vec3::new(5.0, 4.0, 0.5),
+            0.36,
+            false,
+            vec![vec![Vec3::new(0.0, 0.0, 0.5), Vec3::new(2.0, 1.0, 0.5)]],
+        )],
         text: Some(text),
         style: "Standard".into(),
         arrow_size: 0.18,
         spline: false,
         block: None,
         arrow_block: String::new(),
+        context: cadcraft_doc::MLeaderContext::default(),
     };
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(m)).unwrap();
     let text = save_2018(&d);
@@ -743,16 +747,26 @@ fn a_multileader_with_two_leader_roots_keeps_them_apart() {
     // A DWG gives every leader line properties of its own: its roots, landings and vertices are compared.
     let places = |g: Vec<(i32, String)>| g.into_iter().filter(|(c, _)| matches!(c, 302 | 10 | 20 | 30 | 11 | 21 | 31)).collect::<Vec<_>>();
     assert_eq!(places(root_groups(&all_records(&dwg_first, "MULTILEADER")[0])), places(want), "DWG");
-    // A vertex edit joins the roots as before: the model's leader lines through one landing.
+    // A vertex edit of one root keeps both roots: the edited line is the model's, the sibling root keeps its
+    // landing, direction, dogleg and line, in a DXF and in a DWG.
     let mut edited = d.clone();
     let h = first_handle(&edited);
     edited
         .modify_entity(h, |e| {
             if let EntityKind::MLeader(m) = &mut e.kind {
-                m.leaders[0][0].x += 1.0;
+                m.roots[0].branches[0].vertices[0].x += 1.0;
             }
         })
         .unwrap();
+    let sibling = |text: &str| {
+        let g = root_groups(&all_records(text, "MULTILEADER")[0]);
+        let at = g.iter().rposition(|(c, v)| *c == 302 && v.starts_with("LEADER")).expect("a second root");
+        g[at..].to_vec()
+    };
     let got = root_groups(&all_records(&save_2018(&edited), "MULTILEADER")[0]);
-    assert_eq!(got.iter().filter(|(c, _)| *c == 302).count(), 1, "{got:?}");
+    assert_eq!(got.iter().filter(|(c, _)| *c == 302).count(), 2, "{got:?}");
+    assert_eq!(sibling(&save_2018(&edited)), sibling(&source), "the sibling root of the DXF");
+    let through = cadcraft_io::read(&cadcraft_io::write(&edited, "x.dwg").unwrap(), "x.dwg").unwrap();
+    let dwg_roots = root_groups(&all_records(&save_2018(&through), "MULTILEADER")[0]);
+    assert_eq!(dwg_roots.iter().filter(|(c, _)| *c == 302).count(), 2, "{dwg_roots:?}");
 }

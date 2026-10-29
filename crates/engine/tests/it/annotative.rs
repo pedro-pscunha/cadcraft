@@ -315,15 +315,14 @@ fn annotative_mtext_columns_follow_the_scale() {
     };
     let ml = Entity {
         kind: EntityKind::MLeader(cadcraft_engine::doc::MLeader {
-            leaders: Vec::new(),
-            landing: Default::default(),
-            dogleg: 1.0,
+            roots: vec![cadcraft_doc::MLeaderRoot::new(Default::default(), 1.0, false, Vec::new())],
             text: Some(mtext),
             style: "Standard".into(),
             arrow_size: 1.0,
             spline: false,
             block: None,
             arrow_block: String::new(),
+            context: cadcraft_doc::MLeaderContext::default(),
         }),
         ..e.clone()
     };

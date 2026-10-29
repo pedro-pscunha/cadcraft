@@ -168,9 +168,9 @@ pub fn anno_scaled(e: &Entity, f: f64) -> Entity {
             dm.block = None;
         }
         EntityKind::MLeader(m) => {
-            let land = m.landing;
+            let land = m.landing();
             m.arrow_size *= f;
-            m.dogleg *= f;
+            m.roots.iter_mut().for_each(|r| r.dogleg *= f);
             if let Some(t) = &mut m.text {
                 t.insert = land + (t.insert - land) * f;
                 t.height *= f;

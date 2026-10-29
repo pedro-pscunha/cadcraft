@@ -30,7 +30,7 @@ fn spline_leader_curves_through_its_points() {
     let mut s = Session::new();
     s.script("mleader o l p m 3 x 0,0 5,5 10,0 note\n").unwrap();
     let m = last_mleader(&s);
-    assert!(m.spline && m.leaders[0].len() == 2);
+    assert!(m.spline && m.roots[0].branches[0].vertices.len() == 2);
     let path = &m.leader_paths()[0];
     assert!(path.len() > 3, "tessellated: {path:?}");
     assert!(path.first().unwrap().near(Vec2::ZERO, 1e-9) && path.last().unwrap().near(Vec2::new(10.0, 0.0), 1e-9));
@@ -49,7 +49,7 @@ fn no_leader_places_only_the_content() {
     s.script("mleader o l n x 3,4 Only text\n").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
     let m = last_mleader(&s);
-    assert!(m.leaders.is_empty() && m.dogleg == 0.0);
+    assert!(m.line_count() == 0 && m.dogleg() == 0.0);
     let t = m.text.unwrap();
     assert_eq!(t.contents, "Only text");
     assert!(t.insert.xy().near(Vec2::new(3.0, 4.0), 1e-9) && t.attach == 1);
@@ -73,19 +73,19 @@ fn block_content_inserts_the_block_at_the_landing() {
     assert!(m.text.is_none());
     let b = m.block.clone().expect("block content");
     assert_eq!(b.block, "TAG");
-    let end = m.landing.xy() + Vec2::new(m.dogleg, 0.0);
+    let end = m.landing().xy() + Vec2::new(m.dogleg(), 0.0);
     // Block base (-1,-1) maps to the insertion point; the square's centre is base + (1, 1).
     assert!((b.insert.xy() + Vec2::new(1.0, 1.0)).near(end, 1e-9), "{:?} vs {end:?}", b.insert);
     // Insertion point attachment, remembered for the next MLEADER together with the block.
     s.script("mleader o c b tag i x 0,0 10,5\n").unwrap();
     let m = last_mleader(&s);
-    assert!(m.block.unwrap().insert.xy().near(m.landing.xy() + Vec2::new(m.dogleg, 0.0), 1e-9));
+    assert!(m.block.clone().unwrap().insert.xy().near(m.landing().xy() + Vec2::new(m.dogleg(), 0.0), 1e-9));
     s.script("mleader 20,0 30,5\n").unwrap();
     assert!(last_mleader(&s).block.is_some(), "block content remembered");
     // Block content without a leader line.
     s.script("mleader o l n x 50,50\n").unwrap();
     let m = last_mleader(&s);
-    assert!(m.leaders.is_empty() && m.block.unwrap().insert.xy().near(Vec2::new(50.0, 50.0), 1e-9));
+    assert!(m.line_count() == 0 && m.block.unwrap().insert.xy().near(Vec2::new(50.0, 50.0), 1e-9));
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn json_form_takes_leader_type_and_block() {
     assert!(last_mleader(&s).spline);
     s.execute("mleader", &json!({"points": [[7, 7]], "text": "alone", "leaderType": "none"})).unwrap();
     let m = last_mleader(&s);
-    assert!(m.leaders.is_empty() && m.text.unwrap().insert.xy().near(Vec2::new(7.0, 7.0), 1e-9));
+    assert!(m.line_count() == 0 && m.text.unwrap().insert.xy().near(Vec2::new(7.0, 7.0), 1e-9));
     for bad in [
         json!({"points": [[0, 0], [5, 5]], "leaderType": "wavy"}),
         json!({"points": [[0, 0], [5, 5]], "block": "missing"}),
@@ -133,7 +133,7 @@ fn mleader_sizes_ignore_dimscale() {
     let m = last_mleader(&s);
     assert_eq!(m.arrow_size, 5.0);
     let st = s.doc().unwrap().mleader_styles.iter().find(|x| x.name == "M5").unwrap().clone();
-    assert_eq!(m.dogleg, st.dogleg);
+    assert_eq!(m.dogleg(), st.dogleg);
     let t = m.text.unwrap();
     assert_eq!(t.height, 5.0);
     assert!((t.insert.x - (30.0 + st.dogleg + st.landing_gap)).abs() < 1e-9, "{}", t.insert.x);

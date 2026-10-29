@@ -95,7 +95,7 @@ fn chamfer_and_mleader_angles_are_amounts_in_aunits() {
     match last(&s) {
         EntityKind::MLeader(m) => {
             let r = Vec2::new(10.0, 8.0).len();
-            assert!(m.landing.xy().near(Vec2::new(r, r) / 2f64.sqrt(), 1e-6), "{:?}", m.landing);
+            assert!(m.landing().xy().near(Vec2::new(r, r) / 2f64.sqrt(), 1e-6), "{:?}", m.landing());
         }
         k => panic!("expected a multileader, got {k:?}"),
     }

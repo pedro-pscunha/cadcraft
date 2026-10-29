@@ -107,15 +107,14 @@ fn scale_scales_multileader_text_width_and_columns() {
     };
     let mut s = Session::new();
     let ml = MLeader {
-        leaders: Vec::new(),
-        landing: Default::default(),
-        dogleg: 1.0,
+        roots: vec![cadcraft_doc::MLeaderRoot::new(Default::default(), 1.0, false, Vec::new())],
         text: Some(text),
         style: "Standard".into(),
         arrow_size: 1.0,
         spline: false,
         block: None,
         arrow_block: String::new(),
+        context: cadcraft_doc::MLeaderContext::default(),
     };
     let h = s.add_entity(EntityKind::MLeader(ml)).unwrap();
     s.execute("scale", &json!({ "handles": [h.hex()], "base": [0, 0], "factor": 2 })).unwrap();

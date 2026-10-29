@@ -853,9 +853,9 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
         kind,
     };
     let style = d.header.str("DIMSTYLE", "Standard");
-    for arm in m.leaders.iter().take(64) {
-        let mut vertices = arm.clone();
-        vertices.push(m.landing);
+    for (root, arm) in m.lines().take(64) {
+        let mut vertices = arm.vertices.clone();
+        vertices.push(root.landing);
         let le = part(w, EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone() }));
         entity(w, d, &le, owner, paper, cx);
     }

@@ -1,7 +1,5 @@
-use super::block::Insert;
 use super::common::Handle;
-use super::text::MText;
-use super::{Deserialize, GSpline, Serialize, Vec2, Vec3, one, standard, yes};
+use super::{Deserialize, Serialize, Vec3, standard, yes};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -219,41 +217,4 @@ pub struct Leader {
     pub spline: bool,
     #[serde(default = "standard")]
     pub style: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MLeader {
-    pub leaders: Vec<Vec<Vec3>>,
-    pub landing: Vec3,
-    pub dogleg: f64,
-    pub text: Option<MText>,
-    #[serde(default = "standard")]
-    pub style: String,
-    #[serde(default = "one")]
-    pub arrow_size: f64,
-    /// Leader lines are smooth curves through their points (leader type Spline). An empty
-    /// `leaders` is a multileader without a leader line (leader type None).
-    #[serde(default)]
-    pub spline: bool,
-    /// Block content in place of the text: a block reference placed at the landing.
-    #[serde(default)]
-    pub block: Option<Insert>,
-    /// The arrowhead (DXF group 342): a standard name such as `_None` or a block name; empty =
-    /// the style's.
-    #[serde(default)]
-    pub arrow_block: String,
-}
-
-impl MLeader {
-    /// Each leader line as drawn: through its points to the landing, smoothed for spline leaders.
-    pub fn leader_paths(&self) -> Vec<Vec<Vec2>> {
-        self.leaders
-            .iter()
-            .map(|l| {
-                let pts: Vec<Vec2> = l.iter().map(|v| v.xy()).chain(std::iter::once(self.landing.xy())).collect();
-                if self.spline && pts.len() > 2 { GSpline::from_fit_points(&pts).tessellate(1e-3) } else { pts }
-            })
-            .collect()
-    }
 }

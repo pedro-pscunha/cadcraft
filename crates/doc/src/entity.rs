@@ -51,6 +51,7 @@ mod fill;
 mod geometry;
 mod layout;
 mod mesh;
+mod mleader;
 mod text;
 
 pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
@@ -59,11 +60,12 @@ pub use curves::{
     Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
     Solid,
 };
-pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, MLeader};
+pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader};
 pub use fill::{Gradient, Hatch, HatchLoop, Wipeout};
 pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
+pub use mleader::{MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot};
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown {
@@ -267,9 +269,8 @@ impl EntityKind {
             EntityKind::Dimension(d) => vec![Prim::Point(d.defpt.xy())],
             EntityKind::MLine(m) => m.segments().into_iter().map(Prim::Seg).collect(),
             EntityKind::MLeader(m) => m
-                .leaders
-                .iter()
-                .flat_map(|l| l.windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(w.first()?.xy(), w.get(1)?.xy()))))))
+                .lines()
+                .flat_map(|(_, b)| b.vertices.windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(w.first()?.xy(), w.get(1)?.xy()))))))
                 .chain(m.block.iter().map(|b| Prim::Point(b.insert.xy())))
                 .collect(),
             EntityKind::Image(i) => vec![Prim::Point(i.insert.xy())],
@@ -401,10 +402,18 @@ impl EntityKind {
             }
             EntityKind::Leader(l) => l.vertices.iter_mut().for_each(t3),
             EntityKind::MLeader(ml) => {
-                for l in &mut ml.leaders {
-                    l.iter_mut().for_each(t3);
+                // Each root keeps its own landing and dogleg: the dogleg turns and scales with the map.
+                let unit = |v: Vec3, by: Vec2| {
+                    let len = by.len();
+                    if len > 0.0 { (Vec3::new(by.x / len, by.y / len, v.z), len) } else { (v, 1.0) }
+                };
+                for r in &mut ml.roots {
+                    r.branches.iter_mut().flat_map(|b| b.vertices.iter_mut()).for_each(t3);
+                    t3(&mut r.landing);
+                    let (dir, len) = unit(r.dogleg_dir, m.apply_vec(r.dogleg_dir.xy()));
+                    (r.dogleg_dir, r.dogleg) = (dir, r.dogleg * len);
                 }
-                t3(&mut ml.landing);
+                ml.context.text_dir = unit(ml.context.text_dir, m.apply_vec(ml.context.text_dir.xy())).0;
                 if let Some(t) = &mut ml.text {
                     edit::mtext_payload(t, GeometryRevision::LegacyProjectedV1, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
                 }
@@ -530,7 +539,10 @@ impl EntityKind {
             EntityKind::Dimension(d) => vec![d.p13.xy(), d.p14.xy(), d.defpt.xy(), d.text_mid.xy()],
             EntityKind::MLine(m) => m.points(),
             EntityKind::Leader(l) => l.vertices.iter().map(|v| v.xy()).collect(),
-            EntityKind::MLeader(m) => m.leaders.iter().flat_map(|l| l.iter().map(|v| v.xy())).chain(std::iter::once(m.landing.xy())).collect(),
+            // The vertices of every line in file order, then the landing of each root.
+            EntityKind::MLeader(m) => {
+                m.lines().flat_map(|(_, b)| b.vertices.iter()).chain(m.roots.iter().map(|r| &r.landing)).map(|v| v.xy()).collect()
+            }
             EntityKind::Hatch(h) => {
                 let b = Bounds2::from_points(h.loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)));
                 vec![b.center()]

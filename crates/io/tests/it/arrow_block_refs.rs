@@ -40,9 +40,12 @@ fn record<'a>(p: &'a [(i32, String)], kind: &str) -> &'a [(i32, String)] {
 
 fn mleader() -> MLeader {
     MLeader {
-        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)]],
-        landing: Vec3::new(5.0, 4.0, 0.0),
-        dogleg: 0.75,
+        roots: vec![cadcraft_doc::MLeaderRoot::new(
+            Vec3::new(5.0, 4.0, 0.0),
+            0.75,
+            false,
+            vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)]],
+        )],
         text: Some(MText {
             insert: Vec3::new(5.9, 4.0, 0.0),
             height: 0.4,
@@ -60,6 +63,7 @@ fn mleader() -> MLeader {
         spline: false,
         block: None,
         arrow_block: "_None".into(),
+        context: cadcraft_doc::MLeaderContext::default(),
     }
 }
 

@@ -367,12 +367,15 @@ fn block_units_before_2007_are_design_center_xdata() {
 #[test]
 fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
     let mleader = cadcraft_doc::MLeader {
-        leaders: vec![
-            vec![cadcraft_geom::Vec3::new(0.0, 0.0, 0.0), cadcraft_geom::Vec3::new(2.0, 3.0, 0.0)],
-            vec![cadcraft_geom::Vec3::new(9.0, 0.0, 0.0), cadcraft_geom::Vec3::new(7.0, 3.0, 0.0)],
-        ],
-        landing: cadcraft_geom::Vec3::new(5.0, 4.0, 0.0),
-        dogleg: 0.75,
+        roots: vec![cadcraft_doc::MLeaderRoot::new(
+            cadcraft_geom::Vec3::new(5.0, 4.0, 0.0),
+            0.75,
+            false,
+            vec![
+                vec![cadcraft_geom::Vec3::new(0.0, 0.0, 0.0), cadcraft_geom::Vec3::new(2.0, 3.0, 0.0)],
+                vec![cadcraft_geom::Vec3::new(9.0, 0.0, 0.0), cadcraft_geom::Vec3::new(7.0, 3.0, 0.0)],
+            ],
+        )],
         text: Some(cadcraft_doc::MText {
             insert: cadcraft_geom::Vec3::new(5.9, 4.0, 0.0),
             height: 0.4,
@@ -390,6 +393,7 @@ fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
         spline: false,
         block: None,
         arrow_block: String::new(),
+        context: cadcraft_doc::MLeaderContext::default(),
     };
     let mut d = Drawing::new_metric();
     d.model.push(cadcraft_doc::Entity::new(cadcraft_doc::Handle(0x80), EntityKind::MLeader(mleader)));

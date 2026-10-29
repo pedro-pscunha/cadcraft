@@ -2,7 +2,7 @@
 //! `mleader_kind` builds, for the prompt machine and the JSON form.
 
 use cadcraft_doc::{Entity, EntityKind, Handle, Insert};
-use cadcraft_geom::{Vec2, Vec3};
+use cadcraft_geom::Vec3;
 use serde_json::Value;
 
 use super::{bad, str_param};
@@ -30,23 +30,24 @@ pub(super) fn block_name(s: &Session, name: &str) -> Result<String> {
 pub(super) fn apply(s: &Session, k: EntityKind, c: &Content) -> Result<EntityKind> {
     let EntityKind::MLeader(mut m) = k else { return Ok(k) };
     m.spline = c.leader == LeaderType::Spline;
-    let land = m.landing.xy();
-    // The side the content sits on, as `mleader_kind` chose it for the text.
-    let dir = if m.leaders.first().and_then(|l| l.first()).is_some_and(|a| a.x > land.x) { -1.0 } else { 1.0 };
+    // The side the content sits on, as `mleader_kind` chose it for the text (the dogleg's direction).
     if c.leader == LeaderType::None {
         // Content only, at the picked location (text from its top left corner).
-        m.leaders.clear();
-        m.dogleg = 0.0;
+        for r in &mut m.roots {
+            r.branches.clear();
+            r.dogleg = 0.0;
+        }
+        let landing = m.landing();
         if let Some(t) = &mut m.text {
-            t.insert = m.landing;
+            t.insert = landing;
             t.attach = 1;
         }
     }
     if let Some((name, center)) = &c.block {
-        let anchor = land + Vec2::new(m.dogleg * dir, 0.0);
+        let anchor = m.roots.first().map_or(m.landing(), |r| r.dogleg_end()).xy();
         let mut ins = Insert {
             block: name.clone(),
-            insert: Vec3::new(anchor.x, anchor.y, m.landing.z),
+            insert: Vec3::new(anchor.x, anchor.y, m.landing().z),
             scale: Vec3::new(1.0, 1.0, 1.0),
             rotation: 0.0,
             attribs: Vec::new(),
