@@ -301,3 +301,88 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
         assert!(!got.iter().any(|t| (210..=213).contains(&t.code)), "{got:?}");
     }
 }
+
+/// The records of `kind` of the ENTITIES section of a DXF text.
+fn all_records(text: &str, kind: &str) -> Vec<Vec<Tag>> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let section = sections(&tags).into_iter().find(|s| s.name == "ENTITIES").expect("ENTITIES");
+    records(&section.tags).into_iter().filter(|(k, _)| k == kind).map(|(_, t)| t).collect()
+}
+
+/// Every number of the `codes` groups of all the records, as (code, bits) in order.
+fn numbers(records: &[Vec<Tag>], codes: &[i32]) -> Vec<(i32, u64)> {
+    records.iter().flatten().filter(|t| codes.contains(&t.code)).map(|t| (t.code, t.str().trim().parse::<f64>().unwrap().to_bits())).collect()
+}
+
+#[test]
+fn a_lightweight_polyline_keeps_its_plane_elevation_and_vertices_through_every_save() {
+    for plane in PLANES {
+        let polyline = format!(
+            "0 LWPOLYLINE\n5 180\n100 AcDbEntity\n8 0\n100 AcDbPolyline\n90 4\n70 1\n43 0.25\n38 2.5\n39 -0.5\n\
+             10 1.5\n20 2.5\n40 0.1\n41 0.2\n42 0.5\n10 6.5\n20 2.5\n10 6.5\n20 7.5\n42 -0.25\n10 1.5\n20 7.5\n{plane}"
+        );
+        // A DWG gives every vertex a start width, an end width and a bulge, zeros included.
+        assert_kept(&dxf(&[&polyline]), "LWPOLYLINE", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 210, 220, 230], &[], &[40, 41, 42]);
+    }
+}
+
+#[test]
+fn a_lightweight_polyline_keeps_the_defaults_and_vertex_ids_its_file_wrote() {
+    // Explicit zero elevation and constant width, and the vertex identifiers (91) of AutoCAD 2010 and later.
+    let polyline = "0 LWPOLYLINE\n5 181\n100 AcDbEntity\n8 0\n100 AcDbPolyline\n90 2\n70 0\n43 0\n38 0\n39 0\n10 1.5\n20 2.5\n91 11\n10 6.5\n20 2.5\n91 12\n210 0\n220 0\n230 -1";
+    assert_kept(&dxf(&[polyline]), "LWPOLYLINE", &[90, 70, 43, 38, 39, 10, 20, 91, 210, 220, 230], &[], &[43, 38, 39, 91]);
+}
+
+/// A heavy 2D polyline (widths, a bulge), a 3D polyline and a polygon mesh in `plane`.
+fn polylines(plane: &str) -> String {
+    let v2 = |x: f64, y: f64, extra: &str| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDb2dVertex\n10 {x}\n20 {y}\n30 0\n{extra}70 0");
+    let v3 = |x: f64, y: f64, z: f64| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDb3dPolylineVertex\n10 {x}\n20 {y}\n30 {z}\n70 32");
+    let vm = |x: f64, y: f64, z: f64| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDbPolygonMeshVertex\n10 {x}\n20 {y}\n30 {z}\n70 64");
+    let seqend = "0 SEQEND\n8 0";
+    [
+        format!("0 POLYLINE\n5 190\n100 AcDbEntity\n8 0\n100 AcDb2dPolyline\n66 1\n10 0\n20 0\n30 2.5\n39 -0.5\n70 1\n40 0.25\n41 0.25\n{plane}"),
+        v2(1.5, 2.5, "40 0.1\n41 0.2\n42 0.5\n"),
+        v2(6.5, 2.5, ""),
+        v2(6.5, 7.5, "42 -0.25\n"),
+        seqend.to_string(),
+        format!("0 POLYLINE\n5 191\n100 AcDbEntity\n8 0\n100 AcDb3dPolyline\n66 1\n10 0\n20 0\n30 0\n70 8\n{plane}"),
+        v3(1.0, 2.0, 3.0),
+        v3(4.0, 5.0, -6.0),
+        seqend.to_string(),
+        format!("0 POLYLINE\n5 192\n100 AcDbEntity\n8 0\n100 AcDbPolygonMesh\n66 1\n10 0\n20 0\n30 0\n70 16\n71 2\n72 2\n{plane}"),
+        vm(0.0, 0.0, 1.0),
+        vm(1.0, 0.0, 2.0),
+        vm(0.0, 1.0, 3.0),
+        vm(1.0, 1.0, 4.0),
+        seqend.to_string(),
+    ]
+    .join("\n")
+}
+
+#[test]
+fn polylines_and_meshes_keep_their_plane_and_vertices_through_every_save() {
+    for plane in PLANES {
+        let source = dxf(&[&polylines(plane)]);
+        let want = all_records(&source, "POLYLINE");
+        let want_vertices = all_records(&source, "VERTEX");
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        for (what, text) in saves(&d) {
+            let (got, got_vertices) = (all_records(&text, "POLYLINE"), all_records(&text, "VERTEX"));
+            assert_eq!(got.len(), 3, "{what}: {text}");
+            if what.starts_with("DWG") {
+                // A DWG keeps the plane of the heavy polyline; a 3D polyline and a mesh have none.
+                for code in [210, 220, 230] {
+                    assert_eq!(bits(&got[0], code), bits(&want[0], code), "{what}: POLYLINE group {code}");
+                }
+            } else {
+                let codes = [10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230];
+                assert_eq!(numbers(&got, &codes), numbers(&want, &codes), "{what}: POLYLINE parents {plane}");
+                assert_eq!(
+                    numbers(&got_vertices, &[10, 20, 30, 40, 41, 42, 70]),
+                    numbers(&want_vertices, &[10, 20, 30, 40, 41, 42, 70]),
+                    "{what}: VERTEX records {plane}"
+                );
+            }
+        }
+    }
+}

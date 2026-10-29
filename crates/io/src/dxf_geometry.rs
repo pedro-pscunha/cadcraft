@@ -16,7 +16,8 @@ use cadcraft_dxf::Tag;
 type Spec = &'static [(&'static str, &'static [i32])];
 
 /// The geometry groups of the types that keep a snapshot, by subclass in record order.
-fn spec(kind: &str) -> Option<Spec> {
+fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
+    let has = |marker: &str| tags.iter().take_while(|t| t.code < 1000).any(|t| t.code == 100 && t.str().trim() == marker);
     Some(match kind {
         "LINE" => &[("AcDbLine", &[39, 10, 20, 30, 11, 21, 31, 210, 220, 230])],
         "POINT" => &[("AcDbPoint", &[39, 10, 20, 30, 50, 210, 220, 230])],
@@ -33,6 +34,13 @@ fn spec(kind: &str) -> Option<Spec> {
         // The vertices and the plane of the leader, and the annotation's size and offsets (the style, the
         // arrow, the path type and the link to the annotation are the model's and `subclass_groups`').
         "LEADER" => &[("AcDbLeader", &[76, 10, 20, 30, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233, 40, 41])],
+        "LWPOLYLINE" => &[("AcDbPolyline", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 91, 210, 220, 230])],
+        // A POLYLINE is a 2D polyline (with VERTEX children), a 3D polyline or a mesh (their parents).
+        "POLYLINE" if has("AcDb2dPolyline") => &[("AcDb2dPolyline", &[10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230])],
+        "POLYLINE" if has("AcDb3dPolyline") => &[("AcDb3dPolyline", &[10, 20, 30, 39, 70, 210, 220, 230])],
+        "POLYLINE" if has("AcDbPolyFaceMesh") => &[("AcDbPolyFaceMesh", &[10, 20, 30, 39, 70, 71, 72, 73, 74, 75, 210, 220, 230])],
+        "POLYLINE" if has("AcDbPolygonMesh") => &[("AcDbPolygonMesh", &[10, 20, 30, 39, 70, 71, 72, 73, 74, 75, 210, 220, 230])],
+        "VERTEX" if has("AcDb2dVertex") => &[("AcDb2dVertex", &[10, 20, 30, 40, 41, 42, 70, 50, 91])],
         _ => return None,
     })
 }
@@ -57,7 +65,7 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
     if kind == "HATCH" {
         return hatch_capture(tags);
     }
-    let spec = spec(kind)?;
+    let spec = spec(kind, tags)?;
     let mut out = Vec::new();
     for (i, (marker, codes)) in spec.iter().enumerate() {
         let range = subclass(tags, marker, occurrence(spec, i))?;
@@ -73,7 +81,7 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
     if kind == "HATCH" {
         return hatch_restore(generated, kept, convert);
     }
-    let spec = spec(kind)?;
+    let spec = spec(kind, generated)?;
     let mut parts = kept.split(|t| t.code == 100).skip(1);
     // For each entry: the subclass's range, where its replacement goes (the first geometry group
     // the writer made, else the end of the subclass), its geometry codes and the kept groups.
@@ -201,19 +209,28 @@ fn handle_of(tags: &[Tag]) -> Option<Handle> {
 /// Give the entities and attributes of `d` the geometry snapshot of their source `records` (type
 /// and groups after it). A handle that two records share names no entity.
 pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'a str, &'a [Tag])>) {
-    let records: Vec<_> = records.filter_map(|(kind, tags)| Some((kind, tags, handle_of(tags)?))).collect();
+    let records: Vec<_> = records.map(|(kind, tags)| (kind, tags, handle_of(tags))).collect();
     let mut seen: HashMap<Handle, usize> = HashMap::new();
-    for (.., h) in &records {
-        *seen.entry(*h).or_default() += 1;
+    for h in records.iter().filter_map(|r| r.2) {
+        *seen.entry(h).or_default() += 1;
     }
     let keys = keys(d, |h| seen.get(&h) == Some(&1));
     let mut snapshots: HashMap<Handle, Arc<GeometrySnapshot>> = HashMap::new();
-    for (kind, tags, h) in records {
-        if let Some(model) = keys.get(&h)
+    for (i, (kind, tags, h)) in records.iter().enumerate() {
+        let Some(h) = h else { continue };
+        if let Some(model) = keys.get(h)
             && let Some(groups) = capture(kind, tags)
         {
-            let record = GeometryRecord { kind: kind.to_string(), groups };
-            snapshots.insert(h, Arc::new(GeometrySnapshot { records: vec![record], model: model.clone() }));
+            let mut parts = vec![GeometryRecord { kind: kind.to_string(), groups }];
+            // A heavy 2D polyline replays its VERTEX records too (the model has them converted).
+            if model.starts_with("HPOLY") {
+                let children = records.iter().skip(i + 1).take_while(|(k, ..)| *k == "VERTEX");
+                let children: Option<Vec<_>> =
+                    children.map(|(k, t, _)| Some(GeometryRecord { kind: k.to_string(), groups: capture(k, t)? })).collect();
+                let Some(children) = children else { continue };
+                parts.extend(children);
+            }
+            snapshots.insert(*h, Arc::new(GeometrySnapshot { records: parts, model: model.clone() }));
         }
     }
     if snapshots.is_empty() {

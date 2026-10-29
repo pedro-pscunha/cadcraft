@@ -76,6 +76,40 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::Insert(i) => {
             let _ = write!(s, "INSERT{:?}{plane:?}", (i.insert, i.scale, i.rotation, i.cols, i.rows, i.col_spacing, i.row_spacing));
         }
+        EntityKind::LwPolyline(p) => {
+            let vertices: Vec<_> = p.vertices.iter().map(|v| (v.p, v.bulge, v.start_width, v.end_width)).collect();
+            let base = (vertices, p.closed, p.plinegen, p.const_width, p.elevation);
+            if p.heavy {
+                // A heavy polyline's VERTEX records follow its parent: the fit data and the vertices are its geometry.
+                let fit = p.fit.as_ref().map(|f| {
+                    let fitted: Vec<_> = f.vertices.iter().map(|v| (v.position, v.flags, v.start_width, v.end_width, v.bulge, v.tangent)).collect();
+                    let display: Vec<_> = f.display_vertices.iter().map(|v| (v.p, v.bulge, v.start_width, v.end_width)).collect();
+                    (
+                        f.flags,
+                        f.smooth_type,
+                        f.m_count,
+                        f.n_count,
+                        f.m_density,
+                        f.n_density,
+                        f.start_width,
+                        f.end_width,
+                        f.elevation,
+                        f.extrusion,
+                        fitted,
+                        display,
+                    )
+                });
+                let _ = write!(s, "HPOLY{base:?}{fit:?}{plane:?}");
+            } else {
+                let _ = write!(s, "LWPOLY{base:?}{plane:?}");
+            }
+        }
+        EntityKind::Polyline3d(p) => {
+            let _ = write!(s, "POLY3D{:?}{plane:?}", p.closed);
+        }
+        EntityKind::PolylineMesh(m) => {
+            let _ = write!(s, "MESH{:?}{plane:?}", (m.kind as u8, m.flags, m.m_count, m.n_count, m.m_density, m.n_density, m.smooth_type));
+        }
         EntityKind::Spline(c) => {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
         }
