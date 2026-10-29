@@ -4,7 +4,7 @@
 
 use acadrust::DwgReader;
 use acadrust::entities::EntityType;
-use cadcraft_doc::{Arc, Circle, Common, Drawing, Entity, EntityKind, GeometryRevision, LwPolyline};
+use cadcraft_doc::{Arc, Circle, Common, Drawing, Entity, EntityKind, GeometryRevision, LwPolyline, Solid};
 use cadcraft_dxf::{Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 
@@ -240,4 +240,62 @@ fn the_canonical_polyline_reader_leaves_3d_polylines_and_meshes_alone() {
     let parent = vec![Tag::i(70, 8)];
     assert!(cadcraft_io::canonical_polyline_from_groups(&parent, &[]).is_none());
     assert!(cadcraft_io::canonical_polyline_from_groups(&[Tag::i(70, 64)], &[]).is_none());
+}
+
+fn solid() -> Solid {
+    Solid { corners: [Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 3.0, 2.0), Vec3::new(2.0, 3.0, 2.0)] }
+}
+
+#[test]
+fn each_solid_and_trace_field_alone_reaches_the_dxf_and_the_dwg() {
+    type Mutation = fn(&mut Solid, &mut Vec3, &mut f64);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("first corner x", |s, _, _| s.corners[0].x = 0.5),
+        ("third corner y", |s, _, _| s.corners[2].y = 3.5),
+        // A DWG solid has one elevation for its four corners, as AutoCAD writes them.
+        ("elevation", |s, _, _| s.corners.iter_mut().for_each(|c| c.z = 2.5)),
+        ("normal y", |_, n, _| n.y = 3.5),
+        ("thickness", |_, _, t| *t = -0.75),
+    ];
+    for (kind, trace) in [("SOLID", false), ("TRACE", true)] {
+        let make = |mutate: Mutation| {
+            let (mut s, mut n, mut t) = (solid(), NORMAL, 0.5);
+            mutate(&mut s, &mut n, &mut t);
+            let k = if trace { EntityKind::Trace(s.clone()) } else { EntityKind::Solid(s.clone()) };
+            (drawing(k, n, t), s, n, t)
+        };
+        let base = groups(&dxf(&make(|_, _, _| {}).0), kind);
+        for (name, mutate) in &cases {
+            let (d, s, n, t) = make(*mutate);
+            let g = groups(&dxf(&d), kind);
+            assert_ne!(g, base, "{kind} {name}");
+            for (i, c) in s.corners.iter().enumerate() {
+                assert!(near(point(&g, 10 + i as i32).unwrap(), *c), "{kind} {name}: corner {i}");
+            }
+            assert!(near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t), "{kind} {name}");
+            let stored = dwg_entities(&d)
+                .into_iter()
+                .find_map(|e| if let EntityType::Solid(x) = e { Some(x) } else { None })
+                .unwrap_or_else(|| panic!("a {kind} in the DWG"));
+            let dwg = [stored.first_corner, stored.second_corner, stored.third_corner, stored.fourth_corner];
+            assert!(dwg.iter().zip(&s.corners).all(|(a, b)| near(v3(*a), *b)), "{kind} {name}: DWG corners");
+            assert!(near(v3(stored.normal), n) && stored.thickness == t && stored.is_trace == trace, "{kind} {name}: DWG plane");
+        }
+    }
+}
+
+#[test]
+fn the_canonical_reader_returns_solids_and_traces_in_the_ocs() {
+    let normal = Vec3::new(0.0, 3.0, -4.0);
+    for (kind, trace) in [("SOLID", false), ("TRACE", true)] {
+        let k = if trace { EntityKind::Trace(solid()) } else { EntityKind::Solid(solid()) };
+        let out = dxf(&drawing(k.clone(), normal, 0.5));
+        let (c, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        assert_eq!((c.extrusion, c.thickness, read), (normal, 0.5, k), "{kind}");
+    }
+    // A triangle repeats its third corner.
+    let tags = vec![Tag::f(10, 0.0), Tag::f(11, 1.0), Tag::f(12, 0.0), Tag::f(22, 1.0), Tag::f(230, 1.0)];
+    let (_, read) = cadcraft_io::canonical_curve_from_groups("SOLID", &tags).unwrap();
+    let EntityKind::Solid(s) = read else { panic!("solid") };
+    assert_eq!(s.corners[3], s.corners[2]);
 }

@@ -696,6 +696,7 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.p(12, s.corners[2]);
             w.p(13, s.corners[3]);
             thickness(w, e);
+            canonical_normal(w, e);
         }
         EntityKind::Face3d(f) => {
             w.s(0, "3DFACE");

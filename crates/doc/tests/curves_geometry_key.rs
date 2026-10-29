@@ -1,7 +1,7 @@
 //! Every CIRCLE, ARC and 2D polyline field of a canonical payload is part of the replay key, so changing it alone
 //! retires the source snapshot.
 
-use cadcraft_doc::{Arc, Circle, Common, EntityKind, LwPolyline, geometry_key};
+use cadcraft_doc::{Arc, Circle, Common, EntityKind, LwPolyline, Solid, geometry_key};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 
 fn distinct(keys: &[String]) {
@@ -83,5 +83,27 @@ fn each_polyline_field_alone_changes_the_key() {
         assert_ne!(k, base, "{name}");
         keys.push(k);
     }
+    distinct(&keys);
+}
+
+#[test]
+fn each_solid_field_alone_changes_the_key() {
+    let solid = Solid { corners: [Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 3.0, 2.0), Vec3::new(2.0, 3.0, 2.0)] };
+    let key = |s: &Solid, c: &Common| geometry_key(&EntityKind::Solid(s.clone()), c).unwrap();
+    let mut keys = vec![key(&solid, &common())];
+    for i in 0..4 {
+        let mut s = solid.clone();
+        s.corners[i].z += 0.5;
+        keys.push(key(&s, &common()));
+        let mut s = solid.clone();
+        s.corners[i].x += 0.5;
+        keys.push(key(&s, &common()));
+    }
+    let mut c = common();
+    c.extrusion.y += 0.5;
+    keys.push(key(&solid, &c));
+    let mut c = common();
+    c.thickness = -0.5;
+    keys.push(key(&solid, &c));
     distinct(&keys);
 }

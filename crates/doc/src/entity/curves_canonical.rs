@@ -1,8 +1,8 @@
-//! Canonical CIRCLE, ARC and 2D polyline geometry.
+//! Canonical CIRCLE, ARC, 2D polyline and SOLID/TRACE geometry.
 //!
-//! A canonical circle, arc or 2D polyline keeps the coordinates its record declares: the circle and arc centers are
+//! A canonical circle, arc, 2D polyline or solid keeps the coordinates its record declares: the circle and arc centers are
 //! OCS points (their Z is the elevation), the arc angles are OCS angles counter-clockwise from the OCS X axis, and a
-//! polyline's vertices are OCS 2D points with the elevation beside them. The plane is the normal of the entity
+//! polyline's vertices are OCS 2D points with the elevation beside them, and the corners of a solid or trace are OCS points. The plane is the normal of the entity
 //! (`Common.extrusion`, kept with its source magnitude), and the signed thickness is `Common.thickness`. Nothing is
 //! mirrored or projected on import.
 //!
@@ -13,7 +13,7 @@
 
 use cadcraft_geom::{Mat4, OcsFrame, PolyVertex, Vec2, Vec3};
 
-use super::curves::{Arc, Circle, LwPolyline, PolylineFit};
+use super::curves::{Arc, Circle, LwPolyline, PolylineFit, Solid};
 use super::text_canonical::Similarity;
 use crate::{DocError, Result};
 
@@ -82,6 +82,20 @@ impl Arc {
         let turn = plane.turn();
         let moved = Arc { center: plane.point(self.center), radius: self.radius * plane.sim.scale, start: self.start + turn, end: self.end + turn };
         Ok((moved, plane.normal))
+    }
+}
+
+impl Solid {
+    /// The corners in WCS, from the normal of the plane.
+    pub fn world_corners(&self, normal: Vec3) -> Result<[Vec3; 4]> {
+        let f = frame(normal)?;
+        Ok(self.corners.map(|c| f.to_world(c)))
+    }
+
+    /// This solid or trace, in the plane of `normal`, after the similarity `transform`; and the new normal.
+    pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Solid, Vec3)> {
+        let plane = Plane::new(normal, transform)?;
+        Ok((Solid { corners: self.corners.map(|c| plane.point(c)) }, plane.normal))
     }
 }
 
@@ -188,6 +202,20 @@ mod tests {
         let mirror = Mat4 { m: [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
         assert!(arc.transformed_canonical(Vec3::Z, &mirror).is_err());
         assert!(arc.transformed_canonical(Vec3::ZERO, &scale(1.0)).is_err());
+    }
+
+    #[test]
+    fn a_solid_keeps_every_corner_where_the_matrix_puts_it() {
+        let rx = rotation_x(0.8);
+        let normal = Vec3::new(1.0, 0.0, 1.0);
+        let solid = Solid { corners: [Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 0.0, 1.0), Vec3::new(0.0, 3.0, 1.0), Vec3::new(2.0, 3.0, 1.0)] };
+        let (moved, n) = solid.transformed_canonical(normal, &rx).unwrap();
+        let (old, new) = (solid.world_corners(normal).unwrap(), moved.world_corners(n).unwrap());
+        assert!(old.iter().zip(&new).all(|(a, b)| near(rx.apply(*a), *b)));
+        let (big, _) = solid.transformed_canonical(Vec3::Z, &scale(2.0)).unwrap();
+        assert_eq!(big.corners[3], Vec3::new(4.0, 6.0, 2.0));
+        let squash = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        assert!(solid.transformed_canonical(Vec3::Z, &squash).is_err());
     }
 
     fn polyline() -> LwPolyline {

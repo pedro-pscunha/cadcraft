@@ -4,13 +4,13 @@
 //! Not part of `read_dxf` yet: the reader still reads legacy curves (`entities.rs`) until the Drawing boundary accepts
 //! canonical payloads. A caller that activates them sets the `Entity.geometry_revision` of what they return.
 
-use cadcraft_doc::{Arc, Circle, Common, Drawing, EntityKind};
+use cadcraft_doc::{Arc, Circle, Common, Drawing, EntityKind, Solid};
 use cadcraft_dxf::Tag;
 use cadcraft_geom::OcsFrame;
 
 use super::common::{T, common};
 
-/// A CIRCLE, ARC or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
+/// A CIRCLE, ARC, SOLID, TRACE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
 /// another kind, a normal without direction, a radius that is not a positive finite number, or an LWPOLYLINE that is a
 /// CADCraft region.
 pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
@@ -21,6 +21,11 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
     let kind = match kind.to_ascii_uppercase().as_str() {
         "CIRCLE" => EntityKind::Circle(Circle { center: t.p(10), radius: radius()? }),
         "ARC" => EntityKind::Arc(Arc { center: t.p(10), radius: radius()?, start: t.fd(50, 0.0).to_radians(), end: t.fd(51, 360.0).to_radians() }),
+        name @ ("SOLID" | "TRACE") => {
+            // The fourth corner repeats the third when the record has none: a triangle.
+            let corners = [t.p(10), t.p(11), t.p(12), if t.f(13).is_some() { t.p(13) } else { t.p(12) }];
+            if name == "SOLID" { EntityKind::Solid(Solid { corners }) } else { EntityKind::Trace(Solid { corners }) }
+        }
         "LWPOLYLINE" => {
             // The legacy reader mirrors under a negative Z: read the vertices as if the plane were +Z.
             let k = super::entities::lwpolyline(tags, &Common { extrusion: cadcraft_geom::Vec3::Z, ..c.clone() }, &t)?;
