@@ -27,7 +27,14 @@ fn axis_ellipse_params(cmd: &str, p: &Value) -> Result<Ellipse> {
 }
 
 fn ellipse_kind(e: &Ellipse) -> EntityKind {
-    EntityKind::Ellipse(cadcraft_doc::Ellipse { center: v3(e.center), major: v3(e.major), ratio: e.ratio, start: e.start, end: e.end })
+    EntityKind::Ellipse(cadcraft_doc::Ellipse {
+        normal: cadcraft_geom::Vec3::Z,
+        center: v3(e.center),
+        major: v3(e.major),
+        ratio: e.ratio,
+        start: e.start,
+        end: e.end,
+    })
 }
 
 pub(super) fn run_ellipse_axis(s: &mut Session, p: &Value) -> Result<Value> {

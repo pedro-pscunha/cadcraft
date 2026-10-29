@@ -36,6 +36,7 @@ mod dwg_text_code_page;
 mod dwt_template;
 mod dxf_versions;
 mod dynblock_read;
+mod entity_normals;
 mod entity_props_roundtrip;
 mod entity_subclass_groups;
 mod followups_626;

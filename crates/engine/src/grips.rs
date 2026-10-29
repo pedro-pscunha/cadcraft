@@ -122,7 +122,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
             return stretch_arc(kind, a, index, to, delta);
         }
         EntityKind::Ellipse(e) => {
-            if e.major.xy().len() <= EPS {
+            if !e.flatten() || e.major.xy().len() <= EPS {
                 return None;
             }
             if index == 0 {

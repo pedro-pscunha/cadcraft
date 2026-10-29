@@ -26,22 +26,7 @@ fn arc(c: &Common, t: &T) -> Arc {
 }
 
 fn ellipse(c: &Common, t: &T) -> Ellipse {
-    let mut e = Ellipse {
-        center: t.p(10),
-        major: t.p(11),
-        ratio: t.fd(40, 1.0).clamp(1e-9, 1.0),
-        start: t.fd(41, 0.0),
-        end: t.fd(42, std::f64::consts::TAU),
-    };
-    if c.extrusion.z < 0.0 && (cadcraft_geom::ccw_sweep(e.start, e.end) - std::f64::consts::TAU).abs() > 1e-9 {
-        // Centre and major axis are WCS, but the minor axis is extrusion × major: with (0,0,-1)
-        // it points the other way, so parameter t lands where -t does in the XY plane. A full
-        // ellipse is symmetric and stays as it is.
-        let (s, e2) = (-e.end, -e.start);
-        e.start = cadcraft_geom::norm_angle(s);
-        e.end = cadcraft_geom::norm_angle(e2);
-    }
-    e
+    Ellipse { center: t.p(10), major: t.p(11), normal: c.extrusion, ratio: t.fd(40, 1.0), start: t.fd(41, 0.0), end: t.fd(42, std::f64::consts::TAU) }
 }
 
 /// A LWPOLYLINE, or the region CADCraft wrote as one.

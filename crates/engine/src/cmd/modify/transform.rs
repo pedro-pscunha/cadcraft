@@ -7,6 +7,13 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
         return copy_transformed(s, hs, std::iter::once(*m));
     }
     let d = s.doc_mut()?;
+    for h in hs {
+        if let Some(e) = d.entity(*h)
+            && !d.layer(&e.common.layer).is_some_and(|l| l.locked)
+        {
+            check_ellipse_transform(e, m)?;
+        }
+    }
     let mut out = Vec::new();
     for h in hs {
         let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -25,6 +32,12 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
     let d = s.doc_mut()?;
     let mut seen = std::collections::HashSet::new();
     let originals: Vec<_> = hs.iter().filter(|h| seen.insert(**h)).filter_map(|h| Some((d.space_of(*h)?, (**d.entity(*h)?).clone()))).collect();
+    let transforms: Vec<_> = transforms.into_iter().collect();
+    for m in &transforms {
+        for (_, entity) in &originals {
+            check_ellipse_transform(entity, m)?;
+        }
+    }
     let sets = transforms
         .into_iter()
         .map(|m| {
@@ -47,6 +60,16 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
         }
     }
     Ok(out)
+}
+
+fn check_ellipse_transform(entity: &cadcraft_doc::Entity, m: &Mat3) -> Result<()> {
+    if *m != Mat3::IDENTITY
+        && let cadcraft_doc::EntityKind::Ellipse(ellipse) = &entity.kind
+        && !ellipse.clone().flatten()
+    {
+        return Err(bad("transform", "An edge-on or invalid ellipse cannot be edited in the 2D plane."));
+    }
+    Ok(())
 }
 
 pub(super) fn erase(s: &mut Session, hs: &[Handle]) -> Result<usize> {

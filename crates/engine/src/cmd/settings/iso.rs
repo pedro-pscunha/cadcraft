@@ -136,6 +136,7 @@ pub(crate) fn run_isocircle(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(crate) fn ellipse_entity(e: &Ellipse) -> cadcraft_doc::EntityKind {
     cadcraft_doc::EntityKind::Ellipse(cadcraft_doc::Ellipse {
+        normal: cadcraft_geom::Vec3::Z,
         center: e.center.to3(0.0),
         major: e.major.to3(0.0),
         ratio: e.ratio,

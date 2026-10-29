@@ -67,6 +67,7 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::Ellipse(Ellipse {
+            normal: cadcraft_geom::Vec3::Z,
             center: Vec3::new(8.0, 8.0, 0.0),
             major: Vec3::new(3.0, 0.0, 0.0),
             ratio: 0.5,

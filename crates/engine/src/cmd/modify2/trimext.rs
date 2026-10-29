@@ -5,11 +5,18 @@ use super::{Ellipse, EntityKind, Line, Result, Segment, TAU, Vec2, ccw_sweep, cu
 // =====================================================================================
 
 pub(super) fn ellipse_of(e: &cadcraft_doc::Ellipse) -> Ellipse {
-    Ellipse { center: e.center.xy(), major: e.major.xy(), ratio: e.ratio, start: e.start, end: e.end }
+    e.projected()
 }
 
 pub(super) fn ellipse_kind(e: &Ellipse) -> EntityKind {
-    EntityKind::Ellipse(cadcraft_doc::Ellipse { center: v3(e.center), major: v3(e.major), ratio: e.ratio, start: e.start, end: e.end })
+    EntityKind::Ellipse(cadcraft_doc::Ellipse {
+        normal: cadcraft_geom::Vec3::Z,
+        center: v3(e.center),
+        major: v3(e.major),
+        ratio: e.ratio,
+        start: e.start,
+        end: e.end,
+    })
 }
 
 /// Intersections of a sampled curve `eval(t)` (parameters `ts`) with the cutting segments,

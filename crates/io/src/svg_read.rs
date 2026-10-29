@@ -423,7 +423,14 @@ impl Parser {
         };
         let ratio = (l_min.max(0.0).sqrt() / s_max).clamp(1e-9, 1.0);
         let major = center + axis * s_max;
-        self.add(EntityKind::Ellipse(Ellipse { center: v3(center), major: v3(major), ratio, start: 0.0, end: std::f64::consts::TAU }))
+        self.add(EntityKind::Ellipse(Ellipse {
+            normal: cadcraft_geom::Vec3::Z,
+            center: v3(center),
+            major: v3(major),
+            ratio,
+            start: 0.0,
+            end: std::f64::consts::TAU,
+        }))
     }
 
     fn line(&mut self, e: &BytesStart) -> Result<()> {

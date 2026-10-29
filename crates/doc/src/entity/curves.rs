@@ -32,9 +32,53 @@ pub struct Arc {
 pub struct Ellipse {
     pub center: Vec3,
     pub major: Vec3,
+    #[serde(default = "ellipse_normal")]
+    pub normal: Vec3,
     pub ratio: f64,
     pub start: f64,
     pub end: f64,
+}
+
+fn ellipse_normal() -> Vec3 {
+    Vec3::Z
+}
+
+impl Ellipse {
+    /// The source plane projected into the drawing's XY display plane.
+    pub fn projected(&self) -> cadcraft_geom::Ellipse {
+        let minor = self.normal.normalized().cross(self.major).normalized() * (self.major.len() * self.ratio);
+        cadcraft_geom::Ellipse::from_conjugate(self.center.xy(), self.major.xy(), minor.xy(), self.start, self.end)
+    }
+
+    /// The existing 2D edit representation. A line-shaped projection has no ellipse representation.
+    pub fn flatten(&mut self) -> bool {
+        if !self.center.is_finite()
+            || !self.major.is_finite()
+            || !self.normal.is_finite()
+            || self.major.len() <= cadcraft_geom::EPS
+            || self.normal.len() <= cadcraft_geom::EPS
+            || !self.ratio.is_finite()
+            || self.ratio <= 0.0
+            || self.ratio > 1.0
+            || !self.start.is_finite()
+            || !self.end.is_finite()
+        {
+            return false;
+        }
+        if self.normal == Vec3::Z && self.major.z == 0.0 {
+            return true;
+        }
+        let p = self.projected();
+        if !p.major.is_finite() || p.major.len() <= cadcraft_geom::EPS || !p.ratio.is_finite() || p.ratio <= cadcraft_geom::EPS {
+            return false;
+        }
+        self.major = p.major.to3(0.0);
+        self.normal = Vec3::Z;
+        self.ratio = p.ratio;
+        self.start = p.start;
+        self.end = p.end;
+        true
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

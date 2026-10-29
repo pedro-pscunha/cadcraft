@@ -102,7 +102,7 @@ fn closed_loop(d: &Drawing, e: &Entity) -> Option<Vec<PolyVertex>> {
             Some(p.vertices.clone())
         }
         EntityKind::Ellipse(el) => {
-            let ge = cadcraft_geom::Ellipse { center: el.center.xy(), major: el.major.xy(), ratio: el.ratio, start: el.start, end: el.end };
+            let ge = el.projected();
             if !ge.is_full() {
                 return None;
             }

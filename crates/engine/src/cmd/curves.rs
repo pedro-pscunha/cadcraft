@@ -433,7 +433,7 @@ impl Chain {
                 tess(pts, p.closed)
             }
             EntityKind::Ellipse(e) => {
-                let ge = cadcraft_geom::Ellipse { center: e.center.xy(), major: e.major.xy(), ratio: e.ratio, start: e.start, end: e.end };
+                let ge = e.projected();
                 let mut pts = Vec::new();
                 ge.tessellate(e.major.xy().len() * 1e-4, &mut pts);
                 tess(pts, ge.is_full())

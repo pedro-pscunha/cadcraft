@@ -232,6 +232,19 @@ pub struct Ellipse {
 }
 
 impl Ellipse {
+    /// Principal axes of conjugate semi-diameters, including a line-shaped projection.
+    pub fn from_conjugate(center: Vec2, am: Vec2, an: Vec2, start: f64, end: f64) -> Self {
+        let t0 = 0.5 * (2.0 * am.dot(an)).atan2(am.dot(am) - an.dot(an));
+        let (s0, c0) = t0.sin_cos();
+        let (u, v) = (am * c0 + an * s0, an * c0 - am * s0);
+        let ratio = if u.len() > 0.0 { (v.len() / u.len()).min(1.0) } else { 0.0 };
+        if (ccw_sweep(start, end) - TAU).abs() < 1e-9 {
+            return Self::full(center, u, ratio);
+        }
+        let (start, end) = if u.cross(v) >= 0.0 { (start - t0, end - t0) } else { (t0 - end, t0 - start) };
+        Self { center, major: u, ratio, start: norm_angle(start), end: norm_angle(end) }
+    }
+
     pub fn full(center: Vec2, major: Vec2, ratio: f64) -> Self {
         Ellipse { center, major, ratio, start: 0.0, end: TAU }
     }
