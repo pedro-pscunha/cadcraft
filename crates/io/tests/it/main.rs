@@ -43,6 +43,7 @@ mod layout_plot_window;
 mod low_handseed;
 mod mleader_content;
 mod mleader_roundtrip;
+mod mline_dictionary_names;
 mod mline_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_layout_plot_type;
