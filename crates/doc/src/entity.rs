@@ -53,6 +53,8 @@ mod layout;
 mod mesh;
 mod mleader;
 mod text;
+mod world;
+pub use world::{WorldGeometry, WorldPrimitive};
 
 pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
