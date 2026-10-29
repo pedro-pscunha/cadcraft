@@ -187,7 +187,11 @@ fn regions_move_grip_explode_and_snap() {
     // One grip in the middle; dragging it moves the region.
     let k = s.doc().unwrap().entity(a).unwrap().kind.clone();
     assert_eq!(k.grips(), vec![Vec2::new(3.0, 6.0)]);
-    let EntityKind::Region(m) = cadcraft_engine::grips::stretch_grip(&k, 0, Vec2::new(4.0, 6.0)).unwrap() else { panic!() };
+    let EntityKind::Region(m) =
+        cadcraft_engine::grips::stretch_grip(s.doc().unwrap().entity(a).unwrap(), 0, Vec2::new(4.0, 6.0)).unwrap().unwrap().kind
+    else {
+        panic!()
+    };
     assert!(m.bounds().min.near(Vec2::new(2.0, 1.0), 1e-9));
     // A corner snaps; a pick on the edge picks it.
     let d = s.doc().unwrap();

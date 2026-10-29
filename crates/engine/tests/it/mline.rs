@@ -233,8 +233,8 @@ fn transforms_grips_explode() {
     // Grips are the vertices.
     let k = s.doc().unwrap().entity(a).unwrap().kind.clone();
     assert!(near(&k.grips(), &mline(&s, a).points()));
-    let moved = cadcraft_engine::grips::stretch_grip(&k, 1, Vec2::new(5.0, 21.0)).unwrap();
-    let EntityKind::MLine(m) = moved else { panic!() };
+    let moved = cadcraft_engine::grips::stretch_grip(s.doc().unwrap().entity(a).unwrap(), 1, Vec2::new(5.0, 21.0)).unwrap().unwrap();
+    let EntityKind::MLine(m) = moved.kind else { panic!() };
     assert_eq!(m.points()[1], Vec2::new(5.0, 21.0));
 
     // Explode: lines in the elements' colours.

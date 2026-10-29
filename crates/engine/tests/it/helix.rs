@@ -67,9 +67,17 @@ fn helix_edits_grips_snaps_and_explode() {
     // Grips: centre, base radius, top radius.
     let k = s.doc().unwrap().entity(a).unwrap().kind.clone();
     assert_eq!(k.grips().len(), 3);
-    let EntityKind::Helix(y) = cadcraft_engine::grips::stretch_grip(&k, 2, Vec2::new(-10.0, 1.0)).unwrap() else { panic!() };
+    let EntityKind::Helix(y) =
+        cadcraft_engine::grips::stretch_grip(s.doc().unwrap().entity(a).unwrap(), 2, Vec2::new(-10.0, 1.0)).unwrap().unwrap().kind
+    else {
+        panic!()
+    };
     assert!((y.top_radius - 1.0).abs() < 1e-9 && (y.base_radius - 4.0).abs() < 1e-9);
-    let EntityKind::Helix(y) = cadcraft_engine::grips::stretch_grip(&k, 0, Vec2::new(0.0, 0.0)).unwrap() else { panic!() };
+    let EntityKind::Helix(y) =
+        cadcraft_engine::grips::stretch_grip(s.doc().unwrap().entity(a).unwrap(), 0, Vec2::new(0.0, 0.0)).unwrap().unwrap().kind
+    else {
+        panic!()
+    };
     assert_eq!(y.center.xy(), Vec2::ZERO);
 
     // The start point snaps as an endpoint; picking the curve picks the helix.
