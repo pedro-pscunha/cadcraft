@@ -49,6 +49,9 @@ fn occurrence(spec: Spec, i: usize) -> usize {
 /// The geometry groups of a source record of `kind`, each subclass after a `100` marker group;
 /// `None` for a type without a snapshot or a record that lacks one of the subclasses.
 pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
+    if kind == "HATCH" {
+        return hatch_capture(tags);
+    }
     let spec = spec(kind)?;
     let mut out = Vec::new();
     for (i, (marker, codes)) in spec.iter().enumerate() {
@@ -62,6 +65,9 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
 /// The record `generated` with its geometry groups replaced by `kept` (see [`capture`]); `None`
 /// when the record lacks one of the subclasses. `convert` turns a kept group into a tag.
 pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
+    if kind == "HATCH" {
+        return hatch_restore(generated, kept, convert);
+    }
     let spec = spec(kind)?;
     let mut parts = kept.split(|t| t.code == 100).skip(1);
     // For each entry: the subclass's range, where its replacement goes (the first geometry group
@@ -85,6 +91,77 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
     for (.., groups) in edits.iter().filter(|e| e.1 >= generated.len()) {
         out.extend(groups.iter().map(&convert));
     }
+    Some(out)
+}
+
+/// A HATCH record: the groups before its first 91 (loop count) hold the elevation point and the
+/// plane, the groups from the 91 to the 75 (style) are the boundary loops, and the groups from the
+/// 75 on are the pattern (angle, scale, definition lines) and the seed points, then the gradient.
+/// A loop ends with its source objects (97 count, 330 handles), which are references and stay
+/// as the writer made them.
+const HATCH_HEAD: &[i32] = &[10, 20, 30, 210, 220, 230];
+const HATCH_TAIL: &[i32] = &[75, 76, 52, 41, 77, 78, 53, 43, 44, 45, 46, 79, 49, 47, 98, 10, 20];
+
+/// The place of the 91 and of the 75 after it in a hatch's groups (the end when it has none).
+fn hatch_parts(codes: &[i32]) -> Option<(usize, usize)> {
+    let loops = codes.iter().position(|c| *c == 91)?;
+    let tail = codes.iter().skip(loops).position(|c| *c == 75).map_or(codes.len(), |p| loops + p);
+    Some((loops, tail))
+}
+
+/// The loops of the groups `codes[loops..tail]` (after the 91): where each starts (a 92), and where its source
+/// objects (97) begin.
+fn hatch_loops(codes: &[i32], loops: usize, tail: usize) -> Vec<(usize, usize, usize)> {
+    let starts: Vec<usize> = (loops + 1..tail).filter(|i| codes.get(*i) == Some(&92)).collect();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(n, start)| {
+            let end = starts.get(n + 1).copied().unwrap_or(tail);
+            let sources = (*start..end).find(|i| codes.get(*i) == Some(&97)).unwrap_or(end);
+            (*start, sources, end)
+        })
+        .collect()
+}
+
+fn hatch_capture(tags: &[Tag]) -> Option<Vec<RawTag>> {
+    let range = subclass(tags, "AcDbHatch", 0)?;
+    let groups = tags.get(range)?;
+    let codes: Vec<i32> = groups.iter().map(|t| t.code).collect();
+    let (loops, tail) = hatch_parts(&codes)?;
+    let raw = |t: &Tag| RawTag { code: t.code, value: t.str() };
+    let mut out = vec![RawTag { code: 100, value: "AcDbHatch".into() }];
+    out.extend(groups.iter().take(loops).filter(|t| HATCH_HEAD.contains(&t.code)).map(raw));
+    out.extend(groups.iter().take(tail).skip(loops).map(raw));
+    out.extend(groups.iter().skip(tail).filter(|t| HATCH_TAIL.contains(&t.code)).map(raw));
+    Some(out)
+}
+
+fn hatch_restore(generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -> Tag) -> Option<Vec<Tag>> {
+    let range = subclass(generated, "AcDbHatch", 0)?;
+    let groups = generated.get(range.clone())?;
+    let kept: Vec<RawTag> = kept.iter().skip(1).cloned().collect();
+    let codes: Vec<i32> = groups.iter().map(|t| t.code).collect();
+    let kept_codes: Vec<i32> = kept.iter().map(|t| t.code).collect();
+    let ((loops, tail), (k_loops, k_tail)) = (hatch_parts(&codes)?, hatch_parts(&kept_codes)?);
+    let (own, kept_own) = (hatch_loops(&codes, loops, tail), hatch_loops(&kept_codes, k_loops, k_tail));
+    if own.len() != kept_own.len() || codes.get(loops) != kept_codes.get(k_loops) {
+        return None;
+    }
+    let mut out: Vec<Tag> = generated.iter().take(range.start).cloned().collect();
+    // Before the loops: the generated groups but the elevation point and the plane, which the kept ones replace.
+    out.extend(kept.iter().take(k_loops).map(&convert));
+    out.extend(groups.iter().take(loops).filter(|t| !HATCH_HEAD.contains(&t.code)).cloned());
+    // The loops: the kept boundary data, then the generated source objects of the loop.
+    out.push(groups.get(loops)?.clone());
+    for ((_, own_sources, own_end), (k_start, k_sources, _)) in own.iter().zip(&kept_own) {
+        out.extend(kept.iter().take(*k_sources).skip(*k_start).map(&convert));
+        out.extend(groups.iter().take(*own_end).skip(*own_sources).cloned());
+    }
+    // The pattern and the seed points: the kept ones; then what the writer made after them (the gradient).
+    out.extend(kept.iter().skip(k_tail).map(&convert));
+    out.extend(groups.iter().skip(tail).filter(|t| !HATCH_TAIL.contains(&t.code)).cloned());
+    out.extend(generated.iter().skip(range.end).cloned());
     Some(out)
 }
 

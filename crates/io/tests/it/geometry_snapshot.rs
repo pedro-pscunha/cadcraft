@@ -220,3 +220,40 @@ fn a_text_edit_keeps_the_plane_and_writes_the_new_text() {
     assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
     assert_eq!(bits(&got, 40), vec![4.0f64.to_bits()]);
 }
+
+/// A hatch with an edge loop (four lines) and a polyline loop with a bulge, the pattern ANSI31 at 45
+/// degrees, in the plane `plane` with an elevation.
+fn hatch(plane: &str) -> String {
+    format!(
+        "0 HATCH\n5 150\n100 AcDbEntity\n8 0\n100 AcDbHatch\n10 0\n20 0\n30 2.5\n{plane}\n2 ANSI31\n70 0\n71 0\n91 2\n\
+         92 1\n93 4\n72 1\n10 0\n20 0\n11 10\n21 0\n72 1\n10 10\n20 0\n11 10\n21 5\n72 1\n10 10\n20 5\n11 0\n21 5\n72 1\n10 0\n20 5\n11 0\n21 0\n97 0\n\
+         92 3\n72 1\n73 1\n93 3\n10 2\n20 1\n42 0.5\n10 8\n20 1\n10 5\n20 4\n97 0\n\
+         75 0\n76 1\n52 45\n41 2\n77 0\n78 1\n53 135.00000000000003\n43 0\n44 0\n45 0\n46 2.8284271247461903\n79 0\n47 0.2\n98 0"
+    )
+}
+
+/// The numbers of a hatch's boundary and pattern groups, as (code, bits) in order.
+fn hatch_numbers(record: &[Tag]) -> Vec<(i32, u64)> {
+    const CODES: [i32; 27] = [10, 20, 30, 210, 220, 230, 11, 21, 42, 52, 41, 53, 43, 44, 45, 46, 47, 91, 92, 93, 72, 73, 78, 79, 98, 75, 76];
+    record.iter().filter(|t| CODES.contains(&t.code)).map(|t| (t.code, t.str().trim().parse::<f64>().unwrap().to_bits())).collect()
+}
+
+#[test]
+fn a_hatch_keeps_its_plane_boundary_and_pattern_through_every_save() {
+    for plane in PLANES {
+        let source = dxf(&[&hatch(plane)]);
+        let want = record(&source, "HATCH");
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        for (what, text) in saves(&d) {
+            let got = record(&text, "HATCH");
+            if what.starts_with("DWG") {
+                // acadrust stores the boundary as it likes; the plane and the elevation are kept.
+                for code in [30, 210, 220, 230] {
+                    assert_eq!(bits(&got, code), bits(&want, code), "{what}: HATCH group {code}");
+                }
+            } else {
+                assert_eq!(hatch_numbers(&got), hatch_numbers(&want), "{what}: HATCH {plane}");
+            }
+        }
+    }
+}
