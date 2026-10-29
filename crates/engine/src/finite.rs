@@ -26,11 +26,13 @@ impl Session {
         let Some(h) = first_non_finite(before, &st.doc) else { return Ok(()) };
         st.doc = before.clone();
         st.selection = selection.to_vec();
-        Err(EngineError::BadParams {
-            cmd: cmd.into(),
-            msg: format!("the result is too large: object {} would get infinite or undefined coordinates. Nothing was changed", h.hex()),
-        })
+        Err(EngineError::BadParams { cmd: cmd.into(), msg: too_large(h) })
     }
+}
+
+/// The message for an object whose edit result has infinite or undefined coordinates.
+pub(crate) fn too_large(h: Handle) -> String {
+    format!("the result is too large: object {} would get infinite or undefined coordinates. Nothing was changed", h.hex())
 }
 
 /// The first object changed between `before` and `after` that has a NaN or infinite number, or
