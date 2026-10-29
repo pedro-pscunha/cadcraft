@@ -1,6 +1,6 @@
 use super::trimext::ellipse_of;
 use super::{
-    Accept, Arc, Chain, EntityKind, Handle, Input, Interactive, LwPolyline, Polyline, Prompt, Result, Session, Step, TAU, Value, Vec2, bad,
+    Accept, Arc, Chain, Entity, EntityKind, Handle, Input, Interactive, LwPolyline, Polyline, Prompt, Result, Session, Step, TAU, Value, Vec2, bad,
     ccw_sweep, curve_edits, curves, json, number, other, point_param, set_kind, targets,
 };
 
@@ -32,7 +32,12 @@ fn measure_len(k: &EntityKind) -> Option<(f64, Option<f64>)> {
 }
 
 /// Lengthen a line, arc, open polyline, elliptical arc or open spline at the end nearest `pick`.
-pub(crate) fn lengthen_kind(k: &EntityKind, pick: Option<Vec2>, mode: LenMode) -> Result<EntityKind> {
+fn lengthen_entity(entity: &Entity, pick: Option<Vec2>, mode: LenMode) -> Result<EntityKind> {
+    entity.require_legacy_geometry()?;
+    lengthen_kind(&entity.kind, pick, mode)
+}
+
+fn lengthen_kind(k: &EntityKind, pick: Option<Vec2>, mode: LenMode) -> Result<EntityKind> {
     let too_short = || other("Lengthening would make the object zero length or negative.");
     match k {
         EntityKind::Line(l) => {
@@ -156,7 +161,7 @@ pub(super) fn run_lengthen(s: &mut Session, p: &Value) -> Result<Value> {
     if curves::is_locked(s, h) {
         return Err(other("The object is on a locked layer."));
     }
-    let k = lengthen_kind(&e.kind, point_param(p, "pick"), mode)?;
+    let k = lengthen_entity(&e, point_param(p, "pick"), mode)?;
     let l = measure_len(&k).map(|x| x.0).unwrap_or(0.0);
     set_kind(s, h, k)?;
     Ok(json!({ "handle": h.hex(), "length": l }))
@@ -275,17 +280,17 @@ impl Interactive for LengthenM {
                     return Ok(Step::Continue);
                 }
                 let mode = self.mode.ok_or_else(|| other("No lengthen mode."))?;
-                let k = curves::entity(s, h)?.kind;
-                let nk = lengthen_kind(&k, Some(*p), mode)?;
+                let entity = curves::entity(s, h)?;
+                let nk = lengthen_entity(&entity, Some(*p), mode)?;
                 set_kind(s, h, nk)?;
-                self.history.push((h, k));
+                self.history.push((h, entity.kind));
                 Ok(Step::Continue)
             }
             (LPhase::DynEnd(h, pick), Input::Point(p)) => {
-                let k = curves::entity(s, h)?.kind;
-                let nk = lengthen_kind(&k, Some(pick), LenMode::To(*p))?;
+                let entity = curves::entity(s, h)?;
+                let nk = lengthen_entity(&entity, Some(pick), LenMode::To(*p))?;
                 set_kind(s, h, nk)?;
-                self.history.push((h, k));
+                self.history.push((h, entity.kind));
                 self.phase = LPhase::Change;
                 Ok(Step::Continue)
             }
@@ -303,7 +308,7 @@ impl Interactive for LengthenM {
         if let LPhase::DynEnd(h, pick) = self.phase
             && let Ok(e) = curves::entity(s, h)
         {
-            return lengthen_kind(&e.kind, Some(pick), LenMode::To(c)).map(|k| vec![k]).unwrap_or_default();
+            return lengthen_entity(&e, Some(pick), LenMode::To(c)).map(|k| vec![k]).unwrap_or_default();
         }
         Vec::new()
     }

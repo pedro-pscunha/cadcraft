@@ -128,7 +128,10 @@ fn a_canonical_child_blocks_the_legacy_parent_callback_before_it_runs() {
         arrow_block: String::new(),
         context: MLeaderContext::default(),
     };
-    for kind in [EntityKind::AttDef(child), EntityKind::Insert(insert), EntityKind::MLeader(leader)] {
+    let mut context_leader = leader.clone();
+    context_leader.block = None;
+    context_leader.context.geometry_revision = GeometryRevision::CanonicalV2;
+    for kind in [EntityKind::AttDef(child), EntityKind::Insert(insert), EntityKind::MLeader(leader), EntityKind::MLeader(context_leader)] {
         let entity = Entity::new(Handle(1), kind);
         let before = entity.clone();
         drawing.model.push(entity);
@@ -151,7 +154,7 @@ fn a_legacy_callback_cannot_commit_non_finite_geometry() {
         entity.common.thickness = f64::INFINITY;
         Ok(())
     });
-    assert!(result.is_err());
+    assert!(matches!(result, Err(cadcraft_doc::DocError::NonFinite(Handle(1)))));
     assert_eq!(entity, before);
 }
 
@@ -168,6 +171,55 @@ fn a_legacy_callback_cannot_relabel_its_result_as_canonical() {
             .is_err()
     );
     assert_eq!(entity, before);
+}
+
+#[test]
+fn non_finite_nested_text_keeps_the_owning_entity_handle() {
+    let mut failures = Vec::new();
+    for embedded in [false, true] {
+        let mut attribute = attribute();
+        if embedded {
+            attribute.multiline = Some(cadcraft_doc::MultilineAttrib {
+                geometry_revision: GeometryRevision::LegacyProjectedV1,
+                mtext: cadcraft_doc::MText {
+                    insert: Vec3::ZERO,
+                    height: 1e308,
+                    width: 1.0,
+                    attach: 1,
+                    rotation: 0.0,
+                    style: "Standard".into(),
+                    contents: "value".into(),
+                    line_spacing: 1.0,
+                    line_spacing_exact: false,
+                    columns: None,
+                },
+                read_as: "value".into(),
+            });
+        } else {
+            attribute.text.height = 1e308;
+        }
+        let mut entity = Entity::new(
+            Handle(0xABC),
+            EntityKind::Insert(cadcraft_doc::Insert {
+                block: "Block".into(),
+                insert: Vec3::ZERO,
+                scale: Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: vec![attribute],
+                cols: 1,
+                rows: 1,
+                col_spacing: 0.0,
+                row_spacing: 0.0,
+            }),
+        );
+        let before = entity.clone();
+        let result = entity.try_transform(&Mat4::from_mat3(&Mat3::scale(2.0, 2.0)));
+        if !matches!(result, Err(cadcraft_doc::DocError::NonFinite(Handle(0xABC)))) {
+            failures.push((embedded, result));
+        }
+        assert_eq!(entity, before);
+    }
+    assert!(failures.is_empty(), "nested text lost its owning handle: {failures:?}");
 }
 
 #[test]

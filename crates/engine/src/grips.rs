@@ -83,7 +83,7 @@ fn grip_candidate(source: &Entity, kind: Option<EntityKind>) -> Result<Option<En
     kind.map(|kind| {
         let candidate = Entity { kind, ..source.clone() };
         if !cadcraft_doc::has_finite_numbers(&candidate) {
-            return Err(EngineError::Other("The grip result has infinite or undefined coordinates.".into()));
+            return Err(cadcraft_doc::DocError::NonFinite(source.handle).into());
         }
         Ok(candidate)
     })

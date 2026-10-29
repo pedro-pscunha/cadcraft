@@ -385,10 +385,27 @@ impl Drawing {
         Ok(result)
     }
 
+    /// Edit appearance metadata without exposing the payload, revision, or identity to the callback.
+    pub fn try_modify_metadata<F, T>(&mut self, h: Handle, edit: F) -> Result<T>
+    where
+        F: FnOnce(&mut Common) -> Result<T>,
+    {
+        let (candidate, result) = self.entity(h).ok_or(DocError::NoEntity(h))?.metadata_edited(edit)?;
+        self.commit_entity_candidate(candidate)?;
+        Ok(result)
+    }
+
     /// Apply the entity's typed affine operation, independently from legacy edit callbacks.
     pub fn transform_entity(&mut self, h: Handle, transform: &cadcraft_geom::Mat4) -> Result<()> {
         let candidate = self.entity(h).ok_or(DocError::NoEntity(h))?.transformed(transform)?;
-        self.modify_entity(h, |entity| *entity = candidate)
+        self.commit_entity_candidate(candidate)
+    }
+
+    fn commit_entity_candidate(&mut self, candidate: Entity) -> Result<()> {
+        let h = candidate.handle;
+        let space = self.space_of(h).ok_or(DocError::NoEntity(h))?;
+        let store = self.space_mut(&space).ok_or(DocError::NoEntity(h))?;
+        if store.replace(candidate) { Ok(()) } else { Err(DocError::NoEntity(h)) }
     }
 
     /// Modify a globally unique record in model/layout space or a block definition.

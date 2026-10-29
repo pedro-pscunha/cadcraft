@@ -16,6 +16,7 @@ use super::{
 pub(super) fn run_splinedit(s: &mut Session, p: &Value) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("splinedit", "`handle` is required"))?;
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     if curves::is_locked(s, h) {
         return Err(other("The object is on a locked layer."));
     }
@@ -652,7 +653,9 @@ impl Interactive for SplineditM {
             return match i {
                 Input::Point(p) => {
                     let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                    if !matches!(curves::entity(s, h)?.kind, EntityKind::Spline(_)) {
+                    let entity = curves::entity(s, h)?;
+                    entity.require_legacy_geometry()?;
+                    if !matches!(entity.kind, EntityKind::Spline(_)) {
                         return Err(other("Object selected is not a spline."));
                     }
                     self.h = Some(h);
@@ -673,6 +676,7 @@ impl Interactive for SplineditM {
             _ => None,
         };
         let enter = i == Input::Enter;
+        s.doc()?.entity(h).ok_or_else(|| other("The spline was erased."))?.require_legacy_geometry()?;
         let sp = self.spline(s).ok_or_else(|| other("The spline was erased."))?;
         match self.sub {
             Sub::Main => {

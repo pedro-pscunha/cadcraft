@@ -86,7 +86,7 @@ impl MultilineAttrib {
         let mut candidate = self.clone();
         super::edit::mtext_payload(&mut candidate.mtext, candidate.geometry_revision, m, super::edit::TextOwner::AttributeInstance)?;
         if !crate::has_finite_numbers(&candidate) {
-            return Err(crate::DocError::Invalid("The embedded text result has infinite or undefined coordinates.".into()));
+            return Err(crate::DocError::NonFinite(super::Handle(0)));
         }
         Ok(candidate)
     }
@@ -127,7 +127,7 @@ impl Attrib {
         super::edit::text_payload(&mut candidate.text, candidate.geometry_revision, m, super::edit::TextOwner::AttributeInstance)?;
         candidate.try_transform_multiline(m)?;
         if !crate::has_finite_numbers(&candidate) {
-            return Err(crate::DocError::Invalid("The attribute result has infinite or undefined coordinates.".into()));
+            return Err(crate::DocError::NonFinite(self.handle.unwrap_or(super::Handle(0))));
         }
         *self = candidate;
         Ok(())

@@ -52,6 +52,8 @@ pub(crate) fn fillet_curves(s: &mut Session, h1: Handle, p1: Vec2, h2: Handle, p
     }
     let e1 = curves::entity(s, h1)?;
     let e2 = curves::entity(s, h2)?;
+    e1.require_legacy_geometry()?;
+    e2.require_legacy_geometry()?;
     if [&e1, &e2].iter().any(|e| matches!(e.kind, EntityKind::Ellipse(_) | EntityKind::Spline(_))) {
         return curve_edits::fillet_curvy(s, h1, p1, h2, p2, r, &e1, &e2);
     }
@@ -113,6 +115,7 @@ pub(crate) fn fillet_polyline(s: &mut Session, h: Handle, r: f64) -> Result<usiz
         return Err(other("The object is on a locked layer."));
     }
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     let EntityKind::LwPolyline(pl) = &e.kind else { return Err(other("Select a 2D polyline.")) };
     let vs = &pl.vertices;
     let n = vs.len();

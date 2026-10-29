@@ -101,6 +101,43 @@ fn a_mixed_crossing_edit_refuses_before_it_changes_a_legacy_target() {
 }
 
 #[test]
+fn appearance_properties_keep_canonical_geometry_and_the_source_snapshot() {
+    let mut session = Session::new();
+    let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let handle = cadcraft_doc::Handle::parse_hex(&line).unwrap();
+    session
+        .doc_mut()
+        .unwrap()
+        .modify_entity(handle, |entity| {
+            entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+            entity.common.extrusion = cadcraft_geom::Vec3::new(0.0, 0.8, 0.6);
+            entity.common.thickness = 1.5;
+            entity.common.geometry = Some(std::sync::Arc::new(cadcraft_doc::GeometrySnapshot {
+                records: Vec::new(),
+                model: cadcraft_doc::geometry_key(&entity.kind, &entity.common).unwrap(),
+            }));
+        })
+        .unwrap();
+    let before = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
+    session.execute("properties.set", &json!({"handle": line, "layer": "metadata", "color": 3, "visible": false, "ltscale": 2})).unwrap();
+    let after = session.doc().unwrap().entity(handle).unwrap();
+    assert_eq!(after.kind, before.kind);
+    assert_eq!(after.geometry_revision, before.geometry_revision);
+    assert_eq!(after.common.extrusion, before.common.extrusion);
+    assert_eq!(after.common.thickness.to_bits(), before.common.thickness.to_bits());
+    assert!(std::sync::Arc::ptr_eq(after.common.geometry.as_ref().unwrap(), before.common.geometry.as_ref().unwrap()));
+    assert_eq!(cadcraft_doc::geometry_key(&after.kind, &after.common), cadcraft_doc::geometry_key(&before.kind, &before.common));
+    assert_eq!(after.common.layer, "metadata");
+    assert_eq!(after.common.color, cadcraft_doc::color::Color::Index(3));
+    assert_eq!(after.common.ltscale, 2.0);
+    assert!(!after.common.visible);
+    let before_geometry_edit = session.doc().unwrap().model.clone();
+    let error = session.execute("properties.set", &json!({"handle": line, "color": 2, "start": [2, 3]})).unwrap_err();
+    assert!(error.to_string().contains("canonical"));
+    assert_eq!(session.doc().unwrap().model, before_geometry_edit);
+}
+
+#[test]
 fn a_failed_multi_entity_transform_restores_the_document_and_selection() {
     let mut session = Session::new();
     let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
