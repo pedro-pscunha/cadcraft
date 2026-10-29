@@ -57,7 +57,7 @@ fn dim_header_vars(w: &mut W, d: &Drawing, target: Version) {
     let v = serde_json::to_value(style).unwrap_or_default();
     let none = |_: &str| None;
     for (var, field) in cadcraft_doc::DIMVARS {
-        if *var == "DIMSCALE" || target < header_since(var, Version::R2000) {
+        if *var == "DIMSCALE" || (!w.dwg_bridge && bridge_header(var)) || target < header_since(var, Version::R2000) {
             continue;
         }
         let (Some(value), Some((_, _, kind))) = (v.get(*field), dxf_ext::DIM_CODES.iter().find(|(f, _, _)| f == field)) else { continue };
@@ -154,11 +154,15 @@ fn header_since(name: &str, source: Version) -> Version {
     match name {
         "PLIMMIN" | "PLIMMAX" | "PEXTMIN" | "PEXTMAX" | "PINSBASE" | "ISOLINES" | "FACETRES" | "TEXTQLTY" | "USERI1" | "USERI2" | "USERI3"
         | "USERI4" | "USERI5" | "USERR1" | "USERR2" | "USERR3" | "USERR4" | "USERR5" | "DIMASSOC" | "HIDETEXT" | "DIMASO" | "DIMSHO" | "CHAMFERC"
-        | "CHAMFERD" | "PROJECTNAME" => Version::R2000,
+        | "CHAMFERD" | "PROJECTNAME" | "CEPSNID" | "CEPSNTYPE" => Version::R2000,
         "LATITUDE" | "LONGITUDE" | "NORTHDIRECTION" | "TIMEZONE" | "CAMERADISPLAY" | "CAMERAHEIGHT" | "LOFTANG1" | "LOFTANG2" | "LOFTMAG1"
         | "LOFTMAG2" | "LOFTPARAM" | "LOFTNORMALS" => Version::R2007,
         _ => source,
     }
+}
+
+fn bridge_header(name: &str) -> bool {
+    matches!(name, "ISOLINES" | "FACETRES" | "TEXTQLTY" | "PELLIPSE" | "DIMMZF" | "DIMMZS" | "DIMALTMZF" | "DIMALTMZS")
 }
 
 /// Values are current model values, not a replay of the old header. A pointer (an object
@@ -169,22 +173,27 @@ fn preserved_header_vars(w: &mut W, d: &Drawing, target: Version) {
     let source = Version::for_acadver(&d.header.str("ACADVER", "AC1032")).unwrap_or_default();
     for (name, codes) in &d.header.dxf_codes {
         if written.contains(name)
-            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED")
+            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED" | "CEPSNID")
+            || (!w.dwg_bridge && bridge_header(name))
             || target < header_since(name, source)
         {
             continue;
         }
         let Some(value) = d.header.get(name) else { continue };
         let lead = if matches!(value, HVal::Point(_)) { codes.len() } else { 1 };
-        let mut tags = header_value(value, codes.get(..lead).unwrap_or_default());
-        // $CEPSNTYPE's 390: the placeholder of the plot style `CEPSNTYPE@390` names (see the header
-        // reader), as written in this file.
-        if let Some(h) = d.header.get(&format!("{name}@390")).and_then(HVal::as_str).and_then(|n| w.pstyles.get(&n.trim().to_ascii_uppercase())) {
-            tags.push(Tag::s(390, h.clone()));
-        }
+        let tags = header_value(value, codes.get(..lead).unwrap_or_default());
         if !tags.is_empty() {
             w.s(9, format!("${name}"));
             w.t.extend(tags);
+            if name == "CEPSNTYPE"
+                && value.as_i64() == Some(3)
+                && target >= Version::R2000
+                && let Some(h) =
+                    d.header.get("CEPSNTYPE@390").and_then(HVal::as_str).and_then(|n| w.pstyles.get(&n.trim().to_ascii_uppercase())).cloned()
+            {
+                w.s(9, "$CEPSNID");
+                w.s(390, h);
+            }
         }
     }
 }

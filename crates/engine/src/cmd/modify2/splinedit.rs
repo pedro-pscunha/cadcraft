@@ -127,7 +127,16 @@ fn spline_to_poly(sp: &Spline, precision: usize) -> LwPolyline {
     if sp.closed && vs.len() > 2 {
         vs.pop();
     }
-    LwPolyline { vertices: vs, closed: sp.closed, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None }
+    LwPolyline {
+        records: Default::default(),
+        vertices: vs,
+        closed: sp.closed,
+        const_width: 0.0,
+        elevation: 0.0,
+        plinegen: false,
+        heavy: false,
+        fit: None,
+    }
 }
 
 // ---------------- fit data ----------------

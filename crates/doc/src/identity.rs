@@ -9,6 +9,52 @@ pub(crate) fn allocate_handle(next: &mut u64) -> Handle {
 }
 
 impl EntityKind {
+    pub fn polyline_records(&self) -> impl Iterator<Item = &crate::PolylineRecord> {
+        let (vertices, fit, mesh, seqend) = match self {
+            Self::LwPolyline(p) => {
+                (if p.saved_fit().is_some() { &[][..] } else { p.records.vertices.as_slice() }, p.saved_fit(), None, p.records.seqend.as_ref())
+            }
+            Self::Polyline3d(p) => (p.records.vertices.as_slice(), None, None, p.records.seqend.as_ref()),
+            Self::PolylineMesh(mesh) => (&[][..], None, Some(mesh), mesh.seqend.as_ref()),
+            _ => (&[][..], None, None, None),
+        };
+        fit.into_iter()
+            .flat_map(|f| f.vertices.iter().map(|v| &v.record))
+            .chain(vertices)
+            .chain(mesh.into_iter().flat_map(|m| m.vertices.iter().map(|v| &v.vertex.record)))
+            .chain(seqend)
+    }
+
+    pub fn edit_polyline_records(&mut self, mut edit: impl FnMut(&mut crate::PolylineRecord)) {
+        let records = match self {
+            Self::LwPolyline(p) => {
+                if let Some(fit) = &mut p.fit {
+                    for vertex in &mut fit.vertices {
+                        edit(&mut vertex.record);
+                    }
+                }
+                &mut p.records
+            }
+            Self::Polyline3d(p) => &mut p.records,
+            Self::PolylineMesh(mesh) => {
+                for vertex in &mut mesh.vertices {
+                    edit(&mut vertex.vertex.record);
+                }
+                if let Some(end) = &mut mesh.seqend {
+                    edit(end);
+                }
+                return;
+            }
+            _ => return,
+        };
+        for record in &mut records.vertices {
+            edit(record);
+        }
+        if let Some(end) = &mut records.seqend {
+            edit(end);
+        }
+    }
+
     /// Attribute instances owned by this entity (including multileader block content).
     pub fn attributes(&self) -> &[Attrib] {
         match self {

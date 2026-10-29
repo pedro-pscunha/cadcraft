@@ -46,6 +46,7 @@ fn roots<'a>(entities: impl IntoIterator<Item = &'a Entity>) -> BTreeSet<Handle>
     for entity in entities {
         roots.insert(entity.handle);
         roots.extend(entity.kind.attributes().iter().filter_map(|attribute| attribute.handle));
+        roots.extend(entity.kind.polyline_records().filter_map(|record| record.handle));
     }
     roots
 }

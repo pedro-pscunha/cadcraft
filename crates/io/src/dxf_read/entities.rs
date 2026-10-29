@@ -88,6 +88,7 @@ fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
         }
     }
     let pl = LwPolyline {
+        records: Default::default(),
         vertices: verts,
         closed: flags & 1 != 0,
         const_width: t.fd(43, 0.0),
@@ -409,6 +410,18 @@ pub(super) fn plot_style_names(secs: &[cadcraft_dxf::Section]) -> HashMap<String
 /// The plot style an entity record names among its AcDbEntity groups: ByBlock (group 380 = 1), the
 /// dictionary default (380 = 2) or the named style its placeholder (group 390) stands for.
 pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
+    let mut own = false;
+    for (i, tag) in tags.iter().enumerate() {
+        if tag.code == 1001 {
+            own = tag.str() == crate::dxf_ext::APP;
+        } else if own
+            && tag.code == 1000
+            && tag.str() == "PLOTSTYLE"
+            && let Some(value) = tags.get(i + 1).filter(|t| t.code == 1070 && matches!(t.i64(), 1 | 2))
+        {
+            return Some(if value.i64() == 1 { "ByBlock" } else { "ByDictionaryDefault" }.into());
+        }
+    }
     let mut in_entity = false;
     for t in tags {
         if t.code == 100 {
@@ -487,53 +500,70 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
     }
 }
 
-/// Parse a run of entity records (ENTITIES section or a block's body) into entities. Records that
-/// can't be placed are counted in `skipped`.
-/// The entity of a POLYLINE, with its mesh faces (advancing `i` past its VERTEX records). `None`
-/// for a mesh without faces.
-pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T) -> Option<(Common, EntityKind, Vec<EntityKind>)> {
+/// A POLYLINE and its child records, advancing `i` past the VERTEX and SEQEND records.
+pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T, d: &mut super::Drawing, rx: &Rx) -> (Common, EntityKind) {
     let flags = t.i(70).unwrap_or(0);
     let mut pts: Vec<(Vec3, f64, f64, f64)> = Vec::new();
     let mut fit_vertices = Vec::new();
-    // Polyface face records (VERTEX 70 bit 128 without 64): vertex indices 71–74.
-    let mut faces: Vec<[i64; 4]> = Vec::new();
+    let mut seqend = None;
+    let mut record = |tags: &[Tag]| {
+        let tt = T(tags);
+        let mut c = common(&tt);
+        if let Some(style) = entity_plot_style(tags, rx) {
+            c.plot_style = style;
+        }
+        let handle = tt.s(5).and_then(|h| Handle::parse_hex(&h)).unwrap_or_else(|| d.new_handle());
+        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c }
+    };
+    let mesh = flags & (16 | 64) != 0;
+    let mut mesh_vertices = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
         if k2 == "VERTEX" {
             let tt = T(t2);
             let vflags = tt.i(70).unwrap_or(0);
-            fit_vertices.push(cadcraft_doc::PolylineFitVertex {
+            let vertex = cadcraft_doc::PolylineFitVertex {
+                record: record(t2),
                 position: tt.p(10),
                 flags: vflags,
                 start_width: tt.fd(40, t.fd(40, 0.0)),
                 end_width: tt.fd(41, t.fd(41, 0.0)),
                 bulge: tt.fd(42, 0.0),
                 tangent: tt.fd(50, 0.0).to_radians(),
-            });
-            if vflags & 128 != 0 && vflags & 64 == 0 {
-                faces.push([71, 72, 73, 74].map(|c| tt.i(c).unwrap_or(0)));
-            } else if vflags & 16 == 0 {
-                pts.push((tt.p(10), tt.fd(42, 0.0), tt.fd(40, t.fd(40, 0.0)), tt.fd(41, t.fd(41, 0.0))));
+            };
+            if mesh {
+                mesh_vertices.push(cadcraft_doc::MeshVertex { vertex, indices: [71, 72, 73, 74].map(|c| tt.i(c).unwrap_or(0)) });
+            } else {
+                if vflags & 16 == 0 {
+                    pts.push((vertex.position, vertex.bulge, vertex.start_width, vertex.end_width));
+                }
+                fit_vertices.push(vertex);
             }
             *i += 1;
         } else {
             if k2 == "SEQEND" {
+                seqend = Some(record(t2));
                 *i += 1;
             }
             break;
         }
     }
+    let records =
+        cadcraft_doc::PolylineRecords { vertices: fit_vertices.iter().filter(|v| v.flags & 16 == 0).map(|v| v.record.clone()).collect(), seqend };
     let c = common(t);
-    let mut extra: Vec<EntityKind> = Vec::new();
-    let k = if flags & (16 | 64) != 0 {
-        // Polyface (64) and polygon (16) meshes become 3D faces; the first takes the
-        // polyline's place.
-        let verts: Vec<Vec3> = pts.iter().map(|p| p.0).collect();
-        let mut fs = if flags & 64 != 0 { polyface_faces(&verts, &faces) } else { mesh_faces(&verts, t, flags) }.into_iter().map(EntityKind::Face3d);
-        let first = fs.next()?;
-        extra.extend(fs);
-        first
+    let k = if mesh {
+        EntityKind::PolylineMesh(cadcraft_doc::PolylineMesh {
+            kind: if flags & 64 != 0 { cadcraft_doc::MeshKind::Polyface } else { cadcraft_doc::MeshKind::Polygon },
+            flags: flags & !(16 | 64),
+            m_count: t.i(71).unwrap_or(0),
+            n_count: t.i(72).unwrap_or(0),
+            m_density: t.i(73).unwrap_or(0),
+            n_density: t.i(74).unwrap_or(0),
+            smooth_type: t.i(75).unwrap_or(0),
+            vertices: mesh_vertices,
+            seqend: records.seqend,
+        })
     } else if flags & 8 != 0 {
-        EntityKind::Polyline3d(Polyline3d { points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
+        EntityKind::Polyline3d(Polyline3d { records, points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
         let m = if c.extrusion.z < 0.0 { -1.0 } else { 1.0 };
@@ -556,6 +586,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             }
         });
         EntityKind::LwPolyline(LwPolyline {
+            records,
             vertices,
             closed: flags & 1 != 0,
             // The effective widths live on each vertex, including inherited defaults.
@@ -566,7 +597,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             fit,
         })
     };
-    Some((c, k, extra))
+    (c, k)
 }
 
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
@@ -600,59 +631,6 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
         }
     }
     attribs
-}
-
-/// Faces of a polyface mesh: each face record names three or four vertices by 1-based index;
-/// a negative index hides the edge that starts at that vertex. Faces with fewer vertices or
-/// an index outside the vertex list are skipped.
-fn polyface_faces(verts: &[Vec3], faces: &[[i64; 4]]) -> Vec<Face3d> {
-    let mut out = Vec::new();
-    for f in faces {
-        let mut corners: Vec<Vec3> = Vec::with_capacity(4);
-        let mut hidden = 0u8;
-        let mut ok = true;
-        for &ix in f.iter().filter(|&&ix| ix != 0) {
-            let at = usize::try_from(ix.unsigned_abs()).ok().and_then(|n| n.checked_sub(1));
-            let Some(p) = at.and_then(|n| verts.get(n)) else {
-                ok = false;
-                break;
-            };
-            if ix < 0 {
-                hidden |= 1 << corners.len();
-            }
-            corners.push(*p);
-        }
-        match (ok, corners.as_slice()) {
-            // A triangle's closing edge is the 3DFACE's fourth (the third is degenerate).
-            (true, [a, b, c]) => out.push(Face3d { corners: [*a, *b, *c, *c], hidden_edges: hidden | if hidden & 4 != 0 { 8 } else { 0 } }),
-            (true, [a, b, c, d]) => out.push(Face3d { corners: [*a, *b, *c, *d], hidden_edges: hidden }),
-            _ => {}
-        }
-    }
-    out
-}
-
-/// Quads of an M×N polygon mesh (71/72, or the smoothed 73/74 when the vertex count matches
-/// those), closed in M by bit 1 and in N by bit 32. Vertices run row by row.
-fn mesh_faces(verts: &[Vec3], t: &T, flags: i64) -> Vec<Face3d> {
-    let dims = |a: i32, b: i32| Some((usize::try_from(t.i(a)?).ok()?, usize::try_from(t.i(b)?).ok()?));
-    let fits = |(m, n): (usize, usize)| m >= 2 && n >= 2 && m.checked_mul(n).is_some_and(|mn| mn <= verts.len());
-    let exact = |(m, n): (usize, usize)| fits((m, n)) && m * n == verts.len();
-    let Some((m, n)) = [dims(71, 72), dims(73, 74)].into_iter().flatten().find(|d| exact(*d)).or_else(|| dims(71, 72).filter(|d| fits(*d))) else {
-        return Vec::new();
-    };
-    let at = |i: usize, j: usize| verts.get((i % m) * n + j % n).copied();
-    let rows = if flags & 1 != 0 { m } else { m - 1 };
-    let cols = if flags & 32 != 0 { n } else { n - 1 };
-    let mut out = Vec::new();
-    for i in 0..rows {
-        for j in 0..cols {
-            if let (Some(a), Some(b), Some(c), Some(d)) = (at(i, j), at(i, j + 1), at(i + 1, j + 1), at(i + 1, j)) {
-                out.push(Face3d { corners: [a, b, c, d], hidden_edges: 0 });
-            }
-        }
-    }
-    out
 }
 
 /// A HELIX (DXF Reference): the axis base point, start point, axis, radius, turns, turn height,

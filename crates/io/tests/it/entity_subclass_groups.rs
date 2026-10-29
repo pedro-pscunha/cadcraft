@@ -99,9 +99,7 @@ fn codes(entity: &[Tag], name: &str) -> Vec<i32> {
     subclass(entity, name).iter().map(|(c, _)| *c).collect()
 }
 
-/// `dwg`: acadrust's DXF reader takes no material (347) or shadow mode (284) of any entity, so
-/// an entity saved as DWG keeps neither (its `EntityCommon` has the fields, the reader fills none).
-fn assert_subclasses(text: &str, what: &str, dwg: bool) {
+fn assert_subclasses(text: &str, what: &str) {
     let ents = section(text, "ENTITIES");
     let objects = section(text, "OBJECTS");
     let material = |entity: &[Tag]| {
@@ -113,18 +111,15 @@ fn assert_subclasses(text: &str, what: &str, dwg: bool) {
         let entity = ents.iter().filter(|(k, t)| k == kind && t.iter().any(|t| t.code == 430)).map(|(_, t)| t.as_slice()).next();
         let entity = entity.unwrap_or_else(|| panic!("{what}: {kind} with its colour name is saved: {text}"));
         let (common, own_codes) = (codes(entity, "AcDbEntity"), codes(entity, own));
-        let lost: &[i32] = if dwg { &[347, 284] } else { &[] };
         for code in [347, 284, 430] {
-            assert!(common.contains(&code) || lost.contains(&code), "{what}: {kind} keeps {code} in AcDbEntity: {common:?}");
+            assert!(common.contains(&code), "{what}: {kind} keeps {code} in AcDbEntity: {common:?}");
             assert!(!own_codes.contains(&code), "{what}: {kind} has {code} in {own}: {own_codes:?}");
         }
         for code in view {
             assert!(own_codes.contains(&code), "{what}: {kind} keeps {code} in {own}: {own_codes:?}");
             assert!(!common.contains(&code), "{what}: {kind} has {code} in AcDbEntity: {common:?}");
         }
-        if !lost.contains(&347) {
-            assert_eq!(material(entity).as_deref(), Some("Concrete"), "{what}: {kind}'s material");
-        }
+        assert_eq!(material(entity).as_deref(), Some("Concrete"), "{what}: {kind}'s material");
     }
 }
 
@@ -132,9 +127,9 @@ fn assert_subclasses(text: &str, what: &str, dwg: bool) {
 fn viewport_and_leader_keep_each_group_in_its_subclass() {
     let d = cadcraft_io::read_dxf(fixture().as_bytes()).unwrap();
     for (i, text) in saved_twice(&d).into_iter().enumerate() {
-        let (what, dwg) = [("DXF", false), ("DWG", true)][i];
-        assert_subclasses(&text, what, dwg);
+        let what = ["DXF", "DWG"][i];
+        assert_subclasses(&text, what);
         let again = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
-        assert_subclasses(&cadcraft_io::write_dxf(&again), &format!("{what}, second save"), dwg);
+        assert_subclasses(&cadcraft_io::write_dxf(&again), &format!("{what}, second save"));
     }
 }

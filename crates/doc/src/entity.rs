@@ -43,14 +43,19 @@ mod curves;
 mod dim;
 mod fill;
 mod layout;
+mod mesh;
 mod text;
 
 pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
-pub use curves::{Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, RayLine, Solid};
+pub use curves::{
+    Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
+    Solid,
+};
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, MLeader};
 pub use fill::{Gradient, Hatch, HatchLoop, Wipeout};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
+pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
 pub use text::{HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown {
@@ -68,6 +73,7 @@ pub enum EntityKind {
     Ellipse(Ellipse),
     LwPolyline(LwPolyline),
     Polyline3d(Polyline3d),
+    PolylineMesh(PolylineMesh),
     Spline(GSpline),
     Helix(Helix),
     Ray(RayLine),
@@ -122,6 +128,10 @@ impl EntityKind {
             EntityKind::Ellipse(_) => "Ellipse",
             EntityKind::LwPolyline(_) => "Polyline",
             EntityKind::Polyline3d(_) => "3D Polyline",
+            EntityKind::PolylineMesh(mesh) => match mesh.kind {
+                MeshKind::Polyface => "Polyface Mesh",
+                MeshKind::Polygon => "Polygon Mesh",
+            },
             EntityKind::Spline(_) => "Spline",
             EntityKind::Helix(_) => "Helix",
             EntityKind::Ray(_) => "Ray",
@@ -156,7 +166,7 @@ impl EntityKind {
             EntityKind::Arc(_) => "ARC",
             EntityKind::Ellipse(_) => "ELLIPSE",
             EntityKind::LwPolyline(_) => "LWPOLYLINE",
-            EntityKind::Polyline3d(_) => "POLYLINE",
+            EntityKind::Polyline3d(_) | EntityKind::PolylineMesh(_) => "POLYLINE",
             EntityKind::Spline(_) => "SPLINE",
             EntityKind::Helix(_) => "HELIX",
             EntityKind::Ray(_) => "RAY",
@@ -208,6 +218,7 @@ impl EntityKind {
                 }
                 v
             }
+            EntityKind::PolylineMesh(mesh) => mesh.faces().into_iter().flat_map(|face| EntityKind::Face3d(face).prims()).collect(),
             EntityKind::Spline(s) => vec![Prim::Spline(s.clone())],
             EntityKind::Helix(h) => vec![Prim::Spline(h.spline())],
             EntityKind::Ray(r) => vec![Prim::Infinite { base: r.base.xy(), dir: r.dir.xy().normalized(), ray: true }],
@@ -314,18 +325,9 @@ impl EntityKind {
                     }
                 }
             }
-            EntityKind::LwPolyline(p) => {
-                for v in &mut p.vertices {
-                    v.p = m.apply(v.p);
-                    v.start_width *= s;
-                    v.end_width *= s;
-                    if mirror {
-                        v.bulge = -v.bulge;
-                    }
-                }
-                p.const_width *= s;
-            }
+            EntityKind::LwPolyline(p) => p.transform(m),
             EntityKind::Polyline3d(p) => p.points.iter_mut().for_each(t3),
+            EntityKind::PolylineMesh(mesh) => mesh.transform(m),
             EntityKind::Spline(sp) => sp.transform(m),
             EntityKind::Helix(h) => {
                 let sp = m.apply(h.start_point().xy());
@@ -505,6 +507,7 @@ impl EntityKind {
                 g
             }
             EntityKind::Polyline3d(p) => p.points.iter().map(|q| q.xy()).collect(),
+            EntityKind::PolylineMesh(mesh) => mesh.vertices.iter().filter(|v| !v.is_face()).map(|v| v.vertex.position.xy()).collect(),
             EntityKind::Spline(s) => {
                 if s.fit.is_empty() {
                     s.control.clone()
@@ -577,6 +580,7 @@ mod grip_tests {
         // once rather than rebuilt per vertex (CWE-407, row 35).
         let verts: Vec<PolyVertex> = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)].iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect();
         let e = EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
             vertices: verts,
             closed: false,
             const_width: 0.0,

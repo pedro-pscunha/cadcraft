@@ -208,6 +208,10 @@ fn handle(v: &serde_json::Value) -> Handle {
 /// must own its own graph, including the reactor and the attribute's 1005 self-reference.
 fn assert_field_copy(d: &Drawing, source: Handle, copy: Handle, stage: &str) {
     let old = d.foreign.entities.get(&source).unwrap();
+    assert_field_graph(d, old, copy, stage);
+}
+
+fn assert_field_graph(d: &Drawing, old: &cadcraft_engine::doc::foreign::ForeignExtra, copy: Handle, stage: &str) {
     let new = d.foreign.entities.get(&copy).expect("copied attribute retained foreign data");
     assert_ne!(new.xdict, old.xdict, "{stage}: copied dictionary aliases the source");
     assert_ne!(new.reactors, old.reactors, "{stage}: copied reactor aliases the source");
@@ -402,7 +406,18 @@ fn wblock_duplicates_model_and_nested_attribute_instances() {
             let copies: Vec<_> =
                 d.model.iter().chain(d.blocks.values().flat_map(|b| b.entities.iter())).filter(|e| e.kind.attributes().len() == 2).collect();
             assert_eq!(copies.len(), 1, "WBLOCK must write its attributed INSERT");
-            assert_insert_copy(&d, &original, copies[0], false, "WBLOCK");
+            let source_handles: HashSet<_> =
+                std::iter::once(original.handle).chain(original.kind.attributes().iter().filter_map(|a| a.handle)).collect();
+            assert!(!source_handles.contains(&copies[0].handle), "WBLOCK: fresh entity identity");
+            for (source, copy) in original.kind.attributes().iter().zip(copies[0].kind.attributes()) {
+                let handle = copy.handle.unwrap();
+                assert!(!source_handles.contains(&handle), "WBLOCK: fresh attribute identity");
+                assert_eq!(source.text.value, copy.text.value, "WBLOCK: attribute value");
+                if source.text.value == "live" {
+                    let old = s.doc().unwrap().foreign.entities.get(&source.handle.unwrap()).unwrap();
+                    assert_field_graph(&d, old, handle, "WBLOCK");
+                }
+            }
             let mut read = Session::new();
             read.open_drawing(d, "written", None);
             assert_fresh(&read, "WBLOCK");

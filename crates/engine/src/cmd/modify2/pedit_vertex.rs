@@ -19,6 +19,9 @@ fn ordered(pl: &LwPolyline, i: usize, j: usize) -> Result<(usize, usize)> {
 pub(super) fn straighten(pl: &mut LwPolyline, i: usize, j: usize) -> Result<()> {
     let (lo, hi) = ordered(pl, i, j)?;
     if hi > lo + 1 {
+        if pl.records.vertices.len() == pl.vertices.len() {
+            pl.records.vertices.drain(lo + 1..hi);
+        }
         pl.vertices.drain(lo + 1..hi);
     }
     if let Some(v) = pl.vertices.get_mut(lo) {

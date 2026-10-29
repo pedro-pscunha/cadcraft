@@ -47,6 +47,7 @@ fn thickness_roundtrips_on_every_entity_that_has_one() {
         EntityKind::Point(Point { p: p(1.0, 2.0), angle: 0.0 }),
         EntityKind::Text(text),
         EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
             vertices: square(4.0),
             closed: true,
             const_width: 0.0,
@@ -55,7 +56,7 @@ fn thickness_roundtrips_on_every_entity_that_has_one() {
             heavy: false,
             fit: None,
         }),
-        EntityKind::Polyline3d(Polyline3d { points: vec![p(0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)], closed: false }),
+        EntityKind::Polyline3d(Polyline3d { records: Default::default(), points: vec![p(0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)], closed: false }),
         EntityKind::Solid(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),
         EntityKind::Trace(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),
     ];
@@ -215,15 +216,15 @@ fn face(idx: [&'static str; 4]) -> Vec<(i32, &'static str)> {
 fn faces(d: &Drawing) -> Vec<Face3d> {
     d.model
         .iter()
-        .map(|e| match &e.kind {
-            EntityKind::Face3d(f) => f.clone(),
-            k => panic!("expected only 3D faces, got {k:?}"),
+        .flat_map(|e| match &e.kind {
+            EntityKind::PolylineMesh(mesh) => mesh.faces(),
+            k => panic!("expected a mesh, got {k:?}"),
         })
         .collect()
 }
 
 #[test]
-fn polyface_and_polygon_mesh_polylines_become_faces_not_bogus_vertices() {
+fn polyface_and_polygon_mesh_polylines_keep_their_face_display() {
     let p = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
     // Polyface: four vertices, a quad, a triangle whose third edge is hidden, and faces with an
     // out-of-range index or only two vertices (skipped).
@@ -245,7 +246,7 @@ fn polyface_and_polygon_mesh_polylines_become_faces_not_bogus_vertices() {
     assert_eq!(fs[0].hidden_edges, 0);
     assert_eq!(fs[1].corners, [p(0.0, 0.0, 2.0), p(1.0, 1.0, 2.0), p(0.0, 1.0, 2.0), p(0.0, 1.0, 2.0)]);
     assert_eq!(fs[1].hidden_edges, 4 | 8, "the triangle's closing edge is hidden");
-    // The faces survive a save and reopen as 3DFACEs.
+    // The mesh stays one entity and keeps the same face display after a save.
     assert_eq!(faces(&roundtrip(&d)), fs);
 
     // 3×2 polygon mesh: two quads.
@@ -269,5 +270,6 @@ fn polyface_and_polygon_mesh_polylines_become_faces_not_bogus_vertices() {
     ];
     let refs: Vec<&[(i32, &str)]> = recs.iter().map(Vec::as_slice).collect();
     let d = read_dxf(dxf(&refs).as_bytes()).expect("read hostile mesh");
-    assert_eq!(d.model.iter().count(), 0);
+    assert_eq!(d.model.iter().count(), 1, "the source mesh remains in the database");
+    assert!(faces(&d).is_empty());
 }

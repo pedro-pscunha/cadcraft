@@ -28,5 +28,6 @@ rstar = { version = "0.13", default-features = false }
 libc = "0.2"
 
 [dev-dependencies]
+cadcraft-dwg = { workspace = true }
 # Real DXF files for the external reference tests (io is a lower layer).
 cadcraft-io = { workspace = true }

@@ -148,6 +148,38 @@ fn the_plot_style_of_new_objects_is_kept() {
 }
 
 #[test]
+fn current_plot_style_uses_a_separate_cepsnid_header_variable() {
+    let source = DwgWriter::write_to_vec(&document()).unwrap();
+    let drawing = cadcraft_io::read(&source, "x.dwg").unwrap();
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    let dxf = cadcraft_io::write_with(&drawing, "x.dxf", &opts).unwrap();
+    let tags = cadcraft_dxf::parse(&dxf).unwrap();
+    let variable = |name: &str| {
+        let i = tags.iter().position(|t| t.code == 9 && t.str() == name).unwrap();
+        tags[i + 1..].iter().take_while(|t| !matches!(t.code, 0 | 9)).cloned().collect::<Vec<_>>()
+    };
+    assert_eq!(variable("$CEPSNTYPE").iter().map(|t| t.code).collect::<Vec<_>>(), vec![380]);
+    let handle = variable("$CEPSNID");
+    assert_eq!(handle.len(), 1);
+    assert_eq!(handle[0].code, 390);
+    assert_ne!(handle[0].str(), "0");
+    let name = drawing.header.str("CEPSNTYPE@390", "missing");
+    let text = String::from_utf8(dxf).unwrap();
+    let separate = format!("9\n$CEPSNTYPE\n380\n3\n9\n$CEPSNID\n390\n{}\n", handle[0].str());
+    let reversed = format!("9\n$CEPSNID\n390\n{}\n9\n$CEPSNTYPE\n380\n3\n", handle[0].str());
+    let combined = format!("9\n$CEPSNTYPE\n380\n3\n390\n{}\n", handle[0].str());
+    // Normalize whitespace so all three header forms exercise the same object map.
+    let normalized = text.lines().map(str::trim).collect::<Vec<_>>().join("\n") + "\n";
+    for form in [&separate, &reversed, &combined] {
+        let input = normalized.replace(&separate, form);
+        let back = cadcraft_io::read_dxf(input.as_bytes()).unwrap();
+        assert_eq!(back.header.i64("CEPSNTYPE", -1), 3);
+        assert_eq!(back.header.str("CEPSNTYPE@390", "missing"), name);
+        assert!(back.header.get("CEPSNID").is_none());
+    }
+}
+
+#[test]
 fn the_plot_style_table_and_the_project_name_are_kept() {
     for (what, back) in saves(&document()) {
         assert_eq!(back.header.stylesheet, "monochrome.ctb", "{what}: STYLESHEET");

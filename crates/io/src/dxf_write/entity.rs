@@ -1,5 +1,7 @@
 use super::blocks::table_size;
-use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
+use super::common::{
+    attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, plot_style_xdata, text_tags,
+};
 use super::ctx::Ctx;
 use super::layout::paper_view;
 use super::{
@@ -44,6 +46,7 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     write_viewport_entity(w, d, e, owner, paper, cx);
     write_wipeout_entity(w, d, e, owner, paper, cx);
     write_other_entity(w, d, e, owner, paper, cx);
+    plot_style_xdata(w, &e.common.plot_style, start);
     let mut top_level = false;
     let mut handles = Vec::new();
     for tag in w.t.get(start..).unwrap_or_default() {
@@ -78,37 +81,45 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.i(70, i64::from(p.closed) | if p.plinegen { 128 } else { 0 });
         w.f(40, p.const_width);
         w.f(41, p.const_width);
-        for vertex in &p.vertices {
+        w.p(210, e.common.extrusion);
+        let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
+        for (index, vertex) in p.vertices.iter().enumerate() {
             heavy_vertex(
                 w,
                 e,
                 &cadcraft_doc::PolylineFitVertex {
-                    position: Vec3::new(vertex.p.x, vertex.p.y, 0.0),
+                    record: p.records.vertices.get(index).cloned().unwrap_or_default(),
+                    position: Vec3::new(ocs_x * vertex.p.x, vertex.p.y, 0.0),
                     flags: 0,
                     start_width: if p.const_width > 0.0 { p.const_width } else { vertex.start_width },
                     end_width: if p.const_width > 0.0 { p.const_width } else { vertex.end_width },
-                    bulge: vertex.bulge,
+                    bulge: ocs_x * vertex.bulge,
                     tangent: 0.0,
                 },
             );
         }
     }
-    let handle = w.h();
-    w.s(0, "SEQEND");
-    w.s(5, handle);
-    w.s(330, e.handle.hex());
-    w.s(100, "AcDbEntity");
-    w.s(8, &e.common.layer);
+    polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
+}
+
+fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::PolylineRecord>, kind: &str, subclass: &str) -> usize {
+    let handle = w.instance_handle(record.and_then(|r| r.handle));
+    let child = Entity {
+        handle,
+        common: record.map_or_else(|| cadcraft_doc::Common { layer: parent.common.layer.clone(), ..Default::default() }, |r| r.common.clone()),
+        kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
+    };
+    let start = w.t.len();
+    w.s(0, kind);
+    common(w, &child, &parent.handle.hex(), false, subclass);
+    if subclass.is_empty() {
+        plot_style_xdata(w, &child.common.plot_style, start);
+    }
+    start
 }
 
 fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex) {
-    let handle = w.h();
-    w.s(0, "VERTEX");
-    w.s(5, handle);
-    w.s(330, e.handle.hex());
-    w.s(100, "AcDbEntity");
-    w.s(8, &e.common.layer);
-    w.s(100, "AcDbVertex");
+    let start = polyline_child(w, e, Some(&vertex.record), "VERTEX", "AcDbVertex");
     w.s(100, "AcDb2dVertex");
     w.p(10, vertex.position);
     w.f(40, vertex.start_width);
@@ -116,6 +127,40 @@ fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex)
     w.f(42, vertex.bulge);
     w.i(70, vertex.flags);
     w.f(50, vertex.tangent.to_degrees());
+    plot_style_xdata(w, &vertex.record.common.plot_style, start);
+}
+
+fn polyline_mesh(w: &mut W, e: &Entity, owner: &str, paper: bool, mesh: &cadcraft_doc::PolylineMesh) {
+    let (parent_class, vertex_class) = match mesh.kind {
+        cadcraft_doc::MeshKind::Polyface => ("AcDbPolyFaceMesh", "AcDbPolyFaceMeshVertex"),
+        cadcraft_doc::MeshKind::Polygon => ("AcDbPolygonMesh", "AcDbPolygonMeshVertex"),
+    };
+    w.s(0, "POLYLINE");
+    common(w, e, owner, paper, parent_class);
+    w.i(66, 1);
+    w.p(10, Vec3::ZERO);
+    thickness(w, e);
+    w.p(210, e.common.extrusion);
+    w.i(70, mesh.dxf_flags());
+    for (code, value) in [(71, mesh.m_count), (72, mesh.n_count), (73, mesh.m_density), (74, mesh.n_density), (75, mesh.smooth_type)] {
+        w.i(code, value);
+    }
+    for record in &mesh.vertices {
+        let v = &record.vertex;
+        let start = polyline_child(w, e, Some(&v.record), "VERTEX", if record.is_face() { "AcDbFaceRecord" } else { "AcDbVertex" });
+        if !record.is_face() {
+            w.s(100, vertex_class);
+        }
+        w.p(10, v.position);
+        w.i(70, v.flags);
+        if record.is_face() {
+            for (code, value) in (71..=74).zip(record.indices) {
+                w.i(code, value);
+            }
+        }
+        plot_style_xdata(w, &v.record.common.plot_style, start);
+    }
+    polyline_child(w, e, mesh.seqend.as_ref(), "SEQEND", "");
 }
 
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
@@ -174,15 +219,17 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             if p.elevation != 0.0 {
                 w.f(38, p.elevation);
             }
+            w.p(210, e.common.extrusion);
             thickness(w, e);
+            let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
             for v in &p.vertices {
-                w.p2(10, v.p);
+                w.p2(10, Vec2::new(ocs_x * v.p.x, v.p.y));
                 if v.start_width != 0.0 || v.end_width != 0.0 {
                     w.f(40, v.start_width);
                     w.f(41, v.end_width);
                 }
                 if v.bulge != 0.0 {
-                    w.f(42, v.bulge);
+                    w.f(42, ocs_x * v.bulge);
                 }
             }
         }
@@ -191,6 +238,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             common(w, e, owner, paper, "AcDbMline");
             w.t.extend(crate::dxf_mline::entity_tags(m, &cx.mlines.handle(&m.style)));
         }
+        EntityKind::PolylineMesh(mesh) => polyline_mesh(w, e, owner, paper, mesh),
         EntityKind::Polyline3d(p) => {
             w.s(0, "POLYLINE");
             common(w, e, owner, paper, "AcDb3dPolyline");
@@ -198,24 +246,17 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.p(10, Vec3::ZERO);
             thickness(w, e);
             w.i(70, 8 | i64::from(p.closed));
-            for q in &p.points {
-                let vh = w.h();
-                w.s(0, "VERTEX");
-                w.s(5, vh);
-                w.s(330, e.handle.hex());
-                w.s(100, "AcDbEntity");
-                w.s(8, &e.common.layer);
-                w.s(100, "AcDbVertex");
+            for (index, q) in p.points.iter().enumerate() {
+                let record = p.records.vertices.get(index);
+                let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
                 w.p(10, *q);
                 w.i(70, 32);
+                if let Some(record) = record {
+                    plot_style_xdata(w, &record.common.plot_style, start);
+                }
             }
-            let sh = w.h();
-            w.s(0, "SEQEND");
-            w.s(5, sh);
-            w.s(330, e.handle.hex());
-            w.s(100, "AcDbEntity");
-            w.s(8, &e.common.layer);
+            polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
         }
         EntityKind::Spline(s) => {
             w.s(0, "SPLINE");
@@ -375,7 +416,8 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
         }
         if !i.attribs.is_empty() {
             for a in &i.attribs {
-                let ah = w.attribute_handle(a.handle);
+                let ah = w.instance_handle(a.handle).hex();
+                let start = w.t.len();
                 w.s(0, "ATTRIB");
                 w.s(5, ah);
                 w.s(330, e.handle.hex());
@@ -392,6 +434,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }
+                plot_style_xdata(w, &c.plot_style, start);
             }
             let sh = w.h();
             w.s(0, "SEQEND");

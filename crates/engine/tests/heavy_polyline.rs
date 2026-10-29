@@ -3,7 +3,7 @@ use cadcraft_engine::doc::{EntityKind, Handle};
 use serde_json::json;
 
 #[test]
-fn geometry_edits_decurve_a_fitted_polyline_without_restoring_its_old_control_points() {
+fn whole_polyline_edits_keep_the_source_fit() {
     let source = b"0\nSECTION\n2\nENTITIES\n0\nPOLYLINE\n5\n100\n8\n0\n70\n4\n75\n6\n0\nVERTEX\n10\n0\n20\n0\n70\n16\n0\nVERTEX\n10\n10\n20\n0\n70\n16\n0\nVERTEX\n10\n0\n20\n0\n70\n8\n0\nVERTEX\n10\n5\n20\n3\n70\n8\n0\nVERTEX\n10\n10\n20\n0\n70\n8\n0\nSEQEND\n0\nENDSEC\n0\nEOF\n";
     for (command, parameters) in [
         ("move", json!({"handles": ["100"], "from": [0, 0], "to": [3, 4]})),
@@ -18,8 +18,51 @@ fn geometry_edits_decurve_a_fitted_polyline_without_restoring_its_old_control_po
             let drawing = cadcraft_io::read(&bytes, format).unwrap();
             let EntityKind::LwPolyline(polyline) = &drawing.entity(Handle(0x100)).unwrap().kind else { panic!("polyline") };
             assert!(polyline.heavy);
-            assert!(polyline.fit.is_none(), "{command}: {format}");
+            let fit = polyline.saved_fit().unwrap_or_else(|| panic!("{command}: {format}: lost fit"));
+            assert_eq!(fit.flags, 4);
+            assert_eq!(fit.smooth_type, 6);
+            assert_eq!(fit.vertices.iter().map(|v| v.flags).collect::<Vec<_>>(), vec![16, 16, 8, 8, 8]);
             assert_eq!(polyline.vertices.len(), 3, "{command}: {format}");
+        }
+    }
+}
+
+#[test]
+fn polyline_extrusion_and_ocs_survive_unchanged_and_width_edits() {
+    for (normal, groups) in [
+        (cadcraft_engine::geom::Vec3::new(0.0, 1.0, 0.0), "210\n0\n220\n1\n230\n0\n"),
+        (cadcraft_engine::geom::Vec3::new(0.0, 0.0, -1.0), "210\n0\n220\n0\n230\n-1\n"),
+    ] {
+        for record in [
+            "POLYLINE\n5\n100\n8\n0\n10\n0\n20\n0\n30\n4\n70\n0\n{normal}0\nVERTEX\n10\n2\n20\n3\n42\n0.5\n0\nVERTEX\n10\n7\n20\n8\n0\nSEQEND\n",
+            "LWPOLYLINE\n5\n100\n8\n0\n90\n2\n70\n0\n38\n4\n{normal}10\n2\n20\n3\n42\n0.5\n10\n7\n20\n8\n",
+        ] {
+            let source = format!("0\nSECTION\n2\nENTITIES\n0\n{}0\nENDSEC\n0\nEOF\n", record.replace("{normal}", groups));
+            for edit in [false, true] {
+                let mut session = Session::new();
+                session.open_drawing(cadcraft_io::read_dxf(source.as_bytes()).unwrap(), "plane.dxf", None);
+                if edit {
+                    session.execute("pedit", &json!({"handles": ["100"], "option": "width", "width": 2.5})).unwrap();
+                }
+                let EntityKind::LwPolyline(expected) = &session.doc().unwrap().entity(Handle(0x100)).unwrap().kind else { panic!("polyline") };
+                let expected_points: Vec<_> = expected.vertices.iter().map(|v| (v.p, v.bulge)).collect();
+                let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+                let dxf = cadcraft_io::write_with(session.doc().unwrap(), "plane.dxf", &opts).unwrap();
+                let converted = cadcraft_dwg::dxf_to_dwg(&dxf).unwrap();
+                let bridge = cadcraft_dwg::dwg_to_dxf(&converted).unwrap();
+                let dwg = cadcraft_io::write_with(session.doc().unwrap(), "plane.dwg", &opts).unwrap();
+                for back in [
+                    cadcraft_io::read(&dxf, "plane.dxf").unwrap(),
+                    cadcraft_io::read_dxf(&bridge).unwrap(),
+                    cadcraft_io::read(&dwg, "plane.dwg").unwrap(),
+                ] {
+                    let entity = back.entity(Handle(0x100)).unwrap();
+                    assert_eq!(entity.common.extrusion, normal, "edit={edit}, {record}");
+                    let EntityKind::LwPolyline(polyline) = &entity.kind else { panic!("polyline") };
+                    assert_eq!(polyline.elevation, 4.0);
+                    assert_eq!(polyline.vertices.iter().map(|v| (v.p, v.bulge)).collect::<Vec<_>>(), expected_points);
+                }
+            }
         }
     }
 }

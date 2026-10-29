@@ -52,9 +52,14 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
             mv(&mut l.b);
         }
         EntityKind::LwPolyline(pl) => {
-            for v in &mut pl.vertices {
-                if inside(v.p) {
-                    v.p += d;
+            if pl.vertices.iter().all(|v| inside(v.p)) {
+                pl.transform(&Mat3::translate(d));
+            } else if pl.vertices.iter().any(|v| inside(v.p)) {
+                pl.fit = None;
+                for v in &mut pl.vertices {
+                    if inside(v.p) {
+                        v.p += d;
+                    }
                 }
             }
         }

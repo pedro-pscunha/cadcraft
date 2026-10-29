@@ -66,6 +66,30 @@ fn dimstyle_fidelity_unused_separate_arrow_names_do_not_enable_dimsah() {
 }
 
 #[test]
+fn dimstyle_fidelity_dimsah_controls_screen_and_saved_arrows() {
+    let source = b"0\nSECTION\n2\nENTITIES\n0\nDIMENSION\n5\n100\n8\n0\n70\n0\n10\n0\n20\n5\n13\n0\n23\n0\n14\n20\n24\n0\n0\nENDSEC\n0\nEOF\n";
+    let mut d = cadcraft_io::read_dxf(source).unwrap();
+    let st = d.dim_styles.iter_mut().find(|s| s.name == "Standard").unwrap();
+    st.arrow_block = "_ClosedFilled".into();
+    st.arrow_block1 = "_None".into();
+    st.arrow_block2 = "_Open".into();
+    st.separate_arrows = false;
+    let EntityKind::Dimension(dm) = &d.model.iter().next().unwrap().kind else { panic!("dimension") };
+    assert_eq!(cadcraft_render::dimension_in(&d, dm).fills.len(), 2, "screen arrows");
+    let opts = SaveOptions { version: Some(Version::R2018), binary: false };
+    let dxf = cadcraft_io::write_with(&d, "x.dxf", &opts).unwrap();
+    let converted = cadcraft_dwg::dxf_to_dwg(&dxf).unwrap();
+    let bridged = cadcraft_dwg::dwg_to_dxf(&converted).unwrap();
+    let dwg = cadcraft_io::write_with(&d, "x.dwg", &opts).unwrap();
+    for back in [cadcraft_io::read(&dxf, "x.dxf").unwrap(), cadcraft_io::read_dxf(&bridged).unwrap(), cadcraft_io::read(&dwg, "x.dwg").unwrap()] {
+        let EntityKind::Dimension(dm) = &back.model.iter().next().unwrap().kind else { panic!("dimension") };
+        let block = back.block(dm.block.as_deref().unwrap()).unwrap();
+        assert_eq!(block.entities.iter().filter(|e| matches!(e.kind, EntityKind::Solid(_))).count(), 2, "saved arrows");
+        assert_eq!(cadcraft_render::dimension_in(&back, dm).fills.len(), 2, "reopened screen arrows");
+    }
+}
+
+#[test]
 fn dimstyle_fidelity_measurement_factors_stay_private_in_user_dxf() {
     let mut d = drawing();
     let st = d.dim_styles.iter_mut().find(|s| s.name == "Detail").unwrap();
@@ -190,8 +214,13 @@ fn dimstyle_fidelity_true_colors_survive_dwg() {
     let mut d = Drawing::new_imperial();
     let rgb = cadcraft_color::Color::True(cadcraft_color::Rgb(187, 130, 157));
     let st = DimStyle {
-        name: "RGB".into(), dim_line_color: rgb, ext_line_color: rgb, text_color: rgb,
-        text_fill: 2, text_fill_color: rgb, ..DimStyle::default()
+        name: "RGB".into(),
+        dim_line_color: rgb,
+        ext_line_color: rgb,
+        text_color: rgb,
+        text_fill: 2,
+        text_fill_color: rgb,
+        ..DimStyle::default()
     };
     d.dim_styles.push(st.clone());
     for version in [Version::R2007, Version::R2010, Version::R2018] {

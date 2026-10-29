@@ -38,6 +38,7 @@ fn region_with_islands_survives_save_and_reopen() {
             &Space::Model,
             Common::default(),
             EntityKind::LwPolyline(cadcraft_doc::LwPolyline {
+                records: Default::default(),
                 vertices: square(50.0, 0.0, 1.0, true).vertices,
                 closed: true,
                 const_width: 0.0,

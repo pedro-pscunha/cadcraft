@@ -174,6 +174,9 @@ fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value
         EntityKind::Line(_) | EntityKind::Arc(_) if bool_or(p, "convert", true) => as_lwpoly(&e.kind).ok_or_else(|| other("Cannot convert."))?,
         _ => return Err(other("Object selected is not a polyline.")),
     };
+    if !matches!(opt, "width" | "w" | "reverse" | "r" | "ltypegen" | "l") || pl.saved_fit().is_none() {
+        pl.fit = None;
+    }
     match opt {
         "close" | "c" => pl.closed = pl.vertices.len() > 1,
         "open" | "o" => pl.closed = false,
@@ -182,11 +185,7 @@ fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value
             if w < 0.0 {
                 return Err(bad("pedit", "width must be non-negative"));
             }
-            pl.const_width = w;
-            for v in &mut pl.vertices {
-                v.start_width = 0.0;
-                v.end_width = 0.0;
-            }
+            pl.set_width(w);
         }
         "fit" | "f" => pl.vertices = fit_vertices(&pl.vertices, pl.closed, &pedit_vertex::tangent_param(p, pl.vertices.len())?),
         "spline" | "s" => {
@@ -194,8 +193,13 @@ fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value
             pl.vertices = spline_vertices(&pl.vertices, pl.closed, segs);
         }
         "decurve" | "d" => pl.vertices.iter_mut().for_each(|v| v.bulge = 0.0),
-        "reverse" | "r" => pl.vertices = curves::reverse_vertices(&pl.vertices, pl.closed),
-        "ltypegen" | "l" => pl.plinegen = bool_or(p, "on", !pl.plinegen),
+        "reverse" | "r" => pl = curves::reverse_polyline(&pl),
+        "ltypegen" | "l" => {
+            pl.plinegen = bool_or(p, "on", !pl.plinegen);
+            if let Some(fit) = &mut pl.fit {
+                fit.flags = (fit.flags & !128) | if pl.plinegen { 128 } else { 0 };
+            }
+        }
         "join" | "j" => {
             set_kind(s, h, EntityKind::LwPolyline(pl))?;
             let others: Vec<Handle> = p
@@ -227,6 +231,9 @@ fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value
                     }
                     if let Some(v) = pl.vertices.get_mut(i) {
                         v.bulge = 0.0;
+                    }
+                    if pl.records.vertices.len() == n {
+                        pl.records.vertices.insert(i + 1, Default::default());
                     }
                     pl.vertices.insert(i + 1, PolyVertex::new(to));
                 }

@@ -125,6 +125,7 @@ fn dimblk_dot_and_none() {
     let g = dimension_geometry(&lin((0.0, 0.0), (10.0, 0.0), (0.0, 5.0), 0.0), &st, 1.0);
     assert_eq!(g.fills.len(), 48, "two 24-triangle dots");
     let st = st_with(|s| {
+        s.separate_arrows = true;
         s.arrow_block1 = "_NONE".into();
         s.arrow_block2 = "_OPEN".into();
     });

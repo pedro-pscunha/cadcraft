@@ -285,6 +285,7 @@ fn entity_z(e: &Entity, p: Vec2) -> Option<f64> {
         EntityKind::MText(t) => Some(t.insert.z),
         EntityKind::Insert(i) => Some(i.insert.z),
         EntityKind::Face3d(f) => face_z(&f.corners, p).or_else(|| along(&f.corners, true)),
+        EntityKind::PolylineMesh(mesh) => mesh.faces().iter().find_map(|f| face_z(&f.corners, p).or_else(|| along(&f.corners, true))),
         _ => None,
     }
 }

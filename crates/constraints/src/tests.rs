@@ -252,7 +252,16 @@ fn polyline_rectangle() {
     let vs = [(0.0, 0.0), (8.0, 0.4), (8.3, 3.0), (-0.2, 3.1)].iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect();
     let p = add_e(
         &mut d,
-        EntityKind::LwPolyline(LwPolyline { vertices: vs, closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None }),
+        EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
+            vertices: vs,
+            closed: true,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+            heavy: false,
+            fit: None,
+        }),
     );
     for i in [0, 2] {
         ok(&mut d, con(ConstraintKind::Horizontal, &[s(p, Sub::Segment(i))]));

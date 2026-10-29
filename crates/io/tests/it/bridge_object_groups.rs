@@ -170,6 +170,50 @@ fn plot_styled() -> CadDocument {
 }
 
 #[test]
+fn user_dxf_plot_styles_use_only_standard_entity_groups() {
+    let source = acadrust::DwgWriter::write_to_vec(&plot_styled()).unwrap();
+    for style in ["Color_1", "ByBlock", "ByDictionaryDefault"] {
+        let mut drawing = cadcraft_io::read(&source, "x.dwg").unwrap();
+        let handles: Vec<_> = drawing.model.iter().map(|e| e.handle).collect();
+        for handle in handles {
+            drawing
+                .modify_entity(handle, |e| {
+                    e.common.plot_style = style.into();
+                    for attribute in e.kind.attributes_mut() {
+                        attribute.props.plot_style = Some(style.into());
+                    }
+                })
+                .unwrap();
+        }
+        let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+        let dxf = cadcraft_io::write_with(&drawing, "x.dxf", &opts).unwrap();
+        let tags = cadcraft_dxf::parse(&dxf).unwrap();
+        let mut entity_groups = false;
+        let mut named = 0;
+        for tag in &tags {
+            if tag.code == 0 {
+                entity_groups = false;
+            }
+            if tag.code == 100 {
+                entity_groups = tag.str() == "AcDbEntity";
+            }
+            if entity_groups {
+                assert_ne!(tag.code, 380, "{style}: private plot-style flags in user DXF");
+                named += usize::from(tag.code == 390);
+            }
+        }
+        assert_eq!(named > 0, style == "Color_1", "{style}: only named objects use group 390");
+        let back = cadcraft_io::read_dxf(&dxf).unwrap();
+        for entity in back.model.iter() {
+            assert_eq!(entity.common.plot_style, style);
+            for attribute in entity.kind.attributes() {
+                assert_eq!(attribute.props.plot_style.as_deref(), Some(style));
+            }
+        }
+    }
+}
+
+#[test]
 fn entities_and_attributes_keep_their_plot_style() {
     for (what, back) in saves(&plot_styled()) {
         let name = |h: Option<Handle>| h.and_then(|h| plot_style_name(&back, h));
@@ -489,7 +533,6 @@ fn a_table_style_keeps_its_name() {
         assert_eq!(names, ["Standard"], "{what}: table style names");
     }
 }
-
 
 /// The cell style borders of a table style point at the ByBlock linetype, as AutoCAD writes them
 /// (acadrust `TableCellBorder::line_type`).

@@ -124,7 +124,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // CADCraft wrote names its own next handle, above which its rebuilt records are numbered
     // (#495), so it is left to that.
     let ours = secs.iter().any(|s| s.name == "OBJECTS" && s.tags.iter().any(|t| t.code == 3 && t.str() == crate::dxf_ext::HANDSEED_KEY));
-    reserve_attribute_handles(&mut secs, &mut d, ours);
+    reserve_instance_handles(&mut secs, &mut d, ours);
     let mut skipped = std::collections::BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
@@ -175,10 +175,10 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     Ok(d)
 }
 
-/// Reserve persistent ATTRIB identities even in CADCraft files with a private handseed. A
+/// Reserve persistent child identities even in CADCraft files with a private handseed. A
 /// colliding input identity is omitted before raw-data reading, so its dictionary cannot be
 /// attached to whichever different record already owns the handle.
-fn reserve_attribute_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
+fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
     let mut used = HashSet::new();
     for section in secs.iter().filter(|s| s.name != "HEADER") {
         let mut kind = String::new();
@@ -187,7 +187,7 @@ fn reserve_attribute_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) 
             if t.code == 0 {
                 kind = t.str();
                 seen = false;
-            } else if !kind.is_empty() && kind != "ATTRIB" && matches!(t.code, 5 | 105) && !seen {
+            } else if !kind.is_empty() && !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") && matches!(t.code, 5 | 105) && !seen {
                 if let Some(h) = Handle::parse_hex(&t.str()) {
                     used.insert(h);
                     if !ours {
@@ -199,20 +199,20 @@ fn reserve_attribute_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) 
         }
     }
     for section in secs.iter_mut().filter(|s| s.name != "HEADER") {
-        let mut attrib = false;
+        let mut instance = false;
         let mut seen = false;
         for t in &mut section.tags {
             if t.code == 0 {
-                attrib = t.str() == "ATTRIB";
+                instance = matches!(t.str().as_str(), "ATTRIB" | "VERTEX" | "SEQEND");
                 seen = false;
-            } else if attrib && t.code == 5 {
+            } else if instance && t.code == 5 {
                 let h = Handle::parse_hex(&t.str()).filter(|h| h.0 != 0 && h.0 != u64::MAX);
                 if !seen && h.is_some_and(|h| used.insert(h)) {
                     if let Some(h) = h {
                         d.bump_handseed(h);
                     }
                 } else {
-                    *t = Tag::s(999, "Rejected duplicate or invalid ATTRIB identity");
+                    *t = Tag::s(999, "Rejected duplicate or invalid child identity");
                 }
                 seen = true;
             }

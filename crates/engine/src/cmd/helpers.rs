@@ -21,6 +21,7 @@ pub fn arc(a: &cadcraft_geom::Arc) -> EntityKind {
 
 pub fn lwpoly(vs: Vec<PolyVertex>, closed: bool) -> EntityKind {
     EntityKind::LwPolyline(cadcraft_doc::LwPolyline {
+        records: Default::default(),
         vertices: vs,
         closed,
         const_width: 0.0,

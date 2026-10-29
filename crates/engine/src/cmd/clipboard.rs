@@ -178,6 +178,8 @@ struct Used {
     text_styles: HashSet<String>,
     dim_styles: HashSet<String>,
     mleader_styles: HashSet<String>,
+    mline_styles: HashSet<String>,
+    images: HashSet<String>,
     table_styles: HashSet<String>,
     blocks: HashSet<String>,
 }
@@ -188,9 +190,17 @@ fn up(n: &str) -> String {
 
 impl Used {
     /// Note what `e` uses; returns the blocks it references.
-    fn note(&mut self, e: &Entity) -> Vec<String> {
+    fn note(&mut self, e: &Entity, src: &Drawing) -> Vec<String> {
         self.layers.insert(up(&e.common.layer));
         self.linetypes.insert(up(&e.common.linetype));
+        for record in e.kind.polyline_records() {
+            self.layers.insert(up(&record.common.layer));
+            self.linetypes.insert(up(&record.common.linetype));
+        }
+        for attribute in e.kind.attributes() {
+            self.layers.extend(attribute.props.layer.as_deref().map(up));
+            self.linetypes.extend(attribute.props.linetype.as_deref().map(up));
+        }
         let mut blocks = Vec::new();
         match &e.kind {
             EntityKind::Text(t) => {
@@ -221,10 +231,40 @@ impl Used {
                 self.text_styles.extend(m.text.iter().map(|t| up(&t.style)));
                 blocks.extend(m.block.as_ref().map(|b| b.block.clone()));
             }
+            EntityKind::MLine(m) => {
+                self.mline_styles.insert(up(&m.style));
+            }
+            EntityKind::Image(image) => {
+                self.images.insert(up(&image.name));
+                self.images.insert(up(&image.path));
+            }
             EntityKind::Table(t) => {
                 self.table_styles.insert(up(&t.style));
             }
             _ => {}
+        }
+        let dimension_style = match &e.kind {
+            EntityKind::Dimension(d) => Some(d.style.as_str()),
+            EntityKind::Leader(l) => Some(l.style.as_str()),
+            EntityKind::Tolerance(t) => Some(t.style.as_str()),
+            _ => None,
+        };
+        if let Some(style) = dimension_style.and_then(|name| src.dim_style(name)) {
+            self.text_styles.insert(up(&style.text_style));
+            blocks.extend(
+                [&style.arrow_block, &style.arrow_block1, &style.arrow_block2, &style.leader_arrow_block]
+                    .into_iter()
+                    .filter(|n| !n.is_empty())
+                    .cloned(),
+            );
+        }
+        if let EntityKind::MLeader(m) = &e.kind
+            && let Some(style) = src.mleader_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&m.style))
+        {
+            self.text_styles.insert(up(&style.text_style));
+            if !style.arrow_block.is_empty() {
+                blocks.push(style.arrow_block.clone());
+            }
         }
         blocks
     }
@@ -232,9 +272,9 @@ impl Used {
 
 /// The definitions `ents` need from `src`: the layers, linetypes, styles and blocks they (and the
 /// blocks they reference, nested ones too) use, and `src`'s header.
-fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
+pub(super) fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
     let mut used = Used::default();
-    let mut frontier: Vec<String> = ents.iter().flat_map(|e| used.note(e)).collect();
+    let mut frontier: Vec<String> = ents.iter().flat_map(|e| used.note(e, src)).collect();
     let mut walked = 0usize;
     while let Some(name) = frontier.pop() {
         if !used.blocks.insert(up(&name)) {
@@ -246,12 +286,15 @@ fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
             if walked > MAX_WALK {
                 break;
             }
-            frontier.extend(used.note(e));
+            frontier.extend(used.note(e, src));
         }
     }
     // Records referenced by other records.
     for l in src.layers.iter().filter(|l| used.layers.contains(&up(&l.name))) {
         used.linetypes.insert(up(&l.linetype));
+    }
+    for style in src.mline_styles.iter().filter(|s| used.mline_styles.contains(&up(&s.name))) {
+        used.linetypes.extend(style.elements.iter().map(|e| up(&e.linetype)));
     }
     for t in src.linetypes.iter().filter(|t| used.linetypes.contains(&up(&t.name))) {
         used.text_styles.extend(t.pattern.iter().filter_map(|p| p.style.as_deref()).map(up));
@@ -272,6 +315,9 @@ fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
     d.text_styles = pick(&src.text_styles, &used.text_styles, |t| &t.name);
     d.dim_styles = pick(&src.dim_styles, &used.dim_styles, |t| &t.name);
     d.mleader_styles = pick(&src.mleader_styles, &used.mleader_styles, |t| &t.name);
+    d.mline_styles = pick(&src.mline_styles, &used.mline_styles, |t| &t.name);
+    d.image_definitions =
+        src.image_definitions.iter().filter(|i| used.images.contains(&up(&i.name)) || used.images.contains(&up(&i.path))).cloned().collect();
     d.table_styles = pick(&src.table_styles, &used.table_styles, |t| &t.name);
     d.blocks = src.blocks.iter().filter(|(k, _)| used.blocks.contains(&up(k))).map(|(k, b)| (k.clone(), b.clone())).collect();
     d.layouts.clear();
@@ -280,7 +326,7 @@ fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
 
 /// Add `defs`' table records and blocks that `d` doesn't have. Returns the blocks copied, from
 /// their name in `defs` to their name in `d`.
-fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSource) -> BTreeMap<String, String> {
+pub(super) fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSource) -> BTreeMap<String, String> {
     fn add<T: Clone>(ours: &mut Vec<T>, theirs: &[T], name: fn(&T) -> &str) {
         for t in theirs {
             if !ours.iter().any(|o| name(o).eq_ignore_ascii_case(name(t))) {
@@ -293,6 +339,8 @@ fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSourc
     add(&mut d.text_styles, &defs.text_styles, |t| &t.name);
     add(&mut d.dim_styles, &defs.dim_styles, |t| &t.name);
     add(&mut d.mleader_styles, &defs.mleader_styles, |t| &t.name);
+    add(&mut d.mline_styles, &defs.mline_styles, |t| &t.name);
+    add(&mut d.image_definitions, &defs.image_definitions, |i| &i.name);
     add(&mut d.table_styles, &defs.table_styles, |t| &t.name);
     let renames = block_names(d, defs);
     for (from, to) in &renames {

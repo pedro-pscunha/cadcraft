@@ -134,6 +134,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
             stretch_polyline(p, index, to, delta)?;
         }
         EntityKind::Polyline3d(p) => set_xy(p.points.get_mut(index)?, to),
+        EntityKind::PolylineMesh(mesh) => set_xy(&mut mesh.vertices.iter_mut().filter(|v| !v.is_face()).nth(index)?.vertex.position, to),
         EntityKind::Spline(sp) => {
             if sp.fit.is_empty() {
                 *sp.control.get_mut(index)? = to;
@@ -435,12 +436,18 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             // The segment is split in two straight ones.
             v.bulge = 0.0;
             let nv = cadcraft_geom::PolyVertex { p: to, bulge: 0.0, ..*v };
+            if p.records.vertices.len() == p.vertices.len() {
+                p.records.vertices.insert(at + 1, Default::default());
+            }
             p.vertices.insert(at + 1, nv);
         }
         (EntityKind::LwPolyline(p), GripAction::RemoveVertex) => {
             let PolyGrip::Vertex(i) = poly_grip(p, index)? else { return None };
             if p.vertices.len() <= 2 || i >= p.vertices.len() {
                 return None;
+            }
+            if p.records.vertices.len() == p.vertices.len() {
+                p.records.vertices.remove(i);
             }
             p.vertices.remove(i);
             // The segment into the removed vertex now runs to the next one: straight.
