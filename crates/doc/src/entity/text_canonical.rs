@@ -91,6 +91,12 @@ impl Text {
         })
     }
 
+    /// The alignment point of a justified text in WCS (`None` for left, baseline text), from the normal of its plane.
+    pub fn world_align(&self, normal: Vec3) -> Result<Option<Vec3>> {
+        let f = frame(normal)?;
+        Ok(self.align_pt.map(|p| f.to_world(p)))
+    }
+
     /// This text, whose OCS fields lie in the plane of `normal`, after the similarity `transform`; and the normal of
     /// its new plane (the rotated normal, with the source magnitude).
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Text, Vec3)> {
@@ -203,6 +209,16 @@ mod tests {
 
     fn near(a: Vec3, b: Vec3) -> bool {
         (a - b).len() < 1e-9
+    }
+
+    #[test]
+    fn the_alignment_point_is_placed_in_the_plane_like_the_insertion() {
+        let mut t = text(Vec3::new(1.0, 2.0, 3.0), 0.0);
+        t.align_pt = Some(Vec3::new(4.0, 5.0, 3.0));
+        let normal = Vec3::new(0.0, 3.0, 4.0);
+        let f = OcsFrame::new(normal).unwrap();
+        assert!(near(t.world_align(normal).unwrap().unwrap(), f.to_world(Vec3::new(4.0, 5.0, 3.0))));
+        assert_eq!(text(Vec3::ZERO, 0.0).world_align(normal).unwrap(), None);
     }
 
     #[test]
