@@ -459,7 +459,8 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
-        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76]),
+        // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
         _ => return Vec::new(),

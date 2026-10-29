@@ -257,3 +257,47 @@ fn a_hatch_keeps_its_plane_boundary_and_pattern_through_every_save() {
         }
     }
 }
+
+#[test]
+fn a_spline_keeps_its_z_values_and_plane_through_every_save() {
+    for plane in PLANES {
+        let spline = format!(
+            "0 SPLINE\n5 160\n100 AcDbEntity\n8 0\n100 AcDbSpline\n{plane}\n70 8\n71 3\n72 8\n73 4\n74 0\n42 1e-7\n43 1e-7\n\
+             40 0\n40 0\n40 0\n40 0\n40 1.5\n40 1.5\n40 1.5\n40 1.5\n10 0.5\n20 0.25\n30 1.125\n10 2.5\n20 3.25\n30 -2.5\n10 4.5\n20 -1.25\n30 0.75\n10 6.5\n20 2.25\n30 3.5"
+        );
+        // A DWG spline has no plane: its points are in world coordinates.
+        assert_kept(&dxf(&[&spline]), "SPLINE", &[210, 220, 230, 71, 72, 73, 40, 10, 20, 30], &[], &[210, 220, 230]);
+    }
+}
+
+#[test]
+fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
+    for plane in PLANES {
+        let leader = format!(
+            "0 LEADER\n5 170\n100 AcDbEntity\n8 0\n100 AcDbLeader\n3 Standard\n71 1\n72 0\n73 3\n74 1\n75 1\n40 2.5\n41 10\n76 3\n\
+             10 0.5\n20 0.25\n30 1.125\n10 2.5\n20 3.25\n30 -2.5\n10 4.5\n20 -1.25\n30 0.75\n{plane}\n211 0.6\n221 0.8\n231 0\n212 0.1\n222 0.2\n232 0.3\n213 0.4\n223 0.5\n233 0.6"
+        );
+        let source = dxf(&[&leader]);
+        // acadrust's DXF reader does not take the annotation's width (41) into a DWG.
+        assert_kept(&source, "LEADER", &[76, 10, 20, 30, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233, 40, 41], &[], &[41]);
+        // Each group once: the snapshot owns the geometry, the kept subclass groups the rest.
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        let got = record(&cadcraft_io::write_dxf(&d), "LEADER");
+        for code in [40, 41, 76, 210, 211, 212, 213] {
+            assert_eq!(got.iter().filter(|t| t.code == code).count(), 1, "group {code} once: {got:?}");
+        }
+        assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3);
+        // A vertex edit writes the model: its vertices once and no plane from the source.
+        let mut d = d;
+        let h = first_handle(&d);
+        d.modify_entity(h, |e| {
+            if let EntityKind::Leader(l) = &mut e.kind {
+                l.vertices[0].x += 1.0;
+            }
+        })
+        .unwrap();
+        let got = record(&cadcraft_io::write_dxf(&d), "LEADER");
+        assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3, "{got:?}");
+        assert!(!got.iter().any(|t| matches!(t.code, 210 | 211 | 212 | 213)), "{got:?}");
+    }
+}

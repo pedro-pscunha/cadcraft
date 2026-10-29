@@ -28,6 +28,11 @@ fn spec(kind: &str) -> Option<Spec> {
         "ATTDEF" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbAttributeDefinition", &[74])],
         "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230])],
         "INSERT" => &[("AcDbBlockReference", &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230])],
+        // The whole curve: flags, degree, counts, tolerances, tangents, knots, weights, controls, fits and the plane.
+        "SPLINE" => &[("AcDbSpline", &[210, 220, 230, 70, 71, 72, 73, 74, 42, 43, 44, 12, 22, 32, 13, 23, 33, 40, 41, 10, 20, 30, 11, 21, 31])],
+        // The vertices and the plane of the leader, and the annotation's size and offsets (the style, the
+        // arrow, the path type and the link to the annotation are the model's and `subclass_groups`').
+        "LEADER" => &[("AcDbLeader", &[76, 10, 20, 30, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233, 40, 41])],
         _ => return None,
     })
 }

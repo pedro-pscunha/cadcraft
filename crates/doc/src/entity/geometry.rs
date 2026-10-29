@@ -76,6 +76,12 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::Insert(i) => {
             let _ = write!(s, "INSERT{:?}{plane:?}", (i.insert, i.scale, i.rotation, i.cols, i.rows, i.col_spacing, i.row_spacing));
         }
+        EntityKind::Spline(c) => {
+            let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
+        }
+        EntityKind::Leader(l) => {
+            let _ = write!(s, "LEADER{:?}{plane:?}", &l.vertices);
+        }
         EntityKind::Hatch(h) => {
             // The boundary objects (`sources`) are references, not geometry.
             let loops: Vec<_> = h.loops.iter().map(|l| (&l.vertices, l.outer)).collect();
