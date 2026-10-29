@@ -82,16 +82,17 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
         w.f(40, p.const_width);
         w.f(41, p.const_width);
         w.p(210, e.common.extrusion);
+        let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
         for vertex in &p.vertices {
             heavy_vertex(
                 w,
                 e,
                 &cadcraft_doc::PolylineFitVertex {
-                    position: Vec3::new(vertex.p.x, vertex.p.y, 0.0),
+                    position: Vec3::new(ocs_x * vertex.p.x, vertex.p.y, 0.0),
                     flags: 0,
                     start_width: if p.const_width > 0.0 { p.const_width } else { vertex.start_width },
                     end_width: if p.const_width > 0.0 { p.const_width } else { vertex.end_width },
-                    bulge: vertex.bulge,
+                    bulge: ocs_x * vertex.bulge,
                     tangent: 0.0,
                 },
             );
@@ -180,14 +181,15 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             }
             w.p(210, e.common.extrusion);
             thickness(w, e);
+            let ocs_x = if e.common.extrusion.z < 0.0 { -1.0 } else { 1.0 };
             for v in &p.vertices {
-                w.p2(10, v.p);
+                w.p2(10, Vec2::new(ocs_x * v.p.x, v.p.y));
                 if v.start_width != 0.0 || v.end_width != 0.0 {
                     w.f(40, v.start_width);
                     w.f(41, v.end_width);
                 }
                 if v.bulge != 0.0 {
-                    w.f(42, v.bulge);
+                    w.f(42, ocs_x * v.bulge);
                 }
             }
         }

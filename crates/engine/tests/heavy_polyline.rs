@@ -31,8 +31,8 @@ fn polyline_extrusion_and_ocs_survive_unchanged_and_width_edits() {
         (cadcraft_engine::geom::Vec3::new(0.0, 0.0, -1.0), "210\n0\n220\n0\n230\n-1\n"),
     ] {
         for record in [
-            "POLYLINE\n5\n100\n8\n0\n10\n0\n20\n0\n30\n4\n70\n0\n{normal}0\nVERTEX\n10\n2\n20\n3\n0\nVERTEX\n10\n7\n20\n8\n0\nSEQEND\n",
-            "LWPOLYLINE\n5\n100\n8\n0\n90\n2\n70\n0\n38\n4\n{normal}10\n2\n20\n3\n10\n7\n20\n8\n",
+            "POLYLINE\n5\n100\n8\n0\n10\n0\n20\n0\n30\n4\n70\n0\n{normal}0\nVERTEX\n10\n2\n20\n3\n42\n0.5\n0\nVERTEX\n10\n7\n20\n8\n0\nSEQEND\n",
+            "LWPOLYLINE\n5\n100\n8\n0\n90\n2\n70\n0\n38\n4\n{normal}10\n2\n20\n3\n42\n0.5\n10\n7\n20\n8\n",
         ] {
             let source = format!("0\nSECTION\n2\nENTITIES\n0\n{}0\nENDSEC\n0\nEOF\n", record.replace("{normal}", groups));
             for edit in [false, true] {
@@ -41,6 +41,8 @@ fn polyline_extrusion_and_ocs_survive_unchanged_and_width_edits() {
                 if edit {
                     session.execute("pedit", &json!({"handles": ["100"], "option": "width", "width": 2.5})).unwrap();
                 }
+                let EntityKind::LwPolyline(expected) = &session.doc().unwrap().entity(Handle(0x100)).unwrap().kind else { panic!("polyline") };
+                let expected_points: Vec<_> = expected.vertices.iter().map(|v| (v.p, v.bulge)).collect();
                 let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
                 let dxf = cadcraft_io::write_with(session.doc().unwrap(), "plane.dxf", &opts).unwrap();
                 let converted = cadcraft_dwg::dxf_to_dwg(&dxf).unwrap();
@@ -55,10 +57,7 @@ fn polyline_extrusion_and_ocs_survive_unchanged_and_width_edits() {
                     assert_eq!(entity.common.extrusion, normal, "edit={edit}, {record}");
                     let EntityKind::LwPolyline(polyline) = &entity.kind else { panic!("polyline") };
                     assert_eq!(polyline.elevation, 4.0);
-                    assert_eq!(
-                        polyline.vertices.iter().map(|v| v.p).collect::<Vec<_>>(),
-                        vec![cadcraft_engine::geom::Vec2::new(2.0, 3.0), cadcraft_engine::geom::Vec2::new(7.0, 8.0)]
-                    );
+                    assert_eq!(polyline.vertices.iter().map(|v| (v.p, v.bulge)).collect::<Vec<_>>(), expected_points);
                 }
             }
         }
