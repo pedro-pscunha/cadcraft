@@ -317,7 +317,11 @@ fn read_style(tags: &[Tag]) -> Option<MLineStyle> {
             e.linetype = "ByBlock".into();
         }
     }
-    st.fill = (flags & FILL != 0).then_some(fill);
+    if flags & FILL != 0 {
+        st.fill = Some(fill);
+    } else {
+        st.fill_off_color = fill;
+    }
     st.joints = flags & JOINTS != 0;
     st.start_caps.line = flags & START_LINE != 0;
     st.start_caps.inner_arcs = flags & START_INNER != 0;
@@ -483,7 +487,7 @@ pub(crate) fn objects(plan: &Plan, root: &str) -> Vec<Tag> {
             | caps(&s.end_caps, END_LINE, END_INNER, END_OUTER);
         t.push(Tag::i(70, flags));
         t.push(Tag::s(3, s.description.clone()));
-        t.push(Tag::i(62, i64::from(s.fill.unwrap_or(Color::ByLayer).to_aci())));
+        t.push(Tag::i(62, i64::from(s.fill.unwrap_or(s.fill_off_color).to_aci())));
         t.push(Tag::f(51, finite(s.start_caps.angle.to_degrees())));
         t.push(Tag::f(52, finite(s.end_caps.angle.to_degrees())));
         t.push(Tag::i(71, s.elements.len() as i64));

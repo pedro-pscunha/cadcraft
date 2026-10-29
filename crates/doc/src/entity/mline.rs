@@ -68,6 +68,9 @@ pub struct MLineStyle {
     pub joints: bool,
     /// Fill colour between the outermost elements; `None` = no fill.
     pub fill: Option<Color>,
+    /// The fill colour the style stores while its fill is off: AutoCAD keeps it and uses it
+    /// when the fill is turned on again.
+    pub fill_off_color: Color,
 }
 
 impl Default for MLineStyle {
@@ -81,6 +84,7 @@ impl Default for MLineStyle {
             end_caps: MLineCaps::default(),
             joints: false,
             fill: None,
+            fill_off_color: Color::ByLayer,
         }
     }
 }

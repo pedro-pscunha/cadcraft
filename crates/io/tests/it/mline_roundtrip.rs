@@ -31,6 +31,7 @@ fn wall() -> MLineStyle {
         end_caps: MLineCaps { line: false, outer_arc: true, inner_arcs: false, angle: std::f64::consts::FRAC_PI_2 },
         joints: true,
         fill: Some(Color::Index(3)),
+        fill_off_color: cadcraft_color::Color::ByLayer,
     }
 }
 
@@ -294,4 +295,19 @@ fn mline_survives_dwg_save_and_reopen() {
     let [b] = mlines(&back).try_into().unwrap();
     assert_eq!((b.style.as_str(), b.def.elements.len(), b.justification, b.points()), ("Wall", 3, MLineJust::Top, m.points()));
     assert_eq!(b.geometry().lines.len(), m.geometry().lines.len());
+}
+
+/// A style whose fill is off keeps the fill colour it stores, through DXF and DWG: AutoCAD uses
+/// it when the fill is turned on again (Cyrela Aura Moema: 5 styles stored ByBlock, saved as
+/// ByLayer).
+#[test]
+fn an_unfilled_style_keeps_its_fill_colour() {
+    let mut d = Drawing::new_imperial();
+    d.mline_styles.push(MLineStyle { fill: None, fill_off_color: Color::ByBlock, ..wall() });
+    let dxf = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
+    let dwg = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    for (back, what) in [(dxf, "DXF"), (dwg, "DWG")] {
+        let s = back.mline_styles.iter().find(|s| s.name == "Wall").unwrap();
+        assert_eq!((s.fill, s.fill_off_color), (None, Color::ByBlock), "{what}");
+    }
 }
