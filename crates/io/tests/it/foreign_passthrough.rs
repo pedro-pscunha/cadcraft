@@ -299,3 +299,69 @@ fn layout_styles_and_scales_keep_their_xdata_and_extension_dictionaries() {
         }
     }
 }
+
+/// Two layers with the xdata AutoCAD gives layers: `Opaque` has a transparency of 0 and a layer
+/// standard without description (nothing the model writes), `Glass` a transparency and a description.
+fn layer_xdata() -> String {
+    dxf(&[
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "LAYER"),
+        (70, "2"),
+        (0, "LAYER"),
+        (5, "50"),
+        (100, "AcDbSymbolTableRecord"),
+        (100, "AcDbLayerTableRecord"),
+        (2, "Opaque"),
+        (70, "0"),
+        (62, "7"),
+        (6, "Continuous"),
+        (1001, "AcCmTransparency"),
+        (1071, "33554687"),
+        (1001, "AcAecLayerStandard"),
+        (1000, ""),
+        (1000, ""),
+        (0, "LAYER"),
+        (5, "51"),
+        (100, "AcDbSymbolTableRecord"),
+        (100, "AcDbLayerTableRecord"),
+        (2, "Glass"),
+        (70, "0"),
+        (62, "7"),
+        (6, "Continuous"),
+        (1001, "AcCmTransparency"),
+        (1071, "33554559"),
+        (1001, "AcAecLayerStandard"),
+        (1000, ""),
+        (1000, "Glass note"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ])
+}
+
+/// The groups of the `app` xdata of a record (after its `1001` up to the next).
+fn app_groups(tags: &[Tag], app: &str) -> Vec<(i32, String)> {
+    let Some(start) = tags.iter().position(|t| t.code == 1001 && t.str() == app) else { return Vec::new() };
+    tags.iter().skip(start + 1).take_while(|t| t.code != 1001).map(|t| (t.code, t.str())).collect()
+}
+
+#[test]
+fn layer_xdata_the_model_does_not_reproduce_is_kept_and_the_rest_written_once() {
+    let d = cadcraft_io::read_dxf(layer_xdata().as_bytes()).unwrap();
+    let glass = d.layers.iter().find(|l| l.name == "Glass").unwrap();
+    assert_eq!((glass.transparency, glass.description.as_str()), (50, "Glass note"));
+    for text in saved_twice(&d) {
+        let tables = section(&text, "TABLES");
+        let layer = |name: &str| tables.iter().find(|(k, t)| k == "LAYER" && val(t, 2) == name).map(|(_, t)| t.clone()).unwrap();
+        let (opaque, glass) = (layer("Opaque"), layer("Glass"));
+        let strings = |tags: &[Tag], app: &str| app_groups(tags, app).into_iter().map(|(_, v)| v).collect::<Vec<_>>();
+        assert_eq!(apps(&glass), ["AcCmTransparency", "AcAecLayerStandard"], "written once, from the model: {text}");
+        assert_eq!(strings(&glass, "AcCmTransparency"), ["33554559"]);
+        assert_eq!(strings(&glass, "AcAecLayerStandard"), ["", "Glass note"]);
+        assert_eq!(apps(&opaque), ["AcCmTransparency", "AcAecLayerStandard"], "kept as read: {text}");
+        assert_eq!(strings(&opaque, "AcCmTransparency"), ["33554687"]);
+        assert_eq!(strings(&opaque, "AcAecLayerStandard"), ["", ""]);
+    }
+}

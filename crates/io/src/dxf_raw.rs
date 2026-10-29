@@ -52,8 +52,26 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
 /// (DSTYLE) on dimensions and dimension styles, `AcadAnnotative` the annotative flag of text and
-/// dimension styles; elsewhere they are kept.
-const OWN_APPS: &[&str] = &["CADCRAFT", "ACCMTRANSPARENCY", "ACAECLAYERSTANDARD"];
+/// dimension styles, `AcCmTransparency` and `AcAecLayerStandard` a layer's transparency and
+/// description (see [`layer_xdata_modelled`]); elsewhere they are kept.
+const OWN_APPS: &[&str] = &["CADCRAFT"];
+
+/// Whether a layer's xdata of `app` (upper case) holds what the model writes back: a transparency
+/// above 0 (or no value: acadrust drops a layer whose `AcCmTransparency` has none) for
+/// `AcCmTransparency`, a description (the second string, after the layer standard's name) for
+/// `AcAecLayerStandard`. Any other content is kept as read.
+fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
+    match app {
+        "ACCMTRANSPARENCY" => {
+            chunk.iter().find(|t| t.code == 1071).is_none_or(|t| crate::dxf_ext::transparency_from_dxf(t.i64()).is_some_and(|p| p > 0))
+        }
+        "ACAECLAYERSTANDARD" => {
+            let mut strings = chunk.iter().filter(|t| t.code == 1000);
+            strings.next().is_some_and(|name| name.str().is_empty()) && strings.next().is_some_and(|description| !description.str().is_empty())
+        }
+        _ => false,
+    }
+}
 
 /// Most objects kept from one file.
 const MAX_OBJECTS: usize = 1_000_000;
@@ -234,7 +252,8 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let app = up(&first.str());
         let own = OWN_APPS.contains(&app.as_str())
             || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
-            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE"));
+            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE"))
+            || (kind == "LAYER" && layer_xdata_modelled(&app, chunk));
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
         }
