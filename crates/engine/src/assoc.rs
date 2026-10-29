@@ -534,15 +534,14 @@ mod revision_tests {
     /// The drawing after the line's end moved to (5, 0), with `edit` applied to the line and the dimension.
     fn moved(before: &Drawing, line: Handle, dim: Handle, edit: impl Fn(&mut cadcraft_doc::Entity, bool)) -> Arc<Drawing> {
         let mut after = before.clone();
-        after
-            .modify_entity(line, |e| {
-                if let EntityKind::Line(l) = &mut e.kind {
-                    l.b = Vec3::new(5.0, 0.0, 0.0);
-                }
-                edit(e, true);
-            })
-            .unwrap();
-        after.modify_entity(dim, |e| edit(e, false)).unwrap();
+        for (handle, is_line) in [(line, true), (dim, false)] {
+            let mut entity = after.entity(handle).unwrap().as_ref().clone();
+            if is_line && let EntityKind::Line(line) = &mut entity.kind {
+                line.b = Vec3::new(5.0, 0.0, 0.0);
+            }
+            edit(&mut entity, is_line);
+            after.model.push(entity);
+        }
         Arc::new(after)
     }
 
@@ -589,7 +588,9 @@ mod revision_tests {
         let own = |d: &Drawing| find_snap(d, &Space::Model, at).map(|f| f.0);
         assert!(own(&d).is_some());
         let mut canonical = (*d).clone();
-        canonical.modify_entity(line, |e| e.geometry_revision = GeometryRevision::CanonicalV2).unwrap();
+        let mut entity = canonical.entity(line).unwrap().as_ref().clone();
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        canonical.model.push(entity);
         // Only the line was there to attach to, but the dimension's own points are not snaps.
         assert_eq!(own(&canonical).filter(|h| *h == line), None);
         assert_eq!(SnapIndex::new(&canonical, &Space::Model).find(at).filter(|f| f.0 == line), None);
