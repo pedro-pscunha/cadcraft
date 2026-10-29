@@ -56,6 +56,7 @@ fn geometry(s: &Session, hs: &[Handle]) -> Result<(Vec<Vec2>, Vec<(Vec2, f64)>)>
     let mut circles = Vec::new();
     for h in hs {
         let Some(e) = d.entity(*h) else { continue };
+        e.require_legacy_geometry()?;
         for pr in e.kind.prims() {
             match pr {
                 Prim::Seg(seg) => {

@@ -89,6 +89,7 @@ fn single_curve_edits_refuse_legacy_dispatch_for_canonical_inputs() {
         ("line", json!({"points": [[0, 0], [10, 0]]}), "lengthen", json!({"pick": [10, 0], "delta": 2})),
         ("line", json!({"points": [[0, 0], [10, 0]]}), "reverse", json!({})),
         ("line", json!({"points": [[0, 0], [10, 0]]}), "flatten", json!({})),
+        ("line", json!({"points": [[0, 0], [10, 0]]}), "qdim", json!({"at": [0, 5]})),
     ];
     for (create_command, create_params, command, mut params) in cases {
         let mut session = Session::new();
@@ -139,6 +140,18 @@ fn hatch_and_boundary_trace_only_supported_source_revisions() {
         let source = create(&mut session, "rectang", json!({"p1": [0, 0], "p2": [10, 10]}));
         let params = if by_point { json!({"points": [[5, 5]]}) } else { json!({"handle": source.hex()}) };
         check_refusals(session.doc().unwrap(), command, params, &[source]);
+    }
+}
+
+#[test]
+fn region_booleans_check_every_source_before_combining_or_consuming_it() {
+    for command in ["union", "subtract", "intersect"] {
+        let mut session = Session::new();
+        let a = create(&mut session, "rectang", json!({"p1": [0, 0], "p2": [10, 10]}));
+        let b = create(&mut session, "rectang", json!({"p1": [2, 2], "p2": [3, 3]}));
+        session.execute("region", &json!({"handles": [a.hex(), b.hex()]})).unwrap();
+        let params = if command == "subtract" { json!({"from": [a.hex()], "remove": [b.hex()]}) } else { json!({"handles": [a.hex(), b.hex()]}) };
+        check_refusals(session.doc().unwrap(), command, params, &[a, b]);
     }
 }
 

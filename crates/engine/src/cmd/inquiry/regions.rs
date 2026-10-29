@@ -52,13 +52,15 @@ const MAX_PAIRS: usize = 50_000_000;
 /// The regions among `hs` (others are left alone).
 fn regions(s: &Session, hs: &[Handle]) -> Result<Vec<(Handle, Region)>> {
     let d = s.doc()?;
-    Ok(hs
-        .iter()
-        .filter_map(|h| match &d.entity(*h)?.kind {
-            EntityKind::Region(r) => Some((*h, r.clone())),
-            _ => None,
-        })
-        .collect())
+    let mut regions = Vec::new();
+    for handle in hs {
+        let Some(entity) = d.entity(*handle) else { continue };
+        if let EntityKind::Region(region) = &entity.kind {
+            entity.require_legacy_geometry()?;
+            regions.push((*handle, region.clone()));
+        }
+    }
+    Ok(regions)
 }
 
 /// Each loop of a region as points, with a chord tolerance for both regions' size.
