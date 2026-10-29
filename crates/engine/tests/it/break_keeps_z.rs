@@ -9,7 +9,7 @@ fn add(s: &mut Session, kind: EntityKind) -> String {
     let space = s.space();
     let d = s.doc_mut().unwrap();
     let handle = d.new_handle();
-    d.space_mut(&space).unwrap().push(Entity { handle, common: Common::default(), kind });
+    d.space_mut(&space).unwrap().push(Entity { geometry_revision: Default::default(), handle, common: Common::default(), kind });
     handle.hex()
 }
 

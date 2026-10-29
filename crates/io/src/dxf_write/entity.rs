@@ -105,6 +105,7 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
 fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::PolylineRecord>, kind: &str, subclass: &str) -> usize {
     let handle = w.instance_handle(record.and_then(|r| r.handle));
     let child = Entity {
+        geometry_revision: Default::default(),
         handle,
         common: record.map_or_else(|| cadcraft_doc::Common { layer: parent.common.layer.clone(), ..Default::default() }, |r| r.common.clone()),
         kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
@@ -351,7 +352,12 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 } else {
                     // The other loops get handles of their own (only the handle and properties are written).
                     let h = Handle::parse_hex(&w.h()).unwrap_or(e.handle);
-                    let part = Entity { handle: h, common: e.common.clone(), kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }) };
+                    let part = Entity {
+                        geometry_revision: Default::default(),
+                        handle: h,
+                        common: e.common.clone(),
+                        kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
+                    };
                     common(w, &part, owner, paper, "AcDbPolyline");
                 }
                 w.t.extend(tags);
@@ -840,7 +846,12 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
 /// A multileader for a file older than 2007 (no MULTILEADER): a LEADER per leader line, ending
 /// at the landing, plus its MTEXT or its block's INSERT, with the multileader's properties.
 fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str, paper: bool, cx: &Ctx) {
-    let part = |w: &mut W, kind: EntityKind| Entity { handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)), common: e.common.clone(), kind };
+    let part = |w: &mut W, kind: EntityKind| Entity {
+        geometry_revision: Default::default(),
+        handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)),
+        common: e.common.clone(),
+        kind,
+    };
     let style = d.header.str("DIMSTYLE", "Standard");
     for arm in m.leaders.iter().take(64) {
         let mut vertices = arm.clone();

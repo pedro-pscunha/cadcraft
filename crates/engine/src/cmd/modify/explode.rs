@@ -32,6 +32,7 @@ fn explode_mtext(e: &Entity, m: &cadcraft_doc::MText) -> Vec<Entity> {
         .map(|(i, l)| {
             let at = m.insert.xy() + Vec2::from_angle(m.rotation - std::f64::consts::FRAC_PI_2) * (m.height * (1.0 + 5.0 / 3.0 * i as f64));
             Entity {
+                geometry_revision: Default::default(),
                 handle: Handle(0),
                 common: e.common.clone(),
                 kind: EntityKind::Text(cadcraft_doc::Text {
@@ -59,7 +60,7 @@ fn segment_entities(e: &Entity, segs: impl IntoIterator<Item = Segment>) -> Vec<
                 Segment::Line(l) => line(l.a, l.b),
                 Segment::Arc { arc: a, .. } => arc(&a),
             };
-            Entity { handle: Handle(0), common: e.common.clone(), kind: k }
+            Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind: k }
         })
         .collect()
 }
@@ -70,9 +71,14 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
     let g = cadcraft_render::dimension_in(d, dm);
     let line_entity = |l: &Vec<Vec2>| {
         if l.len() == 2 {
-            Some(Entity { handle: Handle(0), common: e.common.clone(), kind: line(*l.first()?, *l.get(1)?) })
+            Some(Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind: line(*l.first()?, *l.get(1)?) })
         } else {
-            Some(Entity { handle: Handle(0), common: e.common.clone(), kind: lwpoly(l.iter().map(|p| PolyVertex::new(*p)).collect(), false) })
+            Some(Entity {
+                geometry_revision: Default::default(),
+                handle: Handle(0),
+                common: e.common.clone(),
+                kind: lwpoly(l.iter().map(|p| PolyVertex::new(*p)).collect(), false),
+            })
         }
     };
     // The text's marks (arc length symbol, DIMINSPECT frame) go after the text background.
@@ -82,6 +88,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
     for t in &g.fills {
         if let [a, b, c] = t.as_slice() {
             v.push(Entity {
+                geometry_revision: Default::default(),
                 handle: Handle(0),
                 common: e.common.clone(),
                 kind: EntityKind::Solid(cadcraft_doc::Solid { corners: [v3(*a), v3(*b), v3(*c), v3(*c)] }),
@@ -96,6 +103,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
         let fill = style.text_fill_color;
         let color = if fill == cadcraft_doc::color::Color::ByBlock { e.common.color } else { fill };
         v.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: cadcraft_doc::Common { color, ..e.common.clone() },
             kind: EntityKind::Solid(cadcraft_doc::Solid { corners: [v3(*p0), v3(*p1), v3(*p3), v3(*p2)] }),
@@ -104,6 +112,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
     v.extend(marks(true).filter_map(&line_entity));
     if !g.value.is_empty() {
         v.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: e.common.clone(),
             kind: EntityKind::MText(cadcraft_doc::MText {
@@ -140,13 +149,18 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Result<Opti
         }
         EntityKind::Insert(ins) => return explode_block_ref(d, e, ins),
         // A helix explodes into its spline (seen from above).
-        EntityKind::Helix(h) => Some(vec![Entity { handle: Handle(0), common: e.common.clone(), kind: EntityKind::Spline(h.spline()) }]),
+        EntityKind::Helix(h) => Some(vec![Entity {
+            geometry_revision: Default::default(),
+            handle: Handle(0),
+            common: e.common.clone(),
+            kind: EntityKind::Spline(h.spline()),
+        }]),
         EntityKind::Polyline3d(p) => Some(
             p.points
                 .windows(2)
                 .filter_map(|w| {
                     let kind = EntityKind::Line(cadcraft_doc::Line { a: *w.first()?, b: *w.get(1)? });
-                    Some(Entity { handle: Handle(0), common: e.common.clone(), kind })
+                    Some(Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind })
                 })
                 .collect(),
         ),

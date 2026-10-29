@@ -14,7 +14,7 @@ use serde_json::json;
 
 fn line(d: &mut Drawing, layer: &str, a: (f64, f64), b: (f64, f64)) -> Entity {
     let kind = EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
-    Entity { handle: d.new_handle(), common: Common { layer: layer.into(), ..Common::default() }, kind }
+    Entity { geometry_revision: Default::default(), handle: d.new_handle(), common: Common { layer: layer.into(), ..Common::default() }, kind }
 }
 
 fn insert(d: &mut Drawing, block: &str, at: (f64, f64)) -> Entity {
@@ -29,7 +29,7 @@ fn insert(d: &mut Drawing, block: &str, at: (f64, f64)) -> Entity {
         col_spacing: 0.0,
         row_spacing: 0.0,
     });
-    Entity { handle: d.new_handle(), common: Common::default(), kind }
+    Entity { geometry_revision: Default::default(), handle: d.new_handle(), common: Common::default(), kind }
 }
 
 fn block(d: &mut Drawing, name: &str, ents: Vec<Entity>) {

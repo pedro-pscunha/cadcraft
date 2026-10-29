@@ -719,6 +719,7 @@ mod budget_tests {
         let mut block = Block::new("BAR");
         for _ in 0..3 {
             block.entities.push(Entity {
+                geometry_revision: Default::default(),
                 handle: d.new_handle(),
                 common: Common::default(),
                 kind: EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) }),

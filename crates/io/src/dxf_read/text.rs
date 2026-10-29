@@ -38,7 +38,7 @@ pub(super) fn split_embedded(tags: &[Tag]) -> (&[Tag], Option<&[Tag]>) {
 pub(super) fn multiline_attrib(embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
     let mtext = mtext_from(embedded.filter(|e| !e.is_empty())?, c);
     let read_as = cadcraft_fonts::plain_mtext(&mtext.contents);
-    Some(MultilineAttrib { mtext, read_as })
+    Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as })
 }
 
 /// Multiline text from MTEXT groups (an MTEXT entity's, or a multiline attribute's embedded ones).

@@ -21,7 +21,12 @@ fn save_lists_the_entities_the_file_does_not_keep() {
     }
     let mut b = Block::new("Part");
     let h = d.new_handle();
-    b.entities.push(cadcraft_engine::doc::Entity { handle: h, common: Common::default(), kind: unknown("REGION") });
+    b.entities.push(cadcraft_engine::doc::Entity {
+        geometry_revision: Default::default(),
+        handle: h,
+        common: Common::default(),
+        kind: unknown("REGION"),
+    });
     d.blocks.insert("Part".into(), std::sync::Arc::new(b));
     let mut s = Session::empty();
     s.open_drawing(d, "foreign.dxf", None);

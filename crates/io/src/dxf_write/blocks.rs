@@ -92,7 +92,12 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
         };
         l.windows(2)
             .filter_map(|seg| match seg {
-                [a, b] => Some(Entity { handle: Handle(0), common: c.clone(), kind: EntityKind::Line(Line { a: a.to3(0.0), b: b.to3(0.0) }) }),
+                [a, b] => Some(Entity {
+                    geometry_revision: Default::default(),
+                    handle: Handle(0),
+                    common: c.clone(),
+                    kind: EntityKind::Line(Line { a: a.to3(0.0), b: b.to3(0.0) }),
+                }),
                 _ => None,
             })
             .collect()
@@ -104,6 +109,7 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
     for t in &g.fills {
         if let [a, b, cc] = t.as_slice() {
             out.push(Entity {
+                geometry_revision: Default::default(),
                 handle: Handle(0),
                 common: dim_c.clone(),
                 kind: EntityKind::Solid(Solid { corners: [a.to3(0.0), b.to3(0.0), cc.to3(0.0), cc.to3(0.0)] }),
@@ -116,6 +122,7 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
         && let [p0, p1, p2, p3] = g.text_fill.as_slice()
     {
         out.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: in_color(style.text_fill_color),
             kind: EntityKind::Solid(Solid { corners: [p0.to3(0.0), p1.to3(0.0), p3.to3(0.0), p2.to3(0.0)] }),
@@ -126,6 +133,7 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
     }
     if !g.value.is_empty() {
         out.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: text_c,
             kind: EntityKind::MText(MText {
@@ -163,6 +171,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
         let [a, b, cc, dd] = f.corners.map(|p| p.to3(0.0));
         // SOLID corners go 1, 2, 4, 3.
         out.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: Common { color: f.color, ..c.clone() },
             kind: EntityKind::Solid(Solid { corners: [a, b, dd, cc] }),
@@ -170,6 +179,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
     }
     for l in &g.lines {
         out.push(Entity {
+            geometry_revision: Default::default(),
             handle: Handle(0),
             common: Common { color: l.color, lineweight: l.lineweight, ..c.clone() },
             kind: EntityKind::Line(Line { a: l.a.to3(0.0), b: l.b.to3(0.0) }),
@@ -180,6 +190,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
         if !cell.text.is_empty() {
             let style = if d.text_style(&cell.style).is_some() { cell.style.clone() } else { "Standard".into() };
             texts.push(Entity {
+                geometry_revision: Default::default(),
                 handle: Handle(0),
                 common: Common { color: cell.color, ..c.clone() },
                 kind: EntityKind::MText(MText {
@@ -209,13 +220,19 @@ pub(super) fn arrow_block_entities(kind: cadcraft_render::Arrowhead) -> Vec<Enti
     for l in &g.lines {
         for seg in l.windows(2) {
             if let [a, b] = seg {
-                out.push(Entity { handle: Handle(0), common: c.clone(), kind: EntityKind::Line(Line { a: a.to3(0.0), b: b.to3(0.0) }) });
+                out.push(Entity {
+                    geometry_revision: Default::default(),
+                    handle: Handle(0),
+                    common: c.clone(),
+                    kind: EntityKind::Line(Line { a: a.to3(0.0), b: b.to3(0.0) }),
+                });
             }
         }
     }
     for t in g.tris.chunks(3) {
         if let [a, b, cc] = t {
             out.push(Entity {
+                geometry_revision: Default::default(),
                 handle: Handle(0),
                 common: c.clone(),
                 kind: EntityKind::Solid(Solid { corners: [a.to3(0.0), b.to3(0.0), cc.to3(0.0), cc.to3(0.0)] }),

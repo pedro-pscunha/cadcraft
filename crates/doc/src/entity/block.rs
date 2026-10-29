@@ -5,6 +5,8 @@ use super::{Color, Deserialize, Mat3, Mat4, Serialize, Vec2, Vec3};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attrib {
+    #[serde(default)]
+    pub geometry_revision: super::GeometryRevision,
     /// This attribute instance's persistent handle. Unlike its tag or position in an INSERT,
     /// it survives rename, reorder and synchronization and owns the instance's foreign data.
     /// The document assigns it when an instance is created or imported. Definitions have none.
@@ -66,6 +68,8 @@ impl AttribModes {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MultilineAttrib {
+    #[serde(default)]
+    pub geometry_revision: super::GeometryRevision,
     pub mtext: MText,
     /// The plain text `mtext`'s contents read as: an attribute whose value differs was edited
     /// since, and its value replaces the contents.
@@ -80,7 +84,7 @@ impl MultilineAttrib {
             return Ok(self.clone());
         }
         let mut candidate = self.clone();
-        super::edit::mtext_payload(&mut candidate.mtext, m, super::edit::TextOwner::AttributeInstance)?;
+        super::edit::mtext_payload(&mut candidate.mtext, candidate.geometry_revision, m, super::edit::TextOwner::AttributeInstance)?;
         if !crate::has_finite_numbers(&candidate) {
             return Err(crate::DocError::Invalid("The embedded text result has infinite or undefined coordinates.".into()));
         }
@@ -92,6 +96,7 @@ impl Attrib {
     /// Create attribute content; a drawing assigns its instance identity when it is inserted.
     pub fn new(tag: impl Into<String>, text: Text) -> Self {
         Self {
+            geometry_revision: super::GeometryRevision::LegacyProjectedV1,
             handle: None,
             tag: tag.into(),
             text,
@@ -111,7 +116,7 @@ impl Attrib {
             return Ok(());
         }
         let mut candidate = self.clone();
-        super::edit::text_payload(&mut candidate.text, m, super::edit::TextOwner::AttributeInstance)?;
+        super::edit::text_payload(&mut candidate.text, candidate.geometry_revision, m, super::edit::TextOwner::AttributeInstance)?;
         candidate.try_transform_multiline(m)?;
         if !crate::has_finite_numbers(&candidate) {
             return Err(crate::DocError::Invalid("The attribute result has infinite or undefined coordinates.".into()));

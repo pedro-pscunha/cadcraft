@@ -35,11 +35,14 @@ fn session() -> Session {
         line_spacing_exact: false,
         columns: None,
     };
-    let def =
-        Attrib { prompt: "Site".into(), multiline: Some(MultilineAttrib { mtext, read_as: "SITE\nNAME".into() }), ..Attrib::new("LABEL", text) };
+    let def = Attrib {
+        prompt: "Site".into(),
+        multiline: Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as: "SITE\nNAME".into() }),
+        ..Attrib::new("LABEL", text)
+    };
     let mut b = Block::new("TAG");
     let h = d.new_handle();
-    b.entities.push(Entity { handle: h, common: Common::default(), kind: EntityKind::AttDef(def) });
+    b.entities.push(Entity { geometry_revision: Default::default(), handle: h, common: Common::default(), kind: EntityKind::AttDef(def) });
     d.blocks.insert("TAG".into(), Arc::new(b));
     let mut s = Session::empty();
     s.open_drawing(d, "tags", None);

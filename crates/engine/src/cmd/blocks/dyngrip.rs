@@ -103,7 +103,7 @@ fn drawn(d: &Drawing, h: Handle) -> Vec<Entity> {
             _ => None,
         });
         let common = under(&a.props.over(def.unwrap_or(&by_block)), r);
-        Entity { handle: Handle(0), common, kind: EntityKind::Text(a.text.clone()) }
+        Entity { geometry_revision: Default::default(), handle: Handle(0), common, kind: EntityKind::Text(a.text.clone()) }
     }));
     out
 }

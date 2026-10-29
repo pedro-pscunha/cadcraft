@@ -844,14 +844,14 @@ pub(crate) fn explode(e: &Entity, m: &MLine) -> Vec<Entity> {
                 c.linetype = el.linetype.clone();
             }
         }
-        out.push(Entity { handle: Handle(0), common: c, kind: crate::cmd::helpers::line(*a, *b) });
+        out.push(Entity { geometry_revision: Default::default(), handle: Handle(0), common: c, kind: crate::cmd::helpers::line(*a, *b) });
     }
     for seg in &g.caps {
         let kind = match seg {
             cadcraft_geom::Segment::Line(l) => crate::cmd::helpers::line(l.a, l.b),
             cadcraft_geom::Segment::Arc { arc, .. } => crate::cmd::helpers::arc(arc),
         };
-        out.push(Entity { handle: Handle(0), common: e.common.clone(), kind });
+        out.push(Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind });
     }
     out
 }

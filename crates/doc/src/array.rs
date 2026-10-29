@@ -229,7 +229,7 @@ impl ArrayParams {
                 col_spacing: 0.0,
                 row_spacing: 0.0,
             };
-            out.push(Entity { handle: d.new_handle(), common: common.clone(), kind: EntityKind::Insert(ins) });
+            out.push(Entity { geometry_revision: Default::default(), handle: d.new_handle(), common: common.clone(), kind: EntityKind::Insert(ins) });
         }
         Some(out)
     }

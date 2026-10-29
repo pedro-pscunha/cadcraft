@@ -294,6 +294,7 @@ fn viewport_frozen_layers_apply_inside_nested_block_references() {
     d.layers.push(cadcraft_engine::doc::Layer { name: "Detail".into(), ..Default::default() });
     let mut inner = Block::new("Inner");
     inner.entities.push(Entity {
+        geometry_revision: Default::default(),
         handle: d.new_handle(),
         common: Common::default(),
         kind: EntityKind::Line(Line { a: Vec3::new(0.0, 4.0, 0.0), b: Vec3::new(2.0, 4.0, 0.0) }),
@@ -313,7 +314,12 @@ fn viewport_frozen_layers_apply_inside_nested_block_references() {
         })
     };
     let mut outer = Block::new("Outer");
-    outer.entities.push(Entity { handle: d.new_handle(), common: Common { layer: "Detail".into(), ..Default::default() }, kind: insert("Inner") });
+    outer.entities.push(Entity {
+        geometry_revision: Default::default(),
+        handle: d.new_handle(),
+        common: Common { layer: "Detail".into(), ..Default::default() },
+        kind: insert("Inner"),
+    });
     d.blocks.insert(outer.name.clone(), std::sync::Arc::new(outer));
     d.add(&Space::Model, Common::default(), insert("Outer")).unwrap();
     let cursor = Vec2::new(95.05, 52.04);

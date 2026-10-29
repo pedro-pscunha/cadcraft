@@ -518,7 +518,7 @@ impl Session {
         if !out.is_empty() {
             common.color = cadcraft_doc::color::Color::True(cadcraft_doc::color::Rgb(0x2f, 0x6b, 0xff));
         }
-        out.extend(kinds.into_iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k }));
+        out.extend(kinds.into_iter().map(|k| Entity { geometry_revision: Default::default(), handle: Handle(0), common: common.clone(), kind: k }));
         out
     }
 
@@ -528,7 +528,11 @@ impl Session {
         let r = self.running.as_ref()?;
         let d = r.machine.drag(self, cursor)?;
         let common = self.current_common();
-        let extra = d.extra.iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k.clone() }).collect();
+        let extra = d
+            .extra
+            .iter()
+            .map(|k| Entity { geometry_revision: Default::default(), handle: Handle(0), common: common.clone(), kind: k.clone() })
+            .collect();
         Some((d, extra))
     }
 }

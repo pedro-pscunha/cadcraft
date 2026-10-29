@@ -373,7 +373,7 @@ pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
         if ents.len() >= MAX_PENDING_BLOCK_ENTITIES {
             return Ok(Flow::Value(Value::Nil));
         }
-        ents.push(Entity { handle: Handle(0), common, kind });
+        ents.push(Entity { geometry_revision: Default::default(), handle: Handle(0), common, kind });
         return Ok(Flow::Value(list.clone()));
     }
     let space = ctx.s.space();

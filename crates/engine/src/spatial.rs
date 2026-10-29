@@ -485,6 +485,7 @@ mod tests {
         let mut blk = (**drawing(1, 0).blocks.get("B").unwrap()).clone();
         let big = Common { layer: "HID".into(), ..Common::default() };
         blk.entities.push(Entity {
+            geometry_revision: Default::default(),
             handle: cadcraft_doc::Handle(2_000_000),
             common: big,
             kind: EntityKind::Circle(cadcraft_doc::Circle { center: v3(0.0, 0.0), radius: 50.0 }),

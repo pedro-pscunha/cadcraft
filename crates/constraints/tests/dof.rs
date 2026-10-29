@@ -288,7 +288,12 @@ fn block_reference_moves_rigidly() {
     let mut d = Drawing::default();
     let mut b = Block::new("BAR");
     let h = d.new_handle();
-    b.entities.push(Entity { handle: h, common: Common::default(), kind: EntityKind::Line(DLine { a: v(0.0, 0.0), b: v(4.0, 0.0) }) });
+    b.entities.push(Entity {
+        geometry_revision: Default::default(),
+        handle: h,
+        common: Common::default(),
+        kind: EntityKind::Line(DLine { a: v(0.0, 0.0), b: v(4.0, 0.0) }),
+    });
     d.blocks.insert("BAR".into(), Arc::new(b));
     let ins = put(
         &mut d,

@@ -58,7 +58,12 @@ pub(super) fn apply(s: &Session, k: EntityKind, c: &Content) -> Result<EntityKin
         if *center {
             // Move the block so the centre of its extents lands on the anchor.
             let d = s.doc()?;
-            let probe = Entity { handle: Handle(0), common: Default::default(), kind: EntityKind::Insert(ins.clone()) };
+            let probe = Entity {
+                geometry_revision: Default::default(),
+                handle: Handle(0),
+                common: Default::default(),
+                kind: EntityKind::Insert(ins.clone()),
+            };
             let b = cadcraft_doc::entity_bounds(d, &probe, 0);
             if !b.is_empty() {
                 let c = b.center();

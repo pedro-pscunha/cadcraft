@@ -260,6 +260,7 @@ impl Record {
         }
         // Unknown is a raw transport here, not a CADCraft interpretation of the fixture geometry.
         Ok(Entity {
+            geometry_revision: Default::default(),
             handle,
             common: Common { layer, ..Default::default() },
             kind: EntityKind::Unknown(Unknown { dxf_type: self.kind.name().into(), tags }),

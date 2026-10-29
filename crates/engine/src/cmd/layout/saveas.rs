@@ -70,7 +70,12 @@ fn template_of(d: &Drawing, layout: &str) -> Result<Drawing> {
         .collect();
     for layer in named {
         let handle = t.new_handle();
-        t.model.push(Entity { handle, common: Common { layer, ..Common::default() }, kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }) });
+        t.model.push(Entity {
+            geometry_revision: Default::default(),
+            handle,
+            common: Common { layer, ..Common::default() },
+            kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
+        });
     }
     // PURGE runs on a session of its own, so the open drawing keeps everything.
     let mut scratch = Session::empty();

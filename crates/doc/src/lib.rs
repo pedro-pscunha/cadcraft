@@ -403,7 +403,7 @@ impl Drawing {
         self.allocate_attribute_handles(&mut kind);
         self.ensure_layer(&common.layer);
         let store = self.space_mut(space).ok_or_else(|| DocError::Invalid(format!("no such space {space:?}")))?;
-        store.push(Entity { handle: h, common, kind });
+        store.push(Entity { geometry_revision: Default::default(), handle: h, common, kind });
         Ok(h)
     }
 

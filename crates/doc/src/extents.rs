@@ -192,7 +192,12 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
                 }
             }
             if let Some(ins) = &m.block {
-                let be = Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::Insert(ins.clone()) };
+                let be = Entity {
+                    geometry_revision: Default::default(),
+                    handle: e.handle,
+                    common: e.common.clone(),
+                    kind: EntityKind::Insert(ins.clone()),
+                };
                 b = b.union(&bounds_in(d, &be, depth, blocks));
             }
             b

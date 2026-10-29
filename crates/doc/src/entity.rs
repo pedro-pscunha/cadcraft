@@ -12,6 +12,8 @@ pub use mline::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
+    #[serde(default, rename = "geometryRevision")]
+    pub geometry_revision: GeometryRevision,
     pub handle: Handle,
     #[serde(default)]
     pub common: Common,
@@ -20,7 +22,7 @@ pub struct Entity {
 
 impl Entity {
     pub fn new(handle: Handle, kind: EntityKind) -> Self {
-        Entity { handle, common: Common::default(), kind }
+        Entity { geometry_revision: Default::default(), handle, common: Common::default(), kind }
     }
 }
 fn one() -> f64 {
@@ -37,6 +39,8 @@ fn yes() -> bool {
 }
 mod region;
 pub use region::*;
+mod revision;
+pub use revision::GeometryRevision;
 
 mod block;
 mod common;
@@ -357,12 +361,12 @@ impl EntityKind {
                 t3(&mut r.base);
                 r.dir = m.apply_vec(r.dir.xy()).normalized().to3(0.0);
             }
-            EntityKind::Text(t) => edit::text_payload(t, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
+            EntityKind::Text(t) => edit::text_payload(t, GeometryRevision::LegacyProjectedV1, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
             EntityKind::AttDef(a) => {
-                edit::text_payload(&mut a.text, &Mat4::from_mat3(m), edit::TextOwner::Entity)?;
+                edit::text_payload(&mut a.text, a.geometry_revision, &Mat4::from_mat3(m), edit::TextOwner::Entity)?;
                 a.try_transform_multiline(&Mat4::from_mat3(m))?;
             }
-            EntityKind::MText(t) => edit::mtext_payload(t, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
+            EntityKind::MText(t) => edit::mtext_payload(t, GeometryRevision::LegacyProjectedV1, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
             EntityKind::Insert(i) => {
                 t3(&mut i.insert);
                 i.scale.x *= s;
@@ -402,7 +406,7 @@ impl EntityKind {
                 }
                 t3(&mut ml.landing);
                 if let Some(t) = &mut ml.text {
-                    edit::mtext_payload(t, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
+                    edit::mtext_payload(t, GeometryRevision::LegacyProjectedV1, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
                 }
                 if let Some(b) = &mut ml.block {
                     // Transformed exactly like a block reference.

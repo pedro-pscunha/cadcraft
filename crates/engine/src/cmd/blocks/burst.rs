@@ -34,7 +34,7 @@ fn burst_pieces(d: &Drawing, e: &Entity) -> Result<Option<Vec<Entity>>> {
             Some(m) => EntityKind::MText(m),
             None => EntityKind::Text(a.text.clone()),
         };
-        out.push(Entity { handle: Handle(0), common: attrib_common(d, e, ins, &a.tag, &a.props), kind });
+        out.push(Entity { geometry_revision: Default::default(), handle: Handle(0), common: attrib_common(d, e, ins, &a.tag, &a.props), kind });
     }
     Ok(Some(out))
 }

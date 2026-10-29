@@ -551,7 +551,12 @@ fn a_dimension_block_copy_keeps_its_geometry_when_the_snapshot_is_saved() {
 fn block_contents_take_the_comparison_color() {
     let mut s = Session::new();
     let mut part = Block::new("PART");
-    part.entities.push(Entity { handle: Handle(0x700), common: Common { color: Color::Index(1), ..Common::default() }, kind: line(1.0) });
+    part.entities.push(Entity {
+        geometry_revision: Default::default(),
+        handle: Handle(0x700),
+        common: Common { color: Color::Index(1), ..Common::default() },
+        kind: line(1.0),
+    });
     part.entities.push(Entity::new(Handle(0x701), EntityKind::Insert(insert("PART"))));
     s.doc_mut().unwrap().blocks.insert("PART".into(), Arc::new(part));
     s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Insert(insert("PART"))).unwrap();

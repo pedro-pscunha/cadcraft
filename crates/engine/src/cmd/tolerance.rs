@@ -276,7 +276,7 @@ pub(crate) fn explode(d: &Drawing, e: &Entity, t: &Tolerance) -> Vec<Entity> {
     let g = cadcraft_render::tolerance_in(d, t);
     let st = d.dim_style(&t.style).cloned().unwrap_or_default();
     let wf = d.text_style(&st.text_style).map(|s| s.width_factor).filter(|w| w.is_finite() && *w > 0.0).unwrap_or(1.0);
-    let mk = |kind| Entity { handle: Handle(0), common: e.common.clone(), kind };
+    let mk = |kind| Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind };
     let mut v = Vec::new();
     for p in g.frame.iter().chain(&g.symbols) {
         match p {

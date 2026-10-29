@@ -50,7 +50,7 @@ pub(super) fn parse_entities(
                 None => d.new_handle(),
             };
             entity_extras(kind, tags, h, &mut k, rx);
-            out.push((owner, paper, Entity { handle: h, common: c, kind: k }));
+            out.push((owner, paper, Entity { geometry_revision: Default::default(), handle: h, common: c, kind: k }));
         } else if kind == "HATCH" {
             // Without boundary data. The other records `entity` returns nothing for are read
             // elsewhere (the writer's paper viewport, the loops of a region).

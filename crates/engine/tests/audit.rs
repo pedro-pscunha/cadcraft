@@ -34,7 +34,7 @@ fn on(layer: &str) -> Common {
 /// Push an object without the checks `Drawing::add` makes (it would create the layer).
 fn raw(d: &mut Drawing, space: &Space, common: Common, kind: EntityKind) -> Handle {
     let h = d.new_handle();
-    d.space_mut(space).unwrap().push(Entity { handle: h, common, kind });
+    d.space_mut(space).unwrap().push(Entity { geometry_revision: Default::default(), handle: h, common, kind });
     h
 }
 
@@ -74,13 +74,18 @@ fn corrupt(d: &mut Drawing) -> (Handle, Handle) {
     for (name, inner) in [("A", "B"), ("B", "A"), ("C", "C")] {
         let mut b = Block::new(name);
         let h = d.new_handle();
-        b.entities.push(Entity { handle: h, common: on("0"), kind: insert(inner) });
+        b.entities.push(Entity { geometry_revision: Default::default(), handle: h, common: on("0"), kind: insert(inner) });
         d.blocks.insert(name.into(), Arc::new(b));
     }
     raw(d, &Space::Model, on("0"), insert("A"));
     // The same handle in model space and in a layout.
     let dup = d.model.iter().nth(2).unwrap().handle;
-    d.space_mut(&Space::Paper("Layout1".into())).unwrap().push(Entity { handle: dup, common: on("0"), kind: line((0.0, 0.0), (1.0, 1.0)) });
+    d.space_mut(&Space::Paper("Layout1".into())).unwrap().push(Entity {
+        geometry_revision: Default::default(),
+        handle: dup,
+        common: on("0"),
+        kind: line((0.0, 0.0), (1.0, 1.0)),
+    });
     d.groups.push(Group { name: "G".into(), description: String::new(), selectable: true, members: vec![good, Handle(0xDEAD)] });
     d.header.set("CLAYER", HVal::Str("Gone".into()));
     d.header.set_str("DIMSTYLE", "Lost");
@@ -248,7 +253,7 @@ fn a_long_block_cycle_is_broken_without_deep_recursion() {
     for i in 0..n {
         let mut b = Block::new(&format!("B{i}"));
         let h = d.new_handle();
-        b.entities.push(Entity { handle: h, common: on("0"), kind: insert(&format!("B{}", (i + 1) % n)) });
+        b.entities.push(Entity { geometry_revision: Default::default(), handle: h, common: on("0"), kind: insert(&format!("B{}", (i + 1) % n)) });
         d.blocks.insert(b.name.clone(), Arc::new(b));
     }
     let r = s.execute("audit", &json!({"fix": true})).unwrap();

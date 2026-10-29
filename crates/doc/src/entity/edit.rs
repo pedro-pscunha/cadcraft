@@ -2,7 +2,7 @@
 
 use cadcraft_geom::{Mat3, Mat4};
 
-use super::{Entity, EntityKind, MText, Text};
+use super::{Entity, EntityKind, GeometryRevision, MText, Text};
 use crate::{DocError, Result, has_finite_numbers};
 
 impl Entity {
@@ -26,11 +26,12 @@ impl Entity {
     }
 
     fn dispatch_transform(&mut self, transform: &Mat4) -> Result<()> {
-        let matrix = legacy_matrix(transform)?;
         // Each canonical family replaces its own arm, never a catch-all legacy fallback.
         match &self.kind {
             EntityKind::Unknown(_) => return Err(DocError::Invalid("This entity has no supported geometry transform.".into())),
             EntityKind::Ellipse(ellipse) => {
+                self.geometry_revision.require_legacy()?;
+                let matrix = legacy_matrix(transform)?;
                 let translation = matrix.a == 1.0 && matrix.b == 0.0 && matrix.c == 0.0 && matrix.d == 1.0;
                 if !translation && !ellipse.clone().flatten() {
                     return Err(DocError::Invalid("An edge-on or invalid ellipse cannot use the legacy 2D edit.".into()));
@@ -64,9 +65,9 @@ impl Entity {
             | EntityKind::Image(_)
             | EntityKind::Wipeout(_)
             | EntityKind::Table(_)
-            | EntityKind::Tolerance(_) => {}
+            | EntityKind::Tolerance(_) => self.geometry_revision.require_legacy()?,
         }
-        self.kind.transform_legacy(&matrix)
+        self.kind.transform_legacy(&legacy_matrix(transform)?)
     }
 }
 
@@ -88,7 +89,8 @@ pub(super) enum TextOwner {
     MLeaderContent,
 }
 
-pub(super) fn text_payload(text: &mut Text, transform: &Mat4, owner: TextOwner) -> Result<()> {
+pub(super) fn text_payload(text: &mut Text, revision: GeometryRevision, transform: &Mat4, owner: TextOwner) -> Result<()> {
+    revision.require_legacy()?;
     let matrix = legacy_matrix(transform)?;
     let mirror = matches!(owner, TextOwner::Entity) && matrix.is_mirroring();
     super::transform_text(text, &matrix, matrix.scale_factor(), matrix.rotation(), mirror);
@@ -96,7 +98,8 @@ pub(super) fn text_payload(text: &mut Text, transform: &Mat4, owner: TextOwner) 
 }
 
 /// All nested MTEXT edits enter here, even while the containing INSERT or MLEADER stays legacy.
-pub(super) fn mtext_payload(text: &mut MText, transform: &Mat4, owner: TextOwner) -> Result<()> {
+pub(super) fn mtext_payload(text: &mut MText, revision: GeometryRevision, transform: &Mat4, owner: TextOwner) -> Result<()> {
+    revision.require_legacy()?;
     let matrix = legacy_matrix(transform)?;
     let scale = matrix.scale_factor();
     let position = matrix.apply(text.insert.xy());

@@ -3,6 +3,7 @@ use cadcraft_geom::{Mat3, Mat4, Vec2, Vec3};
 
 fn ellipse() -> Entity {
     Entity {
+        geometry_revision: Default::default(),
         handle: Handle(0x100),
         common: Common { extrusion: Vec3::new(0.0, 1.0, 0.0), ..Default::default() },
         kind: EntityKind::Ellipse(Ellipse {
@@ -61,6 +62,7 @@ fn attribute_dispatch_updates_plain_and_embedded_payloads_atomically() {
     };
     let mut attribute = cadcraft_doc::Attrib::new("TAG", text);
     attribute.multiline = Some(cadcraft_doc::MultilineAttrib {
+        geometry_revision: Default::default(),
         mtext: cadcraft_doc::MText {
             insert: Vec3::new(4.0, 5.0, 6.0),
             height: 1.0,

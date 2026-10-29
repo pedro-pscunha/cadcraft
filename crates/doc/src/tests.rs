@@ -323,7 +323,7 @@ fn plain_insert(block: &str) -> EntityKind {
 }
 
 fn on_layer(layer: &str, kind: EntityKind, h: u64) -> Entity {
-    Entity { handle: Handle(h), common: Common { layer: layer.into(), ..Default::default() }, kind }
+    Entity { geometry_revision: Default::default(), handle: Handle(h), common: Common { layer: layer.into(), ..Default::default() }, kind }
 }
 
 /// Model space with one insert of a block holding a near line (0,0)-(1,1) plus `extra`.
