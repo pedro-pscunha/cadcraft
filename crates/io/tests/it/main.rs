@@ -75,6 +75,7 @@ mod plot_styles;
 #[cfg(not(target_arch = "wasm32"))]
 mod polyline_fit;
 mod polyline_owned_vertices;
+mod polyline_parent_plot_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod raw_dwg_bridge;
 mod region_roundtrip;
