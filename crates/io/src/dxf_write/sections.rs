@@ -1128,6 +1128,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     }
     crate::dxf_raw::finish(&mut w.t, d, dwg_bridge);
     if !dwg_bridge {
+        let release = |v: Version| v.code().trim_start_matches("AC").parse().unwrap_or(0);
+        let source = Version::for_acadver(&d.header.str("ACADVER", "")).unwrap_or(version);
+        crate::dxf_raw::reform_for_version(&mut w.t, release(source), release(version));
         remove_embedded_layouts(&mut w.t);
     }
     // Every entity now has its final emitted records, including raw passthrough. Flatten lowered

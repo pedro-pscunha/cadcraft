@@ -1303,6 +1303,56 @@ fn public_foreign(f: &Foreign) -> Foreign {
     public
 }
 
+/// The form a kept record has in a DXF of `release` (an `$ACADVER` number), for the kinds whose form depends on
+/// it: two records are the same form when these are equal.
+fn release_form(kind: &str, release: u32) -> Option<u32> {
+    match kind {
+        "VISUALSTYLE" => Some(match release {
+            ..=1023 => 0,
+            1024..=1026 => 1,
+            _ => 2,
+        }),
+        "ACDBASSOC2DCONSTRAINTGROUP" => Some(u32::from(release >= 1027)),
+        // The embedded DWG entities are encoded with the DWG layout of their release.
+        "ACSH_SWEEP_CLASS"
+        | "ACSH_EXTRUSION_CLASS"
+        | "ACSH_LOFT_CLASS"
+        | "ACSH_REVOLVE_CLASS"
+        | "EXTRUDEDSURFACE"
+        | "LOFTEDSURFACE"
+        | "REVOLVEDSURFACE"
+        | "SWEPTSURFACE" => Some(release),
+        _ => None,
+    }
+}
+
+/// The kept records that were written for release `source` and are not in the form of release `target` (both
+/// `$ACADVER` numbers) are written again in that form, by acadrust. A record that is already in it stays as it
+/// is, and so does one acadrust does not read. The DWG bridge's embedded entity bytes say their own release in
+/// group 455, which `source` does not replace.
+pub(crate) fn reform_for_version(tags: &mut Vec<Tag>, source: u32, target: u32) {
+    let starts: Vec<usize> = tags.iter().enumerate().filter(|(_, t)| t.code == 0).map(|(i, _)| i).collect();
+    let mut out: Vec<Tag> = Vec::with_capacity(tags.len());
+    out.extend(tags.get(..starts.first().copied().unwrap_or(tags.len())).unwrap_or_default().iter().cloned());
+    for (n, &start) in starts.iter().enumerate() {
+        let end = starts.get(n + 1).copied().unwrap_or(tags.len());
+        let record = tags.get(start..end).unwrap_or_default();
+        let kind = record.first().map(|t| up(&t.str())).unwrap_or_default();
+        let from = record.iter().find(|t| t.code == 455).map_or(source, |t| u32::try_from(t.i64()).unwrap_or(source));
+        let reformed = (release_form(&kind, from) != release_form(&kind, target) && release_form(&kind, target).is_some())
+            .then(|| {
+                let groups: Vec<(i32, String)> = record.iter().map(|t| (t.code, t.str())).collect();
+                cadcraft_dwg::reform_object(&kind, &groups, &format!("AC{from}"), &format!("AC{target}"))
+            })
+            .flatten();
+        match reformed {
+            Some(groups) => out.extend(groups.iter().map(|(code, value)| tag(&RawTag { code: *code, value: value.clone() }))),
+            None => out.extend(record.iter().cloned()),
+        }
+    }
+    *tags = out;
+}
+
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
 pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
