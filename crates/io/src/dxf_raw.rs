@@ -400,7 +400,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
-    if !unknown && (entity || kind == "LAYER") {
+    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT")) {
         let props =
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
@@ -416,8 +416,8 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
-/// The groups of an entity's own subclass that the model has no field for, as read: a viewport's
-/// view (direction, target, twist, lens, clipping, snap and grid), UCS (345, 346, 79 and its
+/// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
+/// read: a viewport's view (direction, target, twist, lens, clipping), UCS (345, 346, 79 and its
 /// origins and axes) and visual style (348), a leader's annotation link (340), its hook line and
 /// offsets. The writer puts them after the groups it writes, with handles remapped. A group the
 /// model writes, or keeps elsewhere (frozen layers by 341 and xdata, the sun by link), is not one.
@@ -425,6 +425,8 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76]),
+        // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
+        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
         _ => return Vec::new(),
     };
     let mut out = Vec::new();
@@ -1506,6 +1508,15 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             && let Some(x) = x
         {
             xdata(map, x, &own_apps, out);
+        }
+        // A VPORT record's kept view replaces the plan view the writer wrote.
+        if !entity
+            && r.kind == "VPORT"
+            && i < xdata_at
+            && x.is_some_and(|x| x.props.iter().any(|p| p.code == t.code))
+            && !matches!(t.code, 0 | 5 | 100 | 330)
+        {
+            continue;
         }
         let mut t = t.clone();
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {

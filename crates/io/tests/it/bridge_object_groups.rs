@@ -380,3 +380,28 @@ fn a_leader_keeps_its_annotation_and_hook_line() {
         assert_eq!(leader.text_height, 2.5, "{what}: text height");
     }
 }
+
+#[test]
+fn the_active_vport_keeps_its_view_and_visual_style() {
+    let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+    let styles = doc.header.acad_visualstyle_dict_handle;
+    let style = add_to_dictionary(&mut doc, styles, "Realistic", visual_style("realistic"));
+    let ucs = add_ucs(&mut doc, "Plan");
+    let active = doc.vports.get_mut("*Active").expect("*Active VPORT");
+    active.view_direction = Vector3::new(1.0, 1.0, 1.0);
+    active.lens_length = 80.0;
+    active.visual_style_handle = style;
+    active.named_ucs_handle = ucs;
+    for (what, back) in saves(&doc) {
+        let active = back.vports.get("*Active").unwrap_or_else(|| panic!("{what}: *Active VPORT lost"));
+        assert_eq!(active.view_direction, Vector3::new(1.0, 1.0, 1.0), "{what}: view direction");
+        assert_eq!(active.lens_length, 80.0, "{what}: lens");
+        let described = match back.objects.get(&active.visual_style_handle) {
+            Some(ObjectType::VisualStyle(s)) => s.description.clone(),
+            other => format!("not a visual style: {other:?}"),
+        };
+        assert_eq!(described, "realistic", "{what}: visual style");
+        let ucs = back.ucss.iter().find(|u| u.handle == active.named_ucs_handle).map(|u| u.name.as_str());
+        assert_eq!(ucs, Some("Plan"), "{what}: named UCS");
+    }
+}
