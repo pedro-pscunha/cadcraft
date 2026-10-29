@@ -52,9 +52,15 @@ fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
 /// (DSTYLE) on dimensions and dimension styles, `AcadAnnotative` the annotative flag of text and
-/// dimension styles, `AcCmTransparency` and `AcAecLayerStandard` a layer's transparency and
+/// dimension styles while it is on (see [`annotative_on`]), `AcCmTransparency` and `AcAecLayerStandard` a layer's transparency and
 /// description (see [`layer_xdata_modelled`]); elsewhere they are kept.
 const OWN_APPS: &[&str] = &["CADCRAFT"];
+
+/// Whether `AcadAnnotative` xdata (`chunk`) has the annotative flag (its second `1070`) on, as the
+/// model reads it from a style and writes it back. With the flag off the data is kept as read.
+fn annotative_on(chunk: &[Tag]) -> bool {
+    chunk.iter().filter(|t| t.code == 1070).nth(1).is_some_and(|t| t.i64() != 0)
+}
 
 /// Whether a layer's xdata of `app` (upper case) holds what the model writes back: a transparency
 /// above 0 (or no value: acadrust drops a layer whose `AcCmTransparency` has none) for
@@ -252,7 +258,7 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let app = up(&first.str());
         let own = OWN_APPS.contains(&app.as_str())
             || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
-            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE"))
+            || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE") && annotative_on(chunk))
             || (kind == "LAYER" && layer_xdata_modelled(&app, chunk));
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;

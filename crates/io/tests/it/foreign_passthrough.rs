@@ -123,8 +123,8 @@ fn annotative_entity_keeps_its_state_and_scale_dictionary() {
     }
 }
 
-/// Annotative text styles are modelled (written once); an annotative block definition is not, and
-/// keeps its flag as read.
+/// Annotative text styles are modelled (written once); a style whose flag is off, and an annotative
+/// block definition, are not, and keep their data as read.
 #[test]
 fn annotative_style_is_written_once_and_annotative_block_keeps_its_flag() {
     let annotative = [(1001, "AcadAnnotative"), (1000, "AnnotativeData"), (1002, "{"), (1070, "1"), (1070, "1"), (1002, "}")];
@@ -146,6 +146,9 @@ fn annotative_style_is_written_once_and_annotative_block_keeps_its_flag() {
         (4, ""),
     ];
     groups.extend(annotative);
+    // A style marked and then switched off keeps its data with the flag 0.
+    groups.extend([(0, "STYLE"), (5, "45"), (2, "Plain"), (70, "0"), (40, "0"), (41, "1"), (50, "0"), (71, "0"), (42, "0.2"), (3, "txt"), (4, "")]);
+    groups.extend([(1001, "AcadAnnotative"), (1000, "AnnotativeData"), (1002, "{"), (1070, "1"), (1070, "0"), (1002, "}")]);
     groups.extend([(0, "ENDTAB"), (0, "TABLE"), (2, "BLOCK_RECORD"), (0, "BLOCK_RECORD"), (5, "41"), (2, "TAG"), (340, "0")]);
     groups.extend(annotative);
     groups.extend([
@@ -180,6 +183,12 @@ fn annotative_style_is_written_once_and_annotative_block_keeps_its_flag() {
         let tables = section(&text, "TABLES");
         let named = |kind: &str, name: &str| tables.iter().find(|(k, t)| k == kind && val(t, 2) == name).map(|(_, t)| t.clone()).unwrap();
         assert_eq!(apps(&named("STYLE", "Note")), ["AcadAnnotative"], "{text}");
+        let plain = named("STYLE", "Plain");
+        assert_eq!(
+            (apps(&plain), plain.iter().filter(|t| t.code == 1070).map(Tag::i64).collect::<Vec<_>>()),
+            (vec!["AcadAnnotative".to_string()], vec![1, 0]),
+            "{text}"
+        );
         assert_eq!(apps(&named("BLOCK_RECORD", "TAG")), ["AcadAnnotative"], "{text}");
     }
 }
