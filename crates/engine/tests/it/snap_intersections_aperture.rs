@@ -12,7 +12,14 @@ fn add_ellipse(d: &mut Drawing, center: Vec2, major: Vec2, ratio: f64) {
     d.add(
         &Space::Model,
         Common::default(),
-        EntityKind::Ellipse(Ellipse { center: center.to3(0.0), major: major.to3(0.0), ratio, start: 0.0, end: std::f64::consts::TAU }),
+        EntityKind::Ellipse(Ellipse {
+            normal: cadcraft_geom::Vec3::Z,
+            center: center.to3(0.0),
+            major: major.to3(0.0),
+            ratio,
+            start: 0.0,
+            end: std::f64::consts::TAU,
+        }),
     )
     .unwrap();
 }

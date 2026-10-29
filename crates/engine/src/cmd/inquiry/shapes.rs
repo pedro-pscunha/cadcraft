@@ -173,7 +173,7 @@ fn facts(s: &Session, e: &Entity, tol: f64) -> Result<Facts> {
             }
         }
         EntityKind::Ellipse(el) => {
-            let geom = cadcraft_geom::Ellipse { center: el.center.xy(), major: el.major.xy(), ratio: el.ratio, start: el.start, end: el.end };
+            let geom = el.projected();
             if !geom.is_full() {
                 return Ok(Facts::Skip("open"));
             }

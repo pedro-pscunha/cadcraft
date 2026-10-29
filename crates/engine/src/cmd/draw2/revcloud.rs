@@ -1,6 +1,6 @@
 use super::{
-    Accept, Chain, Circle, Ellipse, EntityKind, Handle, Input, Interactive, Line, MAX_GEN, PolyVertex, Polyline, Prompt, Result, Session, Step,
-    Value, Vec2, added, bad, bool_or, curves, lwpoly, number, other, point_param, points_param, rect_vertices, shoelace, str_param,
+    Accept, Chain, Circle, EntityKind, Handle, Input, Interactive, Line, MAX_GEN, PolyVertex, Polyline, Prompt, Result, Session, Step, Value, Vec2,
+    added, bad, bool_or, curves, lwpoly, number, other, point_param, points_param, rect_vertices, shoelace, str_param,
 };
 
 // =====================================================================================
@@ -78,8 +78,7 @@ fn object_outline(s: &Session, h: Handle) -> Result<Vec<Vec2>> {
         }
         EntityKind::Ellipse(el) => {
             let mut v = Vec::new();
-            Ellipse { center: el.center.xy(), major: el.major.xy(), ratio: el.ratio, start: el.start, end: el.end }
-                .tessellate(el.major.xy().len() * 1e-3, &mut v);
+            el.projected().tessellate(el.major.xy().len() * 1e-3, &mut v);
             v
         }
         EntityKind::Spline(sp) if sp.closed => sp.tessellate(tol),

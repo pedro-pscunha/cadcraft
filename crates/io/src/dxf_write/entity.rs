@@ -203,6 +203,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             common(w, e, owner, paper, "AcDbEllipse");
             w.p(10, el.center);
             w.p(11, el.major);
+            w.p(210, el.normal);
             w.f(40, el.ratio);
             w.f(41, el.start);
             w.f(42, el.end);

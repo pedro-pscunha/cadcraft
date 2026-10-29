@@ -78,6 +78,7 @@ fn arc_and_ellipse_grips() {
 #[test]
 fn degenerate_ellipse_cannot_move_from_its_center_grip() {
     let ellipse = EntityKind::Ellipse(cadcraft_doc::Ellipse {
+        normal: cadcraft_geom::Vec3::Z,
         center: cadcraft_geom::Vec3::ZERO,
         major: cadcraft_geom::Vec3::ZERO,
         ratio: 0.5,

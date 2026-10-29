@@ -485,7 +485,7 @@ pub(super) fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
             (g.area().abs(), drawn.len())
         }
         EntityKind::Ellipse(el) => {
-            let arc = cadcraft_geom::Ellipse { center: el.center.xy(), major: el.major.xy(), ratio: el.ratio, start: el.start, end: el.end };
+            let arc = el.projected();
             if !arc.is_full() {
                 return Err(bad("area", "object has no area"));
             }

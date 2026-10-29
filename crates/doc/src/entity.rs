@@ -202,7 +202,7 @@ impl EntityKind {
             EntityKind::Circle(c) => vec![Prim::Circle(GCircle::new(c.center.xy(), c.radius))],
             EntityKind::Arc(a) => vec![Prim::Seg(Segment::Arc { arc: GArc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true })],
             EntityKind::Ellipse(e) => {
-                vec![Prim::Ellipse(GEllipse { center: e.center.xy(), major: e.major.xy(), ratio: e.ratio, start: e.start, end: e.end })]
+                vec![Prim::Ellipse(e.projected())]
             }
             EntityKind::LwPolyline(p) => {
                 let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
@@ -307,6 +307,9 @@ impl EntityKind {
                 }
             }
             EntityKind::Ellipse(e) => {
+                if *m == Mat3::IDENTITY || !e.flatten() {
+                    return;
+                }
                 let sp = m.apply(e.center.xy() + e.major.xy() * e.start.cos() + e.major.xy().perp() * (e.ratio * e.start.sin()));
                 let ep = m.apply(e.center.xy() + e.major.xy() * e.end.cos() + e.major.xy().perp() * (e.ratio * e.end.sin()));
                 t3(&mut e.center);
@@ -487,9 +490,10 @@ impl EntityKind {
                 vec![g.start_point(), g.mid_point(), g.end_point(), a.center.xy()]
             }
             EntityKind::Ellipse(e) => {
-                let c = e.center.xy();
-                let mj = e.major.xy();
-                let mn = mj.perp() * e.ratio;
+                let projected = e.projected();
+                let c = projected.center;
+                let mj = projected.major;
+                let mn = projected.minor();
                 vec![c, c + mj, c + mn, c - mj, c - mn]
             }
             EntityKind::LwPolyline(p) => {

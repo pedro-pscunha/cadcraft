@@ -232,6 +232,7 @@ fn join_remaps_surviving_fields_and_xdata_document_wide_for_all_curve_routes() {
                 .unwrap()
                 .modify_entity(b, |e| {
                     e.kind = EntityKind::Ellipse(cadcraft_engine::doc::Ellipse {
+                        normal: cadcraft_geom::Vec3::Z,
                         center: cadcraft_engine::geom::Vec3::ZERO,
                         major: cadcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0),
                         ratio: 0.5,
@@ -246,6 +247,7 @@ fn join_remaps_surviving_fields_and_xdata_document_wide_for_all_curve_routes() {
                     &cadcraft_engine::doc::Space::Model,
                     Default::default(),
                     EntityKind::Ellipse(cadcraft_engine::doc::Ellipse {
+                        normal: cadcraft_geom::Vec3::Z,
                         center: cadcraft_engine::geom::Vec3::ZERO,
                         major: cadcraft_engine::geom::Vec3::new(10.0, 0.0, 0.0),
                         ratio: 0.5,
