@@ -107,3 +107,124 @@ fn entity_groups_does_not_scan_the_document_namespace() {
     assert!(tags.iter().any(|t| t.code == 5 && t.str() == h.hex()));
     SCANNED.with(|count| assert_eq!(count.get(), 0, "entget must not reserve every drawing handle"));
 }
+
+/// A dynamic block's purge preventer as the DWG bridge reads it: with the block in group 340.
+fn purge_preventer_dxf() -> String {
+    let groups: &[(i32, &str)] = &[
+        (0, "SECTION"),
+        (2, "HEADER"),
+        (9, "$ACADVER"),
+        (1, "AC1032"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "CLASSES"),
+        (0, "CLASS"),
+        (1, "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION"),
+        (2, "AcDbDynamicBlockPurgePreventer"),
+        (3, "ObjectDBX Classes"),
+        (90, "1153"),
+        (91, "1"),
+        (280, "0"),
+        (281, "0"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "BLOCK_RECORD"),
+        (5, "1"),
+        (330, "0"),
+        (100, "AcDbSymbolTable"),
+        (70, "1"),
+        (0, "BLOCK_RECORD"),
+        (5, "80"),
+        (102, "{ACAD_XDICTIONARY"),
+        (360, "81"),
+        (102, "}"),
+        (330, "1"),
+        (100, "AcDbSymbolTableRecord"),
+        (100, "AcDbBlockTableRecord"),
+        (2, "Door"),
+        (70, "0"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "BLOCKS"),
+        (0, "BLOCK"),
+        (5, "82"),
+        (330, "80"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbBlockBegin"),
+        (2, "Door"),
+        (70, "0"),
+        (10, "0"),
+        (20, "0"),
+        (30, "0"),
+        (3, "Door"),
+        (1, ""),
+        (0, "LINE"),
+        (5, "84"),
+        (330, "80"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbLine"),
+        (10, "0"),
+        (20, "0"),
+        (30, "0"),
+        (11, "1"),
+        (21, "0"),
+        (31, "0"),
+        (0, "ENDBLK"),
+        (5, "83"),
+        (330, "80"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbBlockEnd"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "OBJECTS"),
+        (0, "DICTIONARY"),
+        (5, "C"),
+        (330, "0"),
+        (100, "AcDbDictionary"),
+        (281, "1"),
+        (0, "DICTIONARY"),
+        (5, "81"),
+        (330, "80"),
+        (100, "AcDbDictionary"),
+        (280, "1"),
+        (281, "1"),
+        (3, "AcDbDynamicBlockRoundTripPurgePreventer"),
+        (360, "85"),
+        (0, "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION"),
+        (5, "85"),
+        (102, "{ACAD_REACTORS"),
+        (330, "81"),
+        (102, "}"),
+        (330, "81"),
+        (100, "AcDbDynamicBlockPurgePreventer"),
+        (70, "1"),
+        (340, "80"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+}
+
+/// The groups of the purge preventer record in `tags`.
+fn purge_preventer(tags: &[Tag]) -> Vec<Tag> {
+    let at = tags.iter().position(|t| t.code == 0 && t.str() == "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION").expect("purge preventer");
+    tags[at + 1..].iter().take_while(|t| t.code != 0).cloned().collect()
+}
+
+#[test]
+fn purge_preventer_block_pointer_stays_in_the_dwg_bridge() {
+    // AutoCAD's DXFOUT writes the purge preventer without group 340, and AutoCAD LT 2025 refuses a
+    // DXF whose preventer has it ("Fim prematuro do objeto"). The DWG bridge keeps it.
+    let d = crate::read_dxf(purge_preventer_dxf().as_bytes()).unwrap();
+    let public = purge_preventer(&tags(&d, Version::R2018));
+    assert!(public.iter().any(|t| t.code == 70 && t.i64() == 1), "public preventer keeps its flags: {public:?}");
+    assert!(!public.iter().any(|t| t.code == 340), "public preventer has no block pointer: {public:?}");
+    let bridge = purge_preventer(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap());
+    assert!(bridge.iter().any(|t| t.code == 340 && t.str() != "0"), "bridge preventer keeps its block: {bridge:?}");
+}

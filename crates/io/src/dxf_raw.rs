@@ -1258,6 +1258,17 @@ fn public_foreign(f: &Foreign) -> Foreign {
     let mut public = f.clone();
     let private: HashSet<String> = public.objects.iter().filter(|o| raw_dwg_object(o)).map(|o| up(&o.kind)).collect();
     public.objects.retain(|o| !raw_dwg_object(o));
+    // AutoCAD writes a dynamic block's purge preventer without its block (group 340), and refuses
+    // a DXF preventer that has one; the DWG bridge keeps it.
+    for o in public.objects.iter_mut().filter(|o| up(&o.kind) == "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION") {
+        if let Some(marker) = o.tags.iter().position(|t| t.code == 100 && t.value.trim().eq_ignore_ascii_case("AcDbDynamicBlockPurgePreventer")) {
+            let mut at = 0;
+            o.tags.retain(|t| {
+                at += 1;
+                at <= marker + 1 || t.code != 340
+            });
+        }
+    }
     let kept: HashSet<String> = public.objects.iter().map(|o| up(&o.kind)).collect();
     public.classes.retain(|c| c.iter().find(|t| t.code == 1).map(|n| up(&n.value)).is_none_or(|n| !private.contains(&n) || kept.contains(&n)));
     public
