@@ -35,10 +35,37 @@ fn dimstyle_fidelity_bridge_true_colors_keep_all_24_bits() {
     st.text_fill_color = rgb;
     for version in [Version::R2000, Version::R2004, Version::R2007, Version::R2018] {
         let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, version)).unwrap();
+        let public = tags(&d, version);
         for code in 421..=424 {
+            assert!(!public.iter().any(|t| t.code == code && t.i64() == 0xbb829d), "public DXF {version:?}/{code}");
             let supported = version >= if code == 424 { Version::R2007 } else { Version::R2004 };
             assert_eq!(bridge.iter().any(|t| t.code == code && t.i64() == 0xbb829d), supported, "{version:?}/{code}");
         }
+    }
+}
+
+#[test]
+fn private_header_variables_stay_in_the_dwg_bridge() {
+    let mut d = Drawing::new_imperial();
+    for (name, code, value) in [
+        ("ISOLINES", 70, HVal::Int(4)),
+        ("FACETRES", 40, HVal::Real(0.5)),
+        ("TEXTQLTY", 70, HVal::Int(50)),
+        ("PELLIPSE", 70, HVal::Int(0)),
+        ("DIMMZF", 40, HVal::Real(1.0)),
+        ("DIMMZS", 1, HVal::Str("m".into())),
+        ("DIMALTMZF", 40, HVal::Real(1.0)),
+        ("DIMALTMZS", 1, HVal::Str("cm".into())),
+    ] {
+        d.header.set(name, value);
+        d.header.dxf_codes.insert(name.into(), vec![code]);
+    }
+    let public = tags(&d, Version::R2018);
+    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap();
+    for name in ["ISOLINES", "FACETRES", "TEXTQLTY", "PELLIPSE", "DIMMZF", "DIMMZS", "DIMALTMZF", "DIMALTMZS"] {
+        let variable = format!("${name}");
+        assert!(!public.iter().any(|t| t.code == 9 && t.str() == variable), "public {variable}");
+        assert!(bridge.iter().any(|t| t.code == 9 && t.str() == variable), "bridge {variable}");
     }
 }
 

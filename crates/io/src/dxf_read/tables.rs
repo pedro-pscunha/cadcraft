@@ -37,6 +37,14 @@ pub(super) fn header(tags: &[Tag], d: &mut Drawing, rx: &Rx) {
                 }
                 continue;
             }
+            if name == "CEPSNID" {
+                if let Some(p) = vals.iter().find(|t| t.code == 390)
+                    && let Some(n) = rx.pstyles.get(&p.str().trim().to_ascii_uppercase())
+                {
+                    d.header.set("CEPSNTYPE@390", HVal::Str(n.clone()));
+                }
+                continue;
+            }
             let hv = match vals.as_slice() {
                 [x, y, z] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), z.f64())),
                 [x, y] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), 0.0)),

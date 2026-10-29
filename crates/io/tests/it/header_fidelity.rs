@@ -16,16 +16,15 @@ fn header_fidelity_read_variables_keep_codes_and_modified_values() {
     let opts = SaveOptions { version: Some(Version::R2018), binary: false };
     let bytes = cadcraft_io::write_with(&d, "x.dxf", &opts).unwrap();
     let tags = cadcraft_dxf::parse(&bytes).unwrap();
-    for name in
-        ["USERI1", "USERR5", "ISOLINES", "LATITUDE", "PLIMMIN", "PEXTMAX", "DIMUPT", "PROJECTNAME", "CAMERADISPLAY", "EXTMIN", "HANDSEED", "ACADVER"]
-    {
+    for name in ["USERI1", "USERR5", "LATITUDE", "PLIMMIN", "PEXTMAX", "DIMUPT", "PROJECTNAME", "CAMERADISPLAY", "EXTMIN", "HANDSEED", "ACADVER"] {
         assert_eq!(tags.iter().filter(|t| t.code == 9 && t.str() == format!("${name}")).count(), 1, "{name} once");
     }
     let group_after = |name: &str| tags.windows(2).find(|p| p[0].code == 9 && p[0].str() == format!("${name}")).unwrap()[1].clone();
     assert_eq!(group_after("USERI1"), cadcraft_dxf::Tag::i(70, 2000));
     assert_eq!((group_after("CAMERADISPLAY").code, group_after("CAMERADISPLAY").i64()), (290, 1));
+    assert!(!tags.iter().any(|t| t.code == 9 && t.str() == "$ISOLINES"), "private bridge header");
     let back = cadcraft_io::read_dxf(&bytes).unwrap();
-    for name in ["USERI1", "USERR5", "ISOLINES", "LATITUDE", "PLIMMIN", "PEXTMAX", "DIMUPT", "PROJECTNAME", "CAMERADISPLAY"] {
+    for name in ["USERI1", "USERR5", "LATITUDE", "PLIMMIN", "PEXTMAX", "DIMUPT", "PROJECTNAME", "CAMERADISPLAY"] {
         assert_eq!(back.header.get(name), d.header.get(name), "{name}");
     }
     assert_eq!(back.header.get("EXTMIN"), Some(&HVal::Point(Vec3::ZERO)), "model geometry owns EXTMIN");
