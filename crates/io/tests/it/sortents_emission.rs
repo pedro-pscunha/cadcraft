@@ -50,9 +50,7 @@ fn legacy_multileader_parts_sent_to_back_all_sort_below_the_cover() {
             &Space::Model,
             Common::default(),
             EntityKind::MLeader(MLeader {
-                leaders: vec![vec![Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)]],
-                landing: Vec3::new(2.0, 1.0, 0.0),
-                dogleg: 0.5,
+                roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::new(2.0, 1.0, 0.0), 0.5, false, vec![vec![Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)]])],
                 arrow_size: 0.2,
                 spline: false,
                 block: None,
@@ -70,6 +68,7 @@ fn legacy_multileader_parts_sent_to_back_all_sort_below_the_cover() {
                     columns: None,
                 }),
                 arrow_block: String::new(),
+                context: cadcraft_doc::MLeaderContext::default(),
             }),
         )
         .unwrap();

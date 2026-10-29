@@ -3,7 +3,7 @@
 //! The model has one landing per multileader: its leaders are polylines from an arrowhead to that
 //! landing, so "add leader" pushes one more arrowhead polyline and "remove leader" drops one.
 
-use cadcraft_doc::{Entity, EntityKind, Handle, Insert, MLeader};
+use cadcraft_doc::{Entity, EntityKind, Handle, Insert, MLeader, MLeaderBranch, MLeaderRoot};
 use cadcraft_geom::{Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -80,8 +80,8 @@ fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 /// The leader of `m` nearest `p`.
 fn nearest_leader(m: &MLeader, p: Vec2) -> Option<usize> {
     let mut best: Option<(usize, f64)> = None;
-    for (i, l) in m.leaders.iter().enumerate() {
-        let pts: Vec<Vec2> = l.iter().map(|v| v.xy()).chain(std::iter::once(m.landing.xy())).collect();
+    for (i, (root, b)) in m.lines().enumerate() {
+        let pts: Vec<Vec2> = b.vertices.iter().map(|v| v.xy()).chain(std::iter::once(root.landing.xy())).collect();
         let d = pts.windows(2).filter_map(|w| Some(seg_dist(p, *w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
         if d.is_finite() && best.is_none_or(|(_, bd)| d < bd) {
             best = Some((i, d));
@@ -99,7 +99,11 @@ fn add_leaders(s: &mut Session, h: Handle, pts: &[Vec2]) -> Result<()> {
     }
     s.doc_mut()?.modify_entity(h, |e| {
         if let EntityKind::MLeader(m) = &mut e.kind {
-            m.leaders.extend(pts.iter().map(|p| vec![v3(*p)]));
+            // A new line joins the first root, with the next free branch numbers.
+            let first = m.next_branch_id();
+            if let Some(root) = m.roots.first_mut() {
+                root.branches.extend(pts.iter().zip(first..).map(|(p, id)| MLeaderBranch { id, vertices: vec![v3(*p)] }));
+            }
         }
     })?;
     Ok(())
@@ -110,8 +114,8 @@ fn remove_leaders(s: &mut Session, h: Handle, idx: &[usize]) -> Result<()> {
     if locked(s, h) {
         return Err(bad("mleaderedit", "the multileader is on a locked layer"));
     }
-    if let Some(i) = idx.iter().find(|i| **i >= m.leaders.len()) {
-        return Err(bad("mleaderedit", format!("no leader {i} (the multileader has {})", m.leaders.len())));
+    if let Some(i) = idx.iter().find(|i| **i >= m.line_count()) {
+        return Err(bad("mleaderedit", format!("no leader {i} (the multileader has {})", m.line_count())));
     }
     s.doc_mut()?.modify_entity(h, |e| {
         if let EntityKind::MLeader(m) = &mut e.kind {
@@ -119,8 +123,14 @@ fn remove_leaders(s: &mut Session, h: Handle, idx: &[usize]) -> Result<()> {
             sorted.sort_unstable();
             sorted.dedup();
             for i in sorted.into_iter().rev() {
-                if i < m.leaders.len() {
-                    m.leaders.remove(i);
+                // Line `i` in file order: counted over the roots.
+                let mut before = 0;
+                for r in &mut m.roots {
+                    if i < before + r.branches.len() {
+                        r.branches.remove(i - before);
+                        break;
+                    }
+                    before += r.branches.len();
                 }
             }
         }
@@ -270,7 +280,7 @@ impl Interactive for EditM {
 /// Move a multileader's content (landing, text, block) by `d`; the arrowheads stay.
 fn shift_content(m: &mut MLeader, d: Vec2) {
     let mv = |v: &mut Vec3| *v = Vec3::new(v.x + d.x, v.y + d.y, v.z);
-    mv(&mut m.landing);
+    m.roots.iter_mut().for_each(|r| mv(&mut r.landing));
     if let Some(t) = &mut m.text {
         mv(&mut t.insert);
     }
@@ -306,8 +316,9 @@ enum Spacing {
 
 /// The direction of the last leader segment (arrowhead side to landing).
 fn segment_dir(m: &MLeader) -> Option<Vec2> {
-    let last = m.leaders.first()?.last()?;
-    let v = m.landing.xy() - last.xy();
+    let (root, line) = m.lines().next()?;
+    let last = line.vertices.last()?;
+    let v = root.landing.xy() - last.xy();
     (v.len() > 1e-12).then(|| v.normalized())
 }
 
@@ -315,9 +326,9 @@ fn align_parallel(items: &[(Handle, MLeader)], reference: Option<&MLeader>) -> R
     let rdir = reference.and_then(segment_dir).ok_or_else(|| bad("mleaderalign", "the reference multileader has no leader"))?;
     let mut moves = Vec::new();
     for (h, m) in items {
-        let Some(arrow) = m.leaders.first().and_then(|l| l.last()) else { continue };
-        let len = (m.landing.xy() - arrow.xy()).len();
-        moves.push((*h, arrow.xy() + rdir * len - m.landing.xy()));
+        let Some(arrow) = m.lines().next().and_then(|(_, l)| l.vertices.last()) else { continue };
+        let len = (m.landing().xy() - arrow.xy()).len();
+        moves.push((*h, arrow.xy() + rdir * len - m.landing().xy()));
     }
     Ok(moves)
 }
@@ -329,12 +340,12 @@ fn align_distribute(mut items: Vec<(Handle, MLeader)>, line: Option<(Vec2, Vec2)
         return Err(bad("mleaderalign", "the two points coincide"));
     }
     let u = d.normalized();
-    items.sort_by(|x, y| (x.1.landing.xy() - a).dot(u).total_cmp(&(y.1.landing.xy() - a).dot(u)));
+    items.sort_by(|x, y| (x.1.landing().xy() - a).dot(u).total_cmp(&(y.1.landing().xy() - a).dot(u)));
     let n = items.len();
     let mut moves = Vec::new();
     for (i, (h, m)) in items.iter().enumerate() {
         let f = if n > 1 { i as f64 / (n - 1) as f64 } else { 0.0 };
-        moves.push((*h, a + d * f - m.landing.xy()));
+        moves.push((*h, a + d * f - m.landing().xy()));
     }
     Ok(moves)
 }
@@ -351,22 +362,22 @@ fn align_directional(
         return Err(bad("mleaderalign", "the direction is zero"));
     }
     let u = d.normalized();
-    let origin = reference.map(|r| r.landing.xy()).unwrap_or(a);
-    let t_of = |m: &MLeader| (m.landing.xy() - origin).dot(u);
+    let origin = reference.map(|r| r.landing().xy()).unwrap_or(a);
+    let t_of = |m: &MLeader| (m.landing().xy() - origin).dot(u);
     let mut moves = Vec::new();
     if let Spacing::Value(sp) = spacing {
         let (mut pos, mut neg): (Vec<_>, Vec<_>) = items.iter().partition(|(_, m)| t_of(m) >= 0.0);
         pos.sort_by(|x, y| t_of(&x.1).total_cmp(&t_of(&y.1)));
         neg.sort_by(|x, y| t_of(&y.1).total_cmp(&t_of(&x.1)));
         for (k, (h, m)) in pos.iter().enumerate() {
-            moves.push((*h, origin + u * (sp * (k + 1) as f64) - m.landing.xy()));
+            moves.push((*h, origin + u * (sp * (k + 1) as f64) - m.landing().xy()));
         }
         for (k, (h, m)) in neg.iter().enumerate() {
-            moves.push((*h, origin - u * (sp * (k + 1) as f64) - m.landing.xy()));
+            moves.push((*h, origin - u * (sp * (k + 1) as f64) - m.landing().xy()));
         }
     } else {
         for (h, m) in items {
-            moves.push((*h, origin + u * t_of(m) - m.landing.xy()));
+            moves.push((*h, origin + u * t_of(m) - m.landing().xy()));
         }
     }
     Ok(moves)
@@ -661,9 +672,9 @@ fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Op
     }
     let (first_h, first) = items[0].clone();
     let mut merged = first;
-    merged.leaders = items.iter().flat_map(|(_, m)| m.leaders.iter().cloned()).collect();
-    merged.landing = Vec3::new(at.x, at.y, merged.landing.z);
-    merged.dogleg = 0.0;
+    // One root at the collected landing, with every line of the collected multileaders.
+    let lines: Vec<Vec<Vec3>> = items.iter().flat_map(|(_, m)| m.lines().map(|(_, b)| b.vertices.clone())).collect();
+    merged.roots = vec![MLeaderRoot::new(Vec3::new(at.x, at.y, merged.landing().z), 0.0, false, lines)];
     merged.text = None;
     let mut rest = placed.split_off(1.min(placed.len()));
     merged.block = placed.pop();

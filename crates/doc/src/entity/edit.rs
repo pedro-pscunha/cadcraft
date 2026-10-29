@@ -91,9 +91,12 @@ impl Entity {
         if *transform == Mat4::IDENTITY {
             return Ok(candidate);
         }
-        candidate.dispatch_transform(transform)?;
+        // A result too large to represent names this entity, whichever check finds it.
+        candidate
+            .dispatch_transform(transform)
+            .map_err(|e| if matches!(e, DocError::NonFinite(_)) { DocError::NonFinite(self.handle) } else { e })?;
         if !has_finite_numbers(&candidate) {
-            return Err(DocError::Invalid("The geometry result has infinite or undefined coordinates.".into()));
+            return Err(DocError::NonFinite(self.handle));
         }
         Ok(candidate)
     }
@@ -140,13 +143,17 @@ impl Entity {
             | EntityKind::Table(_)
             | EntityKind::Tolerance(_) => self.geometry_revision.require_legacy()?,
         }
+        // A multileader's content frame has a revision of its own.
+        if let EntityKind::MLeader(m) = &self.kind {
+            m.context.geometry_revision.require_legacy()?;
+        }
         self.kind.transform_legacy(&legacy_matrix(transform)?)
     }
 }
 
 pub(super) fn legacy_matrix(transform: &Mat4) -> Result<Mat3> {
     if !has_finite_numbers(transform) {
-        return Err(DocError::Invalid("The geometry transform has infinite or undefined values.".into()));
+        return Err(DocError::NonFinite(super::Handle(0)));
     }
     let rows = &transform.m;
     let matrix = Mat3 { a: rows[0][0], b: rows[1][0], c: rows[0][1], d: rows[1][1], e: rows[0][3], f: rows[1][3] };

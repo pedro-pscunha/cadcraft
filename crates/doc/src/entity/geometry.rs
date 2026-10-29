@@ -130,10 +130,16 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             );
         }
         EntityKind::MLeader(m) => {
-            // Not the text, its style or the arrowhead: the paths, landing, dogleg and the content's placement.
+            // Not the text, its style or the arrowhead: every root (number, landing, dogleg direction and length, and
+            // its branches with their numbers and vertices), the context's frame and the content's placement.
             let text = m.text.as_ref().map(|t| (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact));
             let block = m.block.as_ref().map(|b| (b.insert, b.scale, b.rotation));
-            let _ = write!(s, "MLEADER{:?}{plane:?}", (&m.leaders, m.landing, m.dogleg, m.spline, text, block));
+            let roots: Vec<_> = m
+                .roots
+                .iter()
+                .map(|r| (r.id, r.landing, r.dogleg_dir, r.dogleg, r.branches.iter().map(|b| (b.id, &b.vertices)).collect::<Vec<_>>()))
+                .collect();
+            let _ = write!(s, "MLEADER{:?}{plane:?}", (roots, m.context, m.spline, text, block));
         }
         EntityKind::Table(t) => {
             let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, &t.row_heights, &t.col_widths));

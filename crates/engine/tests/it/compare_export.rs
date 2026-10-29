@@ -207,15 +207,14 @@ fn a_named_block_defined_differently_in_the_other_drawing_shows_the_other_defini
         part.entities.push(Entity::new(Handle(first), line(part_end)));
         part.entities.push(Entity::new(Handle(first + 1), EntityKind::Insert(insert("SUB"))));
         let leader = MLeader {
-            leaders: Vec::new(),
-            landing: Vec3::ZERO,
-            dogleg: 0.0,
+            roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::ZERO, 0.0, false, Vec::new())],
             text: None,
             style: "Standard".into(),
             arrow_size: 1.0,
             spline: false,
             block: Some(insert("SYMBOL")),
             arrow_block: String::new(),
+            context: cadcraft_doc::MLeaderContext::default(),
         };
         part.entities.push(Entity::new(Handle(first + 2), EntityKind::MLeader(leader)));
         let mut sub = Block::new("SUB");

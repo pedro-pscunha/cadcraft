@@ -55,6 +55,9 @@ pub enum DocError {
     NoEntity(Handle),
     #[error("{0}")]
     Invalid(String),
+    /// An edit would give the entity (its handle; 0 for a copy not yet in a drawing) infinite or undefined coordinates.
+    #[error("The geometry result of {0:?} has infinite or undefined coordinates.")]
+    NonFinite(Handle),
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;

@@ -22,17 +22,17 @@ fn mleader_remembers_order_and_options() {
     // Landing first, then Options: Maxpoints 3, no landing line.
     s.script("mleader l o m 3 a n x 10,5 5,5 0,0 one\n").unwrap();
     let m = last_mleader(&s);
-    assert!(near(m.leaders[0][0].xy(), Vec2::ZERO) && near(m.landing.xy(), Vec2::new(10.0, 5.0)), "{m:?}");
-    assert_eq!(m.dogleg, 0.0);
+    assert!(near(m.roots[0].branches[0].vertices[0].xy(), Vec2::ZERO) && near(m.landing().xy(), Vec2::new(10.0, 5.0)), "{m:?}");
+    assert_eq!(m.dogleg(), 0.0);
 
     // The next MLEADER asks for the landing first and keeps both options.
     s.cmdline("mleader").unwrap();
     assert!(s.prompt_text().contains("landing location"), "{}", s.prompt_text());
     s.script("20,5 15,5 10,0 two\n").unwrap();
     let m = last_mleader(&s);
-    assert_eq!(m.leaders[0].len(), 2, "three points (Maxpoints 3): {m:?}");
-    assert!(near(m.leaders[0][0].xy(), Vec2::new(10.0, 0.0)) && near(m.landing.xy(), Vec2::new(20.0, 5.0)), "{m:?}");
-    assert_eq!(m.dogleg, 0.0);
+    assert_eq!(m.roots[0].branches[0].vertices.len(), 2, "three points (Maxpoints 3): {m:?}");
+    assert!(near(m.roots[0].branches[0].vertices[0].xy(), Vec2::new(10.0, 0.0)) && near(m.landing().xy(), Vec2::new(20.0, 5.0)), "{m:?}");
+    assert_eq!(m.dogleg(), 0.0);
     assert_eq!(m.text.unwrap().contents, "two");
 
     // Switching back to arrowhead first is remembered too, also when the command is cancelled.
@@ -44,5 +44,5 @@ fn mleader_remembers_order_and_options() {
 
     // JSON calls keep their documented defaults (landing line drawn).
     s.execute("mleader", &json!({"points": [[0, 0], [5, 5]], "text": "json"})).unwrap();
-    assert!(last_mleader(&s).dogleg > 0.0);
+    assert!(last_mleader(&s).dogleg() > 0.0);
 }

@@ -17,28 +17,23 @@ fn mleaders(d: &Drawing) -> Vec<&MLeader> {
 }
 
 fn text_mleader() -> MLeader {
-    MLeader {
-        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)], vec![Vec3::new(1.0, -2.0, 0.0)]],
-        landing: Vec3::new(5.0, 4.0, 0.0),
-        dogleg: 0.75,
-        text: Some(MText {
-            insert: Vec3::new(5.9, 4.0, 0.0),
-            height: 0.4,
-            width: 6.0,
-            attach: 4,
-            rotation: 0.0,
-            style: "Notes".into(),
-            contents: "FIRST\\PSECOND".into(),
-            line_spacing: 1.25,
-            line_spacing_exact: true,
-            columns: None,
-        }),
-        style: "Callout".into(),
-        arrow_size: 0.3,
-        spline: false,
-        block: None,
-        arrow_block: String::new(),
-    }
+    let text = MText {
+        insert: Vec3::new(5.9, 4.0, 0.0),
+        height: 0.4,
+        width: 6.0,
+        attach: 4,
+        rotation: 0.0,
+        style: "Notes".into(),
+        contents: "FIRST\\PSECOND".into(),
+        line_spacing: 1.25,
+        line_spacing_exact: true,
+        columns: None,
+    };
+    let lines = vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)], vec![Vec3::new(1.0, -2.0, 0.0)]];
+    let mut m = MLeader::single(Vec3::new(5.0, 4.0, 0.0), 0.75, false, lines, Some(text));
+    m.style = "Callout".into();
+    m.arrow_size = 0.3;
+    m
 }
 
 fn insert(block: &str, at: Vec3) -> Insert {
@@ -102,17 +97,9 @@ fn spline_leader_with_block_content_and_attributes() {
     let EntityKind::Text(mut placed) = entity.kind else { unreachable!() };
     placed.value = "42".into();
     ins.attribs.push(Attrib::new("NUM", placed));
-    let m = MLeader {
-        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.0, 5.0, 0.0), Vec3::new(8.0, 4.0, 0.0)]],
-        landing: Vec3::new(10.0, 3.0, 0.0),
-        dogleg: 1.0,
-        text: None,
-        style: "Standard".into(),
-        arrow_size: 0.18,
-        spline: true,
-        block: Some(ins),
-        arrow_block: String::new(),
-    };
+    let lines = vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.0, 5.0, 0.0), Vec3::new(8.0, 4.0, 0.0)]];
+    let mut m = MLeader::single(Vec3::new(10.0, 3.0, 0.0), 1.0, false, lines, None);
+    (m.arrow_size, m.spline, m.block) = (0.18, true, Some(ins));
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(m.clone())).unwrap();
     let (_, back) = roundtrip(&d);
     assert!(!back.model.iter().any(|e| matches!(e.kind, EntityKind::Insert(_) | EntityKind::Leader(_))));
@@ -120,7 +107,7 @@ fn spline_leader_with_block_content_and_attributes() {
     assert_eq!(got.len(), 1);
     let g = got[0];
     assert!(g.spline);
-    assert_eq!(g.leaders, m.leaders);
+    assert_eq!(g.roots, m.roots);
     let b = g.block.as_ref().expect("block content");
     assert_eq!(b.block, "BUBBLE");
     assert_eq!(b.insert, Vec3::new(12.0, 3.0, 0.0));
@@ -137,11 +124,12 @@ fn spline_leader_with_block_content_and_attributes() {
 fn multileader_without_leader_lines() {
     let mut d = Drawing::new_metric();
     let mut m = text_mleader();
-    m.leaders.clear();
-    m.dogleg = 0.0;
+    m.roots[0].branches.clear();
+    m.roots[0].dogleg = 0.0;
     m.style = "Standard".into();
+    let landing = m.landing();
     if let Some(t) = &mut m.text {
-        t.insert = m.landing;
+        t.insert = landing;
         t.attach = 1;
         t.style = "Standard".into();
     }
@@ -189,10 +177,13 @@ fn foreign_multileader_with_two_landings() {
     let got = mleaders(&d);
     assert_eq!(got.len(), 1);
     let m = got[0];
-    assert_eq!(m.landing, Vec3::new(5.0, 5.0, 0.0));
-    assert_eq!(m.dogleg, 0.5);
+    // Each root keeps its own landing, dogleg and lines.
+    assert_eq!(m.roots.len(), 2);
+    assert_eq!((m.roots[0].landing, m.roots[0].dogleg), (Vec3::new(5.0, 5.0, 0.0), 0.5));
+    assert_eq!((m.roots[1].landing, m.roots[1].dogleg), (Vec3::new(20.0, 5.0, 0.0), 0.5));
     assert_eq!(m.arrow_size, 1.5);
-    assert_eq!(m.leaders, vec![vec![Vec3::ZERO], vec![Vec3::new(25.0, 0.0, 0.0), Vec3::new(20.0, 5.0, 0.0)]]);
+    let lines: Vec<Vec<Vec3>> = m.lines().map(|(_, b)| b.vertices.clone()).collect();
+    assert_eq!(lines, vec![vec![Vec3::ZERO], vec![Vec3::new(25.0, 0.0, 0.0)]]);
     let t = m.text.as_ref().unwrap();
     assert_eq!(t.contents, "HELLO");
     assert_eq!(t.insert, Vec3::new(6.0, 5.0, 0.0));
@@ -218,10 +209,10 @@ fn hostile_multileaders_do_not_panic() {
     for body in &cases {
         let d = cadcraft_io::read_dxf(dxf_with(body).as_bytes()).unwrap();
         for m in mleaders(&d) {
-            assert!(m.leaders.len() <= 4096);
-            assert!(m.landing.x.is_finite() && m.landing.y.is_finite());
-            assert!(m.leaders.iter().flatten().all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite()));
-            assert!(m.dogleg.is_finite() && m.dogleg >= 0.0);
+            assert!(m.line_count() <= 4096);
+            assert!(m.roots.iter().all(|r| r.landing.x.is_finite() && r.landing.y.is_finite()));
+            assert!(m.lines().all(|(_, b)| b.vertices.iter().all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite())));
+            assert!(m.roots.iter().all(|r| r.dogleg.is_finite() && r.dogleg >= 0.0));
             if let Some(t) = &m.text {
                 assert!((1..=9).contains(&t.attach) && t.height > 0.0);
             }

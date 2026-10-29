@@ -339,6 +339,13 @@ impl Session {
                 self.resume_suspended();
                 Err(EngineError::Internal(id, m))
             }
+            Err(e @ EngineError::TooLarge(_)) => {
+                // The step left the drawing as it was: the command ends.
+                self.echo(e.to_string());
+                self.finish(run, true);
+                self.resume_suspended();
+                Ok(())
+            }
             Err(e) => {
                 // Invalid input: report and keep prompting (AutoCAD re-prompts).
                 self.echo(e.to_string());

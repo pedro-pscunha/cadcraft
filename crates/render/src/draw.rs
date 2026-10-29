@@ -273,18 +273,14 @@ fn draw_mleader(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &cadcraft_doc::MLeade
             b.tris(ctx, rgb, &g.tris);
         }
     }
+    // Each root draws its own dogleg from its landing along its own direction.
+    for r in m.roots.iter().filter(|r| r.dogleg > 0.0 && !r.branches.is_empty()) {
+        b.polyline(ctx, rgb, lw, &[r.landing.xy(), r.dogleg_end().xy()]);
+    }
     if let Some(t) = &m.text {
-        let land = m.landing.xy();
-        let dir = if t.insert.x >= land.x { 1.0 } else { -1.0 };
-        b.polyline(ctx, rgb, lw, &[land, land + Vec2::new(m.dogleg * dir, 0.0)]);
         mtext(b, ctx, t, rgb, lw);
     }
     if let Some(ins) = &m.block {
-        if m.dogleg > 0.0 && !m.leaders.is_empty() {
-            let land = m.landing.xy();
-            let dir = if ins.insert.x >= land.x { 1.0 } else { -1.0 };
-            b.polyline(ctx, rgb, lw, &[land, land + Vec2::new(m.dogleg * dir, 0.0)]);
-        }
         insert(b, ctx, e, ins, rgb);
     }
 }

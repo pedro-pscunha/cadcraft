@@ -102,13 +102,13 @@ fn mleader_landing_first_and_content_first() {
     let mut s = Session::new();
     s.script("mleader l 10,5 0,0 note\n").unwrap();
     let m = last_mleader(&s);
-    assert_eq!(m.leaders.len(), 1);
-    assert!(near(m.leaders[0][0].xy(), Vec2::ZERO) && near(m.landing.xy(), Vec2::new(10.0, 5.0)), "{m:?}");
+    assert_eq!(m.line_count(), 1);
+    assert!(near(m.roots[0].branches[0].vertices[0].xy(), Vec2::ZERO) && near(m.landing().xy(), Vec2::new(10.0, 5.0)), "{m:?}");
     assert_eq!(m.text.unwrap().contents, "note");
 
     s.script("mleader c 10,5 hello\n0,0\n").unwrap();
     let m = last_mleader(&s);
-    assert!(near(m.leaders[0][0].xy(), Vec2::ZERO) && near(m.landing.xy(), Vec2::new(10.0, 5.0)), "{m:?}");
+    assert!(near(m.roots[0].branches[0].vertices[0].xy(), Vec2::ZERO) && near(m.landing().xy(), Vec2::new(10.0, 5.0)), "{m:?}");
     assert_eq!(m.text.unwrap().contents, "hello");
 }
 
@@ -118,9 +118,9 @@ fn mleader_options_take_effect() {
     // Enter opens Options; Maxpoints 3 and no landing line.
     s.script("mleader\n\nm 3 a n x 0,0 5,5 10,5 txt\n").unwrap();
     let m = last_mleader(&s);
-    assert_eq!(m.leaders[0].len(), 2, "{m:?}");
-    assert!(near(m.leaders[0][1].xy(), Vec2::new(5.0, 5.0)) && near(m.landing.xy(), Vec2::new(10.0, 5.0)));
-    assert_eq!(m.dogleg, 0.0);
+    assert_eq!(m.roots[0].branches[0].vertices.len(), 2, "{m:?}");
+    assert!(near(m.roots[0].branches[0].vertices[1].xy(), Vec2::new(5.0, 5.0)) && near(m.landing().xy(), Vec2::new(10.0, 5.0)));
+    assert_eq!(m.dogleg(), 0.0);
     assert_eq!(m.text.unwrap().contents, "txt");
 
     // First angle constraint snaps the leader to 45° steps (a new session: MLEADER would keep the
@@ -129,7 +129,7 @@ fn mleader_options_take_effect() {
     s.script("mleader o f 45 x 0,0 10,8 note\n").unwrap();
     let m = last_mleader(&s);
     let r = Vec2::new(10.0, 8.0).len();
-    assert!(near(m.landing.xy(), Vec2::new(r, r) / 2f64.sqrt()), "{:?}", m.landing);
+    assert!(near(m.landing().xy(), Vec2::new(r, r) / 2f64.sqrt()), "{:?}", m.landing());
 
     // Leader type sPline keeps the following input and draws a spline leader.
     s.script("mleader o l p x 0,0 4,4 hi\n").unwrap();

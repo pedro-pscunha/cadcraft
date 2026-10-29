@@ -184,7 +184,9 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
             b
         }
         EntityKind::MLeader(m) => {
-            let mut b = Bounds2::from_points(m.leaders.iter().flatten().map(|v| v.xy()).chain(std::iter::once(m.landing.xy())));
+            let mut b = Bounds2::from_points(
+                m.roots.iter().flat_map(|r| r.branches.iter().flat_map(|b| b.vertices.iter()).chain(std::iter::once(&r.landing))).map(|v| v.xy()),
+            );
             if let Some(t) = &m.text {
                 b.add(t.insert.xy());
                 if !blank(&t.contents) {
@@ -354,15 +356,14 @@ mod tests {
             columns: None,
         };
         let ml = crate::MLeader {
-            leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0)]],
-            landing: Vec3::new(25.0, 0.0, 0.0),
-            dogleg: 0.45,
+            roots: vec![crate::MLeaderRoot::new(Vec3::new(25.0, 0.0, 0.0), 0.45, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],
             text: Some(mtext.clone()),
             style: "Standard".into(),
             arrow_size: 1.0,
             spline: false,
             block: None,
             arrow_block: String::new(),
+            context: crate::MLeaderContext::default(),
         };
         let b = bounds(EntityKind::MLeader(ml.clone()));
         // The glyph spans x 25.45..28.78, y -2.5..2.5.

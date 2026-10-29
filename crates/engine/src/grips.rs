@@ -213,29 +213,25 @@ fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2) -> Option<Enti
         EntityKind::Leader(l) => set_xy(l.vertices.get_mut(index)?, to),
         EntityKind::MLine(m) => set_xy(&mut m.vertices.get_mut(index)?.p, to),
         EntityKind::MLeader(m) => {
-            let mut idx = 0usize;
-            let mut done = false;
-            'outer: for l in &mut m.leaders {
-                for v in l.iter_mut() {
-                    if idx == index {
-                        set_xy(v, to);
-                        done = true;
-                        break 'outer;
+            // The vertices of every line come first (each root's lines in turn), then one landing grip per root.
+            let vertices = m.lines().map(|(_, b)| b.vertices.len()).sum::<usize>();
+            if let Some(v) = m.roots.iter_mut().flat_map(|r| r.branches.iter_mut()).flat_map(|b| b.vertices.iter_mut()).nth(index) {
+                set_xy(v, to);
+            } else {
+                // A landing grip moves its landing; the first root's also moves the content.
+                let n = index.checked_sub(vertices)?;
+                let root = m.roots.get_mut(n)?;
+                let ld = root.landing.xy() + delta;
+                set_xy(&mut root.landing, ld);
+                if n == 0 {
+                    if let Some(t) = &mut m.text {
+                        let q = t.insert.xy() + delta;
+                        set_xy(&mut t.insert, q);
                     }
-                    idx += 1;
-                }
-            }
-            if !done {
-                // The landing grip moves the landing and its content.
-                let ld = m.landing.xy() + delta;
-                set_xy(&mut m.landing, ld);
-                if let Some(t) = &mut m.text {
-                    let q = t.insert.xy() + delta;
-                    set_xy(&mut t.insert, q);
-                }
-                if let Some(b) = &mut m.block {
-                    let q = b.insert.xy() + delta;
-                    set_xy(&mut b.insert, q);
+                    if let Some(b) = &mut m.block {
+                        let q = b.insert.xy() + delta;
+                        set_xy(&mut b.insert, q);
+                    }
                 }
             }
         }

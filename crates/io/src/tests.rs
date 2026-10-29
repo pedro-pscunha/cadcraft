@@ -1715,15 +1715,14 @@ fn mleader_is_written_as_multileader() {
         columns: None,
     };
     let m = cadcraft_doc::MLeader {
-        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.0)]],
-        landing: Vec3::new(10.0, 5.0, 0.0),
-        dogleg: 2.0,
+        roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::new(10.0, 5.0, 0.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],
         text: Some(text),
         style: "Standard".into(),
         arrow_size: 2.5,
         spline: false,
         block: None,
         arrow_block: String::new(),
+        context: cadcraft_doc::MLeaderContext::default(),
     };
     d.add(&Space::Model, Default::default(), EntityKind::MLeader(m.clone())).unwrap();
     // MULTILEADER is a 2007 entity (R2000/2004 files get LEADER + MTEXT).
