@@ -5,7 +5,16 @@ use super::{
     VportConfig, VportTile, records,
 };
 
-pub(super) fn header(tags: &[Tag], d: &mut Drawing) {
+fn scalar(v: &Tag) -> HVal {
+    match &v.value {
+        cadcraft_dxf::Value::Real(r) => HVal::Real(*r),
+        cadcraft_dxf::Value::Int(n) => HVal::Int(*n),
+        cadcraft_dxf::Value::Bool(b) => HVal::Int(i64::from(*b)),
+        other => HVal::Str(other.as_str()),
+    }
+}
+
+pub(super) fn header(tags: &[Tag], d: &mut Drawing, rx: &Rx) {
     let mut i = 0;
     while let Some(t) = tags.get(i) {
         if t.code == 9 {
@@ -31,12 +40,15 @@ pub(super) fn header(tags: &[Tag], d: &mut Drawing) {
             let hv = match vals.as_slice() {
                 [x, y, z] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), z.f64())),
                 [x, y] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), 0.0)),
-                [v] => match &v.value {
-                    cadcraft_dxf::Value::Real(r) => HVal::Real(*r),
-                    cadcraft_dxf::Value::Int(n) => HVal::Int(*n),
-                    cadcraft_dxf::Value::Bool(b) => HVal::Int(i64::from(*b)),
-                    other => HVal::Str(other.as_str()),
-                },
+                [v] => scalar(v),
+                // $CEPSNTYPE 380 with 390, the plot style of new objects when the type is 3: the
+                // placeholder is held by its plot style name as `CEPSNTYPE@390`, like a layer's.
+                [v, p] if p.code == 390 => {
+                    if let Some(n) = rx.pstyles.get(&p.str().trim().to_ascii_uppercase()) {
+                        d.header.set(&format!("{name}@390"), HVal::Str(n.clone()));
+                    }
+                    scalar(v)
+                }
                 _ => continue,
             };
             // $DIMDSEP holds a character code; the dimension style holds the character.

@@ -1530,18 +1530,20 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     }
 }
 
-/// Header variables that point at an object ($CMATERIAL, $INTERFEREOBJVS…) were written with
+/// Header variables that point at an object ($CMATERIAL, $INTERFEREOBJVS, $CEPSNTYPE 390…) were written with
 /// the handle read (see `header::preserved_header_vars`): point them at the saved object, or at
 /// the null handle when it is gone (`saved`). The writer generates no pointer-valued header
 /// variable.
 fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
     let Some(start) = out.windows(2).position(|w| w[0].code == 0 && w[1].code == 2 && w[1].str() == "HEADER") else { return };
-    let mut named = false;
+    let mut variable = String::new();
     for t in out.iter_mut().skip(start + 2).take_while(|t| t.code != 0) {
-        if named && cadcraft_doc::foreign::is_pointer(t.code) {
+        if t.code == 9 {
+            variable = t.str();
+        // $CEPSNTYPE's 390 names a placeholder the writer wrote in this file: already saved.
+        } else if cadcraft_doc::foreign::is_pointer(t.code) && !variable.eq_ignore_ascii_case("$CEPSNTYPE") {
             *t = Tag::s(t.code, saved(&t.str()));
         }
-        named = t.code == 9;
     }
 }
 

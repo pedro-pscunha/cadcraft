@@ -175,7 +175,13 @@ fn preserved_header_vars(w: &mut W, d: &Drawing, target: Version) {
             continue;
         }
         let Some(value) = d.header.get(name) else { continue };
-        let tags = header_value(value, codes);
+        let lead = if matches!(value, HVal::Point(_)) { codes.len() } else { 1 };
+        let mut tags = header_value(value, codes.get(..lead).unwrap_or_default());
+        // $CEPSNTYPE's 390: the placeholder of the plot style `CEPSNTYPE@390` names (see the header
+        // reader), as written in this file.
+        if let Some(h) = d.header.get(&format!("{name}@390")).and_then(HVal::as_str).and_then(|n| w.pstyles.get(&n.trim().to_ascii_uppercase())) {
+            tags.push(Tag::s(390, h.clone()));
+        }
         if !tags.is_empty() {
             w.s(9, format!("${name}"));
             w.t.extend(tags);
