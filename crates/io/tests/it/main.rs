@@ -19,6 +19,7 @@ mod dim_block_text;
 mod dim_clone_insert_point;
 mod dim_marks_roundtrip;
 mod dim_named_block;
+mod dim_oblique_90;
 mod dimassoc_foreign_roundtrip;
 mod dimstyle_fidelity;
 mod dimstyle_vars_roundtrip;
@@ -75,6 +76,7 @@ mod plot_styles;
 #[cfg(not(target_arch = "wasm32"))]
 mod polyline_fit;
 mod polyline_owned_vertices;
+mod polyline_parent_plot_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod raw_dwg_bridge;
 mod region_roundtrip;

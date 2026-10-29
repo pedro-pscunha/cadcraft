@@ -296,6 +296,14 @@ pub(super) fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
     for style in src.mline_styles.iter().filter(|s| used.mline_styles.contains(&up(&s.name))) {
         used.linetypes.extend(style.elements.iter().map(|e| up(&e.linetype)));
     }
+    // A table style's cell styles (the built-in ones too) use text styles and border linetypes.
+    for ts in src.table_styles.iter().filter(|s| used.table_styles.contains(&up(&s.name))) {
+        for name in ts.cell_style_names() {
+            let cs = ts.cell_style(&name);
+            used.text_styles.insert(up(&cs.text_style));
+            used.linetypes.extend(cs.borders.as_array().into_iter().filter_map(|b| b.linetype.as_deref()).map(up));
+        }
+    }
     for t in src.linetypes.iter().filter(|t| used.linetypes.contains(&up(&t.name))) {
         used.text_styles.extend(t.pattern.iter().filter_map(|p| p.style.as_deref()).map(up));
     }

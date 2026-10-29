@@ -58,10 +58,14 @@ pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
 }
 
 /// Group 52 of a linear or aligned dimension with oblique extension lines: their angle less the
-/// dimension line's (`base`), in degrees.
+/// dimension line's (`base`), in degrees. Extension lines perpendicular to the dimension line (90
+/// degrees, mod 180) are no oblique: AutoCAD writes no 52 for them and refuses a DXF that has one.
 pub(super) fn oblique_52(w: &mut W, dm: &Dimension, base: f64) {
     if let Some(a) = dm.marks.oblique.filter(|a| a.is_finite()) {
-        w.f(52, cadcraft_geom::norm_angle(a - base).to_degrees());
+        let degrees = cadcraft_geom::norm_angle(a - base).to_degrees();
+        if (degrees.rem_euclid(180.0) - 90.0).abs() > 1e-9 {
+            w.f(52, degrees);
+        }
     }
 }
 

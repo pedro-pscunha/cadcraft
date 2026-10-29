@@ -549,7 +549,10 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T,
     }
     let records =
         cadcraft_doc::PolylineRecords { vertices: fit_vertices.iter().filter(|v| v.flags & 16 == 0).map(|v| v.record.clone()).collect(), seqend };
-    let c = common(t);
+    let mut c = common(t);
+    if let Some(style) = entity_plot_style(t.0, rx) {
+        c.plot_style = style;
+    }
     let k = if mesh {
         EntityKind::PolylineMesh(cadcraft_doc::PolylineMesh {
             kind: if flags & 64 != 0 { cadcraft_doc::MeshKind::Polyface } else { cadcraft_doc::MeshKind::Polygon },
