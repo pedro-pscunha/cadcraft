@@ -80,7 +80,7 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
         }
         EntityKind::Leader(l) => {
-            let _ = write!(s, "LEADER{:?}{plane:?}", &l.vertices);
+            let _ = write!(s, "LEADER{:?}{plane:?}", l.vertices);
         }
         EntityKind::Hatch(h) => {
             // The boundary objects (`sources`) are references, not geometry.

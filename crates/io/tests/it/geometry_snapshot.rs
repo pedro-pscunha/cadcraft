@@ -298,6 +298,6 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
         .unwrap();
         let got = record(&cadcraft_io::write_dxf(&d), "LEADER");
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3, "{got:?}");
-        assert!(!got.iter().any(|t| matches!(t.code, 210 | 211 | 212 | 213)), "{got:?}");
+        assert!(!got.iter().any(|t| (210..=213).contains(&t.code)), "{got:?}");
     }
 }
