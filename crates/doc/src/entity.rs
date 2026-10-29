@@ -58,6 +58,8 @@ mod mleader;
 mod mline_canonical;
 mod text;
 mod text_canonical;
+mod world;
+pub use world::{WorldGeometry, WorldPrimitive};
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
