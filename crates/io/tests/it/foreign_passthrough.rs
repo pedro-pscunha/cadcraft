@@ -557,7 +557,7 @@ fn layouts() -> String {
         (100, "AcDbPlotSettings"),
         (1, ""),
         (2, "none_device"),
-        (4, "ISO_A1_(841.00_x_594.00_MM)"),
+        (4, "UserDefinedMetric (841.00 x 594.00MM)"),
         (6, ""),
         (7, "acad.ctb"),
         (40, "7.5"),
@@ -662,6 +662,7 @@ fn layouts_keep_their_limits_extents_ucs_and_plot_settings() {
         assert_eq!((num(&plot, 46), num(&plot, 47)), (-5.0, -6.0), "plot origin: {text}");
         assert_eq!((num(&plot, 148), num(&plot, 149)), (-100.0, -200.0));
         assert_eq!((num(&plot, 76), num(&plot, 77), num(&plot, 78)), (1.0, 3.0, 200.0), "shade plot");
+        assert_eq!(text_of(&plot, 4), "UserDefinedMetric (841.00 x 594.00MM)", "the paper's canonical name keeps its spaces: {text}");
         let flags = num(&plot, 70) as i64;
         assert_eq!(flags & (8 | 32 | 512), 8 | 32 | 512, "plot flags the page setup has no field for: {flags}");
         // The Model layout keeps its own paper, device, plot style table and area.

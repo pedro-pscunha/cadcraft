@@ -158,11 +158,12 @@ fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
             LayoutPart::Plot if model && !plot.is_empty() => continue,
             LayoutPart::Plot => {
                 plot_codes.insert(t.code);
-                if t.code == 70 {
-                    first_group(plot, 70)
-                        .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED)))
-                } else {
-                    first_group(plot, t.code).filter(|_| PLOT_EXTRA_CODES.contains(&t.code)).map(tag)
+                match t.code {
+                    70 => first_group(plot, 70)
+                        .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED))),
+                    // The paper's canonical name: the model keeps it with spaces, the writer writes underscores.
+                    4 => first_group(plot, 4).filter(|k| k.value.replace('_', " ") == t.str().replace('_', " ")).map(tag),
+                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(tag),
                 }
             }
             LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
