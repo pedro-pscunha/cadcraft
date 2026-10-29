@@ -84,28 +84,34 @@ pub fn write(d: &Drawing, name: &str) -> Result<Vec<u8>> {
 /// Like [`write`], with the DXF/DWG version and binary DXF chosen by `opts`. Binary applies to
 /// DXF only; asking for it with another format is an error.
 pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>> {
+    write_with_noted(d, name, opts).map(|(bytes, _)| bytes)
+}
+
+/// Like [`write_with`], with notes for every record that the writer leaves out.
+pub fn write_with_noted(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<(Vec<u8>, Vec<String>)> {
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match ext(name).as_str() {
         "dxf" | "" => {
             let tags = dxf_write::tags(d, version);
-            Ok(if opts.binary {
+            let bytes = if opts.binary {
                 cadcraft_dxf::write_binary(&tags, version.utf8())
             } else {
                 cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes()
-            })
+            };
+            Ok((bytes, Vec::new()))
         }
         // The DWG bridge reads our R2000 DXF and writes the DWG at the version asked for. Without
         // one, at least 2004: R2000 DWG has no true colours, transparency, table styles or
         // gradients, so a drawing from an R2000 DXF doesn't lose them by default.
-        "dwg" if !opts.binary => {
+        "dwg" | "dwt" if !opts.binary => {
             let version = opts.version.unwrap_or_else(|| version.max(Version::R2004));
             let page = d.header.str("DWGCODEPAGE", "ANSI_1252");
             let page = page.trim();
             let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
-            cadcraft_dwg::dxf_to_dwg_as(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)
+            cadcraft_dwg::dxf_to_dwg_as_noted(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)
         }
         e if opts.binary => Err(IoError::Format(format!("binary output is for DXF files, not `{e}`"))),
-        _ => write_framed(d, name, None),
+        _ => write_framed(d, name, None).map(|bytes| (bytes, Vec::new())),
     }
 }
 

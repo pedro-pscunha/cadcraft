@@ -44,6 +44,8 @@ mod hatch_clockwise_arc_edge;
 mod hatch_pattern_def;
 mod header_fidelity;
 mod header_pointers;
+#[cfg(not(target_arch = "wasm32"))]
+mod heavy_polyline;
 mod helix_roundtrip;
 mod layout_paper_units;
 mod layout_plot_window;
@@ -68,7 +70,11 @@ mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
+#[cfg(not(target_arch = "wasm32"))]
+mod polyline_fit;
 mod polyline_owned_vertices;
+#[cfg(not(target_arch = "wasm32"))]
+mod raw_dwg_bridge;
 mod region_roundtrip;
 mod roundtrip_audit;
 mod skipped_records;

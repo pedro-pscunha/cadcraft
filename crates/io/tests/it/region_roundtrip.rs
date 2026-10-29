@@ -43,6 +43,8 @@ fn region_with_islands_survives_save_and_reopen() {
                 const_width: 0.0,
                 elevation: 0.0,
                 plinegen: false,
+                heavy: false,
+                fit: None,
             }),
         )
         .unwrap();

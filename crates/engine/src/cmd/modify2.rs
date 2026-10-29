@@ -137,7 +137,7 @@ pub(crate) fn as_lwpoly(k: &EntityKind) -> Option<LwPolyline> {
         EntityKind::LwPolyline(p) => Some(p.clone()),
         EntityKind::Line(_) | EntityKind::Arc(_) => {
             let c = Chain::of(k)?;
-            Some(LwPolyline { vertices: c.vertices(), closed: false, const_width: 0.0, elevation: 0.0, plinegen: false })
+            Some(LwPolyline { vertices: c.vertices(), closed: false, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false, fit: None })
         }
         _ => None,
     }

@@ -177,6 +177,9 @@ fn install_io() {
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
         plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
     });
+    cadcraft_engine::cmd::file::set_write_noted(|d, name, o| {
+        cadcraft_io::write_with_noted(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
+    });
     cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
         cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
     });
@@ -238,9 +241,16 @@ fn export(s: &Session, out: &str) -> Result<(), String> {
 
 fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), String> {
     let d = s.doc().map_err(|e| e.to_string())?;
-    let bytes = cadcraft_io::write_framed(d, out, window).map_err(|e| e.to_string())?;
+    let (bytes, notes) = if cadcraft_io::is_image(out) {
+        (cadcraft_io::write_framed(d, out, window).map_err(|e| e.to_string())?, Vec::new())
+    } else {
+        cadcraft_io::write_with_noted(d, out, &cadcraft_io::SaveOptions::default()).map_err(|e| e.to_string())?
+    };
     write_atomic(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
     eprintln!("wrote {out} ({} bytes)", bytes.len());
+    for note in notes {
+        eprintln!("{note}");
+    }
     if cadcraft_engine::cmd::file::drops_unknown(out) {
         let lost = cadcraft_engine::cmd::file::not_saved(d);
         if let Some(m) = cadcraft_engine::cmd::file::not_saved_message(&lost) {
@@ -577,6 +587,8 @@ fn synthetic(n: usize, side: f64) -> Result<cadcraft_engine::doc::Drawing, Strin
                 const_width: 0.0,
                 elevation: 0.0,
                 plinegen: false,
+                heavy: false,
+                fit: None,
             }),
             _ => EntityKind::Text(d::Text {
                 insert: v3(x, y),

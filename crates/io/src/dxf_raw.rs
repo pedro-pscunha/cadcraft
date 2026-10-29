@@ -1211,9 +1211,24 @@ fn write_table_records(map: &Map<'_>, r: &Rec, body: &[Tag], table: &mut String,
     0
 }
 
+fn raw_dwg_object(object: &ForeignObject) -> bool {
+    object.tags.iter().any(|t| t.code == 100 && t.value == "AcDbAcadrustRawDwgObject")
+}
+
+fn public_foreign(f: &Foreign) -> Foreign {
+    let mut public = f.clone();
+    let private: HashSet<String> = public.objects.iter().filter(|o| raw_dwg_object(o)).map(|o| up(&o.kind)).collect();
+    public.objects.retain(|o| !raw_dwg_object(o));
+    public.classes.retain(|c| {
+        c.iter().find(|t| t.code == 1).is_none_or(|n| !private.contains(&up(&n.value)) || public.objects.iter().any(|o| up(&o.kind) == up(&n.value)))
+    });
+    public
+}
+
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
-pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
-    let f = d.foreign.as_ref();
+pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
+    let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
+    let f = public.as_ref().unwrap_or(&d.foreign);
     let unknown = unknown_handles(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() {

@@ -57,6 +57,67 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     w.emitted.insert(e.handle, handles);
 }
 
+fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_doc::LwPolyline) {
+    w.s(0, "POLYLINE");
+    common(w, e, owner, paper, "AcDb2dPolyline");
+    w.i(66, 1);
+    w.p(10, Vec3::new(0.0, 0.0, p.elevation));
+    thickness(w, e);
+    if let Some(fit) = p.saved_fit().filter(|fit| fit.extrusion == e.common.extrusion) {
+        w.i(70, fit.flags);
+        w.f(40, fit.start_width);
+        w.f(41, fit.end_width);
+        for (code, value) in [(71, fit.m_count), (72, fit.n_count), (73, fit.m_density), (74, fit.n_density), (75, fit.smooth_type)] {
+            w.i(code, value);
+        }
+        w.p(210, fit.extrusion);
+        for vertex in &fit.vertices {
+            heavy_vertex(w, e, vertex);
+        }
+    } else {
+        w.i(70, i64::from(p.closed) | if p.plinegen { 128 } else { 0 });
+        w.f(40, p.const_width);
+        w.f(41, p.const_width);
+        for vertex in &p.vertices {
+            heavy_vertex(
+                w,
+                e,
+                &cadcraft_doc::PolylineFitVertex {
+                    position: Vec3::new(vertex.p.x, vertex.p.y, 0.0),
+                    flags: 0,
+                    start_width: if p.const_width > 0.0 { p.const_width } else { vertex.start_width },
+                    end_width: if p.const_width > 0.0 { p.const_width } else { vertex.end_width },
+                    bulge: vertex.bulge,
+                    tangent: 0.0,
+                },
+            );
+        }
+    }
+    let handle = w.h();
+    w.s(0, "SEQEND");
+    w.s(5, handle);
+    w.s(330, e.handle.hex());
+    w.s(100, "AcDbEntity");
+    w.s(8, &e.common.layer);
+}
+
+fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex) {
+    let handle = w.h();
+    w.s(0, "VERTEX");
+    w.s(5, handle);
+    w.s(330, e.handle.hex());
+    w.s(100, "AcDbEntity");
+    w.s(8, &e.common.layer);
+    w.s(100, "AcDbVertex");
+    w.s(100, "AcDb2dVertex");
+    w.p(10, vertex.position);
+    w.f(40, vertex.start_width);
+    w.f(41, vertex.end_width);
+    w.f(42, vertex.bulge);
+    w.i(70, vertex.flags);
+    w.f(50, vertex.tangent.to_degrees());
+}
+
 fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     match &e.kind {
         EntityKind::Line(l) => {
@@ -101,6 +162,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.f(41, el.start);
             w.f(42, el.end);
         }
+        EntityKind::LwPolyline(p) if p.heavy => heavy_polyline(w, e, owner, paper, p),
         EntityKind::LwPolyline(p) => {
             w.s(0, "LWPOLYLINE");
             common(w, e, owner, paper, "AcDbPolyline");

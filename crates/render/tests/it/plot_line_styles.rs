@@ -67,8 +67,15 @@ fn joins_shape_the_corner() {
     let corner = |join| {
         let mut d = Drawing::new_metric();
         let v = |x, y| PolyVertex::new(Vec2::new(x, y));
-        let pl =
-            LwPolyline { vertices: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)], closed: false, const_width: 0.0, elevation: 0.0, plinegen: false };
+        let pl = LwPolyline {
+            vertices: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0)],
+            closed: false,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+            heavy: false,
+            fit: None,
+        };
         d.add(&Space::Model, red(), EntityKind::LwPolyline(pl)).unwrap();
         let mut l = build_plot(&d, &Space::Model, &table(EndStyle::Butt, join, FillStyle::Object));
         pen::apply(&mut l, 1.0);
