@@ -106,6 +106,17 @@ pub fn write_as() -> Option<WriteAsHook> {
     WRITE_AS.get().copied()
 }
 
+/// Saved bytes and the records the writer could not keep.
+pub type NotedBytes = (Vec<u8>, Vec<String>);
+pub type WriteNotedHook = fn(&Drawing, &str, &SaveAs) -> std::result::Result<NotedBytes, String>;
+
+static WRITE_NOTED: OnceLock<WriteNotedHook> = OnceLock::new();
+
+/// Install the writer that reports losses from the actual conversion.
+pub fn set_write_noted(h: WriteNotedHook) {
+    let _ = WRITE_NOTED.set(h);
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")
@@ -142,20 +153,25 @@ fn is_dxf(path: &str) -> bool {
 
 /// The drawing written to `path` with `opts`: through [`IoHooks::write`] when no option is set,
 /// else through the [`write_as`] hook.
-fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<u8>> {
+fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<NotedBytes> {
     let hooks = io().ok_or_else(|| bad(cmd, "file formats are not available in this build"))?;
     if opts.binary && !is_dxf(path) {
         return Err(bad(cmd, "binary applies to DXF files only"));
     }
     // A drawing file is the drawing outside the Block Editor; an image is what is shown.
     let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    if is_drawing_file(path)
+        && let Some(write) = WRITE_NOTED.get()
+    {
+        return write(d, path, opts).map_err(|e| bad(cmd, e));
+    }
     let r = if *opts == SaveAs::default() {
         (hooks.write)(d, path)
     } else {
         let w = write_as().ok_or_else(|| bad(cmd, "saving at a chosen version or as binary DXF is not available in this build"))?;
         w(d, path, opts)
     };
-    r.map_err(|e| bad(cmd, e))
+    r.map(|bytes| (bytes, Vec::new())).map_err(|e| bad(cmd, e))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -391,18 +407,13 @@ fn run_closeall(s: &mut Session, _p: &Value) -> Result<Value> {
     ok()
 }
 
-pub(crate) fn save_to(s: &mut Session, path: &str) -> Result<usize> {
-    let opts = SaveAs { version: None, binary: s.state()?.binary_dxf && is_dxf(path) };
-    save_as(s, "save", path, &opts)
-}
-
 /// Save to `path` with `opts`. A drawing file then keeps the version and binary choice: the
 /// version goes into the drawing's `$ACADVER`, so later saves (QSAVE) write it again.
-fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usize> {
+fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<(usize, Vec<String>)> {
     if s.doc()?.refedit.is_some() {
         return Err(bad(cmd, "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
     }
-    let bytes = write_bytes(s, cmd, path, opts)?;
+    let (bytes, notes) = write_bytes(s, cmd, path, opts)?;
     let n = commit_save(s, path, &bytes, store)?;
     if is_drawing_file(path) {
         let st = s.state_mut()?;
@@ -414,7 +425,7 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
             st.saved = st.drawing().clone();
         }
     }
-    Ok(n)
+    Ok((n, notes))
 }
 
 /// Put saved bytes where the user gets them: natively the file at `path` (written atomically); on
@@ -468,15 +479,19 @@ fn run_save(s: &mut Session, p: &Value) -> Result<Value> {
         Some(p) => p.to_string(),
         None => s.state()?.path.clone().ok_or_else(|| bad("qsave", "drawing has no file name yet; use saveas {path}"))?,
     };
-    let n = save_to(s, &path)?;
-    Ok(saved(&path, n))
+    let opts = SaveAs { version: None, binary: s.state()?.binary_dxf && is_dxf(&path) };
+    let (n, notes) = save_as(s, "save", &path, &opts)?;
+    let mut result = saved(&path, n);
+    report_notes(s, &mut result, notes);
+    Ok(result)
 }
 
 fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("saveas", "`path` is required"))?.to_string();
     let opts = save_options("saveas", p)?;
-    let n = save_as(s, "saveas", &path, &opts)?;
+    let (n, notes) = save_as(s, "saveas", &path, &opts)?;
     let mut r = saved(&path, n);
+    report_notes(s, &mut r, notes);
     if is_drawing_file(&path) {
         r["version"] = json!(opts.version.unwrap_or_else(|| drawing_version(s, &path)).year());
         r["binary"] = json!(opts.binary);
@@ -513,8 +528,9 @@ fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let opts = save_options("document.bytes", p)?;
     let version = opts.version.unwrap_or_else(|| drawing_version(s, &format!("drawing.{fmt}")));
     let lost = not_saved_as(s.state()?.drawing(), version);
-    let bytes = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
+    let (bytes, notes) = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
     let mut r = json!({ "data": base64_encode(&bytes), "bytes": bytes.len() });
+    report_notes(s, &mut r, notes);
     if drops_unknown(&format!("drawing.{fmt}")) {
         report_not_saved(s, &mut r, &lost);
     }
@@ -608,11 +624,19 @@ fn report_save_notes(s: &mut Session, result: &mut Value, path: &str, version: V
             });
         }
     }
-    if !notes.is_empty() {
-        for note in &notes {
-            s.echo(note);
-        }
-        result["warnings"] = json!(notes);
+    report_notes(s, result, notes);
+}
+
+fn report_notes(s: &mut Session, result: &mut Value, notes: Vec<String>) {
+    if notes.is_empty() {
+        return;
+    }
+    for note in &notes {
+        s.echo(note);
+    }
+    let warnings = result.as_object_mut().map(|object| object.entry("warnings").or_insert_with(|| json!([])));
+    if let Some(Value::Array(warnings)) = warnings {
+        warnings.extend(notes.into_iter().map(Value::String));
     }
 }
 

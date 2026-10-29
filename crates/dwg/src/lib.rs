@@ -391,44 +391,6 @@ mod native {
         orphans.len()
     }
 
-    /// Leave out what acadrust can't write as this DWG version: other programs' custom entities
-    /// and objects without raw DWG data of that version. acadrust 0.6.4 refuses the whole file
-    /// for one of them (0.6.3 left them out); CADCraft already tells the user which entity types
-    /// a DWG doesn't keep (`not_saved`), so the rest of the drawing is written. Returns how many.
-    fn drop_unwritable(doc: &mut acadrust::CadDocument) -> usize {
-        let version = doc.version;
-        let unwritable: Vec<acadrust::Handle> = doc
-            .entities()
-            .filter_map(|e| match e {
-                acadrust::entities::EntityType::Unknown(u)
-                    if u.raw_dwg_data.is_none() || u.dwg_source_version.is_some_and(|v| v != version) || version == acadrust::DxfVersion::AC1009 =>
-                {
-                    Some(u.common.handle)
-                }
-                _ => None,
-            })
-            .collect();
-        for h in &unwritable {
-            doc.remove_entity(*h);
-        }
-        let objects: Vec<acadrust::Handle> = doc
-            .objects
-            .iter()
-            .filter_map(|(h, o)| match o {
-                acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, .. }
-                    if raw_dwg_data.is_none() || raw_dwg_version.is_some_and(|v| v != version) || version == acadrust::DxfVersion::AC1009 =>
-                {
-                    Some(*h)
-                }
-                _ => None,
-            })
-            .collect();
-        for h in &objects {
-            doc.objects.remove(h);
-        }
-        unwritable.len() + objects.len()
-    }
-
     /// Header variables the DWG reader fills in but acadrust's DXF writer (0.6.3) leaves out of
     /// the HEADER section: (name, group code, value).
     fn unwritten_header_vars(h: &acadrust::document::HeaderVariables) -> [(&'static str, i32, String); 7] {
@@ -494,13 +456,18 @@ mod native {
     /// Convert DXF bytes into a DWG file of the DXF's version, and at least AutoCAD 2004
     /// (AC1018).
     pub fn dxf_to_dwg(dxf: &[u8]) -> Result<Vec<u8>, String> {
-        convert(dxf, None, None)
+        convert(dxf, None, None).map(|(bytes, _)| bytes)
     }
 
     /// Convert DXF bytes into a DWG file of `version`, a code from [`super::VERSIONS`] ("AC1032"),
     /// whatever version the DXF declares. `source_code_page` restores drawing metadata after
     /// decoding the bridge bytes, only when the target's strings are Unicode (2007+).
     pub fn dxf_to_dwg_as(dxf: &[u8], version: &str, source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
+        dxf_to_dwg_as_noted(dxf, version, source_code_page).map(|(bytes, _)| bytes)
+    }
+
+    /// Convert DXF to DWG and report every record the writer cannot keep.
+    pub fn dxf_to_dwg_as_noted(dxf: &[u8], version: &str, source_code_page: Option<&str>) -> Result<(Vec<u8>, Vec<String>), String> {
         let v = match version.trim().to_ascii_uppercase().as_str() {
             "AC1015" => acadrust::DxfVersion::AC1015,
             "AC1018" => acadrust::DxfVersion::AC1018,
@@ -547,7 +514,7 @@ mod native {
         }
     }
 
-    fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>, source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
+    fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>, source_code_page: Option<&str>) -> Result<(Vec<u8>, Vec<String>), String> {
         // Reject a pathologically large DXF before handing it to the third-party decoder, which
         // allocates tables and section buffers from the input's declared sizes and cannot be
         // interrupted once it starts (CWE-789). This bounds the large-input variant; the decoder
@@ -581,13 +548,16 @@ mod native {
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
-        drop_unwritable(&mut doc);
         current_dimstyle(&mut doc);
         add_variable_dictionary(&mut doc);
         current_text_style(&mut doc);
-        std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec(&doc)))
+        std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
             .map_err(|_| "the DWG writer failed on this drawing".to_string())?
             .map_err(|e| format!("DWG write: {e}"))
+            .map(|(bytes, omitted)| {
+                let notes = omitted.into_iter().map(|o| format!("DWG: not saved: {} ({}): {}", o.name, o.handle, o.reason)).collect();
+                (bytes, notes)
+            })
     }
 
     /// AutoCAD's entry name for the drawing variables dictionary (the DXF Reference calls it the
@@ -684,7 +654,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as};
+pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_as_noted};
 
 /// The error for a DWG version CADCraft can't write.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -711,6 +681,11 @@ pub fn dxf_to_dwg(_dxf: &[u8]) -> Result<Vec<u8>, String> {
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dxf_to_dwg_as(_dxf: &[u8], _version: &str, _source_code_page: Option<&str>) -> Result<Vec<u8>, String> {
+    Err("DWG files can't be written in the web build yet; save as DXF".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn dxf_to_dwg_as_noted(_dxf: &[u8], _version: &str, _source_code_page: Option<&str>) -> Result<(Vec<u8>, Vec<String>), String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
 

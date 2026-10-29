@@ -78,6 +78,18 @@ fn raw_records_and_their_references_survive_two_dwg_saves() {
 }
 
 #[test]
+fn another_dwg_version_reports_the_raw_record_omission() {
+    let drawing = cadcraft_io::read(&source(), "source.dwg").unwrap();
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false };
+    let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, "saved.dwg", &opts).unwrap();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains(CLASS), "{notes:?}");
+    assert!(notes[0].contains("AC1032, not AC1024"), "{notes:?}");
+    let doc = DwgReader::from_stream(Cursor::new(bytes)).read().unwrap();
+    assert!(!doc.objects.values().any(|o| matches!(o, ObjectType::Arch(a) if a.dxf_name == CLASS)));
+}
+
+#[test]
 fn a_user_dxf_has_no_private_records_or_private_classes() {
     let bridge = cadcraft_dwg::dwg_to_dxf(&source()).unwrap();
     assert!(String::from_utf8_lossy(&bridge).contains("AcDbAcadrustRawDwgObject"));
