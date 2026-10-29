@@ -145,11 +145,19 @@ pub struct ForeignExtra {
     pub color_book: Option<(String, String)>,
     /// Other unmodelled property groups (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
+    /// A layout's plot settings and layout groups as read (each after its `100` subclass marker):
+    /// the writer takes from them what it has no model for (limits, extents, UCS, plot origin...).
+    pub layout: Vec<RawTag>,
 }
 
 impl ForeignExtra {
     pub fn is_empty(&self) -> bool {
-        self.xdict.is_none() && self.reactors.is_empty() && self.xdata.is_empty() && self.color_book.is_none() && self.props.is_empty()
+        self.xdict.is_none()
+            && self.reactors.is_empty()
+            && self.xdata.is_empty()
+            && self.color_book.is_none()
+            && self.props.is_empty()
+            && self.layout.is_empty()
     }
 }
 

@@ -473,3 +473,202 @@ fn suns_stay_linked_to_their_vport_and_viewport() {
         }
     }
 }
+
+/// Two layouts as AutoCAD writes them: the Model layout, whose page setup CADCraft has no model
+/// of, and a sheet with limits, extents, a UCS, a plot origin and shade plot settings.
+fn layouts() -> String {
+    let dictionary = |h: &'static str, owner: &'static str, entries: &[(&'static str, &'static str)]| -> Vec<(i32, &'static str)> {
+        let mut g = vec![(0, "DICTIONARY"), (5, h), (330, owner), (100, "AcDbDictionary"), (281, "1")];
+        for (key, target) in entries {
+            g.extend([(3, *key), (350, *target)]);
+        }
+        g
+    };
+    let mut g: Vec<(i32, &str)> = vec![(0, "SECTION"), (2, "OBJECTS")];
+    g.extend(dictionary("C", "0", &[("ACAD_LAYOUT", "20")]));
+    g.extend(dictionary("20", "C", &[("Model", "30"), ("Sheet", "31")]));
+    g.extend([
+        (0, "LAYOUT"),
+        (5, "30"),
+        (330, "20"),
+        (100, "AcDbPlotSettings"),
+        (1, ""),
+        (2, "HP LaserJet 4"),
+        (4, "ISO_A4_(210.00_x_297.00_MM)"),
+        (6, ""),
+        (7, "mono.ctb"),
+        (40, "4.1"),
+        (41, "13.5"),
+        (42, "4.3"),
+        (43, "3.3"),
+        (44, "210"),
+        (45, "297"),
+        (46, "0"),
+        (47, "0"),
+        (48, "1"),
+        (49, "2"),
+        (140, "3"),
+        (141, "4"),
+        (142, "1"),
+        (143, "40"),
+        (70, "11936"),
+        (72, "1"),
+        (73, "0"),
+        (74, "4"),
+        (75, "16"),
+        (76, "0"),
+        (77, "2"),
+        (78, "150"),
+        (147, "40"),
+        (148, "-141.2"),
+        (149, "-56.2"),
+        (100, "AcDbLayout"),
+        (1, "Model"),
+        (70, "1"),
+        (71, "0"),
+        (10, "0"),
+        (20, "0"),
+        (11, "12"),
+        (21, "9"),
+        (12, "0"),
+        (22, "0"),
+        (32, "0"),
+        (14, "-173.2"),
+        (24, "22.8"),
+        (34, "-3.35"),
+        (15, "-42.8"),
+        (25, "87.3"),
+        (35, "750"),
+        (146, "0"),
+        (13, "0"),
+        (23, "0"),
+        (33, "0"),
+        (16, "1"),
+        (26, "0"),
+        (36, "0"),
+        (17, "0"),
+        (27, "1"),
+        (37, "0"),
+        (76, "0"),
+        (330, "40"),
+        (0, "LAYOUT"),
+        (5, "31"),
+        (330, "20"),
+        (100, "AcDbPlotSettings"),
+        (1, ""),
+        (2, "none_device"),
+        (4, "ISO_A1_(841.00_x_594.00_MM)"),
+        (6, ""),
+        (7, "acad.ctb"),
+        (40, "7.5"),
+        (41, "7.5"),
+        (42, "7.5"),
+        (43, "7.5"),
+        (44, "841"),
+        (45, "594"),
+        (46, "-5"),
+        (47, "-6"),
+        (48, "0"),
+        (49, "0"),
+        (140, "0"),
+        (141, "0"),
+        (142, "1"),
+        (143, "1"),
+        (70, "684"),
+        (72, "1"),
+        (73, "0"),
+        (74, "5"),
+        (75, "16"),
+        (76, "1"),
+        (77, "3"),
+        (78, "200"),
+        (147, "1"),
+        (148, "-100"),
+        (149, "-200"),
+        (100, "AcDbLayout"),
+        (1, "Sheet"),
+        (70, "0"),
+        (71, "1"),
+        (10, "100"),
+        (20, "200"),
+        (11, "500"),
+        (21, "600"),
+        (12, "1"),
+        (22, "2"),
+        (32, "3"),
+        (14, "-5"),
+        (24, "-6"),
+        (34, "0"),
+        (15, "700"),
+        (25, "800"),
+        (35, "0"),
+        (146, "2.5"),
+        (13, "10"),
+        (23, "20"),
+        (33, "30"),
+        (16, "0"),
+        (26, "1"),
+        (36, "0"),
+        (17, "-1"),
+        (27, "0"),
+        (37, "0"),
+        (76, "1"),
+        (330, "41"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ]);
+    dxf(&g)
+}
+
+/// The groups of subclass `name` of a record.
+fn subclass(tags: &[Tag], name: &str) -> Vec<(i32, String)> {
+    let Some(start) = tags.iter().position(|t| t.code == 100 && t.str() == name) else { return Vec::new() };
+    tags.iter().skip(start + 1).take_while(|t| t.code != 100).map(|t| (t.code, t.str())).collect()
+}
+
+/// The value of the first group `code`, as a number.
+fn num(groups: &[(i32, String)], code: i32) -> f64 {
+    groups.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.trim().parse().ok()).unwrap_or(f64::NAN)
+}
+
+fn text_of(groups: &[(i32, String)], code: i32) -> String {
+    groups.iter().find(|(c, _)| *c == code).map(|(_, v)| v.clone()).unwrap_or_default()
+}
+
+/// A layout keeps what CADCraft writes as constants: the limits, insertion base, extents, UCS and
+/// flags of its AcDbLayout, the plot origin, shade plot settings and paper image origin, and
+/// the plot flags it has no field for. The Model layout keeps its whole page setup.
+#[test]
+fn layouts_keep_their_limits_extents_ucs_and_plot_settings() {
+    let d = cadcraft_io::read_dxf(layouts().as_bytes()).unwrap();
+    for text in saved_twice(&d) {
+        let layout = |name: &str| {
+            let objs = section(&text, "OBJECTS");
+            objs.into_iter().find(|(k, t)| k == "LAYOUT" && text_of(&subclass(t, "AcDbLayout"), 1) == name).map(|(_, t)| t).expect(name)
+        };
+        let (sheet, model) = (layout("Sheet"), layout("Model"));
+        let (frame, plot) = (subclass(&sheet, "AcDbLayout"), subclass(&sheet, "AcDbPlotSettings"));
+        let point = |g: &[(i32, String)], c: i32, n: usize| (0..n).map(|i| num(g, c + 10 * i as i32)).collect::<Vec<_>>();
+        assert_eq!(point(&frame, 10, 2), [100.0, 200.0], "limits: {text}");
+        assert_eq!(point(&frame, 11, 2), [500.0, 600.0]);
+        assert_eq!(point(&frame, 12, 3), [1.0, 2.0, 3.0]);
+        assert_eq!(point(&frame, 14, 3), [-5.0, -6.0, 0.0]);
+        assert_eq!(point(&frame, 15, 3), [700.0, 800.0, 0.0]);
+        assert_eq!(num(&frame, 146), 2.5);
+        assert_eq!(point(&frame, 13, 3), [10.0, 20.0, 30.0]);
+        assert_eq!(point(&frame, 16, 3), [0.0, 1.0, 0.0]);
+        assert_eq!(point(&frame, 17, 3), [-1.0, 0.0, 0.0]);
+        assert_eq!((num(&frame, 70), num(&frame, 76)), (0.0, 1.0), "paper space linetype scaling off");
+        assert_eq!((num(&plot, 46), num(&plot, 47)), (-5.0, -6.0), "plot origin: {text}");
+        assert_eq!((num(&plot, 148), num(&plot, 149)), (-100.0, -200.0));
+        assert_eq!((num(&plot, 76), num(&plot, 77), num(&plot, 78)), (1.0, 3.0, 200.0), "shade plot");
+        let flags = num(&plot, 70) as i64;
+        assert_eq!(flags & (8 | 32 | 512), 8 | 32 | 512, "plot flags the page setup has no field for: {flags}");
+        // The Model layout keeps its own paper, device, plot style table and area.
+        let (frame, plot) = (subclass(&model, "AcDbLayout"), subclass(&model, "AcDbPlotSettings"));
+        assert_eq!(point(&frame, 14, 3), [-173.2, 22.8, -3.35], "extents: {text}");
+        assert_eq!(point(&frame, 15, 3), [-42.8, 87.3, 750.0]);
+        assert_eq!((text_of(&plot, 2).as_str(), text_of(&plot, 7).as_str()), ("HP LaserJet 4", "mono.ctb"), "{text}");
+        assert_eq!((text_of(&plot, 4).as_str(), num(&plot, 74), num(&plot, 70)), ("ISO_A4_(210.00_x_297.00_MM)", 4.0, 11936.0));
+    }
+}

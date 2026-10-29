@@ -79,6 +79,100 @@ fn layer_xdata_modelled(app: &str, chunk: &[Tag]) -> bool {
     }
 }
 
+/// Groups of a layout's `AcDbLayout` subclass the writer has no model for: its flags (paper space
+/// linetype scaling, limits checking), limits, insertion base, extents, elevation, UCS and
+/// orthographic view type.
+const LAYOUT_FRAME_CODES: &[i32] = &[70, 10, 20, 11, 21, 12, 22, 32, 14, 24, 34, 15, 25, 35, 146, 13, 23, 33, 16, 26, 36, 17, 27, 37, 76];
+/// Groups of a layout's `AcDbPlotSettings` subclass `PageSetup` has no field for: the plot origin,
+/// shade plot mode, resolution and DPI, and the paper image origin.
+const PLOT_EXTRA_CODES: &[i32] = &[46, 47, 76, 77, 78, 148, 149];
+/// Plot layout flag bits (group 70) that `PageSetup` models: show plot styles, centred, standard
+/// scale, lineweights. The others (plot with plot styles, draw viewports first, hide objects,
+/// scale lineweights...) stay as read.
+const PLOT_FLAGS_MODELLED: i64 = 2 | 4 | 16 | 128;
+
+#[derive(Clone, Copy, PartialEq)]
+enum LayoutPart {
+    Plot,
+    Frame,
+    Other,
+}
+
+fn layout_part(subclass: &str) -> LayoutPart {
+    match subclass.trim() {
+        "AcDbPlotSettings" => LayoutPart::Plot,
+        "AcDbLayout" => LayoutPart::Frame,
+        _ => LayoutPart::Other,
+    }
+}
+
+/// A layout's groups to keep: its whole plot settings (the Model layout has no page setup in the
+/// model) and the [`LAYOUT_FRAME_CODES`] of its layout groups, each part after its `100` marker.
+fn layout_groups(tags: &[Tag]) -> Vec<RawTag> {
+    let mut out = Vec::new();
+    let mut part = LayoutPart::Other;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        if t.code == 100 {
+            part = layout_part(&t.str());
+            if part != LayoutPart::Other {
+                out.push(raw(t));
+            }
+        } else if part == LayoutPart::Plot || (part == LayoutPart::Frame && LAYOUT_FRAME_CODES.contains(&t.code)) {
+            out.push(raw(t));
+        }
+    }
+    out
+}
+
+fn first_group(from: &[RawTag], code: i32) -> Option<&RawTag> {
+    from.iter().find(|t| t.code == code)
+}
+
+/// A written layout with the groups it has constants for taken from the file's (`kept`, see
+/// [`layout_groups`]), and the Model layout's plot settings replaced by the file's.
+fn patch_layout(b: &[Tag], kept: &[RawTag]) -> Vec<Tag> {
+    let at = kept.iter().position(|t| t.code == 100 && layout_part(&t.value) == LayoutPart::Frame).unwrap_or(kept.len());
+    let (plot, frame) = (kept.get(1..at).unwrap_or(&[]), kept.get(at + 1..).unwrap_or(&[]));
+    let model = b
+        .iter()
+        .skip_while(|t| !(t.code == 100 && layout_part(&t.str()) == LayoutPart::Frame))
+        .find(|t| t.code == 1)
+        .is_some_and(|t| t.str().trim().eq_ignore_ascii_case("Model"));
+    let mut out = Vec::with_capacity(b.len() + plot.len());
+    let mut part = LayoutPart::Other;
+    let mut plot_codes: HashSet<i32> = HashSet::new();
+    for t in b {
+        if t.code == 100 {
+            let next = layout_part(&t.str());
+            if part == LayoutPart::Plot && next == LayoutPart::Frame && !model {
+                out.extend([76, 77, 78].into_iter().filter(|c| !plot_codes.contains(c)).filter_map(|c| first_group(plot, c)).map(tag));
+            }
+            part = next;
+            out.push(t.clone());
+            if part == LayoutPart::Plot && model && !plot.is_empty() {
+                out.extend(plot.iter().map(tag));
+            }
+            continue;
+        }
+        let replaced = match part {
+            LayoutPart::Plot if model && !plot.is_empty() => continue,
+            LayoutPart::Plot => {
+                plot_codes.insert(t.code);
+                if t.code == 70 {
+                    first_group(plot, 70)
+                        .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED)))
+                } else {
+                    first_group(plot, t.code).filter(|_| PLOT_EXTRA_CODES.contains(&t.code)).map(tag)
+                }
+            }
+            LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
+            LayoutPart::Other => None,
+        };
+        out.push(replaced.unwrap_or_else(|| t.clone()));
+    }
+    out
+}
+
 /// Most objects kept from one file.
 const MAX_OBJECTS: usize = 1_000_000;
 /// Most xdata groups kept per record (AutoCAD allows 16 KB of xdata per object).
@@ -301,6 +395,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         xdata: foreign_xdata(kind, tags),
         ..ForeignExtra::default()
     };
+    if kind == "LAYOUT" && !entity {
+        x.layout = layout_groups(tags);
+    }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
     if !unknown && (entity || kind == "LAYER") {
@@ -1280,6 +1377,14 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
 /// A written record with its kept extras, remapped references (unknown entities) and kept
 /// dictionary entries (the named object dictionary).
 fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool, root: bool, out: &mut Vec<Tag>) {
+    let patched;
+    let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
+        Some(x) => {
+            patched = patch_layout(b, &x.layout);
+            patched.as_slice()
+        }
+        None => b,
+    };
     let h = head(b);
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
