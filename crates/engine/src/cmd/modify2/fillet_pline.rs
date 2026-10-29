@@ -211,6 +211,8 @@ pub(crate) fn fillet_pline(
     trim: bool,
 ) -> Result<Option<Option<Handle>>> {
     let (e1, e2) = (curves::entity(s, h1)?, curves::entity(s, h2)?);
+    e1.require_legacy_geometry()?;
+    e2.require_legacy_geometry()?;
     if !matches!(e1.kind, EntityKind::LwPolyline(_)) && !matches!(e2.kind, EntityKind::LwPolyline(_)) {
         return Ok(None);
     }

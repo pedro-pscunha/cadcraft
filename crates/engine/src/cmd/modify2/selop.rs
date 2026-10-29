@@ -7,7 +7,7 @@ use super::{
 // REVERSE / CHSPACE / FLATTEN (select, then act)
 // =====================================================================================
 
-pub(crate) fn reverse_kind(k: &EntityKind) -> Option<EntityKind> {
+fn reverse_kind(k: &EntityKind) -> Option<EntityKind> {
     Some(match k {
         EntityKind::Line(l) => EntityKind::Line(cadcraft_doc::Line { a: l.b, b: l.a }),
         EntityKind::LwPolyline(p) => EntityKind::LwPolyline(curves::reverse_polyline(p)),
@@ -28,6 +28,7 @@ fn reverse(s: &mut Session, hs: &[Handle]) -> Result<usize> {
             continue;
         }
         let Ok(e) = curves::entity(s, *h) else { continue };
+        e.require_legacy_geometry()?;
         if let Some(k) = reverse_kind(&e.kind) {
             set_kind(s, *h, k)?;
             n += 1;
@@ -43,7 +44,7 @@ pub(super) fn run_reverse(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Zero every z coordinate; 3D polylines become 2D polylines.
-pub(crate) fn flatten_kind(k: &mut EntityKind) {
+fn flatten_kind(k: &mut EntityKind) {
     let z = |p: &mut cadcraft_geom::Vec3| p.z = 0.0;
     match k {
         EntityKind::Line(l) => {
@@ -125,10 +126,13 @@ fn flatten(s: &mut Session, hs: &[Handle]) -> Result<usize> {
     for h in hs {
         if !curves::is_locked(s, *h)
             && let Some(e) = s.doc()?.entity(*h)
-            && let EntityKind::Ellipse(ellipse) = &e.kind
-            && !ellipse.clone().flatten()
         {
-            return Err(other("An edge-on or invalid ellipse cannot be flattened into an ellipse."));
+            e.require_legacy_geometry()?;
+            if let EntityKind::Ellipse(ellipse) = &e.kind
+                && !ellipse.clone().flatten()
+            {
+                return Err(other("An edge-on or invalid ellipse cannot be flattened into an ellipse."));
+            }
         }
     }
     let mut n = 0;

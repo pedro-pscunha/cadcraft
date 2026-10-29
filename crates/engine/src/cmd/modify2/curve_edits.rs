@@ -233,6 +233,9 @@ pub(crate) fn join_curves(s: &mut Session, hs: &[Handle]) -> Result<Option<Handl
     let hs: Vec<Handle> = hs.iter().copied().filter(|h| seen.insert(*h)).collect();
     let d = s.doc()?;
     let ents: Vec<Entity> = hs.iter().filter_map(|h| d.entity(*h).map(|e| (**e).clone())).collect();
+    for entity in &ents {
+        entity.require_legacy_geometry()?;
+    }
     if !ents.iter().any(|e| matches!(e.kind, EntityKind::Ellipse(_) | EntityKind::Spline(_))) {
         return Ok(None);
     }
@@ -335,7 +338,9 @@ pub(crate) fn join_close(s: &mut Session, hs: &[Handle]) -> Result<Handle> {
     let hs: Vec<Handle> = hs.iter().copied().filter(|h| seen.insert(*h)).collect();
     let refuse = || other("Close works on a single arc or elliptical arc.");
     let [h] = hs[..] else { return Err(refuse()) };
-    let k = s.doc()?.entity(h).and_then(|e| closed_kind(&e.kind)).ok_or_else(refuse)?;
+    let entity = curves::entity(s, h)?;
+    entity.require_legacy_geometry()?;
+    let k = closed_kind(&entity.kind).ok_or_else(refuse)?;
     if curves::is_locked(s, h) {
         return Err(other("An object is on a locked layer."));
     }

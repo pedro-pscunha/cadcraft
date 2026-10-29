@@ -108,6 +108,7 @@ pub(crate) fn spline_vertices(vs: &[PolyVertex], closed: bool, segs: usize) -> V
 /// Join connected lines/arcs/open polylines onto the ends of polyline `h` (kept in place).
 pub(crate) fn pedit_join(s: &mut Session, h: Handle, others: &[Handle], fuzz: f64) -> Result<usize> {
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     let mut base = as_lwpoly(&e.kind).ok_or_else(|| other("Select a polyline."))?;
     if base.closed {
         return Err(other("Cannot join to a closed polyline."));
@@ -120,6 +121,7 @@ pub(crate) fn pedit_join(s: &mut Session, h: Handle, others: &[Handle], fuzz: f6
             continue;
         }
         let Ok(oe) = curves::entity(s, *o) else { continue };
+        oe.require_legacy_geometry()?;
         let ok = matches!(&oe.kind, EntityKind::Line(_) | EntityKind::Arc(_)) || matches!(&oe.kind, EntityKind::LwPolyline(p) if !p.closed);
         if ok && let Some(c) = Chain::of(&oe.kind) {
             pool.push((*o, c));
@@ -166,6 +168,7 @@ pub(crate) fn pedit_join(s: &mut Session, h: Handle, others: &[Handle], fuzz: f6
 
 fn pedit_apply(s: &mut Session, h: Handle, opt: &str, p: &Value) -> Result<Value> {
     let e = curves::entity(s, h)?;
+    e.require_legacy_geometry()?;
     if curves::is_locked(s, h) {
         return Err(other("The object is on a locked layer."));
     }
@@ -347,7 +350,9 @@ impl Interactive for PeditM {
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         let sel = s.selection();
         if let [h] = sel.as_slice() {
-            let k = curves::entity(s, *h)?.kind;
+            let entity = curves::entity(s, *h)?;
+            entity.require_legacy_geometry()?;
+            let k = entity.kind;
             match k {
                 EntityKind::LwPolyline(_) => {
                     self.h = Some(*h);
@@ -400,6 +405,9 @@ impl Interactive for PeditM {
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if let Some(h) = self.h {
+            s.doc()?.entity(h).ok_or_else(|| other("no such object"))?.require_legacy_geometry()?;
+        }
         let kw = |i: &Input| match i {
             Input::Keyword(k) | Input::Text(k) => Some(k.trim().to_ascii_lowercase()),
             _ => None,
@@ -408,7 +416,9 @@ impl Interactive for PeditM {
             PPhase::Select => match i {
                 Input::Point(p) => {
                     let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                    let k = curves::entity(s, h)?.kind;
+                    let entity = curves::entity(s, h)?;
+                    entity.require_legacy_geometry()?;
+                    let k = entity.kind;
                     self.h = Some(h);
                     match k {
                         EntityKind::LwPolyline(pl) => {

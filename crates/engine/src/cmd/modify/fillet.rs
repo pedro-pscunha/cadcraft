@@ -17,15 +17,7 @@ fn as_line(e: &Entity) -> Option<Line> {
 }
 
 /// Fillet (or chamfer) two lines. `p1`/`p2` mark the kept side of each line.
-pub(crate) fn fillet_lines(
-    s: &mut Session,
-    h1: Handle,
-    p1: Vec2,
-    h2: Handle,
-    p2: Vec2,
-    radius: f64,
-    chamfer: Option<(f64, f64)>,
-) -> Result<Option<Handle>> {
+fn fillet_lines(s: &mut Session, h1: Handle, p1: Vec2, h2: Handle, p2: Vec2, radius: f64, chamfer: Option<(f64, f64)>) -> Result<Option<Handle>> {
     if crate::cmd::curves::is_locked(s, h1) || crate::cmd::curves::is_locked(s, h2) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
@@ -508,6 +500,7 @@ fn chamfer_polyline(s: &mut Session, h: Handle, cut: ChamferCut) -> Result<usize
     if d.layer(&e.common.layer).is_some_and(|l| l.locked) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
+    e.require_legacy_geometry()?;
     let EntityKind::LwPolyline(pl) = &e.kind else { return Err(EngineError::Other("Select a 2D polyline.".into())) };
     let vs = &pl.vertices;
     let n = vs.len();
