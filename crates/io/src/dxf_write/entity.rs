@@ -390,7 +390,17 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             // Line spacing style: 1 = at least, 2 = exactly.
             w.i(73, if t.line_spacing_exact { 2 } else { 1 });
             w.f(44, t.line_spacing);
-            w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
+            // From 2018 AutoCAD keeps the columns in the embedded object and misreads the column groups;
+            // the DWG bridge reads the object whole (the column groups lose the heights of manual columns).
+            if (cx.target >= Version::R2018 && !cx.entget) || cx.dwg_bridge {
+                // The defined rectangle height (a DWG keeps it with the text, not with its columns).
+                if let Some(c) = t.columns.as_ref().filter(|c| c.height > 0.0 && (c.kind == cadcraft_doc::MTextColumnType::Static || c.auto_height)) {
+                    w.f(46, c.height);
+                }
+                w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t));
+            } else {
+                w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
+            }
         }
         _ => {}
     }
