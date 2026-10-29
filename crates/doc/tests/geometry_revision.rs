@@ -1,4 +1,4 @@
-use cadcraft_doc::{Entity, EntityKind, GeometryRevision, Handle, Line};
+use cadcraft_doc::{Entity, EntityKind, GeometryRevision, Handle, Line, MLeaderContext, MLeaderRoot};
 use cadcraft_geom::{Mat3, Mat4, Vec2, Vec3};
 
 fn line() -> Entity {
@@ -119,15 +119,14 @@ fn a_canonical_child_blocks_the_legacy_parent_callback_before_it_runs() {
         row_spacing: 0.0,
     };
     let leader = cadcraft_doc::MLeader {
-        leaders: Vec::new(),
-        landing: Vec3::ZERO,
-        dogleg: 0.0,
+        roots: vec![MLeaderRoot::new(Vec3::ZERO, 0.0, false, Vec::new())],
         text: None,
         style: "Standard".into(),
         arrow_size: 1.0,
         spline: false,
         block: Some(insert.clone()),
         arrow_block: String::new(),
+        context: MLeaderContext::default(),
     };
     for kind in [EntityKind::AttDef(child), EntityKind::Insert(insert), EntityKind::MLeader(leader)] {
         let entity = Entity::new(Handle(1), kind);
