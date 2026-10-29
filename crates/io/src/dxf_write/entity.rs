@@ -366,10 +366,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
         EntityKind::AttDef(a) => {
             w.s(0, "ATTDEF");
             common(w, e, owner, paper, "AcDbText");
-            // A canonical definition has the plane (and thickness) of its entity.
-            if canonical_plane(e).is_some() {
-                thickness(w, e);
-            }
+            thickness(w, e);
             text_tags(w, d, &a.text, Some((a, cx.target)), Some(&a.prompt), canonical_plane(e));
             if cx.target >= Version::R2007 {
                 multiline_tags(w, a, true);
@@ -468,9 +465,9 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                     w.i(60, 1);
                 }
                 w.s(100, "AcDbText");
-                // A canonical attribute has the plane and thickness of its own.
+                // An attribute has a thickness of its own; only a canonical one has a plane of its own.
                 let own_plane = (a.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2).then_some(a.plane.normal);
-                if own_plane.is_some() && a.plane.thickness != 0.0 {
+                if a.plane.thickness != 0.0 {
                     w.f(39, a.plane.thickness);
                 }
                 text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane);

@@ -282,7 +282,7 @@ fn each_attrib_plane_field_alone_reaches_the_dxf_and_the_dwg_apart_from_the_inse
         assert_eq!(num(&g, 71).unwrap_or(0.0), f64::from(u8::from(a.text.backward) * 2 + u8::from(a.text.upside_down) * 4), "{name}");
         let s = dwg_insert_attrib(&d);
         assert!(near(Vec3::new(s.normal.x, s.normal.y, s.normal.z), a.plane.normal), "{name}: DWG normal {:?}", s.normal);
-        // acadrust's attribute has no thickness field: the DWG leg cannot carry it (reported, DXF only).
+        assert_eq!(s.thickness, a.plane.thickness, "{name}");
         assert!((s.rotation - a.text.rotation).abs() < 1e-9, "{name}");
     }
 }
@@ -404,4 +404,33 @@ fn the_canonical_reader_keeps_an_attribs_own_plane_and_its_embedded_planes() {
 fn the_canonical_reader_refuses_a_normal_without_a_direction() {
     let tags = vec![Tag::s(1, "A"), Tag::f(40, 1.0), Tag::f(210, 0.0), Tag::f(220, 0.0), Tag::f(230, 0.0)];
     assert!(cadcraft_io::canonical_text_from_groups("TEXT", &tags).is_none());
+}
+
+/// The block `TAG` with a definition of thickness `def` and, in an insert, an attribute of thickness `inst` (legacy text).
+fn legacy_attribs(def: f64, inst: f64) -> Drawing {
+    let mut a = cadcraft_doc::Attrib::new("TAG", text());
+    a.plane.thickness = inst;
+    let mut d = insert_with(a, Vec3::Z);
+    let mut b = cadcraft_doc::Block::new("TAG");
+    let mut e = Entity::new(d.new_handle(), EntityKind::AttDef(cadcraft_doc::Attrib::new("TAG", text())));
+    e.common.thickness = def;
+    b.entities.push(e);
+    d.blocks.insert("TAG".into(), std::sync::Arc::new(b));
+    d
+}
+
+fn thicknesses(d: &Drawing) -> (f64, f64) {
+    let def = d.block("TAG").unwrap().entities.iter().find(|e| matches!(e.kind, EntityKind::AttDef(_))).unwrap().common.thickness;
+    let inst = d.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i.attribs[0].plane.thickness) } else { None }).unwrap();
+    (def, inst)
+}
+
+#[test]
+fn attribute_thickness_survives_a_dxf_and_a_dwg_save() {
+    let d = legacy_attribs(0.75, 1.25);
+    assert_eq!(thicknesses(&d), (0.75, 1.25));
+    let dxf = cadcraft_io::write(&d, "x.dxf").unwrap();
+    assert_eq!(thicknesses(&cadcraft_io::read(&dxf, "x.dxf").unwrap()), (0.75, 1.25), "dxf");
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    assert_eq!(thicknesses(&cadcraft_io::read(&dwg, "x.dwg").unwrap()), (0.75, 1.25), "dwg");
 }

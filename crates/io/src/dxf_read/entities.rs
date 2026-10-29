@@ -2,9 +2,9 @@ use super::common::{T, common, ocs};
 use super::hatch::hatch;
 use super::text::{attdef, attrib_modes, attrib_props, mtext_from, multiline_attrib, split_embedded, text_from};
 use super::{
-    Arc, Attrib, Circle, Common, DimKind, Dimension, Ellipse, EntityKind, Face3d, Handle, HashMap, Helix, HelixConstrain, Insert, Leader, Line,
-    LwPolyline, MAX_FRAME_CHARS, Point, PolyVertex, Polyline3d, RawTag, RayLine, Rx, Solid, Spline, Table, TableCell, Tag, Tolerance, Unknown, Vec2,
-    Vec3, Viewport, Wipeout, records,
+    Arc, Attrib, AttribPlane, Circle, Common, DimKind, Dimension, Ellipse, EntityKind, Face3d, Handle, HashMap, Helix, HelixConstrain, Insert,
+    Leader, Line, LwPolyline, MAX_FRAME_CHARS, Point, PolyVertex, Polyline3d, RawTag, RayLine, Rx, Solid, Spline, Table, TableCell, Tag, Tolerance,
+    Unknown, Vec2, Vec3, Viewport, Wipeout, records,
 };
 
 /// Parse one entity record. POLYLINE/INSERT followers are handled by the caller.
@@ -608,6 +608,7 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
                 props: attrib_props(&tt, ins_layer, entity_plot_style(t2, rx)),
                 multiline,
                 modes: attrib_modes(own.0),
+                plane: AttribPlane { thickness: own.fd(39, 0.0), ..AttribPlane::default() },
                 ..Attrib::new(own.s(2).unwrap_or_default(), text)
             });
             *i += 1;
