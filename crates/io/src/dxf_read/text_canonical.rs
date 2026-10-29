@@ -1,4 +1,4 @@
-//! The canonical reading of the text family (revision `CanonicalV2`): the groups' own coordinates, with no mirroring.
+//! The canonical reading of the text family and of TOLERANCE and TABLE (revision `CanonicalV2`): the groups' own coordinates, with no mirroring.
 //! TEXT, ATTDEF and ATTRIB keep OCS points and the baseline angle, the normal with its source magnitude, the signed
 //! thickness and the generation flags. MTEXT keeps its WCS insertion and its full WCS direction. An ATTRIB has its own
 //! plane, and an embedded MTEXT has its own too.
@@ -119,4 +119,30 @@ pub fn canonical_attrib_from_groups(tags: &[Tag], insert_layer: &str, plot_style
         plane: AttribPlane { normal, thickness: own_t.fd(39, 0.0) },
         ..Attrib::new(own_t.s(2).unwrap_or_default(), text)
     })
+}
+
+/// A TOLERANCE or an ACAD_TABLE from the groups of a DXF record (without its `0` group), read canonically: its frame
+/// direction as the record holds it, in the plane of its normal. `None` for another kind, or when the normal has no
+/// direction or the frame direction is not in the plane (the legacy reader keeps such a record). The caller sets the
+/// entity's `geometry_revision`.
+pub fn canonical_layout_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
+    let t = T(tags);
+    let c = common(&t);
+    let normal = normal_of(&t)?;
+    let kind = match kind.to_ascii_uppercase().as_str() {
+        "TOLERANCE" => {
+            let tolerance = super::entities::tolerance_from(&t, t.p(11));
+            tolerance.world_frame(normal).ok()?;
+            EntityKind::Tolerance(tolerance)
+        }
+        "ACAD_TABLE" => {
+            let start = tags.iter().position(|g| g.code == 100 && g.str() == "AcDbTable").unwrap_or(0);
+            let mut table = super::entities::acad_table(tags, &mut 4_000_000);
+            table.dir = T(tags.get(start..).unwrap_or_default()).p(11);
+            table.world_frame(normal).ok()?;
+            EntityKind::Table(table)
+        }
+        _ => return None,
+    };
+    Some((c, kind))
 }

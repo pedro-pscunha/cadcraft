@@ -575,11 +575,15 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         common(w, e, owner, paper, "AcDbBlockReference");
         w.s(2, bname);
         w.p(10, t.insert);
+        // A canonical table has the plane of its entity, kept as read.
+        if let Some(normal) = canonical_plane(e) {
+            w.p(210, normal);
+        }
         w.s(100, "AcDbTable");
         w.i(280, 0);
         w.s(342, cx.table_style(&t.style));
         w.s(343, brh);
-        w.p(11, Vec3::new(1.0, 0.0, 0.0));
+        w.p(11, t.dir);
         w.i(90, 0);
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
@@ -848,6 +852,9 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.p(10, t.insert);
             w.s(1, &t.text);
             w.p(11, t.dir);
+            if let Some(normal) = canonical_plane(e) {
+                w.p(210, normal);
+            }
         }
         // Entity types CADCraft doesn't model aren't written; the save command reports them.
         EntityKind::Unknown(_) => {}
