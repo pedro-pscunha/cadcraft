@@ -243,17 +243,16 @@ fn marks_follow_move_and_rotate_and_hostile_values_do_not_panic() {
     s.execute("rotate", &json!({ "handles": [h], "base": [10, 5], "angle": 90 })).unwrap();
     let (dm, _) = dim_of(&s, &h);
     assert!((dm.marks.oblique.unwrap() - 150f64.to_radians()).abs() < 1e-9);
-    // Damaged marks still draw.
+    // Damaged input records still draw; an edit cannot create them.
     let d = s.doc_mut().unwrap();
     let hh = Handle::parse_hex(&h).unwrap();
-    d.modify_entity(hh, |e| {
-        if let EntityKind::Dimension(dm) = &mut e.kind {
-            dm.marks.oblique = Some(f64::NAN);
-            dm.marks.jog_line = Some(cadcraft_engine::geom::Vec3::new(f64::INFINITY, 0.0, 0.0));
-            dm.marks.breaks.push(cadcraft_engine::doc::DimBreak { at: Default::default(), size: f64::NAN, auto: false });
-            dm.marks.inspect = Some(cadcraft_engine::doc::Inspection { shape: 9, label: "x".into(), rate: String::new() });
-        }
-    })
-    .unwrap();
+    let mut damaged = d.entity(hh).unwrap().as_ref().clone();
+    if let EntityKind::Dimension(dm) = &mut damaged.kind {
+        dm.marks.oblique = Some(f64::NAN);
+        dm.marks.jog_line = Some(cadcraft_engine::geom::Vec3::new(f64::INFINITY, 0.0, 0.0));
+        dm.marks.breaks.push(cadcraft_engine::doc::DimBreak { at: Default::default(), size: f64::NAN, auto: false });
+        dm.marks.inspect = Some(cadcraft_engine::doc::Inspection { shape: 9, label: "x".into(), rate: String::new() });
+    }
+    d.model.push(damaged);
     let _ = dim_of(&s, &h);
 }

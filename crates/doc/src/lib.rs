@@ -370,10 +370,12 @@ impl Drawing {
         }
         self.layouts.iter().find(|l| l.entities.contains(h)).map(|l| Space::Paper(l.name.clone()))
     }
+    /// Modify legacy geometry only, with revision and candidate checks before commit.
     pub fn modify_entity<F: FnOnce(&mut Entity)>(&mut self, h: Handle, f: F) -> Result<()> {
-        let sp = self.space_of(h).ok_or(DocError::NoEntity(h))?;
-        let store = self.space_mut(&sp).ok_or(DocError::NoEntity(h))?;
-        if store.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
+        self.try_modify_entity(h, |entity| {
+            f(entity);
+            Ok(())
+        })
     }
     /// Commit one legacy candidate edit only after its revision check and operation succeed.
     pub fn try_modify_entity<F, T>(&mut self, h: Handle, edit: F) -> Result<T>
@@ -381,7 +383,7 @@ impl Drawing {
         F: FnOnce(&mut Entity) -> Result<T>,
     {
         let (candidate, result) = self.entity(h).ok_or(DocError::NoEntity(h))?.legacy_edited(edit)?;
-        self.modify_entity(h, |entity| *entity = candidate)?;
+        self.commit_entity_candidate(candidate)?;
         Ok(result)
     }
 
@@ -414,7 +416,11 @@ impl Drawing {
             return self.modify_entity(h, f);
         }
         let block = self.blocks.values_mut().find(|block| block.entities.contains(h)).ok_or(DocError::NoEntity(h))?;
-        if std::sync::Arc::make_mut(block).entities.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
+        let (candidate, ()) = block.entities.get(h).ok_or(DocError::NoEntity(h))?.legacy_edited(|entity| {
+            f(entity);
+            Ok(())
+        })?;
+        if std::sync::Arc::make_mut(block).entities.replace(candidate) { Ok(()) } else { Err(DocError::NoEntity(h)) }
     }
 
     pub fn remove_entity(&mut self, h: Handle) -> Option<std::sync::Arc<Entity>> {

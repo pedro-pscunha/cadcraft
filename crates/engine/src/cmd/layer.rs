@@ -327,7 +327,10 @@ fn run_laymch(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     d.ensure_layer(&layer);
     for h in &hs {
-        d.modify_entity(*h, |e| e.common.layer = layer.clone())?;
+        d.try_modify_metadata(*h, |common| {
+            common.layer = layer.clone();
+            Ok(())
+        })?;
     }
     Ok(json!({ "changed": hs.len() }))
 }
@@ -337,7 +340,10 @@ fn run_laycur(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
     let cur = d.header.str("CLAYER", "0");
     for h in &hs {
-        d.modify_entity(*h, |e| e.common.layer = cur.clone())?;
+        d.try_modify_metadata(*h, |common| {
+            common.layer = cur.clone();
+            Ok(())
+        })?;
     }
     Ok(json!({ "changed": hs.len() }))
 }

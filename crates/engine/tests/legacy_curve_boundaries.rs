@@ -7,6 +7,12 @@ fn create(session: &mut Session, command: &str, params: Value) -> Handle {
     session.doc().unwrap().model.iter().last().unwrap().handle
 }
 
+fn install_canonical_fixture(session: &mut Session, handle: Handle) {
+    let mut entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
+    entity.geometry_revision = GeometryRevision::CanonicalV2;
+    session.doc_mut().unwrap().model.push(entity);
+}
+
 fn check_refusals(drawing: &Drawing, command: &str, params: Value, inputs: &[Handle]) {
     let mut control = Session::new();
     control.open_drawing(drawing.clone(), "legacy control", None);
@@ -15,7 +21,7 @@ fn check_refusals(drawing: &Drawing, command: &str, params: Value, inputs: &[Han
     for &input in inputs {
         let mut session = Session::new();
         session.open_drawing(drawing.clone(), "canonical input", None);
-        session.doc_mut().unwrap().modify_entity(input, |entity| entity.geometry_revision = GeometryRevision::CanonicalV2).unwrap();
+        install_canonical_fixture(&mut session, input);
         let before = session.doc().unwrap().model.clone();
         let seed = session.doc().unwrap().handseed;
         match session.execute(command, &params) {
@@ -103,7 +109,7 @@ fn typed_curve_tools_refuse_canonical_inputs_without_a_geometry_change() {
     for (command, params, script) in cases {
         let mut session = Session::new();
         let input = create(&mut session, command, params);
-        session.doc_mut().unwrap().modify_entity(input, |entity| entity.geometry_revision = GeometryRevision::CanonicalV2).unwrap();
+        install_canonical_fixture(&mut session, input);
         session.set_selection(Vec::new());
         let before = session.doc().unwrap().model.clone();
         let seed = session.doc().unwrap().handseed;
