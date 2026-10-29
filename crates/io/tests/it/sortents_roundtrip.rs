@@ -56,7 +56,7 @@ fn assert_tables(text: &str) {
     assert_eq!(tables.len(), 2, "model space and Tree both need explicit draw order");
     let class = &records.iter().find(|(k, t)| k == "CLASS" && value(t, 1) == "SORTENTSTABLE").expect("DXF class declaration").1;
     assert_eq!(value(class, 2), "AcDbSortentsTable");
-    assert_eq!(value(class, 91), "2");
+    assert!(!class.iter().any(|t| t.code == 91), "a 2000 DXF has no instance counts");
     for (name, expected) in [("*Model_Space", vec![(0xA2, 0xA1), (0xA1, 0xA2)]), ("Tree", vec![(0xA4, 0xA3), (0xA3, 0xA4)])] {
         let block = &records.iter().find(|(k, t)| k == "BLOCK_RECORD" && value(t, 2) == name).unwrap().1;
         let owner = value(block, 5);

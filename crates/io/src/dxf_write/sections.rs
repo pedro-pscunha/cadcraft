@@ -1139,7 +1139,13 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         *tag = Tag::s(5, format!("{:X}", w.next));
     }
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
-    add_class_instance_counts(&mut w.t);
+    // Group 91 of a CLASS exists from AutoCAD 2004 on (AutoCAD 2000 expects the next group, 280, after 90);
+    // the DWG bridge keeps it for acadrust.
+    if version >= Version::R2004 || dwg_bridge {
+        add_class_instance_counts(&mut w.t);
+    } else {
+        remove_class_instance_counts(&mut w.t);
+    }
     mark_xrefs(&mut w.t, d);
     w.t
 }
@@ -1176,6 +1182,17 @@ fn add_class_instance_counts(tags: &mut Vec<Tag>) {
         // Inserting the group shifts the next record's start by one.
         start = end + usize::from(inserted);
     }
+}
+
+/// A DXF for AutoCAD 2000 has no group 91 in its CLASS records, kept classes of the source included.
+fn remove_class_instance_counts(tags: &mut Vec<Tag>) {
+    let mut in_class = false;
+    tags.retain(|t| {
+        if t.code == 0 {
+            in_class = t.str() == "CLASS";
+        }
+        !(in_class && t.code == 91)
+    });
 }
 
 /// Xref blocks (DXF Reference, BLOCK): bit 4 of group 70 and the external drawing's path in

@@ -34,6 +34,7 @@ mod dwg_layout_owner;
 mod dwg_roundtrip_losses;
 mod dwg_text_code_page;
 mod dwt_template;
+mod dxf_version_gates;
 mod dxf_versions;
 mod dynblock_read;
 mod entity_normals;
