@@ -562,3 +562,25 @@ fn a_dynamic_block_with_handles_above_2_pow_48_is_kept() {
     let again = read_dxf(write_dxf(&d).as_bytes()).unwrap();
     assert_eq!(by_node(dynamic_block(&again, "Door").unwrap()), by_node(before));
 }
+
+/// AutoCAD spells the lookup markers `AcDbBlockLookUpParameter` and `AcDbBlockLookupAction` (the
+/// fixture has them so); a writer that spells them otherwise gives the same lookup parameter and
+/// action, whichever way each marker is spelled.
+#[test]
+fn the_lookup_markers_are_read_in_either_spelling() {
+    let source = fixture();
+    let model = |text: &str| by_node(dynamic_block(&read_dxf(dxf(text).as_bytes()).unwrap(), "Door").unwrap());
+    let reference = model(&source);
+    assert!(
+        reference.actions.iter().any(|a| matches!(&a.kind, ActionKind::Lookup { rows, .. } if !rows.is_empty())),
+        "the fixture's lookup action is read"
+    );
+    for (parameter, action) in [
+        ("AcDbBlockLookupParameter", "AcDbBlockLookupAction"),
+        ("AcDbBlockLookUpParameter", "AcDbBlockLookUpAction"),
+        ("ACDBBLOCKLOOKUPPARAMETER", "acdbblocklookupaction"),
+    ] {
+        let text = source.replace("AcDbBlockLookUpParameter", parameter).replace("AcDbBlockLookupAction", action);
+        assert_eq!(model(&text), reference, "{parameter} / {action}");
+    }
+}
