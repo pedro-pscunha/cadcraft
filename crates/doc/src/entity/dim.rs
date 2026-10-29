@@ -239,6 +239,10 @@ pub struct MLeader {
     /// Block content in place of the text: a block reference placed at the landing.
     #[serde(default)]
     pub block: Option<Insert>,
+    /// The arrowhead (DXF group 342): a standard name such as `_None` or a block name; empty =
+    /// the style's.
+    #[serde(default)]
+    pub arrow_block: String,
 }
 
 impl MLeader {

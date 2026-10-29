@@ -16,7 +16,7 @@ mod arrowheads;
 mod text;
 
 use arrowheads::tick;
-pub use arrowheads::{ArrowGeom, Arrowhead, arrow, arrowhead};
+pub use arrowheads::{ArrowGeom, Arrowhead, arrowhead};
 pub use text::{DimText, format_linear_value};
 
 /// Most DIMBREAK gaps drawn per dimension.

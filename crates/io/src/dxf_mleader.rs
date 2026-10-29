@@ -78,6 +78,8 @@ struct Parsed {
     dogleg_on: Option<bool>,
     dogleg: Option<f64>,
     arrow: Option<f64>,
+    /// Arrowhead block record (342).
+    arrow_block: Option<String>,
     content: Option<i64>,
     text_style: Option<String>,
     block: Option<String>,
@@ -148,6 +150,7 @@ fn parse(tags: &[Tag]) -> Parsed {
                 291 => p.dogleg_on = Some(t.i64() != 0),
                 41 => p.dogleg = finite(f),
                 42 => p.arrow = finite(f),
+                342 => p.arrow_block = handle(t),
                 172 => p.content = Some(t.i64()),
                 343 => p.text_style = handle(t),
                 344 => p.block = handle(t),
@@ -336,6 +339,7 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
         arrow_size: pos(p.arrow_ctx).or(pos(p.arrow)).unwrap_or(def.arrow_size),
         spline: p.leader_type == Some(2),
         block,
+        arrow_block: String::new(),
     }
 }
 
@@ -352,7 +356,7 @@ fn attach_point(p: &Parsed, text_left_of_landing: bool) -> u8 {
     u8::try_from(row * 3 + col).unwrap_or(1)
 }
 
-/// Text style and block names from the file's STYLE and BLOCK_RECORD handles (upper case →
+/// Text style, block and arrowhead names from the file's STYLE and BLOCK_RECORD handles (upper case →
 /// name); block content whose block is unknown is dropped. Returns what needs the objects.
 pub(crate) fn resolve(tags: &[Tag], m: &mut MLeader, styles: &HashMap<String, String>, brs: &HashMap<String, String>) -> Pending {
     let p = parse(tags);
@@ -370,6 +374,9 @@ pub(crate) fn resolve(tags: &[Tag], m: &mut MLeader, styles: &HashMap<String, St
             }
             None => m.block = None,
         }
+    }
+    if let Some(n) = p.arrow_block.as_ref().and_then(|h| brs.get(h)).filter(|n| !n.is_empty()) {
+        m.arrow_block = n.clone();
     }
     Pending { style: p.style, attribs: p.attribs }
 }
@@ -450,6 +457,8 @@ pub(crate) struct Refs {
     pub text_style: Option<String>,
     /// BLOCK_RECORD handle of the content block.
     pub block: Option<String>,
+    /// BLOCK_RECORD handle of the entity's own arrowhead (none: the style's).
+    pub arrow: Option<String>,
 }
 
 /// The groups of a MULTILEADER record after its `AcDbMLeader` marker.
@@ -563,7 +572,9 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
     s(&mut t, 340, &r.style);
     // Overridden properties: leader type, landing and dogleg, arrowhead size, content type,
     // text style and height, block content (the entity holds its own values).
-    i(&mut t, 90, 0x1 | 0x10 | 0x40 | 0x80 | 0x200 | 0x400 | 0x800 | 0x1_0000 | 0x8_0000);
+    // An own arrowhead (342) is the 0x100 override.
+    let arrow_flag = if r.arrow.is_some() { 0x100 } else { 0 };
+    i(&mut t, 90, 0x1 | 0x10 | 0x40 | 0x80 | arrow_flag | 0x200 | 0x400 | 0x800 | 0x1_0000 | 0x8_0000);
     i(
         &mut t,
         170,
@@ -580,6 +591,9 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
     i(&mut t, 290, 1);
     i(&mut t, 291, i64::from(m.dogleg > 0.0));
     f(&mut t, 41, m.dogleg);
+    if let Some(h) = &r.arrow {
+        s(&mut t, 342, h);
+    }
     f(&mut t, 42, m.arrow_size);
     i(
         &mut t,

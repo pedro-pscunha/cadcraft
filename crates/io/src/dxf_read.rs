@@ -52,6 +52,9 @@ struct Rx {
     table_blocks: std::collections::HashSet<String>,
     /// Upper-case block names used by INSERTs.
     inserted: std::collections::HashSet<String>,
+    /// Upper-case names of blocks that xdata outside dimensions names (1005), such as a leader's
+    /// DIMLDRBLK override: an arrowhead block named there is the file's, kept as read.
+    xdata_blocks: HashSet<String>,
     /// Tables whose style is known only by TABLESTYLE handle: (table, style handle).
     table_style_fix: Vec<(Handle, String)>,
     /// Multileaders' style handles and block attribute values, resolved with the objects.
@@ -66,6 +69,22 @@ struct Rx {
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
     dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
+}
+
+/// Upper-case names of the blocks whose BLOCK_RECORD xdata handles (1005) point at, outside
+/// dimensions and dimension styles (CADCraft models their DSTYLE overrides and arrowheads).
+fn xdata_blocks(secs: &[Section], brs: &HashMap<String, String>) -> HashSet<String> {
+    secs.iter()
+        .flat_map(|s| records(&s.tags))
+        .filter(|(k, _)| k != "DIMENSION" && k != "DIMSTYLE")
+        .flat_map(|(_, tg)| {
+            tg.into_iter()
+                .filter(|t| t.code == 1005)
+                .filter_map(|t| Handle::parse_hex(t.str().trim()))
+                .filter_map(|h| brs.get(&h.hex()).map(|n| n.to_ascii_uppercase()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Read a DXF file into a drawing.
@@ -123,6 +142,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // A file CADCraft wrote names its own next handle (#495): its table records and objects
     // are numbered above it and rebuilt on save, so following $HANDSEED would drift every save.
     let own_seed = objs.xrecord_text(crate::dxf_ext::HANDSEED_KEY).and_then(|t| Handle::parse_hex(t.trim()));
+    rx.xdata_blocks = xdata_blocks(&secs, &rx.brs);
     let (paper_block_for, first_layout) = setup_layouts(&mut d, &mut layout_objs, &rx);
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
     shift_dimension_blocks(&mut d, &rx);

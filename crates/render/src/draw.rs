@@ -256,10 +256,21 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
 
 fn draw_mleader(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &cadcraft_doc::MLeader, rgb: Ink, lw: f32) {
     // Straight or spline leader lines; block content draws like a block reference.
+    // Its own arrowhead, else its style's ("" = closed filled).
+    let arrow = if m.arrow_block.trim().is_empty() {
+        ctx.d.mleader_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&m.style)).map_or("", |s| s.arrow_block.as_str())
+    } else {
+        m.arrow_block.as_str()
+    };
+    let kind = dim::Arrowhead::parse(arrow);
     for pts in m.leader_paths() {
         b.polyline(ctx, rgb, lw, &pts);
         if let (Some(a), Some(n)) = (pts.first(), pts.get(1)) {
-            b.tris(ctx, rgb, &dim::arrow(*a, (*a - *n).normalized(), m.arrow_size));
+            let g = dim::arrowhead(kind, *a, (*a - *n).normalized(), m.arrow_size);
+            for l in &g.lines {
+                b.polyline(ctx, rgb, lw, l);
+            }
+            b.tris(ctx, rgb, &g.tris);
         }
     }
     if let Some(t) = &m.text {

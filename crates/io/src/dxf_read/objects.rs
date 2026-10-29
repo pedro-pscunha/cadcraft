@@ -199,6 +199,7 @@ impl Objects {
                 dogleg: num(43, def.dogleg, 0.0),
                 text_style: text_style.unwrap_or(def.text_style),
                 annotative: t.i(296).unwrap_or(0) != 0,
+                arrow_block: t.s(341).and_then(|h| rx.brs.get(&h.trim().to_ascii_uppercase()).cloned()).unwrap_or_default(),
             };
             match d.mleader_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,

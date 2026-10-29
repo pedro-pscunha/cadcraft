@@ -628,6 +628,9 @@ pub struct MLeaderStyle {
     pub landing_gap: f64,
     pub dogleg: f64,
     pub text_style: String,
+    /// The arrowhead (DXF group 341): a standard name such as `_None` or a block name; empty =
+    /// closed filled.
+    pub arrow_block: String,
     /// New multileaders of this style are annotative.
     pub annotative: bool,
 }
@@ -641,6 +644,7 @@ impl Default for MLeaderStyle {
             landing_gap: 0.09,
             dogleg: 0.36,
             text_style: "Standard".into(),
+            arrow_block: String::new(),
             annotative: false,
         }
     }

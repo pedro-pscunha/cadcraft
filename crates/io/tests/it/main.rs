@@ -3,6 +3,7 @@ mod acad_interop;
 mod acis_data_store;
 mod angle_header;
 mod annotative_roundtrip;
+mod arrow_block_refs;
 mod assoc_array_roundtrip;
 mod attrib_fields_roundtrip;
 mod attrib_handles;

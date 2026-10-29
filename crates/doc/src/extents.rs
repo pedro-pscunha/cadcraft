@@ -357,6 +357,7 @@ mod tests {
             arrow_size: 1.0,
             spline: false,
             block: None,
+            arrow_block: String::new(),
         };
         let b = bounds(EntityKind::MLeader(ml.clone()));
         // The glyph spans x 25.45..28.78, y -2.5..2.5.

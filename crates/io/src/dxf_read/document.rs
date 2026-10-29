@@ -192,11 +192,15 @@ pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, 
             continue;
         }
         // Generated geometry we rebuild on save: table blocks, and standard arrowhead blocks
-        // nothing inserts whose content is the one CADCraft writes. An arrowhead block with other
-        // content (AutoCAD's `_Dot`, a user's redefinition) is kept, so dimensions keep it.
+        // nothing inserts or names in xdata whose content is the one CADCraft writes. An
+        // arrowhead block with other content (AutoCAD's `_Dot`, a user's redefinition) is kept, so
+        // dimensions keep it.
         let generated_arrow = || {
             let own: Vec<&Entity> = ents.iter().map(|(_, _, e)| e).collect();
-            crate::dxf_ext::is_standard_arrow(&name) && !rx.inserted.contains(&up) && crate::dxf_write::is_generated_arrow(&name, &own)
+            crate::dxf_ext::is_standard_arrow(&name)
+                && !rx.inserted.contains(&up)
+                && !rx.xdata_blocks.contains(&up)
+                && crate::dxf_write::is_generated_arrow(&name, &own)
         };
         if rx.table_blocks.contains(&up) || generated_arrow() {
             continue;

@@ -37,6 +37,7 @@ fn text_mleader() -> MLeader {
         arrow_size: 0.3,
         spline: false,
         block: None,
+        arrow_block: String::new(),
     }
 }
 
@@ -110,6 +111,7 @@ fn spline_leader_with_block_content_and_attributes() {
         arrow_size: 0.18,
         spline: true,
         block: Some(ins),
+        arrow_block: String::new(),
     };
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(m.clone())).unwrap();
     let (_, back) = roundtrip(&d);

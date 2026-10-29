@@ -323,6 +323,7 @@ fn annotative_mtext_columns_follow_the_scale() {
             arrow_size: 1.0,
             spline: false,
             block: None,
+            arrow_block: String::new(),
         }),
         ..e.clone()
     };
