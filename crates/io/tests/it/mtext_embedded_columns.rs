@@ -275,3 +275,79 @@ fn the_columns_in_acad_xdata_are_read_and_written_from_the_model() {
     assert_eq!(mtext(&back).columns.map(|c| (c.kind, c.count, c.gutter)), Some((MTextColumnType::Dynamic, 1, 11.41669000533545)));
     assert_eq!(xdata_columns(&r2010(&back)).1, 1);
 }
+
+/// The same record with another ACAD item before it and another after it.
+fn mixed_2010() -> String {
+    CITYCON_2010
+        .replace("1001 ACAD\n1000 ACAD_MTEXT_COLUMN_INFO_BEGIN", "1001 ACAD\n1000 ACAD_KEEP_BEFORE\n1070 11\n1000 ACAD_MTEXT_COLUMN_INFO_BEGIN")
+        .replace("1000 ACAD_MTEXT_COLUMN_INFO_END", "1000 ACAD_MTEXT_COLUMN_INFO_END\n1000 ACAD_KEEP_AFTER\n1040 2.5")
+}
+
+/// Every group of the ACAD application of the first MTEXT, as (code, value) with numbers by their bits.
+fn acad_chunk(text: &str) -> Vec<(i32, String)> {
+    let rec = record(text);
+    let Some(start) = rec.iter().position(|t| t.code == 1001 && t.str().trim() == "ACAD") else { return Vec::new() };
+    rec[start..]
+        .iter()
+        .enumerate()
+        .take_while(|(i, t)| *i == 0 || t.code != 1001)
+        .map(|(_, t)| (t.code, t.str().trim().parse::<f64>().map_or_else(|_| t.str().trim().to_string(), |v| format!("{:x}", v.to_bits()))))
+        .collect()
+}
+
+#[test]
+fn the_column_record_beside_other_acad_data_is_read_and_the_rest_kept_in_order() {
+    let source = dxf(&mixed_2010());
+    let want = acad_chunk(&source);
+    assert_eq!(want.iter().filter(|(_, v)| v == "ACAD_MTEXT_COLUMN_INFO_BEGIN").count(), 1);
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let t = mtext(&d);
+    let c = t.columns.clone().expect("the columns are read");
+    assert_eq!((c.kind, c.count, c.gutter), (MTextColumnType::Dynamic, 1, 11.41669000533545));
+    // The rest stays foreign xdata, without the numbers of the record.
+    let kept: Vec<String> = d.model.iter().next().unwrap().common.xdata.iter().map(|r| r.value.trim().to_string()).collect();
+    assert!(kept.contains(&"ACAD_KEEP_BEFORE".to_string()) && kept.contains(&"ACAD_KEEP_AFTER".to_string()), "{kept:?}");
+    assert!(!kept.contains(&"182.4335599239948".to_string()), "{kept:?}");
+    // A save writes the one chunk as it was, in its order; so do a second save and a moved text.
+    let first = r2010(&d);
+    assert_eq!(acad_chunk(&first), want, "first save");
+    assert_eq!(acad_chunk(&r2010(&cadcraft_io::read_dxf(first.as_bytes()).unwrap())), want, "second save");
+    let mut moved = d.clone();
+    let h = moved.model.iter().next().unwrap().handle;
+    moved
+        .modify_entity(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind {
+                t.insert.x += 1.0;
+            }
+        })
+        .unwrap();
+    assert_eq!(acad_chunk(&r2010(&moved)), want, "moved");
+    // The model's columns edited: the record changes, the rest does not.
+    let mut edited = d.clone();
+    edited
+        .modify_entity(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind
+                && let Some(c) = &mut t.columns
+            {
+                c.gutter = 3.0;
+            }
+        })
+        .unwrap();
+    let chunk = acad_chunk(&r2010(&edited));
+    assert_eq!(chunk.len(), want.len());
+    assert_ne!(chunk, want);
+    assert_eq!((&chunk[..3], &chunk[chunk.len() - 3..]), (&want[..3], &want[want.len() - 3..]));
+    // 2018: no xdata copy of the record or the empty place; the rest is still there once.
+    let new = r2018(&d);
+    let chunk = acad_chunk(&new);
+    assert!(!chunk.iter().any(|(_, v)| v.starts_with("ACAD_MTEXT_COLUMN_INFO")), "{chunk:?}");
+    assert_eq!(chunk.iter().filter(|(_, v)| v == "ACAD_KEEP_BEFORE" || v == "ACAD_KEEP_AFTER").count(), 2);
+    assert_eq!(layout(&new)[0], vec![2.0]);
+    // A DWG keeps the columns, and its 2010 DXF has one column record and both other items.
+    let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    assert_eq!(mtext(&back).columns.map(|c| (c.kind, c.count, c.gutter)), Some((MTextColumnType::Dynamic, 1, 11.41669000533545)));
+    let out = r2010(&back);
+    let all: Vec<String> = record(&out).iter().map(|t| t.str().trim().to_string()).collect();
+    assert_eq!(all.iter().filter(|v| *v == "ACAD_MTEXT_COLUMN_INFO_BEGIN").count(), 1, "{all:?}");
+    assert!(all.contains(&"ACAD_KEEP_BEFORE".to_string()) && all.contains(&"ACAD_KEEP_AFTER".to_string()), "{all:?}");
+}
