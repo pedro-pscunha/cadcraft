@@ -98,3 +98,31 @@ fn a_user_dxf_has_no_private_records_or_private_classes() {
     assert!(!saved.contains("AcDbAcadrustRawDwgObject"));
     assert!(!saved.contains(CLASS));
 }
+
+/// A DXF whose objects are `widgets` (key, handle, private) of the class ACME_WIDGET, each
+/// entered in the named object dictionary.
+fn widgets(widgets: &[(&str, &str, bool)]) -> Vec<u8> {
+    let mut g = String::from("0\nSECTION\n2\nCLASSES\n0\nCLASS\n1\nACME_WIDGET\n2\nAcmeWidget\n3\nAcme\n90\n0\n91\n0\n280\n0\n281\n0\n0\nENDSEC\n");
+    g.push_str("0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n281\n1\n");
+    for (key, handle, _) in widgets {
+        g.push_str(&format!("3\n{key}\n350\n{handle}\n"));
+    }
+    for (_, handle, private) in widgets {
+        g.push_str(&format!("0\nACME_WIDGET\n5\n{handle}\n330\nC\n"));
+        g.push_str(if *private { "100\nAcDbAcadrustRawDwgObject\n" } else { "100\nAcmeWidget\n" });
+    }
+    g.push_str("0\nENDSEC\n0\nEOF\n");
+    g.into_bytes()
+}
+
+fn saved_classes(source: &[u8]) -> usize {
+    let drawing = cadcraft_io::read_dxf(source).unwrap();
+    let saved = String::from_utf8(cadcraft_io::write(&drawing, "saved.dxf").unwrap()).unwrap().replace('\r', "");
+    saved.matches("CLASS\n  1\nACME_WIDGET\n").count()
+}
+
+#[test]
+fn a_private_class_stays_in_a_user_dxf_while_a_public_object_uses_it() {
+    assert_eq!(saved_classes(&widgets(&[("PRIVATE", "40", true)])), 0, "only private records use the class");
+    assert_eq!(saved_classes(&widgets(&[("PRIVATE", "40", true), ("PUBLIC", "41", false)])), 1, "a public record uses it");
+}

@@ -45,9 +45,26 @@ fn the_current_material_points_at_the_saved_material() {
     assert_eq!(material_name(&again, &h).as_deref(), Some("ByLayer"), "second save: $CMATERIAL {h}");
 }
 
+/// The handle of the first record `kind` in a DXF.
+fn record_handle(p: &[(i32, String)], kind: &str) -> Option<String> {
+    let i = p.windows(2).position(|w| w[0] == (0, kind.to_string()) && w[1].0 == 5)?;
+    p.get(i + 1).map(|(_, v)| v.clone())
+}
+
 #[test]
 fn a_header_pointer_whose_object_is_gone_becomes_null() {
-    let d = cadcraft_io::read_dxf(DXF.replace("\n3\nByLayer\n350\n3A", "").replace("0\nMATERIAL\n5\n3A", "0\nXRECORD\n5\n3A").as_bytes()).unwrap();
-    let dxf = pairs(&save(&d));
-    assert_ne!(header(&dxf, "$CMATERIAL").as_deref(), Some("3A"), "the read handle is never copied");
+    // The source names an object that is not in the file: the MATERIAL and its dictionary entry
+    // are gone. The value is the handle the save gives to the layer "0", so a copied value would
+    // name a live object of another type.
+    let layer = record_handle(&pairs(&save(&cadcraft_io::read_dxf(DXF.as_bytes()).unwrap())), "LAYER").expect("a saved layer");
+    let gone = DXF
+        .replace("\n3\nByLayer\n350\n3A", "")
+        .replace("0\nMATERIAL\n5\n3A\n102\n{ACAD_REACTORS\n330\n3B\n102\n}\n330\n3B\n100\nAcDbMaterial\n1\nByLayer\n", "")
+        .replace("347\n3A", &format!("347\n{layer}"));
+    assert!(!gone.contains("MATERIAL\n5"), "the fixture has no target");
+    let d = cadcraft_io::read_dxf(gone.as_bytes()).unwrap();
+    for text in [save(&d), save(&cadcraft_io::read_dxf(save(&d).as_bytes()).unwrap())] {
+        let dxf = pairs(&text);
+        assert_eq!(header(&dxf, "$CMATERIAL").as_deref(), Some("0"), "a dangling pointer is the null handle, not {layer}");
+    }
 }

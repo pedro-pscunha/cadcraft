@@ -297,8 +297,6 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             _ => {}
         }
     }
-    // One *Active viewport is no tiling: the view is the editor's (it zooms to the extents).
-    d.vports.retain(|c| c.tiles.len() > usize::from(c.is_active()));
 }
 
 fn index_table_handles(recs: &[(String, Vec<Tag>)], rx: &mut Rx) {
@@ -341,11 +339,28 @@ fn index_table_handles(recs: &[(String, Vec<Tag>)], rx: &mut Rx) {
 }
 
 /// Most tiles a viewport configuration keeps.
-const MAX_VPORT_TILES: usize = 64;
+pub(crate) const MAX_VPORT_TILES: usize = 64;
+
+/// Whether the reader keeps a VPORT record (`tags`, its groups after the type) as a tile.
+pub(crate) fn kept_vport(tags: &[Tag]) -> bool {
+    vport_tile(&T(tags)).is_some()
+}
 
 /// A VPORT record: one tile of the configuration it names (`*ACTIVE` the one shown). Corners
 /// are fractions of the drawing area; unusable tiles are skipped.
 fn vport_record(d: &mut Drawing, t: &T) {
+    let Some((name, tile)) = vport_tile(t) else { return };
+    let room = d.vports.len() < MAX_OBJECTS;
+    match d.vports.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
+        Some(c) if c.tiles.len() < MAX_VPORT_TILES => c.tiles.push(tile),
+        Some(_) => {}
+        None if room => d.vports.push(VportConfig { name, tiles: vec![tile] }),
+        None => {}
+    }
+}
+
+/// The tile a VPORT record holds and the name of its configuration, `None` for an unusable one.
+fn vport_tile(t: &T) -> Option<(String, VportTile)> {
     let name = t.s(2).map(|n| n.trim().to_string()).unwrap_or_default();
     let (min, max, center) = (t.p(10).xy(), t.p(11).xy(), t.p(12).xy());
     let height = t.fd(40, 0.0);
@@ -357,19 +372,13 @@ fn vport_record(d: &mut Drawing, t: &T) {
         && height.is_finite()
         && height > 0.0;
     if name.is_empty() || !ok {
-        return;
+        return None;
     }
     let aspect = t.f(41).filter(|a| a.is_finite() && *a > 0.0).unwrap_or(0.0);
     let clamp = |p: Vec2| Vec2::new(p.x.clamp(0.0, 1.0), p.y.clamp(0.0, 1.0));
     let tile = VportTile { min: clamp(min), max: clamp(max), center, height, aspect };
     let name = if name.eq_ignore_ascii_case(VportConfig::ACTIVE) { VportConfig::ACTIVE.to_string() } else { name };
-    let room = d.vports.len() < MAX_OBJECTS;
-    match d.vports.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
-        Some(c) if c.tiles.len() < MAX_VPORT_TILES => c.tiles.push(tile),
-        Some(_) => {}
-        None if room => d.vports.push(VportConfig { name, tiles: vec![tile] }),
-        None => {}
-    }
+    Some((name, tile))
 }
 
 /// The dash elements of an LTYPE record with their embedded text and shapes (DXF Reference,
