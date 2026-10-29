@@ -29,6 +29,10 @@ pub struct Attrib {
     /// Its other modes: Verify, Preset and Lock position.
     #[serde(default, skip_serializing_if = "AttribModes::is_default")]
     pub modes: AttribModes,
+    /// The source geometry groups of an attribute instance, written back by a save while its
+    /// geometry is as it was read (see [`super::GeometrySnapshot`]).
+    #[serde(default, skip)]
+    pub geometry: Option<std::sync::Arc<super::GeometrySnapshot>>,
 }
 
 /// An attribute's modes beyond invisible and constant.
@@ -92,6 +96,7 @@ impl Attrib {
             props: AttribProps::default(),
             multiline: None,
             modes: AttribModes::default(),
+            geometry: None,
         }
     }
 

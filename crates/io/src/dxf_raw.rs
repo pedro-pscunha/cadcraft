@@ -284,6 +284,10 @@ fn head(tags: &[Tag]) -> Head {
     h
 }
 
+fn handle_of_record(tags: &[Tag]) -> Option<Handle> {
+    head(tags).handle.and_then(|h| handle(&h))
+}
+
 fn val(tags: &[Tag], code: i32) -> Option<String> {
     tags.iter().take_while(|t| t.code < 1000).find(|t| t.code == code).map(Tag::str)
 }
@@ -455,7 +459,8 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, modelled): (&str, &[i32]) = match kind {
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
-        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76]),
+        // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
         _ => return Vec::new(),
@@ -604,6 +609,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
+    let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
+    crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
@@ -970,6 +977,8 @@ struct Map<'a> {
     roles: HashMap<ForeignKey, String>,
     /// Entities in the written file.
     entities: HashSet<String>,
+    /// The snapshots of the source geometry that are written back, by entity or attribute handle.
+    geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
 }
 
 impl Map<'_> {
@@ -1279,8 +1288,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
     let f = public.as_ref().unwrap_or(&d.foreign);
     let unknown = unknown_handles(d);
+    let geometry = crate::dxf_geometry::eligible(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
-    if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() {
+    if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() && geometry.is_empty() {
         // No kept object a header pointer could name.
         remap_header_pointers(tags, |_| "0".into());
         return;
@@ -1415,7 +1425,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
-    let map = Map { f, alive, objects: objs, owners, roles, entities };
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     for r in &recs {
@@ -1458,7 +1468,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         let start = out.len();
         out.extend(tags.get(r.start).cloned());
         let x = extras.of(r, b);
-        if x.is_none() && Some(r.start) != root {
+        let replayed = handle_of_record(b).is_some_and(|h| map.geometry.contains_key(&h));
+        if x.is_none() && Some(r.start) != root && !replayed {
             out.extend(b.iter().cloned());
         } else {
             record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
@@ -1551,6 +1562,18 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             patched = patch_layout(b, &x.layout, |h| map.get(h));
             patched.as_slice()
         }
+        None => b,
+    };
+    // The source geometry of an entity whose geometry is as it was read.
+    let replayed;
+    let b = match handle_of_record(b).and_then(|h| map.geometry.get(&h)) {
+        Some(g) => match g.records.first().and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, |t| map.group(t))) {
+            Some(tags) => {
+                replayed = tags;
+                replayed.as_slice()
+            }
+            None => b,
+        },
         None => b,
     };
     let h = head(b);

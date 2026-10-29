@@ -40,6 +40,7 @@ mod entity_props_roundtrip;
 mod entity_subclass_groups;
 mod followups_626;
 mod foreign_passthrough;
+mod geometry_snapshot;
 mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
