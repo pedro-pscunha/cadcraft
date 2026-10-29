@@ -1,6 +1,6 @@
 //! Reopening and saving a drawing keeps one anonymous `*D` block per dimension and the same
 //! handles: the block read with a dimension is regenerated under its own name instead of being
-//! kept next to a fresh copy, `*D` blocks nothing references are dropped, and table records and
+//! kept next to a fresh copy, unused `*D` blocks are kept, and table records and
 //! objects keep their handles because CADCraft's own next handle is saved with the drawing
 //! (issue #495, gaps FF7).
 
@@ -124,7 +124,7 @@ fn two_dimensions_and_a_user_block_keep_their_blocks() {
 }
 
 #[test]
-fn stale_dimension_blocks_are_dropped_and_referenced_ones_kept() {
+fn unreferenced_and_referenced_dimension_blocks_are_kept() {
     let mut d = Drawing::new_metric();
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(linear([0.0, 0.0], [10.0, 0.0], [5.0, 3.0]))).unwrap();
     // What older versions left behind: copies nothing references, and one an INSERT uses.
@@ -137,9 +137,9 @@ fn stale_dimension_blocks_are_dropped_and_referenced_ones_kept() {
     d.add(&Space::Model, Common::default(), EntityKind::Insert(insert("*D8"))).unwrap();
     let out = cadcraft_io::write_dxf(&d);
     let blocks = dim_blocks(&out);
-    assert!(!blocks.contains(&"*D7".to_string()), "{blocks:?}");
+    assert!(blocks.contains(&"*D7".to_string()), "{blocks:?}");
     assert!(blocks.contains(&"*D8".to_string()), "{blocks:?}");
-    assert_eq!(blocks.len(), 2, "{blocks:?}");
+    assert_eq!(blocks.len(), 3, "{blocks:?}");
 }
 
 #[test]

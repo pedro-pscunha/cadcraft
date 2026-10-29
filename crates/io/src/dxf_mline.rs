@@ -334,13 +334,62 @@ fn has_mlines(store: &EntityStore) -> bool {
 
 /// Read the multiline styles, then give every multiline its style's elements, caps and fill.
 pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
+    // The dictionary is authoritative: a file can give several styles the same shortened
+    // group-2 name while keeping their distinct, full names in ACAD_MLINESTYLE.
+    let objects = || secs.iter().filter(|s| s.name == "OBJECTS");
+    let value = |tags: &[Tag], code| tags.iter().find(|t| t.code == code).map(Tag::str);
+    let mut dictionary = None;
+    for s in objects() {
+        each_record(&s.tags, |kind, tags| {
+            if kind == "DICTIONARY" {
+                for pair in tags.windows(2) {
+                    if let [name, target] = pair
+                        && name.code == 3
+                        && name.str().eq_ignore_ascii_case("ACAD_MLINESTYLE")
+                        && matches!(target.code, 350 | 360)
+                    {
+                        dictionary = Some(key(&target.str()));
+                    }
+                }
+            }
+        });
+    }
+    let mut names = HashMap::new();
+    for s in objects() {
+        each_record(&s.tags, |kind, tags| {
+            if kind == "DICTIONARY" && value(tags, 5).is_some_and(|h| Some(key(&h)) == dictionary) {
+                for pair in tags.windows(2) {
+                    if let [name, target] = pair
+                        && name.code == 3
+                        && matches!(target.code, 350 | 360)
+                    {
+                        names.insert(key(&target.str()), name.str());
+                    }
+                }
+            }
+        });
+    }
+    let mut by_entity = HashMap::new();
+    for s in secs.iter().filter(|s| s.name == "ENTITIES" || s.name == "BLOCKS") {
+        each_record(&s.tags, |kind, tags| {
+            if kind == "MLINE"
+                && let Some(h) = value(tags, 5).and_then(|h| cadcraft_doc::Handle::parse_hex(&h))
+                && let Some(name) = value(tags, 340).and_then(|h| names.get(&key(&h)))
+            {
+                by_entity.insert(h, name.clone());
+            }
+        });
+    }
     let mut styles: Vec<MLineStyle> = Vec::new();
-    for s in secs.iter().filter(|s| s.name == "OBJECTS") {
+    for s in objects() {
         each_record(&s.tags, |kind, tags| {
             if kind == "MLINESTYLE"
                 && styles.len() < MAX_STYLES
-                && let Some(st) = read_style(tags)
+                && let Some(mut st) = read_style(tags)
             {
+                if let Some(name) = value(tags, 5).and_then(|h| names.get(&key(&h))) {
+                    st.name.clone_from(name);
+                }
                 styles.push(st);
             }
         });
@@ -352,26 +401,30 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
         }
     }
     let by_name: HashMap<String, MLineStyle> = d.mline_styles.iter().map(|s| (key(&s.name), s.clone())).collect();
-    fill(&mut d.model, &by_name);
+    fill(&mut d.model, &by_name, &by_entity);
     for l in &mut d.layouts {
-        fill(&mut l.entities, &by_name);
+        fill(&mut l.entities, &by_name, &by_entity);
     }
     for b in d.blocks.values_mut() {
         if has_mlines(&b.entities) {
-            fill(&mut std::sync::Arc::make_mut(b).entities, &by_name);
+            fill(&mut std::sync::Arc::make_mut(b).entities, &by_name, &by_entity);
         }
     }
 }
 
-fn fill(store: &mut EntityStore, by_name: &HashMap<String, MLineStyle>) {
+fn fill(store: &mut EntityStore, by_name: &HashMap<String, MLineStyle>, by_entity: &HashMap<cadcraft_doc::Handle, String>) {
     let hs: Vec<cadcraft_doc::Handle> = store.iter().filter(|e| matches!(e.kind, EntityKind::MLine(_))).map(|e| e.handle).collect();
     for h in hs {
         store.modify(h, |e| {
-            if let EntityKind::MLine(m) = &mut e.kind
-                && let Some(st) = by_name.get(&key(&m.style))
-                && st.elements.len() == m.def.elements.len()
-            {
-                m.def = st.clone();
+            if let EntityKind::MLine(m) = &mut e.kind {
+                if let Some(name) = by_entity.get(&h) {
+                    m.style.clone_from(name);
+                }
+                if let Some(st) = by_name.get(&key(&m.style))
+                    && st.elements.len() == m.def.elements.len()
+                {
+                    m.def = st.clone();
+                }
             }
         });
     }

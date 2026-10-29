@@ -33,7 +33,6 @@ const MODELLED_KEYS: &[&str] = &[
     "ACAD_SCALELIST",
     "ACAD_TABLESTYLE",
     "ACAD_IMAGE_DICT",
-    "ACAD_IMAGE_VARS",
 ];
 
 /// Extension dictionary entries always written from their models. Dimension associativity is
@@ -446,6 +445,23 @@ fn put_xdata(d: &mut Drawing, mut xdata: HashMap<Handle, Vec<RawTag>>) {
     }
 }
 
+/// Unnamed styles cannot be selected by name. Keep their records and handle links instead.
+fn unnamed_styles(tables: &Recs<'_>) -> Vec<ForeignObject> {
+    tables
+        .iter()
+        .filter_map(|(kind, _, tags)| {
+            let unnamed = val(tags, 2).is_none_or(|name| name.trim().is_empty());
+            let shape = kind == "STYLE" && tags.iter().any(|t| t.code == 70 && t.i64() & 1 != 0);
+            if !matches!(kind.as_str(), "STYLE" | "DIMSTYLE") || !unnamed || shape {
+                return None;
+            }
+            let h = head(tags).handle.and_then(|h| handle(&h))?;
+            Some(ForeignObject { handle: h, kind: kind.clone(), tags: tags.iter().map(raw).collect() })
+        })
+        .take(MAX_OBJECTS)
+        .collect()
+}
+
 /// Keep what `secs` holds that the reader did not model in `d.foreign`.
 pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let get = |name: &str| secs.iter().find(|s| s.name == name).map(|s| split(&s.tags)).unwrap_or_default();
@@ -487,7 +503,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     };
     let memo = retained_objects(&scan);
     let mut f = Foreign::default();
-    let mut kept: HashSet<String> = HashSet::new();
+    f.table_records = unnamed_styles(&tables);
+    let mut kept: HashSet<String> = f.table_records.iter().map(|o| o.handle.hex()).collect();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
         if memo.get(&i) != Some(&true) || f.objects.len() >= MAX_OBJECTS {
             continue;
@@ -569,7 +586,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The roles of the handles kept data refers to.
     let mut refs: Vec<String> = Vec::new();
     let mut note = |tags: &[RawTag]| refs.extend(tags.iter().filter(|r| is_pointer(r.code)).map(|r| norm(&r.value)));
-    for o in &f.objects {
+    for o in f.objects.iter().chain(&f.table_records) {
         note(&o.tags);
     }
     for x in f.entities.values().chain(f.records.values()) {
@@ -983,8 +1000,8 @@ impl Map<'_> {
                 }
                 continue;
             }
-            if r.code == 5 {
-                out.push(Tag::s(5, self.get(&r.value).unwrap_or_else(|| "0".into())));
+            if matches!(r.code, 5 | 105) {
+                out.push(Tag::s(r.code, self.get(&r.value).unwrap_or_else(|| "0".into())));
                 continue;
             }
             out.push(self.group(r));
@@ -1124,24 +1141,52 @@ fn unknown_handles(d: &Drawing) -> HashSet<String> {
     all_entities(d).filter(|e| matches!(e.kind, EntityKind::Unknown(_))).map(|e| e.handle.hex()).collect()
 }
 
+fn allocate_table_records(f: &Foreign, roles: &HashMap<ForeignKey, String>, alive: &mut HashMap<String, String>, next: &mut u64) {
+    for o in &f.table_records {
+        if roles.contains_key(&("TABLE".into(), o.kind.clone())) {
+            alive.insert(o.handle.hex(), format!("{next:X}"));
+            *next = next.saturating_add(1);
+        }
+    }
+}
+
+/// Write retained records before ENDTAB; return the count to add to a TABLE header.
+fn write_table_records(map: &Map<'_>, r: &Rec, body: &[Tag], table: &mut String, out: &mut Vec<Tag>) -> usize {
+    if r.sec != "TABLES" {
+        return 0;
+    }
+    if r.kind == "TABLE" {
+        *table = val(body, 2).unwrap_or_default();
+        return map.f.table_records.iter().filter(|o| o.kind == *table && map.alive.contains_key(&o.handle.hex())).count();
+    }
+    if r.kind == "ENDTAB" {
+        for o in map.f.table_records.iter().filter(|o| o.kind == *table && map.alive.contains_key(&o.handle.hex())) {
+            map.object(o, out);
+        }
+    }
+    0
+}
+
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
 pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let f = d.foreign.as_ref();
     let unknown = unknown_handles(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
-    if f.is_empty() && unknown.is_empty() && xd.is_empty() {
+    if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() {
         return;
     }
     // APPID roles must exist before handle remapping, not only after foreign xdata is emitted.
     let apps = f
         .objects
         .iter()
+        .chain(&f.table_records)
         .flat_map(|o| o.tags.iter())
         .chain(f.entities.values().chain(f.records.values()).flat_map(|x| x.xdata.iter()))
         .chain(xd.values().flat_map(|tags| tags.iter()))
         .filter(|t| t.code == 1001)
         .map(|t| t.value.clone())
-        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()));
+        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()))
+        .chain(d.registered_apps.iter().cloned());
     add_appids(tags, apps);
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
@@ -1185,10 +1230,11 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, s, _)| *s);
     let root_keys: HashSet<String> =
         objects.iter().find(|(_, s, _)| Some(*s) == root).map(|(_, _, t)| entries(t).into_iter().map(|(k, _)| up(&k)).collect()).unwrap_or_default();
-    let objs: HashMap<String, &ForeignObject> = f.objects.iter().map(|o| (o.handle.hex(), o)).collect();
+    let objs: HashMap<String, &ForeignObject> = f.objects.iter().chain(&f.table_records).map(|o| (o.handle.hex(), o)).collect();
     let owners: HashMap<String, String> = f
         .objects
         .iter()
+        .chain(&f.table_records)
         .filter_map(|o| Some((o.handle.hex(), cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())))?.hex())))
         .collect();
     let extras = Extras { f, xd: &xd, ids: &ids };
@@ -1255,12 +1301,15 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             next = next.saturating_add(1);
         }
     }
+    allocate_table_records(f, &roles, &mut alive, &mut next);
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let map = Map { f, alive, objects: objs, owners, roles, entities };
-    let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().map(|o| o.tags.len() + 1).sum::<usize>());
+    let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
+    let mut table = String::new();
     for r in &recs {
         let b = body(r);
+        let added = write_table_records(&map, r, b, &mut table, &mut out);
         if r.kind == "ENDSEC" && r.sec == "CLASSES" {
             for c in f.classes.iter().filter(|c| c.iter().find(|t| t.code == 1).is_some_and(|n| !class_names.contains(&up(&n.value)))) {
                 out.push(Tag::s(0, "CLASS"));
@@ -1295,13 +1344,19 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             out.extend(merge_xdict(&map, old, b));
             continue;
         }
+        let start = out.len();
         out.extend(tags.get(r.start).cloned());
         let x = extras.of(r, b);
         if x.is_none() && Some(r.start) != root {
             out.extend(b.iter().cloned());
-            continue;
+        } else {
+            record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
         }
-        record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
+        if added > 0
+            && let Some(count) = out.get_mut(start..).and_then(|t| t.iter_mut().find(|t| t.code == 70))
+        {
+            *count = Tag::i(70, count.i64().saturating_add(i64::try_from(added).unwrap_or(0)));
+        }
     }
     add_appids(&mut out, std::iter::empty());
     let top = max_handle(&out).saturating_add(1);

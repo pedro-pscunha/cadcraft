@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, EntityKind, EntityStore, Handle, Image};
+use cadcraft_doc::{Drawing, EntityKind, EntityStore, Handle, Image, ImageDefinition};
 use cadcraft_dxf::{Section, Tag};
 use cadcraft_geom::{Vec2, Vec3};
 
@@ -72,17 +72,12 @@ struct Def {
     path: String,
     pixel_size: Option<Vec2>,
     units: u8,
-}
-
-fn has_images(store: &EntityStore) -> bool {
-    store.iter().any(|e| matches!(e.kind, EntityKind::Image(_)))
+    size: Vec2,
+    loaded: bool,
 }
 
 /// Fill in each image's definition (path, name, pixel size) from the IMAGEDEF it points to.
 pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
-    if !has_images(&d.model) && !d.layouts.iter().any(|l| has_images(&l.entities)) && !d.blocks.values().any(|b| has_images(&b.entities)) {
-        return;
-    }
     // IMAGE handle → IMAGEDEF handle.
     let mut refs: HashMap<Handle, String> = HashMap::new();
     for s in secs.iter().filter(|s| s.name == "ENTITIES" || s.name == "BLOCKS") {
@@ -113,7 +108,9 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
                 };
                 let units = body.iter().find(|t| t.code == 281).and_then(|t| u8::try_from(t.i64()).ok()).unwrap_or(0);
                 let path = body.iter().find(|t| t.code == 1).map(Tag::str).unwrap_or_default();
-                defs.insert(h, Def { path, pixel_size: pixel, units, ..Def::default() });
+                let size = Vec2::new(f(10).unwrap_or(1.0), f(20).unwrap_or(1.0));
+                let loaded = body.iter().find(|t| t.code == 280).is_none_or(|t| t.i64() != 0);
+                defs.insert(h, Def { path, pixel_size: pixel, units, size, loaded, ..Def::default() });
             }
             "DICTIONARY" => {
                 let mut name: Option<String> = None;
@@ -137,6 +134,18 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
             def.name = n.clone();
         }
     }
+    d.image_definitions = defs
+        .values()
+        .map(|def| ImageDefinition {
+            name: def.name.clone(),
+            path: def.path.clone(),
+            size: def.size,
+            pixel_size: def.pixel_size.unwrap_or(Vec2::new(1.0, 1.0)),
+            units: def.units,
+            loaded: def.loaded,
+        })
+        .collect();
+    d.image_definitions.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     let by_image: HashMap<Handle, &Def> = refs.iter().filter_map(|(img, dh)| Some((*img, defs.get(dh)?))).collect();
     if by_image.is_empty() {
         return;
@@ -190,6 +199,7 @@ struct PlannedDef {
     size: Vec2,
     pixel_size: Vec2,
     units: u8,
+    loaded: bool,
     /// (IMAGEDEF_REACTOR handle, IMAGE handle) per image using it.
     reactors: Vec<(String, Handle)>,
 }
@@ -223,10 +233,24 @@ fn def_name(i: &Image) -> String {
 }
 
 /// Allocate the IMAGEDEF, IMAGEDEF_REACTOR and dictionary handles for every image entity.
-pub(crate) fn plan<'a>(entities: impl Iterator<Item = &'a cadcraft_doc::Entity>, mut next: impl FnMut() -> String) -> Plan {
+pub(crate) fn plan<'a>(d: &Drawing, entities: impl Iterator<Item = &'a cadcraft_doc::Entity>, mut next: impl FnMut() -> String) -> Plan {
     let mut p = Plan::default();
     let mut index: HashMap<(String, String), usize> = HashMap::new();
     let mut used: HashSet<String> = HashSet::new();
+    for def in &d.image_definitions {
+        index.insert((def.path.clone(), def.name.clone()), p.defs.len());
+        used.insert(key(&def.name));
+        p.defs.push(PlannedDef {
+            handle: next(),
+            name: def.name.clone(),
+            path: def.path.clone(),
+            size: def.size,
+            pixel_size: def.pixel_size,
+            units: def.units,
+            loaded: def.loaded,
+            reactors: Vec::new(),
+        });
+    }
     // Next suffix to try for each normalised base name, so allocating a unique name resumes where
     // the previous collision left off instead of re-probing `_2, _3, …` from the start — otherwise
     // many images sharing a base name make name allocation quadratic (CWE-407).
@@ -256,6 +280,7 @@ pub(crate) fn plan<'a>(entities: impl Iterator<Item = &'a cadcraft_doc::Entity>,
                     size: i.size,
                     pixel_size: i.pixel_size,
                     units: i.resolution_units,
+                    loaded: true,
                     reactors: Vec::new(),
                 });
                 let at = p.defs.len().saturating_sub(1);
@@ -271,7 +296,9 @@ pub(crate) fn plan<'a>(entities: impl Iterator<Item = &'a cadcraft_doc::Entity>,
     }
     if !p.defs.is_empty() {
         p.dict = next();
-        p.vars = next();
+        if !d.foreign.dictionary.iter().any(|(key, _)| key.eq_ignore_ascii_case("ACAD_IMAGE_VARS")) {
+            p.vars = next();
+        }
     }
     p
 }
@@ -321,15 +348,17 @@ pub(crate) fn objects(p: &Plan, root: &str) -> Vec<Tag> {
         t.extend(d.reactors.iter().map(|(r, _)| Tag::s(330, r)));
         t.extend([Tag::s(102, "}"), Tag::s(330, &p.dict), Tag::s(100, "AcDbRasterImageDef"), Tag::i(90, 0), Tag::s(1, &d.path)]);
         t.extend([Tag::f(10, d.size.x), Tag::f(20, d.size.y), Tag::f(11, d.pixel_size.x), Tag::f(21, d.pixel_size.y)]);
-        t.extend([Tag::i(280, 1), Tag::i(281, i64::from(d.units))]);
+        t.extend([Tag::i(280, i64::from(d.loaded)), Tag::i(281, i64::from(d.units))]);
         for (r, img) in &d.reactors {
             let ih = img.hex();
             t.extend([Tag::s(0, "IMAGEDEF_REACTOR"), Tag::s(5, r), Tag::s(330, &ih), Tag::s(100, "AcDbRasterImageDefReactor")]);
             t.extend([Tag::i(90, 2), Tag::s(330, ih)]);
         }
     }
-    // Image frame shown, high display quality, no insertion units.
-    t.extend([Tag::s(0, "RASTERVARIABLES"), Tag::s(5, &p.vars), Tag::s(102, "{ACAD_REACTORS"), Tag::s(330, root), Tag::s(102, "}")]);
-    t.extend([Tag::s(330, root), Tag::s(100, "AcDbRasterVariables"), Tag::i(90, 0), Tag::i(70, 1), Tag::i(71, 1), Tag::i(72, 0)]);
+    // Imported raster variables are kept raw; only new drawings need defaults.
+    if !p.vars.is_empty() {
+        t.extend([Tag::s(0, "RASTERVARIABLES"), Tag::s(5, &p.vars), Tag::s(102, "{ACAD_REACTORS"), Tag::s(330, root), Tag::s(102, "}")]);
+        t.extend([Tag::s(330, root), Tag::s(100, "AcDbRasterVariables"), Tag::i(90, 0), Tag::i(70, 1), Tag::i(71, 1), Tag::i(72, 0)]);
+    }
     t
 }

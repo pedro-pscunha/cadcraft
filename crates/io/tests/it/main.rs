@@ -48,6 +48,7 @@ mod layout_plot_window;
 mod low_handseed;
 mod mleader_content;
 mod mleader_roundtrip;
+mod mline_dictionary_names;
 mod mline_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_layout_plot_type;
@@ -82,6 +83,8 @@ mod tables_objects_roundtrip;
 mod text_left_justify;
 mod tolerance_roundtrip;
 mod unknown_entity_block;
+mod unused_definitions;
+mod unused_symbol_names;
 mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;

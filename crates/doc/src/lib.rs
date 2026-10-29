@@ -94,11 +94,17 @@ pub struct Drawing {
     pub layers: Vec<Layer>,
     pub linetypes: Vec<Linetype>,
     pub text_styles: Vec<TextStyle>,
+    /// Registered application names, including those with no remaining xdata.
+    pub registered_apps: Vec<String>,
+    /// Named plot style dictionary entries, including unused names.
+    pub plot_style_names: Vec<String>,
     pub dim_styles: Vec<DimStyle>,
     pub mleader_styles: Vec<MLeaderStyle>,
     pub table_styles: Vec<TableStyle>,
     /// Multiline styles (MLSTYLE); STANDARD is always there.
     pub mline_styles: Vec<MLineStyle>,
+    /// Raster definitions, including unused entries of ACAD_IMAGE_DICT.
+    pub image_definitions: Vec<ImageDefinition>,
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
     pub layouts: Vec<Layout>,
@@ -171,10 +177,13 @@ impl Drawing {
                 Linetype::continuous(),
             ],
             text_styles: vec![TextStyle::default()],
+            registered_apps: Vec::new(),
+            plot_style_names: Vec::new(),
             dim_styles: vec![DimStyle::default()],
             mleader_styles: vec![MLeaderStyle::default()],
             table_styles: vec![TableStyle::default()],
             mline_styles: vec![MLineStyle::default()],
+            image_definitions: Vec::new(),
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],

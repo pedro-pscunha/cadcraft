@@ -4,7 +4,7 @@ use super::{
 
 /// What happens to the anonymous `*D` blocks read from a file (#495): a dimension that still
 /// names its block regenerates its geometry under that name, keeping the block's entity
-/// handles, and `*D` blocks nothing else references are not written again.
+/// handles. Unreferenced blocks stay ordinary blocks: saving is not PURGE.
 pub(super) struct DimBlockPlan {
     /// Dimension (model or paper space) → the read block whose name and handles it reuses.
     pub(super) reuse: HashMap<Handle, std::sync::Arc<Block>>,
@@ -48,7 +48,7 @@ pub(super) fn dim_block_plan(d: &Drawing) -> DimBlockPlan {
         .flat_map(|s| s.iter())
         .filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { dm.block.as_ref().map(|n| n.to_ascii_uppercase()) } else { None })
         .collect();
-    let skip = d.blocks.keys().map(|n| n.to_ascii_uppercase()).filter(|n| (is_dim_block(n) || dim_refs.contains(n)) && !used.contains(n)).collect();
+    let skip = d.blocks.keys().map(|n| n.to_ascii_uppercase()).filter(|n| dim_refs.contains(n) && !used.contains(n)).collect();
     let mut plan = DimBlockPlan { reuse: HashMap::new(), skip };
     let mut claimed = std::collections::HashSet::new();
     for e in spaces.iter().flat_map(|s| s.iter()) {
