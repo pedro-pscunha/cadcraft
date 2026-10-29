@@ -111,4 +111,5 @@ mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
 mod vport_tiles;
+mod vx_table;
 mod xref_roundtrip;
