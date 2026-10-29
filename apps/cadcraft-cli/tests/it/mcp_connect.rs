@@ -81,13 +81,12 @@ fn connect_with_address_routes_to_that_endpoint() {
 }
 
 #[test]
-fn connect_to_closed_port_fails() {
-    let addr = {
-        let l = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        l.local_addr().expect("local addr").to_string()
-    };
-    let out = mcp(&["--connect", &addr], &format!("{INIT}\n"));
+fn connect_to_unavailable_port_fails() {
+    // Binding port zero chooses a nonzero port. No listener can reclaim zero between processes,
+    // unlike an ephemeral port whose reservation the test releases before starting the CLI.
+    let addr = "127.0.0.1:0";
+    let out = mcp(&["--connect", addr], &format!("{INIT}\n"));
     assert!(!out.status.success());
     assert!(out.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot connect to"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot connect to 127.0.0.1:0"));
 }
