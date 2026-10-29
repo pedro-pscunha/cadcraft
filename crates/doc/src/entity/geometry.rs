@@ -118,6 +118,15 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
                 (dm.kind, dm.defpt, dm.text_mid, dm.p13, dm.p14, dm.p15, dm.p16, dm.text_rotation, dm.user_text_pos, dm.marks.oblique)
             );
         }
+        EntityKind::MLeader(m) => {
+            // Not the text, its style or the arrowhead: the paths, landing, dogleg and the content's placement.
+            let text = m.text.as_ref().map(|t| (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact));
+            let block = m.block.as_ref().map(|b| (b.insert, b.scale, b.rotation));
+            let _ = write!(s, "MLEADER{:?}{plane:?}", (&m.leaders, m.landing, m.dogleg, m.spline, text, block));
+        }
+        EntityKind::Table(t) => {
+            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, &t.row_heights, &t.col_widths));
+        }
         EntityKind::Tolerance(t) => {
             let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
         }

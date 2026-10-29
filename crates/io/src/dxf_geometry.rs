@@ -63,6 +63,9 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
             &[("AcDbDimension", DIMENSION), ("AcDb3PointAngularDimension", &[13, 23, 33, 14, 24, 34, 15, 25, 35])]
         }
         "DIMENSION" if has("AcDbOrdinateDimension") => &[("AcDbDimension", DIMENSION), ("AcDbOrdinateDimension", &[13, 23, 33, 14, 24, 34])],
+        // The insertion point and plane, the direction and the row heights and column widths; the cells, their text,
+        // merges and rotations stay what the writer makes.
+        "ACAD_TABLE" => &[("AcDbBlockReference", &[10, 20, 30, 210, 220, 230]), ("AcDbTable", &[11, 21, 31, 141, 142])],
         "LWPOLYLINE" => &[("AcDbPolyline", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 91, 210, 220, 230])],
         // A POLYLINE is a 2D polyline (with VERTEX children), a 3D polyline or a mesh (their parents).
         "POLYLINE" if has("AcDb2dPolyline") => &[("AcDb2dPolyline", &[10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230])],
@@ -94,6 +97,10 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
     if kind == "HATCH" {
         return hatch_capture(tags);
     }
+    if matches!(kind, "MULTILEADER" | "MLEADER") {
+        return nested_capture(tags, "AcDbMLeader");
+    }
+
     let spec = spec(kind, tags)?;
     let mut out = Vec::new();
     for (i, (marker, codes)) in spec.iter().enumerate() {
@@ -110,6 +117,10 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
     if kind == "HATCH" {
         return hatch_restore(generated, kept, convert);
     }
+    if matches!(kind, "MULTILEADER" | "MLEADER") {
+        return nested_restore(generated, kept, "AcDbMLeader", mleader_geometry, convert);
+    }
+
     let spec = spec(kind, generated)?;
     let mut parts = kept.split(|t| t.code == 100).skip(1);
     // For each entry: the subclass's range, where its replacement goes (the first geometry group
@@ -204,6 +215,73 @@ fn hatch_restore(generated: &[Tag], kept: &[RawTag], convert: impl Fn(&RawTag) -
     out.extend(kept.iter().skip(k_tail).map(&convert));
     out.extend(groups.iter().skip(tail).filter(|t| !HATCH_TAIL.contains(&t.code)).cloned());
     out.extend(generated.iter().skip(range.end).cloned());
+    Some(out)
+}
+
+/// Records whose geometry sits in nested sections that reuse group codes (`300 CONTEXT_DATA{` ...
+/// `301 }`, ...): the groups of the subclass are kept whole, and a save overwrites the values of the
+/// geometry groups of the record the writer made with those of the source, in order, when both
+/// have the same geometry groups at the same depths (else the source is not replayed).
+fn nested_capture(tags: &[Tag], marker: &str) -> Option<Vec<RawTag>> {
+    let range = subclass(tags, marker, 0)?;
+    let mut out = vec![RawTag { code: 100, value: marker.to_string() }];
+    out.extend(tags.get(range)?.iter().map(|t| RawTag { code: t.code, value: t.str() }));
+    Some(out)
+}
+
+/// The depth of each group of a nested record, and whether it opens (`{`) or closes (`}`) a section.
+fn depths(groups: impl Iterator<Item = (i32, String)>) -> Vec<usize> {
+    let mut depth = 0usize;
+    groups
+        .map(|(code, value)| {
+            let value = value.trim();
+            if matches!(code, 301 | 303 | 305) && value == "}" {
+                depth = depth.saturating_sub(1);
+            }
+            let here = depth;
+            if matches!(code, 300 | 302 | 304) && value.ends_with('{') {
+                depth += 1;
+            }
+            here
+        })
+        .collect()
+}
+
+/// The geometry groups of a MULTILEADER by depth: the content context (1), a leader root (2) and a
+/// leader line (3).
+fn mleader_geometry(depth: usize, code: i32) -> bool {
+    match depth {
+        1 => matches!(code, 10..=16 | 20..=26 | 30..=36 | 42 | 43 | 46 | 47 | 110..=112 | 120..=122 | 130..=132),
+        2 => matches!(code, 10 | 11 | 20 | 21 | 30 | 31 | 40),
+        3 => matches!(code, 10 | 20 | 30),
+        _ => false,
+    }
+}
+
+fn nested_restore(
+    generated: &[Tag],
+    kept: &[RawTag],
+    marker: &str,
+    is_geometry: fn(usize, i32) -> bool,
+    convert: impl Fn(&RawTag) -> Tag,
+) -> Option<Vec<Tag>> {
+    let range = subclass(generated, marker, 0)?;
+    let own = generated.get(range.clone())?;
+    let kept = kept.get(1..)?;
+    let (own_depths, kept_depths) = (depths(own.iter().map(|t| (t.code, t.str()))), depths(kept.iter().map(|t| (t.code, t.value.clone()))));
+    let pick = |codes: &mut dyn Iterator<Item = (usize, i32)>| {
+        codes.enumerate().filter(|(_, (d, c))| is_geometry(*d, *c)).map(|(i, (d, c))| (i, d, c)).collect::<Vec<_>>()
+    };
+    let own_geometry = pick(&mut own_depths.iter().copied().zip(own.iter().map(|t| t.code)));
+    let kept_geometry = pick(&mut kept_depths.iter().copied().zip(kept.iter().map(|t| t.code)));
+    if own_geometry.len() != kept_geometry.len() || own_geometry.iter().zip(&kept_geometry).any(|(a, b)| (a.1, a.2) != (b.1, b.2)) {
+        return None;
+    }
+    let mut out: Vec<Tag> = generated.to_vec();
+    for (a, b) in own_geometry.iter().zip(&kept_geometry) {
+        let value = kept.get(b.0)?;
+        *out.get_mut(range.start + a.0)? = convert(value);
+    }
     Some(out)
 }
 

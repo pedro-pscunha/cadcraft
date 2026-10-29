@@ -481,3 +481,145 @@ fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
     let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
     assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
 }
+
+/// A drawing saved as 2018 DXF: the version with a native MULTILEADER.
+fn save_2018(d: &Drawing) -> String {
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &opts).unwrap()).unwrap()
+}
+
+/// The (depth, code, bits) of the geometry groups of a MULTILEADER record: the content context (depth 1),
+/// a leader root (2) and a leader line (3).
+fn mleader_numbers(record: &[Tag]) -> Vec<(usize, i32, u64)> {
+    let mut depth = 0usize;
+    let mut out = Vec::new();
+    for t in record {
+        let value = t.str();
+        if matches!(t.code, 301 | 303 | 305) && value.trim() == "}" {
+            depth = depth.saturating_sub(1);
+        }
+        let geometry = match depth {
+            1 => matches!(t.code, 10..=16 | 20..=26 | 30..=36 | 42 | 43 | 46 | 47 | 110..=112 | 120..=122 | 130..=132),
+            2 => matches!(t.code, 10 | 11 | 20 | 21 | 30 | 31 | 40),
+            3 => matches!(t.code, 10 | 20 | 30),
+            _ => false,
+        };
+        if geometry && let Ok(v) = value.trim().parse::<f64>() {
+            out.push((depth, t.code, v.to_bits()));
+        }
+        if matches!(t.code, 300 | 302 | 304) && value.trim().ends_with('{') {
+            depth += 1;
+        }
+    }
+    out
+}
+
+/// A multileader the way CADCraft writes it, with the content plane and the landing's Z of the source changed.
+fn mleader_source(plane: (f64, f64, f64)) -> String {
+    use cadcraft_doc::{Common, MLeader, MText, Space};
+    use cadcraft_geom::Vec3;
+    let mut d = Drawing::new_imperial();
+    let text = MText {
+        insert: Vec3::new(8.0, 4.0, 0.0),
+        height: 0.18,
+        width: 3.0,
+        attach: 1,
+        rotation: 0.0,
+        style: "Standard".into(),
+        contents: "Note".into(),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+    };
+    let m = MLeader {
+        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.5), Vec3::new(2.0, 1.0, 0.5)]],
+        landing: Vec3::new(5.0, 4.0, 0.5),
+        dogleg: 0.36,
+        text: Some(text),
+        style: "Standard".into(),
+        arrow_size: 0.18,
+        spline: false,
+        block: None,
+        arrow_block: String::new(),
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::MLeader(m)).unwrap();
+    let text = save_2018(&d);
+    // Change the content's plane (11, 21, 31 under the CONTEXT_DATA) and its axes (110-112).
+    let mut tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 0 && t.str() == "MULTILEADER").unwrap();
+    let context = tags.iter().skip(start).position(|t| t.code == 300).unwrap() + start;
+    let normal = tags.iter().skip(context).position(|t| t.code == 11).unwrap() + context;
+    for (k, v) in [plane.0, plane.1, plane.2].into_iter().enumerate() {
+        tags[normal + k] = Tag::f(11 + 10 * k as i32, v);
+    }
+    let axes = tags.iter().skip(context).position(|t| t.code == 111).unwrap() + context;
+    for (k, v) in [0.6, 0.8, 1e-9].into_iter().enumerate() {
+        tags[axes + k] = Tag::f(111 + 10 * k as i32, v);
+    }
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+#[test]
+fn a_multileader_keeps_its_context_planes_and_leader_geometry_through_every_save() {
+    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8), (1e-8, -2e-8, -0.99999999999999978)] {
+        let source = mleader_source(plane);
+        let want = mleader_numbers(&all_records(&source, "MULTILEADER")[0]);
+        assert!(want.len() > 20, "{want:?}");
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        let first = save_2018(&d);
+        let second = save_2018(&cadcraft_io::read_dxf(first.as_bytes()).unwrap());
+        let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+        let through = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+        let (dwg_first, dwg_second) =
+            (save_2018(&through), save_2018(&cadcraft_io::read(&cadcraft_io::write(&through, "x.dwg").unwrap(), "x.dwg").unwrap()));
+        for (what, text) in [("DXF", first), ("DXF, second save", second), ("DWG", dwg_first), ("DWG, second save", dwg_second)] {
+            assert_eq!(mleader_numbers(&all_records(&text, "MULTILEADER")[0]), want, "{what}: {plane:?}");
+        }
+    }
+}
+
+/// A table the way CADCraft writes it, with a plane, an insertion Z, a direction and odd sizes.
+fn table_source(plane: (f64, f64, f64)) -> String {
+    use cadcraft_doc::{Common, Space, Table, TableCell};
+    use cadcraft_geom::Vec3;
+    let mut d = Drawing::new_imperial();
+    let cell = |t: &str| TableCell { text: t.into(), ..Default::default() };
+    let t = Table {
+        insert: Vec3::new(1.0, 10.0, 0.0),
+        col_widths: vec![3.0, 2.0],
+        row_heights: vec![0.6, 0.4],
+        cells: vec![vec![cell("a"), cell("b")], vec![cell("c"), cell("d")]],
+        ..Table::default()
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+    let mut tags = cadcraft_dxf::parse(save_2018(&d).as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 0 && t.str() == "ACAD_TABLE").unwrap();
+    let ten = tags.iter().skip(start).position(|t| t.code == 10).unwrap() + start;
+    tags[ten + 2] = Tag::f(30, 2.5);
+    for (k, v) in [plane.0, plane.1, plane.2].into_iter().enumerate() {
+        tags.insert(ten + 3 + k, Tag::f(210 + 10 * k as i32, v));
+    }
+    let table = tags.iter().skip(ten).position(|t| t.code == 11).unwrap() + ten;
+    for (k, v) in [0.6, 0.8, 1e-9].into_iter().enumerate() {
+        tags[table + k] = Tag::f(11 + 10 * k as i32, v);
+    }
+    let rows = tags.iter().skip(ten).position(|t| t.code == 141).unwrap() + ten;
+    tags[rows] = Tag::f(141, 0.123456789012345);
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+#[test]
+fn a_table_keeps_its_plane_direction_and_sizes_through_every_save() {
+    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8)] {
+        let source = table_source(plane);
+        let want = all_records(&source, "ACAD_TABLE").remove(0);
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        let first = save_2018(&d);
+        let second = save_2018(&cadcraft_io::read_dxf(first.as_bytes()).unwrap());
+        for (what, text) in [("DXF", first), ("DXF, second save", second)] {
+            let got = all_records(&text, "ACAD_TABLE").remove(0);
+            let codes = [10, 20, 30, 210, 220, 230, 11, 21, 31, 141, 142];
+            assert_eq!(numbers(&[got], &codes), numbers(&[want.clone()], &codes), "{what}: {plane:?}");
+        }
+    }
+}
