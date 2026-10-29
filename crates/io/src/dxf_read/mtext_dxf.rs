@@ -285,9 +285,10 @@ pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
     let mut v = vec![
         Tag::s(101, "Embedded Object"),
         Tag::i(70, i64::from(t.attach)),
-        Tag::f(10, t.rotation.cos()),
-        Tag::f(20, t.rotation.sin()),
-        Tag::f(30, 0.0),
+        // The X axis: a canonical text's full direction, else its rotation in the XY plane.
+        Tag::f(10, t.direction.map_or(t.rotation.cos(), |d| d.x)),
+        Tag::f(20, t.direction.map_or(t.rotation.sin(), |d| d.y)),
+        Tag::f(30, t.direction.map_or(0.0, |d| d.z)),
         Tag::f(11, t.insert.x),
         Tag::f(21, t.insert.y),
         Tag::f(31, t.insert.z),

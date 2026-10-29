@@ -99,6 +99,17 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
 }
 
 pub(super) fn text_from(t: &T) -> Text {
+    let mut text = text_fields(t);
+    let align = t.f(11).map(|_| t.p(11));
+    let n = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
+    if n.z < 0.0 {
+        mirror_text(&mut text, align.map(|a| ocs_n(n, a)), ocs_n(n, t.p(10)));
+    }
+    text
+}
+
+/// A TEXT's fields as the groups hold them (OCS points, baseline angle), whatever its normal.
+pub(super) fn text_fields(t: &T) -> Text {
     let h = match t.i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
@@ -116,7 +127,7 @@ pub(super) fn text_from(t: &T) -> Text {
         _ => VAlign::Baseline,
     };
     let align = if t.f(11).is_some() { Some(t.p(11)) } else { None };
-    let mut text = Text {
+    Text {
         insert: t.p(10),
         align_pt: if h == HAlign::Left && v == VAlign::Baseline { None } else { align },
         height: t.fd(40, 0.2).max(1e-9),
@@ -129,12 +140,7 @@ pub(super) fn text_from(t: &T) -> Text {
         valign: v,
         backward: false,
         upside_down: false,
-    };
-    let n = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
-    if n.z < 0.0 {
-        mirror_text(&mut text, align.map(|a| ocs_n(n, a)), ocs_n(n, t.p(10)));
     }
-    text
 }
 
 /// TEXT / ATTRIB / ATTDEF with extrusion (0,0,-1): the points are OCS and the text runs from its

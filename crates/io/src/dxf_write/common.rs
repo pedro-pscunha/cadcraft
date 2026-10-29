@@ -217,11 +217,18 @@ pub(super) fn multiline_tags(w: &mut W, a: &Attrib, attdef: bool) {
         w.s(1, "");
     }
     w.s(7, &m.style);
-    if m.rotation != 0.0 {
-        w.p(11, Vec3::new(m.rotation.cos(), m.rotation.sin(), 0.0));
+    let canonical = a.multiline.as_ref().is_some_and(|ml| ml.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2);
+    match m.direction.filter(|_| canonical) {
+        // The embedded text's full direction and its own plane.
+        Some(direction) => w.p(11, direction),
+        None if m.rotation != 0.0 => w.p(11, Vec3::new(m.rotation.cos(), m.rotation.sin(), 0.0)),
+        None => {}
     }
     w.i(73, if m.line_spacing_exact { 2 } else { 1 });
     w.f(44, m.line_spacing);
+    if let Some(ml) = a.multiline.as_ref().filter(|_| canonical) {
+        w.p(210, ml.normal);
+    }
 }
 
 /// ATTRIB/ATTDEF flags (group 70): 1 invisible, 2 constant, 4 verify, 8 preset.
@@ -285,7 +292,9 @@ fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
     if q.is_finite() { Vec3::new(q.x, q.y, a.z) } else { t.insert }
 }
 
-pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_prompt: Option<&str>) {
+/// `plane` is the normal of a canonical text's plane (the entity's, or the attribute's own): with it the text also writes
+/// its generation flags (group 71) and its normal (210, 220, 230), which the legacy text does not keep.
+pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_prompt: Option<&str>, plane: Option<Vec3>) {
     w.p(10, text_insert(d, t));
     w.f(40, t.height);
     w.s(1, &t.value);
@@ -299,6 +308,9 @@ pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attri
         w.f(51, t.oblique.to_degrees());
     }
     w.s(7, &t.style);
+    if plane.is_some() && (t.backward || t.upside_down) {
+        w.i(71, if t.backward { 2 } else { 0 } | if t.upside_down { 4 } else { 0 });
+    }
     let h = match t.halign {
         HAlign::Left => 0,
         HAlign::Center => 1,
@@ -318,6 +330,9 @@ pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attri
     }
     if let Some(a) = t.align_pt {
         w.p(11, a);
+    }
+    if let Some(normal) = plane {
+        w.p(210, normal);
     }
     match attrib {
         Some((a, target)) => {

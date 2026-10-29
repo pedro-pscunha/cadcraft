@@ -341,7 +341,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.s(0, "TEXT");
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
-            text_tags(w, d, t, None, None);
+            text_tags(w, d, t, None, None, canonical_plane(e));
         }
         // Closed polylines, one per loop (`dxf_region`): REGION's own data is ACIS.
         EntityKind::Region(r) => {
@@ -366,7 +366,11 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
         EntityKind::AttDef(a) => {
             w.s(0, "ATTDEF");
             common(w, e, owner, paper, "AcDbText");
-            text_tags(w, d, &a.text, Some((a, cx.target)), Some(&a.prompt));
+            // A canonical definition has the plane (and thickness) of its entity.
+            if canonical_plane(e).is_some() {
+                thickness(w, e);
+            }
+            text_tags(w, d, &a.text, Some((a, cx.target)), Some(&a.prompt), canonical_plane(e));
             if cx.target >= Version::R2007 {
                 multiline_tags(w, a, true);
             }
@@ -391,8 +395,14 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 w.s(1, "");
             }
             w.s(7, &t.style);
-            if t.rotation != 0.0 {
-                w.f(50, t.rotation.to_degrees());
+            match canonical_plane(e) {
+                // The plane and the full WCS direction of a canonical text.
+                Some(normal) => {
+                    w.p(210, normal);
+                    w.p(11, t.world_direction(normal).unwrap_or(Vec3::new(t.rotation.cos(), t.rotation.sin(), 0.0)));
+                }
+                None if t.rotation != 0.0 => w.f(50, t.rotation.to_degrees()),
+                None => {}
             }
             // Line spacing style: 1 = at least, 2 = exactly.
             w.i(73, if t.line_spacing_exact { 2 } else { 1 });
@@ -458,7 +468,12 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                     w.i(60, 1);
                 }
                 w.s(100, "AcDbText");
-                text_tags(w, d, &a.text, Some((a, cx.target)), None);
+                // A canonical attribute has the plane and thickness of its own.
+                let own_plane = (a.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2).then_some(a.plane.normal);
+                if own_plane.is_some() && a.plane.thickness != 0.0 {
+                    w.f(39, a.plane.thickness);
+                }
+                text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane);
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }
@@ -912,6 +927,11 @@ fn gradient_xdata(w: &mut W, g: &Gradient) {
     w.i(1070, i64::from(g.centered));
     w.s(1000, g.color1.name());
     w.s(1000, g.color2.name());
+}
+
+/// The plane of a canonical text-family entity: its normal, kept as read. Legacy text has none.
+fn canonical_plane(e: &Entity) -> Option<Vec3> {
+    (e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2).then_some(e.common.extrusion)
 }
 
 /// Group 39 (thickness) of the entities whose DXF Reference record has one; only when set.
