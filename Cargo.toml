@@ -96,7 +96,7 @@ debug = 0
 # Arterra fork of acadrust 0.6.8 (INSERT-owned ATTRIB xdata, polyline vertex properties, AcDs
 # bodies listed in two tables, clockwise hatch arc edges, exact sort keys, owned polyline
 # vertices), until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "3353c9b505ee6e0a99d5036eedfd5035ebb5017c" }
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "883f4af09cd6596c8b4041e8d6a06b2ae503de92" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
