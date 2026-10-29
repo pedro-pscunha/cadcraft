@@ -201,6 +201,8 @@ pub struct DimStyle {
     /// DIMBLK1 / DIMBLK2: per-end arrowheads ("" = use `arrow_block`).
     pub arrow_block1: String,
     pub arrow_block2: String,
+    /// DIMSAH: use separate arrowheads rather than DIMBLK.
+    pub separate_arrows: bool,
     /// DIMDLE dimension line extension past the extension lines (ticks / oblique arrows).
     pub dim_line_extend: f64,
     /// DIMJUST: 0 centred, 1 next to ext line 1, 2 next to ext line 2, 3 over ext line 1, 4 over ext line 2.
@@ -230,6 +232,13 @@ pub struct DimStyle {
     pub alt_unit: u8,
     /// DIMALTZ zero suppression of alternate units (DIMZIN bits).
     pub alt_zero_suppression: u8,
+    /// DIMALTTD / DIMALTTZ: alternate tolerance decimals and zero suppression.
+    pub alt_tol_decimals: u8,
+    pub alt_tol_zero_suppression: u8,
+    /// DIMUPT: update text position while dragging a dimension.
+    pub user_position_text: bool,
+    /// DIMTXTDIRECTION: right-to-left dimension text.
+    pub text_right_to_left: bool,
     /// DIMAUNIT: 0 decimal degrees, 1 deg/min/sec, 2 grads, 3 radians.
     pub angular_unit: u8,
     /// DIMSE1 / DIMSE2 suppress extension lines.
@@ -297,6 +306,7 @@ pub const DIMVARS: &[(&str, &str)] = &[
     ("DIMBLK", "arrowBlock"),
     ("DIMBLK1", "arrowBlock1"),
     ("DIMBLK2", "arrowBlock2"),
+    ("DIMSAH", "separateArrows"),
     ("DIMTSZ", "tickSize"),
     ("DIMCLRD", "dimLineColor"),
     ("DIMCLRE", "extLineColor"),
@@ -328,6 +338,10 @@ pub const DIMVARS: &[(&str, &str)] = &[
     ("DIMALTRND", "altRound"),
     ("DIMALTU", "altUnit"),
     ("DIMALTZ", "altZeroSuppression"),
+    ("DIMALTTD", "altTolDecimals"),
+    ("DIMALTTZ", "altTolZeroSuppression"),
+    ("DIMUPT", "userPositionText"),
+    ("DIMTXTDIRECTION", "textRightToLeft"),
     ("DIMAUNIT", "angularUnit"),
     ("DIMSE1", "suppressExt1"),
     ("DIMSE2", "suppressExt2"),
@@ -388,6 +402,7 @@ impl Default for DimStyle {
             annotative: false,
             arrow_block1: String::new(),
             arrow_block2: String::new(),
+            separate_arrows: false,
             dim_line_extend: 0.0,
             text_just: 0,
             round: 0.0,
@@ -404,6 +419,10 @@ impl Default for DimStyle {
             alt_round: 0.0,
             alt_unit: 2,
             alt_zero_suppression: 0,
+            alt_tol_decimals: 2,
+            alt_tol_zero_suppression: 0,
+            user_position_text: false,
+            text_right_to_left: false,
             angular_unit: 0,
             suppress_ext1: false,
             suppress_ext2: false,
@@ -491,6 +510,8 @@ impl DimStyle {
         use serde_json::Value;
         let mut rejected = Vec::new();
         let Ok(mut cur) = serde_json::to_value(&*self) else { return src.keys().cloned().collect() };
+        let infer_separate = !src.keys().any(|k| Self::field_name(k) == Some("separateArrows"));
+        let mut arrow_changed = false;
         for (k, v) in src {
             let Some(field) = DimStyle::field_name(k).filter(|f| *f != "name") else {
                 rejected.push(k.clone());
@@ -530,7 +551,10 @@ impl DimStyle {
             }
             obj.insert(field.to_string(), coerced);
             match serde_json::from_value::<DimStyle>(cur.clone()) {
-                Ok(ns) => *self = ns,
+                Ok(ns) => {
+                    *self = ns;
+                    arrow_changed |= matches!(field, "arrowBlock1" | "arrowBlock2");
+                }
                 Err(_) => {
                     rejected.push(k.clone());
                     if let Some(o) = cur.as_object_mut() {
@@ -538,6 +562,10 @@ impl DimStyle {
                     }
                 }
             }
+        }
+        // Choosing an end's arrow enables DIMSAH, unless the caller explicitly sets it.
+        if infer_separate && arrow_changed {
+            self.separate_arrows = true;
         }
         rejected
     }

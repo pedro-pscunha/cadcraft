@@ -62,8 +62,16 @@ pub(crate) enum K {
     Block,
     /// Handle of an LTYPE record (DIMLTYPE, DIMLTEX1, DIMLTEX2); "" (ByBlock) isn't written.
     Linetype,
-    /// An angle: degrees in the style, radians in the file (DIMJOGANG).
+    /// An angle: degrees in the style and plain groups, radians in xdata (DIMJOGANG).
     Angle,
+}
+
+/// Plain DIMSTYLE angle groups use degrees, unlike the radians in DSTYLE and DIMVARS xdata.
+pub(crate) fn table_kind(kind: K) -> K {
+    match kind {
+        K::Angle => K::Real,
+        _ => kind,
+    }
 }
 
 /// [`DimStyle`] field (camelCase) → DIMSTYLE group code (DXF Reference, DIMSTYLE table). The
@@ -105,6 +113,11 @@ pub(crate) const DIM_CODES: &[(&str, i32, K)] = &[
     ("decimals", 271, K::Int),
     ("tolDecimals", 272, K::Int),
     ("altUnit", 273, K::Int),
+    ("altTolDecimals", 274, K::Int),
+    ("altTolZeroSuppression", 286, K::Int),
+    ("userPositionText", 288, K::Bool),
+    ("textRightToLeft", 294, K::Bool),
+    ("separateArrows", 173, K::Bool),
     ("angularUnit", 275, K::Int),
     ("fractionFormat", 276, K::Int),
     ("linearUnit", 277, K::Int),
@@ -148,11 +161,11 @@ pub(crate) const DIMSAH: i32 = 173;
 pub(crate) const DIMPOST: i32 = 3;
 
 /// Variables newer than R2000: DIMFXL, DIMJOGANG, DIMTFILL, DIMTFILLCLR, DIMARCSYM, DIMFXLON,
-/// DIMLTYPE, DIMLTEX1, DIMLTEX2. Files of a variable's [`newer_since`] version or later get it as
+/// DIMLTYPE, DIMLTEX1, DIMLTEX2, DIMTXTDIRECTION. Files of a variable's [`newer_since`] version or later get it as
 /// a DIMSTYLE group (R2004, and R2007 for DIMTFILL and DIMTFILLCLR); older files get it in a
 /// style's `CADCRAFT` "DIMVARS" xdata (`1070 <code>` then the value, like DSTYLE) instead of a
 /// group an older reader doesn't expect. The reader takes both.
-pub(crate) const NEWER_CODES: &[i32] = &[49, 50, 69, 70, 90, 290, 345, 346, 347];
+pub(crate) const NEWER_CODES: &[i32] = &[49, 50, 69, 70, 90, 290, 294, 345, 346, 347];
 /// The first version with [`NEWER_CODES`] as DIMSTYLE groups, except DIMTFILL and DIMTFILLCLR
 /// (see [`newer_since`]): the others came with AutoCAD 2006, whose files are the 2004 format
 /// (AC1018).
@@ -162,7 +175,11 @@ pub(crate) const NEWER_SINCE: Version = Version::R2004;
 /// DIMTFILL and DIMTFILLCLR (Open Design Specification for .dwg files 5.4.1), else
 /// [`NEWER_SINCE`].
 pub(crate) fn newer_since(code: i32) -> Version {
-    if matches!(code, 69 | 70) { Version::R2007 } else { NEWER_SINCE }
+    match code {
+        69 | 70 => Version::R2007,
+        294 => Version::R2010,
+        _ => NEWER_SINCE,
+    }
 }
 /// Xdata list name of [`NEWER_CODES`] values.
 pub(crate) const DIMVARS_LIST: &str = "DIMVARS";
@@ -171,6 +188,8 @@ pub(crate) fn dim_code(field: &str) -> Option<(i32, K)> {
     DIM_CODES.iter().find(|(f, _, _)| *f == field).map(|(_, c, k)| (*c, *k))
 }
 pub(crate) fn dim_field(code: i32) -> Option<(&'static str, K)> {
+    // The DWG bridge emits DIMTXTDIRECTION as 295 instead of the DXF Reference's 294.
+    let code = if code == 295 { 294 } else { code };
     DIM_CODES.iter().find(|(_, c, _)| *c == code).map(|(f, _, k)| (*f, *k))
 }
 
@@ -407,15 +426,24 @@ fn read_dimvar_list(
     ltypes: &HashMap<String, String>,
 ) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
-    let mut it = list.iter().take(MAX_XDATA_ITEMS * 2);
+    let mut it = list.iter().take(MAX_XDATA_ITEMS * 2).peekable();
     while let Some(t) = it.next() {
         if t.code != 1070 {
             continue;
         }
         let code = t.i64();
-        let Some(v) = it.next() else { break };
+        // Some DWG bridges omit a null 1005 value. It must not eat the next variable.
+        let handle = (340..=347).contains(&code);
+        let null = Tag::s(1005, "0");
+        let v = if handle && it.peek().is_none_or(|v| v.code != 1005) {
+            &null
+        } else {
+            let Some(v) = it.next() else { break };
+            v
+        };
         let Some((field, kind)) = i32::try_from(code).ok().and_then(dim_field) else { continue };
-        if let Some(val) = decode(kind, v, styles, blocks, ltypes).and_then(|j| canonical(field, &j)) {
+        let value = if handle && v.str().trim() == "0" { Some(Value::String(String::new())) } else { decode(kind, v, styles, blocks, ltypes) };
+        if let Some(val) = value.and_then(|j| canonical(field, &j)) {
             out.insert(field.to_string(), val);
         }
     }

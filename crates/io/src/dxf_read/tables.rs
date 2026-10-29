@@ -260,6 +260,7 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                         continue;
                     }
                     let Some((field, kind)) = crate::dxf_ext::dim_field(tag.code) else { continue };
+                    let kind = crate::dxf_ext::table_kind(kind);
                     if let Some(v) = crate::dxf_ext::decode(kind, tag, &rx.styles, &rx.brs, &rx.ltypes) {
                         fields.insert(field.to_string(), v);
                     }

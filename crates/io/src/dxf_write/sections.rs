@@ -13,14 +13,12 @@ use super::{
 
 struct TableWritePlan<'a> {
     d: &'a Drawing,
-    version: Version,
     cx: &'a mut Ctx,
     ext: cadcraft_geom::Bounds2,
 }
 
 fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> {
     let d = plan.d;
-    let version = plan.version;
     let cx = plan.cx;
     let ext = plan.ext;
     // ---------------- TABLES ----------------
@@ -179,7 +177,7 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.i(70, 0);
     }
     w.s(0, "ENDTAB");
-    write_dimstyles(w, d, cx, version);
+    write_dimstyles(w, d, cx);
     ltype_handles
 }
 
@@ -223,7 +221,7 @@ fn write_layer_table(w: &mut W, d: &Drawing) {
     w.s(0, "ENDTAB");
 }
 
-fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx, version: Version) {
+fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx) {
     // DIMSTYLE
     let th = {
         let h = w.h();
@@ -245,7 +243,9 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx, version: Version) {
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
         let mut newer = W::default();
         for (field, code, kind) in dxf_ext::DIM_CODES {
-            let Some(enc) = v.get(*field).and_then(|x| cx.encode(*kind, x)) else { continue };
+            let plain = !dxf_ext::NEWER_CODES.contains(code) || cx.target >= dxf_ext::newer_since(*code);
+            let kind = if plain { dxf_ext::table_kind(*kind) } else { *kind };
+            let Some(enc) = v.get(*field).and_then(|x| cx.encode(kind, x)) else { continue };
             // DIMPOST is written even when empty: a reader that defaults a missing one to "<>"
             // (the DWG bridge's) would otherwise give radius and diameter dimensions no "R" or
             // "Ø" in AutoCAD (#1053).
@@ -263,7 +263,7 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx, version: Version) {
             // Table groups where the file version has them, else xdata. DIMTFILL and DIMTFILLCLR
             // are written only when set, as other writers do, so a style without a text
             // background has a single 70 (its flags).
-            if version >= dxf_ext::newer_since(*code) {
+            if plain {
                 if matches!(*code, 69 | 70) && v.get(*field) == defaults.get(*field) {
                     continue;
                 }
@@ -272,9 +272,6 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx, version: Version) {
                 newer.i(1070, i64::from(*code));
                 newer.dimval(*code, enc, true);
             }
-        }
-        if !s.arrow_block1.trim().is_empty() || !s.arrow_block2.trim().is_empty() {
-            w.i(dxf_ext::DIMSAH, 1);
         }
         if s.annotative {
             annotative_xdata(w);
@@ -971,7 +968,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Ta
 
     write_classes(&mut w, &cx, &every);
 
-    let ltype_handles = write_tables(&mut w, TableWritePlan { d, version, cx: &mut cx, ext: d.extents(&Space::Model) });
+    let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext: d.extents(&Space::Model) });
 
     // BLOCK_RECORD
     let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());

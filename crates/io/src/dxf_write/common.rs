@@ -22,12 +22,17 @@ pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
         let Some(field) = DimStyle::field_name(k) else { continue };
         let Some((code, kind)) = dxf_ext::dim_code(field) else { continue };
         let Some(val) = dxf_ext::canonical(field, v) else { continue };
-        let Some(enc) = cx.encode(kind, &val) else { continue };
+        let enc = if matches!(kind, dxf_ext::K::Linetype | dxf_ext::K::TextStyle) && val.as_str().is_some_and(|s| s.trim().is_empty()) {
+            dxf_ext::DimVal::Handle("0".into())
+        } else {
+            let Some(enc) = cx.encode(kind, &val) else { continue };
+            enc
+        };
         sah |= matches!(code, 343 | 344);
         ov.i(1070, i64::from(code));
         ov.dimval(code, enc, true);
     }
-    if sah {
+    if sah && !dm.overrides.keys().any(|k| DimStyle::field_name(k) == Some("separateArrows")) {
         ov.i(1070, i64::from(dxf_ext::DIMSAH));
         ov.i(1070, 1);
     }
