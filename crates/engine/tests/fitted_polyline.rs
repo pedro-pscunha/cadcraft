@@ -57,6 +57,10 @@ fn affine_edits_transform_controls_fit_points_and_tangents() {
                     let fit = p.saved_fit().unwrap_or_else(|| panic!("{command}, spline={spline}, negative={negative}: lost fit"));
                     assert_eq!((fit.flags, fit.smooth_type, fit.extrusion), (original.flags, original.smooth_type, original.extrusion));
                     assert_eq!(fit.vertices.len(), original.vertices.len());
+                    assert_eq!(
+                        (fit.start_width, fit.end_width),
+                        (original.start_width * matrix.scale_factor(), original.end_width * matrix.scale_factor())
+                    );
                     assert_eq!(p.vertices, fit.display_vertices);
                     for (vertex, old) in fit.vertices.iter().zip(&original.vertices) {
                         let expected = matrix.apply(Vec2::new(ocs_x * old.position.x, old.position.y));
@@ -102,6 +106,7 @@ fn reverse_and_width_keep_fit_flags_and_vertex_order() {
                 assert_eq!(fit.vertices.iter().map(|v| v.flags).collect::<Vec<_>>(), original.vertices.iter().map(|v| v.flags).collect::<Vec<_>>());
                 assert_eq!(fit.vertices.len(), original.vertices.len());
                 if width {
+                    assert_eq!((fit.start_width, fit.end_width), (2.5, 2.5));
                     assert!(fit.vertices.iter().all(|v| v.start_width == 2.5 && v.end_width == 2.5));
                     assert!(p.vertices.iter().all(|v| v.start_width == 2.5 && v.end_width == 2.5));
                 } else {
