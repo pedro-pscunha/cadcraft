@@ -133,17 +133,75 @@ impl Mat4 {
             (m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3]) / w,
         )
     }
+    /// Transform a vector by the linear part, without translation or perspective division.
+    pub fn apply_vec(&self, v: Vec3) -> Vec3 {
+        Vec3::new(
+            self.m[0][0] * v.x + self.m[0][1] * v.y + self.m[0][2] * v.z,
+            self.m[1][0] * v.x + self.m[1][1] * v.y + self.m[1][2] * v.z,
+            self.m[2][0] * v.x + self.m[2][1] * v.y + self.m[2][2] * v.z,
+        )
+    }
+
+    /// Invert a finite affine matrix. Refuse singular or unrepresentable results.
+    pub fn inverse(&self) -> Option<Mat4> {
+        if self.m[3] != [0.0, 0.0, 0.0, 1.0] || !self.m.iter().flatten().all(|v| v.is_finite()) {
+            return None;
+        }
+        let mut rows = [[0.0; 6]; 3];
+        for (i, row) in rows.iter_mut().enumerate() {
+            row[..3].copy_from_slice(&self.m[i][..3]);
+            row[i + 3] = 1.0;
+        }
+        for col in 0..3 {
+            let pivot = (col..3).max_by(|&a, &b| rows[a][col].abs().total_cmp(&rows[b][col].abs()))?;
+            rows.swap(col, pivot);
+            let divisor = rows[col][col];
+            if divisor == 0.0 || !divisor.is_finite() {
+                return None;
+            }
+            for value in &mut rows[col] {
+                *value /= divisor;
+            }
+            let pivot_row = rows[col];
+            for (i, row) in rows.iter_mut().enumerate() {
+                if i != col {
+                    let factor = row[col];
+                    for (value, pivot_value) in row.iter_mut().zip(pivot_row) {
+                        *value -= factor * pivot_value;
+                    }
+                }
+            }
+        }
+        let mut inverse = Mat4::IDENTITY;
+        for (i, row) in rows.iter().enumerate() {
+            inverse.m[i][..3].copy_from_slice(&row[3..]);
+        }
+        let translation = -inverse.apply_vec(Vec3::new(self.m[0][3], self.m[1][3], self.m[2][3]));
+        inverse.m[0][3] = translation.x;
+        inverse.m[1][3] = translation.y;
+        inverse.m[2][3] = translation.z;
+        inverse.m.iter().flatten().all(|v| v.is_finite()).then_some(inverse)
+    }
+
+    /// Transform a normal by the inverse transpose and return a computational unit direction.
+    /// Reflections retain inverse-transpose orientation, not the transformed basis orientation.
+    pub fn apply_normal(&self, normal: Vec3) -> Option<Vec3> {
+        let normal = crate::OcsFrame::new(normal)?.to_world(Vec3::Z);
+        let inverse = self.inverse()?;
+        let components = [normal.x, normal.y, normal.z];
+        let terms: [[f64; 3]; 3] = std::array::from_fn(|row| std::array::from_fn(|col| inverse.m[row][col] * components[row]));
+        // Scale only contributing terms, so an unrelated axis cannot underflow the direction.
+        let scale = terms.iter().flatten().fold(0.0_f64, |a, b| a.max(b.abs()));
+        let component = |col| terms[0][col] / scale + terms[1][col] / scale + terms[2][col] / scale;
+        crate::OcsFrame::new(Vec3::new(component(0), component(1), component(2))).map(|frame| frame.to_world(Vec3::Z))
+    }
+
     pub fn from_mat3(t: &Mat3) -> Mat4 {
         Mat4 { m: [[t.a, t.c, 0.0, t.e], [t.b, t.d, 0.0, t.f], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] }
     }
-    /// The "arbitrary axis algorithm" frame for an extrusion direction (DXF OCS → WCS).
+    /// DXF OCS → WCS, with the legacy identity fallback for invalid normals.
+    /// Geometry edits use `OcsFrame::new` to refuse an invalid source plane.
     pub fn ocs(normal: Vec3) -> Mat4 {
-        let n = normal.normalized();
-        if n == Vec3::ZERO || (n.x.abs() < 1e-12 && n.y.abs() < 1e-12 && n.z > 0.0) {
-            return Mat4::IDENTITY;
-        }
-        let ax = if n.x.abs() < 1.0 / 64.0 && n.y.abs() < 1.0 / 64.0 { Vec3::new(0.0, 1.0, 0.0).cross(n) } else { Vec3::Z.cross(n) }.normalized();
-        let ay = n.cross(ax).normalized();
-        Mat4 { m: [[ax.x, ay.x, n.x, 0.0], [ax.y, ay.y, n.y, 0.0], [ax.z, ay.z, n.z, 0.0], [0.0, 0.0, 0.0, 1.0]] }
+        crate::OcsFrame::new(normal).map_or(Mat4::IDENTITY, crate::OcsFrame::matrix)
     }
 }

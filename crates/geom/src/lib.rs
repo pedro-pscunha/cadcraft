@@ -13,6 +13,7 @@ mod fillet;
 mod intersect;
 mod mat;
 mod nurbs;
+mod plane;
 pub mod region;
 mod spline;
 mod spline_fit;
@@ -25,6 +26,7 @@ pub use curve::{
 pub use fillet::{CornerFit, TanCurve, tangent_circles};
 pub use intersect::{circle_circle, intersect_ext, intersect_segments, line_circle, line_line, line_line_infinite};
 pub use mat::{Mat3, Mat4};
+pub use plane::OcsFrame;
 pub use spline::{MAX_DEGREE as MAX_SPLINE_DEGREE, Spline};
 pub use spline_fit::{FitOptions, KnotParam};
 pub use vec::{Vec2, Vec3};
