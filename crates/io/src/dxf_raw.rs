@@ -284,6 +284,10 @@ fn head(tags: &[Tag]) -> Head {
     h
 }
 
+fn handle_of_record(tags: &[Tag]) -> Option<Handle> {
+    head(tags).handle.and_then(|h| handle(&h))
+}
+
 fn val(tags: &[Tag], code: i32) -> Option<String> {
     tags.iter().take_while(|t| t.code < 1000).find(|t| t.code == code).map(Tag::str)
 }
@@ -604,6 +608,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
+    let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
+    crate::dxf_geometry::capture_all(&mut f, d, source.map(|(k, _, t)| (k.as_str(), *t)));
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
@@ -970,6 +976,8 @@ struct Map<'a> {
     roles: HashMap<ForeignKey, String>,
     /// Entities in the written file.
     entities: HashSet<String>,
+    /// The entities whose snapshot of the source geometry is written back.
+    geometry: HashSet<Handle>,
 }
 
 impl Map<'_> {
@@ -1404,7 +1412,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
-    let map = Map { f, alive, objects: objs, owners, roles, entities };
+    let geometry = crate::dxf_geometry::eligible(f, d);
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     for r in &recs {
@@ -1540,6 +1549,18 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             patched = patch_layout(b, &x.layout, |h| map.get(h));
             patched.as_slice()
         }
+        None => b,
+    };
+    // The source geometry of an entity whose geometry is as it was read.
+    let replayed;
+    let b = match x.and_then(|x| x.geometry.as_ref()).zip(handle_of_record(b)).filter(|(_, h)| map.geometry.contains(h)) {
+        Some((g, _)) => match g.records.first().and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, |t| map.group(t))) {
+            Some(tags) => {
+                replayed = tags;
+                replayed.as_slice()
+            }
+            None => b,
+        },
         None => b,
     };
     let h = head(b);

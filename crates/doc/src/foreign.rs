@@ -14,9 +14,11 @@ use crate::{Entity, EntityKind, Handle, RawTag};
 mod association;
 mod block_copy;
 mod export;
+mod geometry;
 mod merge;
 pub use block_copy::BlockContentCopy;
 use block_copy::{BlockNamespace, block_role};
+pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 #[cfg(test)]
 mod tests;
 use association::RawDimAssoc;
@@ -152,6 +154,8 @@ pub struct ForeignExtra {
     /// A layout's plot settings and layout groups as read (each after its `100` subclass marker):
     /// the writer takes from them what it has no model for (limits, extents, UCS, plot origin...).
     pub layout: Vec<RawTag>,
+    /// The source geometry groups of an entity, replayed by a save while its geometry is as it was read.
+    pub geometry: Option<GeometrySnapshot>,
 }
 
 impl ForeignExtra {
@@ -163,6 +167,7 @@ impl ForeignExtra {
             && self.props.is_empty()
             && self.subclass.is_empty()
             && self.layout.is_empty()
+            && self.geometry.is_none()
     }
 }
 
@@ -355,6 +360,11 @@ fn remap_extra(extra: &mut ForeignExtra, map: &BTreeMap<Handle, Handle>) {
     remap_tags(&mut extra.xdata, map);
     remap_tags(&mut extra.props, map);
     remap_tags(&mut extra.subclass, map);
+    if let Some(g) = &mut extra.geometry {
+        for r in &mut g.records {
+            remap_tags(&mut r.groups, map);
+        }
+    }
 }
 
 fn remap_xdata(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>, source: DuplicationSource) {
