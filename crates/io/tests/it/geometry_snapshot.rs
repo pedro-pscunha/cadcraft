@@ -66,8 +66,8 @@ fn saves(d: &Drawing) -> Vec<(&'static str, String)> {
 
 /// Check that the geometry groups `codes` of the first `kind` record of the source are bit for bit
 /// those of every save. A DWG stores angles in radians, so `angles` only agree to the last digits
-/// there. The groups `dxf_only` are checked in the user DXF saves only: acadrust's DXF reader has
-/// no 210/220/230 for an ATTRIB, so a DWG does not keep the plane of an attribute.
+/// there. The groups `dxf_only` are checked in the user DXF saves only (the DWG format or acadrust
+/// does not keep them).
 fn assert_kept(source: &str, kind: &str, codes: &[i32], angles: &[i32], dxf_only: &[i32]) {
     let want = record(source, kind);
     let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
@@ -183,7 +183,7 @@ fn inserts_and_attributes_keep_their_plane_and_geometry_through_every_save() {
         );
         let source = dxf_with_block(&[attdef], &[&insert, &attrib, "0 SEQEND\n5 142\n100 AcDbEntity\n8 0"]);
         assert_kept(&source, "INSERT", &[10, 20, 30, 41, 42, 43, 50, 210, 220, 230], &[50], &[]);
-        assert_kept(&source, "ATTRIB", &[10, 20, 30, 40, 50, 210, 220, 230, 74], &[50], &[210, 220, 230]);
+        assert_kept(&source, "ATTRIB", &[10, 20, 30, 40, 50, 210, 220, 230, 74], &[50], &[]);
     }
 }
 
