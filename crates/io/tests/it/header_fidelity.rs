@@ -47,3 +47,13 @@ fn header_fidelity_downgrade_omits_variables_newer_than_the_target() {
     assert!(!has("DIMJOGANG"));
     assert!(!has("DIMMZF"));
 }
+
+#[test]
+fn header_fidelity_read_variables_survive_dwg() {
+    let d = cadcraft_io::read_dxf(source()).unwrap();
+    let dwg = cadcraft_io::write_with(&d, "x.dwg", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap();
+    let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+    for name in ["USERI1", "USERR5", "ISOLINES", "LATITUDE", "PLIMMIN", "PEXTMAX", "DIMUPT", "PROJECTNAME", "CAMERADISPLAY"] {
+        assert_eq!(back.header.get(name), d.header.get(name), "{name}");
+    }
+}

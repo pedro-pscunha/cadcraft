@@ -65,8 +65,7 @@ fn unused_image_definitions_survive_dwg_saves() {
         let text = cadcraft_io::write_dxf(&d);
         let dwg = cadcraft_dwg::dxf_to_dwg(text.as_bytes()).unwrap();
         let back = cadcraft_dwg::dwg_to_dxf(&dwg).unwrap();
-        // The pinned acadrust DXF reader does not yet read IMAGEDEF group 281.
-        check_images(&back, 0.0);
+        check_images(&back, 2.0);
         d = cadcraft_io::read_dxf(&back).unwrap();
     }
 }

@@ -200,6 +200,5 @@ fn image_survives_dwg_save_and_reopen() {
     let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
     let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
     let [b] = images(&back).try_into().unwrap();
-    // The DWG bridge keeps everything but the definition's resolution unit.
-    assert_eq!(Image { resolution_units: img.resolution_units, ..b }, img);
+    assert_eq!(b, img);
 }

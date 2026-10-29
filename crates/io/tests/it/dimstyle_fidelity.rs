@@ -167,3 +167,37 @@ fn dimstyle_fidelity_missing_handle_values_do_not_consume_the_next_variable() {
     let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
     assert_eq!(overrides(&back), want.as_object().unwrap(), "nulls are written explicitly");
 }
+
+#[test]
+fn dimstyle_fidelity_measurement_factors_and_suffixes_survive_dwg() {
+    let mut d = Drawing::new_imperial();
+    let mut st = DimStyle { name: "Measurement".into(), ..DimStyle::default() };
+    let fields = serde_json::json!({
+        "DIMMZF": 12.5, "DIMALTMZF": 25.0,
+        "DIMMZS": "m", "DIMALTMZS": "cm",
+    });
+    assert!(st.apply_fields(fields.as_object().unwrap()).is_empty());
+    d.dim_styles.push(st.clone());
+    for version in [Version::R2010, Version::R2013, Version::R2018] {
+        let dwg = cadcraft_io::write_with(&d, "x.dwg", &SaveOptions { version: Some(version), binary: false }).unwrap();
+        let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+        assert_eq!(back.dim_style("Measurement"), Some(&st), "{version:?}");
+    }
+}
+
+#[test]
+fn dimstyle_fidelity_true_colors_survive_dwg() {
+    let mut d = Drawing::new_imperial();
+    let rgb = cadcraft_color::Color::True(cadcraft_color::Rgb(187, 130, 157));
+    let st = DimStyle {
+        name: "RGB".into(), dim_line_color: rgb, ext_line_color: rgb, text_color: rgb,
+        text_fill: 2, text_fill_color: rgb, ..DimStyle::default()
+    };
+    d.dim_styles.push(st.clone());
+    for version in [Version::R2007, Version::R2010, Version::R2018] {
+        let dwg = cadcraft_io::write_with(&d, "x.dwg", &SaveOptions { version: Some(version), binary: false }).unwrap();
+        let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+        assert_eq!(back.dim_style("RGB"), Some(&st), "{version:?}");
+    }
+}
+
