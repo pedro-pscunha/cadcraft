@@ -97,7 +97,9 @@ pub(super) fn text_from(t: &T) -> Text {
         5 => HAlign::Fit,
         _ => HAlign::Left,
     };
-    let v = match t.i(73).or_else(|| t.i(74)).unwrap_or(0) {
+    // An attribute's vertical alignment is group 74; its group 73 is the field length (a TEXT's is 73).
+    let attribute = t.0.iter().any(|g| g.code == 100 && g.str().starts_with("AcDbAttribute"));
+    let v = match if attribute { t.i(74) } else { t.i(73).or_else(|| t.i(74)) }.unwrap_or(0) {
         1 => VAlign::Bottom,
         2 => VAlign::Middle,
         3 => VAlign::Top,
