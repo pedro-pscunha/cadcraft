@@ -64,6 +64,9 @@ pub struct MLeaderContext {
     pub text_dir: Vec3,
     /// The normal of the block content's plane (group 14).
     pub block_normal: Vec3,
+    /// What the content's placement (text and block) means: the projected 2D one of earlier drawings, or the plane's.
+    #[serde(default)]
+    pub geometry_revision: super::GeometryRevision,
 }
 
 impl Default for MLeaderContext {
@@ -75,6 +78,7 @@ impl Default for MLeaderContext {
             text_normal: Vec3::Z,
             text_dir: Vec3::new(1.0, 0.0, 0.0),
             block_normal: Vec3::Z,
+            geometry_revision: super::GeometryRevision::LegacyProjectedV1,
         }
     }
 }

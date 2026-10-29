@@ -397,6 +397,7 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             Vec3::new(a.cos(), a.sin(), 0.0)
         }),
         block_normal: p.block_normal.get().unwrap_or(ctx.block_normal),
+        ..ctx
     };
     MLeader {
         roots,

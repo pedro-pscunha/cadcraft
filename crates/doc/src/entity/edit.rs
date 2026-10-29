@@ -70,6 +70,10 @@ impl Entity {
             | EntityKind::Table(_)
             | EntityKind::Tolerance(_) => self.geometry_revision.require_legacy()?,
         }
+        // A multileader's content frame has a revision of its own.
+        if let EntityKind::MLeader(m) = &self.kind {
+            m.context.geometry_revision.require_legacy()?;
+        }
         self.kind.transform_legacy(&legacy_matrix(transform)?)
     }
 }

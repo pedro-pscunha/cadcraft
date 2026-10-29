@@ -415,7 +415,7 @@ impl EntityKind {
                 }
                 ml.context.text_dir = unit(ml.context.text_dir, m.apply_vec(ml.context.text_dir.xy())).0;
                 if let Some(t) = &mut ml.text {
-                    edit::mtext_payload(t, GeometryRevision::LegacyProjectedV1, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
+                    edit::mtext_payload(t, ml.context.geometry_revision, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
                 }
                 if let Some(b) = &mut ml.block {
                     // Transformed exactly like a block reference.
