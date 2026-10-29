@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use cadcraft_geom::{Mat3, Vec2, Vec3};
+use cadcraft_geom::{Mat3, Mat4, Vec2, Vec3};
 
 use super::{ActionKind, DynamicBlock, ParameterKind, Value, dynamic_block, reference};
 use crate::foreign::{ForeignExtra, ForeignObject};
@@ -381,7 +381,7 @@ fn delta(old: &Val, new: &Val, connection: &str) -> f64 {
 }
 
 /// Move entity `e` by `v`: the listed vertices of a line or polyline, else the whole object.
-fn move_entity(e: &mut Entity, vertices: Option<&[i32]>, v: Vec2) {
+fn move_entity(e: &mut Entity, vertices: Option<&[i32]>, v: Vec2) -> Result<(), String> {
     match (&mut e.kind, vertices) {
         (EntityKind::LwPolyline(pl), Some(idx)) => {
             for i in idx {
@@ -399,8 +399,12 @@ fn move_entity(e: &mut Entity, vertices: Option<&[i32]>, v: Vec2) {
                 }
             }
         }
-        _ => e.kind.transform(&Mat3::translate(v)),
+        _ => e.try_transform(&Mat4::from_mat3(&Mat3::translate(v))).map_err(|error| error.to_string())?,
     }
+    if !crate::has_finite_numbers(e) {
+        return Err("The dynamic geometry result has undefined or infinite coordinates.".into());
+    }
+    Ok(())
 }
 
 /// Whether point `p` lies inside a stretch frame (two corners, or a polygon).
@@ -427,6 +431,20 @@ fn in_frame(frame: &[Vec2], p: Vec2) -> bool {
 /// the stretch and move actions of the changed parameters, with the parameters in their selections
 /// carried along), and record the new values on it.
 fn apply(
+    d: &mut Drawing,
+    insert: Handle,
+    definition: &str,
+    values: &BTreeMap<i32, Value>,
+    set: &BTreeMap<i32, Val>,
+    direct: i32,
+) -> Result<(), String> {
+    let mut candidate = d.clone();
+    apply_candidate(&mut candidate, insert, definition, values, set, direct)?;
+    *d = candidate;
+    Ok(())
+}
+
+fn apply_candidate(
     d: &mut Drawing,
     insert: Handle,
     definition: &str,
@@ -547,7 +565,7 @@ fn apply(
             c.common.visible = *v;
         }
         for (idx, v) in moves.get(&e.handle).into_iter().flatten() {
-            move_entity(&mut c, idx.as_deref(), *v);
+            move_entity(&mut c, idx.as_deref(), *v)?;
         }
         if let EntityKind::Hatch(h) = &mut c.kind {
             for l in &mut h.loops {
@@ -574,22 +592,23 @@ fn apply(
     // the reference's attribute.
     let to_world = ins.transform(src.base.xy());
     let origin = to_world.apply(Vec2::ZERO);
-    d.modify_entity(insert, |e| {
-        if let EntityKind::Insert(i) = &mut e.kind {
+    let mut changed = d.entity(insert).ok_or("No such object.")?.as_ref().clone();
+    {
+        if let EntityKind::Insert(i) = &mut changed.kind {
             i.block = name.clone();
             for a in &mut i.attribs {
                 if let Some(v) = attrib_moves.get(&a.tag.to_ascii_uppercase()) {
                     let w = to_world.apply(*v) - origin;
-                    let mut k = EntityKind::Text(a.text.clone());
-                    k.transform(&Mat3::translate(w));
-                    if let EntityKind::Text(t) = k {
+                    let mut entity = Entity::new(Handle(0), EntityKind::Text(a.text.clone()));
+                    entity.try_transform(&Mat4::from_mat3(&Mat3::translate(w))).map_err(|error| error.to_string())?;
+                    if let EntityKind::Text(t) = entity.kind {
                         a.text = t;
                     }
                 }
             }
         }
-    })
-    .map_err(|e| e.to_string())?;
+    }
+    d.modify_entity(insert, |entity| *entity = changed).map_err(|error| error.to_string())?;
     let was = current(&m, values, direct);
     record_values(d, insert, def_record, &m, &new, (direct, was.as_ref()));
     drop_if_unused(d, &old);

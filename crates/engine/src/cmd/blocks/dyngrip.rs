@@ -88,10 +88,11 @@ fn drawn(d: &Drawing, h: Handle) -> Vec<Entity> {
         .iter()
         .filter(|e| e.common.visible && !matches!(&e.kind, EntityKind::AttDef(_) | EntityKind::Wipeout(_)))
         .take(MAX_PREVIEW)
-        .map(|e| {
-            let mut kind = e.kind.clone();
-            kind.transform(&m);
-            Entity { handle: Handle(0), common: under(&e.common, r), kind }
+        .filter_map(|e| {
+            let mut entity = e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok()?;
+            entity.handle = Handle(0);
+            entity.common = under(&e.common, r);
+            Some(entity)
         })
         .collect();
     // An attribute draws with its definition's properties, except those set on it.

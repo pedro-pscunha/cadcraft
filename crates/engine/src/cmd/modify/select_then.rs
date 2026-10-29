@@ -224,11 +224,7 @@ impl SelectThen {
                     .iter()
                     .take(500)
                     .filter_map(|h| d.entity(*h))
-                    .map(|e| {
-                        let mut k = e.kind.clone();
-                        k.transform(&m);
-                        k
-                    })
+                    .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
                     .collect();
                 out.push(line(base, c));
                 out
@@ -482,11 +478,7 @@ impl Interactive for SelectThen {
             .iter()
             .take(500)
             .filter_map(|h| d.entity(*h))
-            .map(|e| {
-                let mut k = e.kind.clone();
-                k.transform(&m);
-                k
-            })
+            .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
             .collect();
         out.push(line(base, c));
         out
@@ -519,9 +511,9 @@ impl Interactive for SelectThen {
                 handles.push(*h);
             } else if texts < MAX_MIRROR_TEXT_PREVIEW {
                 texts += 1;
-                let mut k = e.kind.clone();
-                k.transform(&matrix);
-                extra.push(k);
+                if let Ok(entity) = e.transformed(&cadcraft_geom::Mat4::from_mat3(&matrix)) {
+                    extra.push(entity.kind);
+                }
             }
         }
         Some(crate::prompt::Drag { handles, matrix, extra, clipboard: false })

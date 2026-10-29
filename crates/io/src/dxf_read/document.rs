@@ -294,7 +294,8 @@ pub(super) fn sortents_table(tags: &[Tag]) -> Option<SortentsTable> {
 /// Move each `*D` block by its dimension's group 12, so the graphics sit where AutoCAD draws
 /// them and the save can write the shift as zero. A block that dimensions share is moved only when
 /// they all shift it alike.
-pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) {
+pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) -> super::Result<()> {
+    let mut notes = Vec::new();
     let mut shifts: HashMap<&str, Option<cadcraft_geom::Vec2>> = HashMap::new();
     for (name, shift) in &rx.dim_block_shifts {
         shifts.entry(name.as_str()).and_modify(|s| *s = s.filter(|s| s.near(*shift, 1e-9))).or_insert(Some(*shift));
@@ -306,10 +307,18 @@ pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) {
         if let Some(b) = d.blocks.get_mut(name.as_str()) {
             let store = &mut std::sync::Arc::make_mut(b).entities;
             for h in store.handles() {
-                store.modify(h, |e| e.kind.transform(&m));
+                let mut entity = store.get(h).ok_or_else(|| super::IoError::Format("missing dimension block entity".into()))?.as_ref().clone();
+                if matches!(entity.kind, EntityKind::Unknown(_)) {
+                    notes.push(format!("Dimension block {name}: entity {} has unsupported geometry. Its source geometry stays unchanged during display normalization.", h.hex()));
+                    continue;
+                }
+                entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m)).map_err(|error| super::IoError::Format(error.to_string()))?;
+                store.modify(h, |current| *current = entity);
             }
         }
     }
+    d.read_notes.extend(notes);
+    Ok(())
 }
 
 /// Draw each space with a SORTENTSTABLE in sort-handle order: an entity listed in the table by

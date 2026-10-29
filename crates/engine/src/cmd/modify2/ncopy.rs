@@ -14,28 +14,27 @@ struct NestedLeaf {
 }
 
 /// The leaf objects of a block reference in world coordinates (nested references expanded).
-fn nested_leaves(d: &cadcraft_doc::Drawing, ins: &cadcraft_doc::Insert, m: &Mat3, path: &mut Vec<Handle>, out: &mut Vec<NestedLeaf>) {
+fn nested_leaves(d: &cadcraft_doc::Drawing, ins: &cadcraft_doc::Insert, m: &Mat3, path: &mut Vec<Handle>, out: &mut Vec<NestedLeaf>) -> Result<()> {
     if path.len() > MAX_BLOCK_DEPTH || out.len() >= MAX_GEN {
-        return;
+        return Ok(());
     }
-    let Some(b) = d.block(&ins.block) else { return };
+    let Some(b) = d.block(&ins.block) else { return Ok(()) };
     let mm = m.then_before(ins.transform(b.base.xy()));
     for e in b.entities.iter() {
         match &e.kind {
             EntityKind::Insert(inner) => {
                 path.push(e.handle);
-                nested_leaves(d, inner, &mm, path, out);
+                nested_leaves(d, inner, &mm, path, out)?;
                 path.pop();
             }
             EntityKind::AttDef(_) => {}
-            k => {
-                let mut copy = (**e).clone();
-                copy.kind = k.clone();
-                copy.kind.transform(&mm);
+            _ => {
+                let copy = e.transformed(&cadcraft_geom::Mat4::from_mat3(&mm))?;
                 out.push(NestedLeaf { entity: copy, occurrence: path.clone() });
             }
         }
     }
+    Ok(())
 }
 
 fn leaves_of(s: &Session, h: Handle) -> Result<Vec<NestedLeaf>> {
@@ -43,7 +42,7 @@ fn leaves_of(s: &Session, h: Handle) -> Result<Vec<NestedLeaf>> {
     let EntityKind::Insert(ins) = &e.kind else { return Err(other("Select a block reference.")) };
     crate::cmd::modify::check_block_expansion(s.doc()?, &e, &Mat3::IDENTITY, 0)?;
     let mut out = Vec::new();
-    nested_leaves(s.doc()?, ins, &Mat3::IDENTITY, &mut vec![h], &mut out);
+    nested_leaves(s.doc()?, ins, &Mat3::IDENTITY, &mut vec![h], &mut out)?;
     Ok(out)
 }
 
@@ -61,7 +60,7 @@ fn place_copies(s: &mut Session, items: &[NestedLeaf], delta: Vec2) -> Result<Ve
             continue;
         }
         let mut copy = source.entity.clone();
-        copy.kind.transform(&m);
+        copy.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
         sets.entry(&source.occurrence).or_default().push(copy);
     }
     let d = s.doc_mut()?;
@@ -168,11 +167,7 @@ impl Interactive for NcopyM {
         self.items
             .iter()
             .take(500)
-            .map(|entity| {
-                let mut k = entity.entity.kind.clone();
-                k.transform(&m);
-                k
-            })
+            .filter_map(|entity| entity.entity.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
             .collect()
     }
 }

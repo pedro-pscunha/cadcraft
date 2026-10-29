@@ -181,7 +181,7 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
     let entities = src.model.iter().map(|e| adopt(e, &renames)).collect();
     for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
         if moved {
-            e.kind.transform(&m);
+            e.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
         }
         d.ensure_layer(&e.common.layer);
         handles.push(e.handle);

@@ -33,10 +33,8 @@ fn set_xy(p: &mut Vec3, q: Vec2) {
     p.y = q.y;
 }
 
-fn translated(k: &EntityKind, d: Vec2) -> EntityKind {
-    let mut k = k.clone();
-    k.transform(&Mat3::translate(d));
-    k
+fn translated(k: &EntityKind, d: Vec2) -> Option<EntityKind> {
+    cadcraft_doc::Entity::new(Handle(0), k.clone()).transformed(&cadcraft_geom::Mat4::from_mat3(&Mat3::translate(d))).ok().map(|entity| entity.kind)
 }
 
 /// What a polyline grip index refers to (matches the order of `EntityKind::grips`).
@@ -101,16 +99,16 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
     match &mut k {
         EntityKind::Line(l) => match index {
             0 => set_xy(&mut l.a, to),
-            1 => return Some(translated(kind, delta)),
+            1 => return translated(kind, delta),
             _ => set_xy(&mut l.b, to),
         },
         EntityKind::Point(_) | EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Image(_) | EntityKind::Table(_) => {
-            return Some(translated(kind, delta));
+            return translated(kind, delta);
         }
-        EntityKind::Hatch(_) | EntityKind::Tolerance(_) => return Some(translated(kind, delta)),
+        EntityKind::Hatch(_) | EntityKind::Tolerance(_) => return translated(kind, delta),
         EntityKind::Circle(c) => {
             if index == 0 {
-                return Some(translated(kind, delta));
+                return translated(kind, delta);
             }
             let r = c.center.xy().dist(to);
             if r <= EPS {
@@ -126,7 +124,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
                 return None;
             }
             if index == 0 {
-                return Some(translated(kind, delta));
+                return translated(kind, delta);
             }
             stretch_ellipse(e, index, to)?;
         }
@@ -146,7 +144,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
         }
         // Centre, base radius (and start angle), top radius.
         EntityKind::Helix(h) => match index {
-            0 => return Some(translated(kind, delta)),
+            0 => return translated(kind, delta),
             1 => {
                 let r = h.center.xy().dist(to);
                 if r <= EPS {
@@ -159,7 +157,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
         },
         EntityKind::Ray(r) | EntityKind::XLine(r) => {
             if index == 0 {
-                return Some(translated(kind, delta));
+                return translated(kind, delta);
             }
             let d = (to - r.base.xy()).normalized();
             if d == Vec2::ZERO {
@@ -169,7 +167,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
         }
         EntityKind::Insert(i) => {
             if index == 0 {
-                return Some(translated(kind, delta));
+                return translated(kind, delta);
             }
             let a = i.attribs.get_mut(index - 1)?;
             let ip = a.text.insert.xy() + delta;
@@ -227,7 +225,7 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
         }
         EntityKind::Solid(s) | EntityKind::Trace(s) => set_xy(s.corners.get_mut(index)?, to),
         EntityKind::Face3d(f) => set_xy(f.corners.get_mut(index)?, to),
-        EntityKind::Region(_) => return Some(translated(kind, delta)),
+        EntityKind::Region(_) => return translated(kind, delta),
         EntityKind::Viewport(v) => {
             let opposite = *grips.get((index + 2) % 4)?;
             let w = (to.x - opposite.x).abs();
@@ -253,7 +251,7 @@ fn stretch_arc(kind: &EntityKind, arc: &cadcraft_doc::Arc, index: usize, to: Vec
         0 => start = to,
         1 => mid = to,
         2 => end = to,
-        _ => return Some(translated(kind, delta)),
+        _ => return translated(kind, delta),
     }
     let adjusted = Arc::from_3_points(start, mid, end)?;
     Some(crate::cmd::helpers::arc(&adjusted))

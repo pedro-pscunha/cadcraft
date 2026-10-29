@@ -1,6 +1,6 @@
 use super::common::{Common, Lineweight};
 use super::text::{MText, Text};
-use super::{Color, Deserialize, EntityKind, Mat3, Serialize, Vec2, Vec3};
+use super::{Color, Deserialize, Mat3, Mat4, Serialize, Vec2, Vec3};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,11 +75,16 @@ pub struct MultilineAttrib {
 impl MultilineAttrib {
     /// This text placed by `m` (a block reference's transform, for its attribute made from a
     /// definition).
-    pub fn transformed(&self, m: &Mat3) -> MultilineAttrib {
-        let mut k = EntityKind::MText(self.mtext.clone());
-        k.transform(m);
-        let mtext = if let EntityKind::MText(t) = k { t } else { self.mtext.clone() };
-        MultilineAttrib { mtext, read_as: self.read_as.clone() }
+    pub fn try_transformed(&self, m: &Mat4) -> crate::Result<MultilineAttrib> {
+        if *m == Mat4::IDENTITY {
+            return Ok(self.clone());
+        }
+        let mut candidate = self.clone();
+        super::edit::mtext_payload(&mut candidate.mtext, m, super::edit::TextOwner::AttributeInstance)?;
+        if !crate::has_finite_numbers(&candidate) {
+            return Err(crate::DocError::Invalid("The embedded text result has infinite or undefined coordinates.".into()));
+        }
+        Ok(candidate)
     }
 }
 
@@ -100,11 +105,27 @@ impl Attrib {
         }
     }
 
-    /// Move a multiline attribute's text by `m` along with the attribute (nothing for others).
-    pub fn transform_multiline(&mut self, m: &Mat3) {
-        if let Some(ml) = &mut self.multiline {
-            *ml = ml.transformed(m);
+    /// Transform an instance's own text payloads without exposing a partial result.
+    pub fn try_transform(&mut self, m: &Mat4) -> crate::Result<()> {
+        if *m == Mat4::IDENTITY {
+            return Ok(());
         }
+        let mut candidate = self.clone();
+        super::edit::text_payload(&mut candidate.text, m, super::edit::TextOwner::AttributeInstance)?;
+        candidate.try_transform_multiline(m)?;
+        if !crate::has_finite_numbers(&candidate) {
+            return Err(crate::DocError::Invalid("The attribute result has infinite or undefined coordinates.".into()));
+        }
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Move a multiline attribute's text by `m` along with the attribute (nothing for others).
+    pub fn try_transform_multiline(&mut self, m: &Mat4) -> crate::Result<()> {
+        if let Some(ml) = &mut self.multiline {
+            *ml = ml.try_transformed(m)?;
+        }
+        Ok(())
     }
 
     /// A multiline attribute's text as drawn and saved: its multiline text, with the contents

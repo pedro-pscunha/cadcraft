@@ -1,0 +1,2978 @@
+{
+  "schema": 1,
+  "fixtures": [
+    {
+      "id": "plane-move-edge-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "ELLIPSE",
+          "name": "ellipse",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEllipse"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                3.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            },
+            {
+              "code": 40,
+              "value": 0.4
+            },
+            {
+              "code": 41,
+              "value": 0.3
+            },
+            {
+              "code": 42,
+              "value": 2.4
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "move",
+        "target": "ellipse",
+        "delta": [
+          2.0,
+          3.0,
+          0.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/plane-move-edge-001",
+        "source": "normals-p2-plane-move-edge-001.dxf",
+        "script": "normals-p2-plane-move-edge-001.scr",
+        "before": "normals-p2-plane-move-edge-001-before.dxf",
+        "after": "normals-p2-plane-move-edge-001-after.dxf",
+        "log": "normals-p2-plane-move-edge-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "ellipse",
+            "value": "ELLIPSE"
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 10,
+            "value": [
+              12.0,
+              23.0,
+              3.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 11,
+            "value": [
+              5.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 210,
+            "value": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 40,
+            "value": 0.4
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 41,
+            "value": 0.3
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 42,
+            "value": 2.399999999999999
+          }
+        ]
+      }
+    },
+    {
+      "id": "plane-grip-edge-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "ELLIPSE",
+          "name": "ellipse",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEllipse"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                3.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            },
+            {
+              "code": 40,
+              "value": 0.4
+            },
+            {
+              "code": 41,
+              "value": 0.3
+            },
+            {
+              "code": 42,
+              "value": 2.4
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "grip",
+        "target": "ellipse",
+        "index": 1,
+        "to": [
+          18.0,
+          20.0,
+          3.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/plane-grip-edge-001",
+        "source": "normals-p2-plane-grip-edge-001.dxf",
+        "script": "normals-p2-plane-grip-edge-001.scr",
+        "before": "normals-p2-plane-grip-edge-001-before.dxf",
+        "after": "normals-p2-plane-grip-edge-001-after.dxf",
+        "log": "normals-p2-plane-grip-edge-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "unmeasured",
+        "reason": "AutoCAD LT 2025 core reports GRIP_STRETCH unknown. A native UI grip measurement is required."
+      }
+    },
+    {
+      "id": "plane-rotate-tilted-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "ELLIPSE",
+          "name": "ellipse",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEllipse"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                3.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                1.2,
+                -1.6
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            },
+            {
+              "code": 40,
+              "value": 0.4
+            },
+            {
+              "code": 41,
+              "value": 0.3
+            },
+            {
+              "code": 42,
+              "value": 2.4
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "rotate",
+        "target": "ellipse",
+        "base": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "degrees": 45.0
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/plane-rotate-tilted-001",
+        "source": "normals-p2-plane-rotate-tilted-001.dxf",
+        "script": "normals-p2-plane-rotate-tilted-001.scr",
+        "before": "normals-p2-plane-rotate-tilted-001-before.dxf",
+        "after": "normals-p2-plane-rotate-tilted-001-after.dxf",
+        "log": "normals-p2-plane-rotate-tilted-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "ellipse",
+            "value": "ELLIPSE"
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 10,
+            "value": [
+              -7.071067811865475,
+              21.21320343559643,
+              3.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 11,
+            "value": [
+              2.687005768508881,
+              4.384062043356594,
+              -1.6
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 210,
+            "value": [
+              -0.565685424949238,
+              0.5656854249492382,
+              0.6000000000000001
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 40,
+            "value": 0.4
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 41,
+            "value": 0.3
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 42,
+            "value": 2.399999999999999
+          }
+        ]
+      }
+    },
+    {
+      "id": "plane-scale-tilted-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "ELLIPSE",
+          "name": "ellipse",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEllipse"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                3.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                1.2,
+                -1.6
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            },
+            {
+              "code": 40,
+              "value": 0.4
+            },
+            {
+              "code": 41,
+              "value": 0.3
+            },
+            {
+              "code": 42,
+              "value": 2.4
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "scale",
+        "target": "ellipse",
+        "base": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "factor": 2.0
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/plane-scale-tilted-001",
+        "source": "normals-p2-plane-scale-tilted-001.dxf",
+        "script": "normals-p2-plane-scale-tilted-001.scr",
+        "before": "normals-p2-plane-scale-tilted-001-before.dxf",
+        "after": "normals-p2-plane-scale-tilted-001-after.dxf",
+        "log": "normals-p2-plane-scale-tilted-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "ellipse",
+            "value": "ELLIPSE"
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 10,
+            "value": [
+              20.0,
+              40.0,
+              6.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 11,
+            "value": [
+              10.0,
+              2.399999999999999,
+              -3.2
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 210,
+            "value": [
+              0.0,
+              0.8,
+              0.6000000000000001
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 40,
+            "value": 0.4
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 41,
+            "value": 0.3
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 42,
+            "value": 2.399999999999999
+          }
+        ]
+      }
+    },
+    {
+      "id": "plane-copy-identity-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "ELLIPSE",
+          "name": "ellipse",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEllipse"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                3.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                1.2,
+                -1.6
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            },
+            {
+              "code": 40,
+              "value": 0.4
+            },
+            {
+              "code": 41,
+              "value": 0.3
+            },
+            {
+              "code": 42,
+              "value": 2.4
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "copy",
+        "target": "ellipse",
+        "delta": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/plane-copy-identity-001",
+        "source": "normals-p2-plane-copy-identity-001.dxf",
+        "script": "normals-p2-plane-copy-identity-001.scr",
+        "before": "normals-p2-plane-copy-identity-001-before.dxf",
+        "after": "normals-p2-plane-copy-identity-001-after.dxf",
+        "log": "normals-p2-plane-copy-identity-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "ellipse",
+            "value": "ELLIPSE"
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 10,
+            "value": [
+              10.0,
+              20.0,
+              3.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 11,
+            "value": [
+              5.0,
+              1.199999999999999,
+              -1.6
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "ellipse",
+            "group": 210,
+            "value": [
+              1e-16,
+              0.7999999999999999,
+              0.6000000000000001
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 40,
+            "value": 0.4
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 41,
+            "value": 0.3
+          },
+          {
+            "kind": "number",
+            "target": "ellipse",
+            "group": 42,
+            "value": 2.399999999999999
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert-nested-shear-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "LINE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                1.0,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "CIRCLE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 40,
+              "value": 1.0
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 1.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 45.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": "parent",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 2.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 0.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "explode",
+        "target": "parent"
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/insert-nested-shear-001",
+        "source": "normals-p2-insert-nested-shear-001.dxf",
+        "script": "normals-p2-insert-nested-shear-001.scr",
+        "before": "normals-p2-insert-nested-shear-001-before.dxf",
+        "after": "normals-p2-insert-nested-shear-001-after.dxf",
+        "log": "normals-p2-insert-nested-shear-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "parent",
+            "value": "INSERT"
+          },
+          {
+            "kind": "point",
+            "target": "parent",
+            "group": 10,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "parent",
+            "group": 210,
+            "value": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 41,
+            "value": 2.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 42,
+            "value": 1.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 43,
+            "value": 1.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 50,
+            "value": 0.0
+          },
+          {
+            "kind": "refusal",
+            "message": "Não é possível explodir esse bloco."
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert-uniform-parent-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "LINE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                1.0,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "CIRCLE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 40,
+              "value": 1.0
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 1.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 45.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": "parent",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 1.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 0.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "explode",
+        "target": "parent"
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/insert-uniform-parent-001",
+        "source": "normals-p2-insert-uniform-parent-001.dxf",
+        "script": "normals-p2-insert-uniform-parent-001.scr",
+        "before": "normals-p2-insert-uniform-parent-001-before.dxf",
+        "after": "normals-p2-insert-uniform-parent-001-after.dxf",
+        "log": "normals-p2-insert-uniform-parent-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "erased",
+            "target": "parent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "insert-aligned-child-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "LINE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                1.0,
+                1.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "CIRCLE",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 40,
+              "value": 1.0
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Child"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 1.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 0.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": "parent",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "Parent"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 2.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": 0.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "explode",
+        "target": "parent"
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/insert-aligned-child-001",
+        "source": "normals-p2-insert-aligned-child-001.dxf",
+        "script": "normals-p2-insert-aligned-child-001.scr",
+        "before": "normals-p2-insert-aligned-child-001-before.dxf",
+        "after": "normals-p2-insert-aligned-child-001-after.dxf",
+        "log": "normals-p2-insert-aligned-child-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "erased",
+            "target": "parent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "minsert-signed-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "PointBlock"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                4.0,
+                -2.0,
+                1.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "POINT",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                5.0,
+                0.0,
+                3.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "BLOCK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "TiltedGrid"
+            },
+            {
+              "code": 70,
+              "value": 0
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "PointBlock"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                7.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": -2.0
+            },
+            {
+              "code": 42,
+              "value": 3.0
+            },
+            {
+              "code": 43,
+              "value": 0.5
+            },
+            {
+              "code": 50,
+              "value": 30.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            },
+            {
+              "code": 70,
+              "value": 3
+            },
+            {
+              "code": 71,
+              "value": 2
+            },
+            {
+              "code": 44,
+              "value": 5.0
+            },
+            {
+              "code": 45,
+              "value": -4.0
+            }
+          ]
+        },
+        {
+          "kind": "ENDBLK",
+          "name": null,
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "kind": "INSERT",
+          "name": "parent",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 2,
+              "value": "TiltedGrid"
+            },
+            {
+              "code": 10,
+              "value": [
+                100.0,
+                -50.0,
+                2.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 1.0
+            },
+            {
+              "code": 42,
+              "value": 1.0
+            },
+            {
+              "code": 43,
+              "value": 1.0
+            },
+            {
+              "code": 50,
+              "value": -90.0
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "inspect",
+        "points": [
+          [
+            91.88230854637602,
+            -44.73205080756888,
+            26.156921938165308
+          ],
+          [
+            90.38230854637602,
+            -40.401923788646684,
+            28.156921938165308
+          ],
+          [
+            90.96076951545867,
+            -34.07179676972449,
+            27.385640646055105
+          ]
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/minsert-signed-001",
+        "source": "normals-p2-minsert-signed-001.dxf",
+        "script": "normals-p2-minsert-signed-001.scr",
+        "before": "normals-p2-minsert-signed-001-before.dxf",
+        "after": "normals-p2-minsert-signed-001-after.dxf",
+        "log": "normals-p2-minsert-signed-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "parent",
+            "value": "INSERT"
+          },
+          {
+            "kind": "point",
+            "target": "parent",
+            "group": 10,
+            "value": [
+              100.0,
+              -50.0,
+              2.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "parent",
+            "group": 210,
+            "value": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 41,
+            "value": 1.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 42,
+            "value": 1.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 43,
+            "value": 1.0
+          },
+          {
+            "kind": "number",
+            "target": "parent",
+            "group": 50,
+            "value": 270.0
+          },
+          {
+            "kind": "array_dimensions",
+            "block": "TiltedGrid",
+            "cols": 3,
+            "rows": 2
+          },
+          {
+            "kind": "world_point",
+            "index": 0,
+            "value": [
+              91.88230854637602,
+              -44.73205080756887,
+              26.1569219381653
+            ]
+          },
+          {
+            "kind": "world_point",
+            "index": 1,
+            "value": [
+              90.38230854637602,
+              -40.40192378864667,
+              28.15692193816531
+            ]
+          },
+          {
+            "kind": "world_point",
+            "index": 2,
+            "value": [
+              90.96076951545867,
+              -34.07179676972449,
+              27.3856406460551
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dimension-assoc-tilted-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          -0.6,
+          0.8
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "LINE",
+          "name": "line",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                1.2,
+                -1.6
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "POINT",
+          "name": "fixed",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                0.0,
+                0.0
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [
+        {
+          "kind": "aligned_dimension",
+          "name": "dimension",
+          "first": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "second": [
+            10.0,
+            0.0,
+            0.0
+          ],
+          "line_point": [
+            0.0,
+            1.8,
+            -2.4
+          ]
+        }
+      ],
+      "operation": {
+        "kind": "move",
+        "target": "line",
+        "delta": [
+          2.0,
+          0.0,
+          0.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/dimension-assoc-tilted-001",
+        "source": "normals-p2-dimension-assoc-tilted-001.dxf",
+        "script": "normals-p2-dimension-assoc-tilted-001.scr",
+        "before": "normals-p2-dimension-assoc-tilted-001-before.dxf",
+        "after": "normals-p2-dimension-assoc-tilted-001-after.dxf",
+        "log": "normals-p2-dimension-assoc-tilted-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "dimension",
+            "value": "DIMENSION"
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 10,
+            "value": [
+              10.0,
+              1.799999999999999,
+              -2.4
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 11,
+            "value": [
+              -6.0,
+              -1.125,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 12,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 13,
+            "value": [
+              2.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 14,
+            "value": [
+              10.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 15,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 16,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 210,
+            "value": [
+              0.0,
+              0.8,
+              0.6
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 42,
+            "value": 8.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 50,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 51,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 52,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 53,
+            "value": 0.0
+          },
+          {
+            "kind": "entity_type",
+            "target": "fixed",
+            "value": "POINT"
+          },
+          {
+            "kind": "point",
+            "target": "fixed",
+            "group": 10,
+            "value": [
+              10.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "fixed",
+            "group": 210,
+            "value": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "kind": "entity_type",
+            "target": "line",
+            "value": "LINE"
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 10,
+            "value": [
+              2.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 11,
+            "value": [
+              7.0,
+              1.199999999999999,
+              -1.6
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 210,
+            "value": [
+              0.0,
+              0.8,
+              0.6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dimension-assoc-offset-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          2.4,
+          1.8
+        ],
+        "x": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          -0.6,
+          0.8
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "LINE",
+          "name": "line",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                2.4,
+                1.8
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                5.0,
+                3.6,
+                0.2
+              ]
+            },
+            {
+              "code": 210,
+              "value": [
+                0.0,
+                0.8,
+                0.6
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "POINT",
+          "name": "fixed",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                2.4,
+                1.8
+              ]
+            }
+          ]
+        }
+      ],
+      "setup": [
+        {
+          "kind": "aligned_dimension",
+          "name": "dimension",
+          "first": [
+            0.0,
+            2.4,
+            1.8
+          ],
+          "second": [
+            10.0,
+            2.4,
+            1.8
+          ],
+          "line_point": [
+            0.0,
+            4.2,
+            -0.6
+          ]
+        }
+      ],
+      "operation": {
+        "kind": "move",
+        "target": "line",
+        "delta": [
+          2.0,
+          0.0,
+          0.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/dimension-assoc-offset-001",
+        "source": "normals-p2-dimension-assoc-offset-001.dxf",
+        "script": "normals-p2-dimension-assoc-offset-001.scr",
+        "before": "normals-p2-dimension-assoc-offset-001-before.dxf",
+        "after": "normals-p2-dimension-assoc-offset-001-after.dxf",
+        "log": "normals-p2-dimension-assoc-offset-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "measured",
+        "product": "AutoCAD LT 2025 V.116.0.0",
+        "method": "native_console",
+        "assertions": [
+          {
+            "kind": "entity_type",
+            "target": "dimension",
+            "value": "DIMENSION"
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 10,
+            "value": [
+              10.0,
+              4.200000000000001,
+              -0.6000000000000019
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 11,
+            "value": [
+              -6.0,
+              -1.125000000000002,
+              3.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 12,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 13,
+            "value": [
+              2.0,
+              2.399999999999999,
+              1.8
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 14,
+            "value": [
+              10.0,
+              2.399999999999999,
+              1.8
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 15,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 16,
+            "value": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "dimension",
+            "group": 210,
+            "value": [
+              0.0,
+              0.8,
+              0.6000000000000001
+            ]
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 42,
+            "value": 8.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 50,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 51,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 52,
+            "value": 0.0
+          },
+          {
+            "kind": "number",
+            "target": "dimension",
+            "group": 53,
+            "value": 0.0
+          },
+          {
+            "kind": "entity_type",
+            "target": "fixed",
+            "value": "POINT"
+          },
+          {
+            "kind": "point",
+            "target": "fixed",
+            "group": 10,
+            "value": [
+              10.0,
+              2.399999999999999,
+              1.8
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "fixed",
+            "group": 210,
+            "value": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "kind": "entity_type",
+            "target": "line",
+            "value": "LINE"
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 10,
+            "value": [
+              2.0,
+              2.399999999999999,
+              1.8
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 11,
+            "value": [
+              7.0,
+              3.6,
+              0.2
+            ]
+          },
+          {
+            "kind": "point",
+            "target": "line",
+            "group": 210,
+            "value": [
+              0.0,
+              0.8,
+              0.6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mleader-two-roots-001",
+      "ucs": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "x": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "y": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "view": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "variables": {
+        "mirrtext": 0,
+        "dimassoc": 2,
+        "osmode": 0
+      },
+      "records": [
+        {
+          "kind": "MULTILEADER",
+          "name": "mleader",
+          "groups": [
+            {
+              "code": 8,
+              "value": "0"
+            },
+            {
+              "code": 100,
+              "value": "AcDbEntity"
+            },
+            {
+              "code": 100,
+              "value": "AcDbMLeader"
+            },
+            {
+              "code": 270,
+              "value": 2
+            },
+            {
+              "code": 300,
+              "value": "CONTEXT_DATA{"
+            },
+            {
+              "code": 40,
+              "value": 1.0
+            },
+            {
+              "code": 10,
+              "value": [
+                12.0,
+                20.0,
+                0.0
+              ]
+            },
+            {
+              "code": 41,
+              "value": 0.4
+            },
+            {
+              "code": 140,
+              "value": 0.18
+            },
+            {
+              "code": 145,
+              "value": 0.2
+            },
+            {
+              "code": 174,
+              "value": 2
+            },
+            {
+              "code": 175,
+              "value": 2
+            },
+            {
+              "code": 176,
+              "value": 0
+            },
+            {
+              "code": 177,
+              "value": 1
+            },
+            {
+              "code": 290,
+              "value": 1
+            },
+            {
+              "code": 304,
+              "value": "Two roots"
+            },
+            {
+              "code": 11,
+              "value": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            },
+            {
+              "code": 12,
+              "value": [
+                0.0,
+                24.0,
+                0.0
+              ]
+            },
+            {
+              "code": 13,
+              "value": [
+                1.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 42,
+              "value": 0.0
+            },
+            {
+              "code": 43,
+              "value": 10.0
+            },
+            {
+              "code": 44,
+              "value": 0.0
+            },
+            {
+              "code": 45,
+              "value": 1.0
+            },
+            {
+              "code": 170,
+              "value": 1
+            },
+            {
+              "code": 171,
+              "value": 1
+            },
+            {
+              "code": 172,
+              "value": 1
+            },
+            {
+              "code": 296,
+              "value": 0
+            },
+            {
+              "code": 110,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 111,
+              "value": [
+                1.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 112,
+              "value": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            },
+            {
+              "code": 297,
+              "value": 0
+            },
+            {
+              "code": 302,
+              "value": "LEADER{"
+            },
+            {
+              "code": 290,
+              "value": 1
+            },
+            {
+              "code": 291,
+              "value": 1
+            },
+            {
+              "code": 10,
+              "value": [
+                10.0,
+                20.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                1.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 90,
+              "value": 7
+            },
+            {
+              "code": 40,
+              "value": 2.0
+            },
+            {
+              "code": 304,
+              "value": "LEADER_LINE{"
+            },
+            {
+              "code": 10,
+              "value": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 10,
+              "value": [
+                4.0,
+                6.0,
+                0.0
+              ]
+            },
+            {
+              "code": 91,
+              "value": 11
+            },
+            {
+              "code": 305,
+              "value": "}"
+            },
+            {
+              "code": 271,
+              "value": 0
+            },
+            {
+              "code": 303,
+              "value": "}"
+            },
+            {
+              "code": 302,
+              "value": "LEADER{"
+            },
+            {
+              "code": 290,
+              "value": 1
+            },
+            {
+              "code": 291,
+              "value": 1
+            },
+            {
+              "code": 10,
+              "value": [
+                -10.0,
+                18.0,
+                0.0
+              ]
+            },
+            {
+              "code": 11,
+              "value": [
+                -1.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 90,
+              "value": 9
+            },
+            {
+              "code": 40,
+              "value": 3.0
+            },
+            {
+              "code": 304,
+              "value": "LEADER_LINE{"
+            },
+            {
+              "code": 10,
+              "value": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "code": 10,
+              "value": [
+                -6.0,
+                5.0,
+                0.0
+              ]
+            },
+            {
+              "code": 91,
+              "value": 21
+            },
+            {
+              "code": 305,
+              "value": "}"
+            },
+            {
+              "code": 271,
+              "value": 0
+            },
+            {
+              "code": 303,
+              "value": "}"
+            },
+            {
+              "code": 272,
+              "value": 9
+            },
+            {
+              "code": 273,
+              "value": 9
+            },
+            {
+              "code": 301,
+              "value": "}"
+            },
+            {
+              "code": 170,
+              "value": 1
+            },
+            {
+              "code": 291,
+              "value": 1
+            },
+            {
+              "code": 41,
+              "value": 2.0
+            },
+            {
+              "code": 42,
+              "value": 0.18
+            },
+            {
+              "code": 172,
+              "value": 2
+            },
+            {
+              "code": 340,
+              "value": {
+                "reference": "mleader_style"
+              }
+            }
+          ]
+        }
+      ],
+      "setup": [],
+      "operation": {
+        "kind": "mleader_vertex",
+        "target": "mleader",
+        "root": 7,
+        "branch": 11,
+        "vertex": 1,
+        "to": [
+          5.0,
+          7.0,
+          0.0
+        ]
+      },
+      "artifacts": {
+        "directory": "/tmp/cad/normals-phase2/mleader-two-roots-001",
+        "source": "normals-p2-mleader-two-roots-001.dxf",
+        "script": "normals-p2-mleader-two-roots-001.scr",
+        "before": "normals-p2-mleader-two-roots-001-before.dxf",
+        "after": "normals-p2-mleader-two-roots-001-after.dxf",
+        "log": "normals-p2-mleader-two-roots-001.dxf.reference.log"
+      },
+      "reference": {
+        "state": "unmeasured",
+        "reason": "Native branch-grip reference measurement pending. The two-root source remains explicit."
+      }
+    }
+  ]
+}

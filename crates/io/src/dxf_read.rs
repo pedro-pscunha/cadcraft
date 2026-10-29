@@ -150,10 +150,10 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     rx.xdata_blocks = xdata_blocks(&secs, &rx.brs);
     let (paper_block_for, first_layout) = setup_layouts(&mut d, &mut layout_objs, &rx);
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
-    shift_dimension_blocks(&mut d, &rx);
+    shift_dimension_blocks(&mut d, &rx)?;
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
     apply_sortents(&mut d, &objs, &rx, &paper_block_for, &first_layout);
-    objs.apply(&mut d, &rx);
+    objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
     // Keep handles unique against the header's seed.

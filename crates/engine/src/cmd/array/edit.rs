@@ -170,7 +170,7 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
     let mut b = Block::new(&name);
     b.base = v3(inv.apply(base));
     for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
-        e.kind.transform(&inv);
+        e.try_transform(&cadcraft_geom::Mat4::from_mat3(&inv))?;
         b.entities.push(e);
     }
     d.blocks.insert(name.clone(), Arc::new(b));
@@ -259,7 +259,7 @@ fn open_source(s: &mut Session, h: Handle, item: (u32, u32, u32)) -> Result<Vec<
     let mut out = Vec::new();
     let entities = src.entities.iter().map(|e| (**e).clone()).collect();
     for mut ne in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
-        ne.kind.transform(&m);
+        ne.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
         out.push(ne.handle);
         d.ensure_layer(&ne.common.layer);
         if let Some(st) = d.space_mut(&space) {
@@ -344,7 +344,7 @@ fn close_source(s: &mut Session, save: bool) -> Result<Value> {
     let name = d.anonymous_block_name("*U");
     let mut nb = Block::new(&name);
     for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
-        e.kind.transform(&inv);
+        e.try_transform(&cadcraft_geom::Mat4::from_mat3(&inv))?;
         nb.entities.push(e);
     }
     d.blocks.insert(name.clone(), Arc::new(nb));

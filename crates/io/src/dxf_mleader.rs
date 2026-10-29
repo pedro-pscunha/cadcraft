@@ -384,10 +384,10 @@ pub(crate) fn resolve(tags: &[Tag], m: &mut MLeader, styles: &HashMap<String, St
 /// Multileader style names (by MLEADERSTYLE handle, from the ACAD_MLEADERSTYLE dictionary) and
 /// block attribute values (by the ATTDEF of the content block), for multileaders in model
 /// space, the layouts and block definitions.
-pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMap<String, String>) {
+pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMap<String, String>) -> crate::Result<()> {
     let fixes: Vec<&(Handle, Pending)> = fixes.iter().filter(|(_, p)| p.style.is_some() || !p.attribs.is_empty()).collect();
     if fixes.is_empty() {
-        return;
+        return Ok(());
     }
     // Block definitions holding the multileaders that are in no space.
     let wanted: HashSet<Handle> = fixes.iter().map(|(h, _)| *h).filter(|h| d.entity(*h).is_none()).collect();
@@ -413,7 +413,7 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
         if !pend.attribs.is_empty()
             && let Some(ins) = &m.block
         {
-            let a = attribs(d, ins, &pend.attribs);
+            let a = attribs(d, ins, &pend.attribs)?;
             if let Some(ins) = &mut m.block {
                 ins.attribs = a;
             }
@@ -430,23 +430,24 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
             }
         }
     }
+    Ok(())
 }
 
 /// The attributes of a multileader's block content: each value placed like its ATTDEF.
-fn attribs(d: &Drawing, ins: &Insert, values: &[(String, String)]) -> Vec<Attrib> {
-    let Some(blk) = d.block(&ins.block) else { return Vec::new() };
+fn attribs(d: &Drawing, ins: &Insert, values: &[(String, String)]) -> crate::Result<Vec<Attrib>> {
+    let Some(blk) = d.block(&ins.block) else { return Ok(Vec::new()) };
     let m = ins.transform(blk.base.xy());
     let mut out = Vec::new();
     for (h, value) in values {
         let def = Handle::parse_hex(h).and_then(|h| blk.entities.get(h));
         let Some(EntityKind::AttDef(ad)) = def.map(|e| &e.kind) else { continue };
-        let mut k = EntityKind::Text(ad.text.clone());
-        k.transform(&m);
-        let EntityKind::Text(mut text) = k else { continue };
+        let mut entity = Entity::new(Handle(0), EntityKind::Text(ad.text.clone()));
+        entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m)).map_err(|error| crate::IoError::Format(error.to_string()))?;
+        let EntityKind::Text(mut text) = entity.kind else { continue };
         text.value = value.clone();
         out.push(Attrib { invisible: ad.invisible, ..Attrib::new(ad.tag.clone(), text) });
     }
-    out
+    Ok(out)
 }
 
 /// What a MULTILEADER record points at in the file being written.

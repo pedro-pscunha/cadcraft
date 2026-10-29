@@ -2,28 +2,27 @@ use super::{Entity, EntityKind, Handle, PolyVertex, Polyline, Result, Segment, S
 
 // ---------------- explode / array / order / break / join ----------------
 
-fn explode_block_ref(d: &cadcraft_doc::Drawing, e: &Entity, ins: &cadcraft_doc::Insert) -> Option<Vec<Entity>> {
-    if let Some(items) = crate::cmd::array::explode_array(d, e) {
-        return Some(items);
+fn explode_block_ref(d: &cadcraft_doc::Drawing, e: &Entity, ins: &cadcraft_doc::Insert) -> Result<Option<Vec<Entity>>> {
+    if let Some(items) = crate::cmd::array::explode_array(d, e)? {
+        return Ok(Some(items));
     }
-    let blk = d.block(&ins.block)?;
+    let Some(blk) = d.block(&ins.block) else { return Ok(None) };
     let m = ins.transform(blk.base.xy());
-    Some(
+    Ok(Some(
         blk.entities
             .iter()
             .map(|be| {
-                let mut ne = (**be).clone();
-                ne.kind.transform(&m);
+                let mut ne = be.transformed(&cadcraft_geom::Mat4::from_mat3(&m))?;
                 if ne.common.layer == "0" {
                     ne.common.layer = e.common.layer.clone();
                 }
                 if ne.common.color == cadcraft_color::Color::ByBlock {
                     ne.common.color = e.common.color;
                 }
-                ne
+                Ok(ne)
             })
-            .collect(),
-    )
+            .collect::<Result<Vec<_>>>()?,
+    ))
 }
 
 fn explode_mtext(e: &Entity, m: &cadcraft_doc::MText) -> Vec<Entity> {
@@ -124,7 +123,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
     v
 }
 
-pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<Entity>> {
+pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Result<Option<Vec<Entity>>> {
     // An annotative object explodes into plain objects as it draws at the current annotation scale.
     if cadcraft_doc::is_annotative(e) {
         let mut se = match d.anno_draw(e) {
@@ -134,12 +133,12 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
         se.common.anno_scales.clear();
         return explode_kind(d, &se);
     }
-    match &e.kind {
+    let pieces = match &e.kind {
         EntityKind::LwPolyline(p) => {
             let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
             Some(segment_entities(e, pl.segments()))
         }
-        EntityKind::Insert(ins) => explode_block_ref(d, e, ins),
+        EntityKind::Insert(ins) => return explode_block_ref(d, e, ins),
         // A helix explodes into its spline (seen from above).
         EntityKind::Helix(h) => Some(vec![Entity { handle: Handle(0), common: e.common.clone(), kind: EntityKind::Spline(h.spline()) }]),
         EntityKind::Polyline3d(p) => Some(
@@ -158,7 +157,8 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
         EntityKind::Dimension(dm) => Some(explode_dimension(d, e, dm)),
         EntityKind::Tolerance(t) => Some(crate::cmd::tolerance::explode(d, e, t)),
         _ => None,
-    }
+    };
+    Ok(pieces)
 }
 
 pub(super) fn explode(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
@@ -170,7 +170,7 @@ pub(super) fn explode(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
 pub(crate) fn explode_with(
     s: &mut Session,
     hs: &[Handle],
-    pieces: impl Fn(&cadcraft_doc::Drawing, &Entity) -> Option<Vec<Entity>>,
+    pieces: impl Fn(&cadcraft_doc::Drawing, &Entity) -> Result<Option<Vec<Entity>>>,
 ) -> Result<Vec<Handle>> {
     let space = s.space();
     let mut sets = Vec::new();
@@ -181,7 +181,7 @@ pub(crate) fn explode_with(
         }
         let Some(e) = s.doc()?.entity(*h).map(|e| (**e).clone()) else { continue };
         super::check_block_expansion(s.doc()?, &e, &cadcraft_geom::Mat3::IDENTITY, 0)?;
-        let Some(mut parts) = pieces(s.doc()?, &e) else { continue };
+        let Some(mut parts) = pieces(s.doc()?, &e)? else { continue };
         if !matches!(e.kind, EntityKind::Insert(_)) {
             for p in &mut parts {
                 p.common.xdata.clear();

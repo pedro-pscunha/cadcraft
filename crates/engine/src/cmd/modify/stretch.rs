@@ -38,7 +38,7 @@ fn add_mline_vertex_hits(d: &cadcraft_doc::Drawing, space: &cadcraft_doc::Space,
 }
 
 /// Move the vertices of `e` that lie inside any of the areas `wins` by `d` (STRETCH).
-fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
+fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) -> cadcraft_doc::Result<()> {
     let inside = |p: Vec2| wins.iter().any(|a| a.contains(p));
     let mv = |p: &mut cadcraft_geom::Vec3| {
         if inside(p.xy()) {
@@ -81,10 +81,11 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
         k => {
             let g = k.grips();
             if g.first().is_some_and(|p| inside(*p)) {
-                k.transform(&Mat3::translate(d));
+                e.try_transform(&cadcraft_geom::Mat4::from_mat3(&Mat3::translate(d)))?;
             }
         }
     }
+    Ok(())
 }
 
 pub(super) fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -116,7 +117,7 @@ pub(super) fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut()?;
     let areas = [area];
     for h in &hs {
-        doc.modify_entity(*h, |e| stretch_entity(e, &areas, d))?;
+        doc.try_modify_entity(*h, |e| stretch_entity(e, &areas, d))?;
     }
     Ok(json!({ "stretched": hs.len() }))
 }
@@ -302,7 +303,7 @@ impl StretchM {
         for h in self.objs.iter().filter(|h| !self.whole.contains(h)) {
             let locked = doc.entity(*h).and_then(|e| doc.layer(&e.common.layer)).is_some_and(|l| l.locked);
             if !locked {
-                doc.modify_entity(*h, |e| stretch_entity(e, &self.windows, d))?;
+                doc.try_modify_entity(*h, |e| stretch_entity(e, &self.windows, d))?;
             }
         }
         s.set_selection(Vec::new());
@@ -382,14 +383,14 @@ impl Interactive for StretchM {
                     .iter()
                     .take(500)
                     .filter_map(|h| doc.entity(*h))
-                    .map(|e| {
+                    .filter_map(|e| {
                         let mut e = (**e).clone();
                         if self.whole.contains(&e.handle) {
-                            e.kind.transform(&m);
+                            e.try_transform(&cadcraft_geom::Mat4::from_mat3(&m)).ok()?;
                         } else {
-                            stretch_entity(&mut e, &self.windows, c - base);
+                            stretch_entity(&mut e, &self.windows, c - base).ok()?;
                         }
-                        e.kind
+                        Some(e.kind)
                     })
                     .collect();
                 out.push(line(base, c));

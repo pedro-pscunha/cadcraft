@@ -218,9 +218,9 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let anno_scale = d.current_anno_scale();
     let common = CommonEntityProperties { anno_scale: &anno_scale, color, linetype: linetype.as_deref(), lineweight: lw, transparency, thickness };
     for h in &hs {
-        d.modify_entity(*h, |e| {
+        d.try_modify_entity(*h, |e| {
             set_common_properties(e, p, &common);
-            apply_kind_properties(e, p, dim_style.as_ref(), &dim_over);
+            apply_kind_properties(e, p, dim_style.as_ref(), &dim_over)
         })?;
     }
     Ok(json!({ "changed": hs.len() }))
@@ -231,7 +231,7 @@ fn apply_kind_properties(
     params: &Value,
     dim_style: Option<&String>,
     dim_overrides: &serde_json::Map<String, Value>,
-) {
+) -> cadcraft_doc::Result<()> {
     let num = |key: &str| params.get(key).and_then(Value::as_f64).filter(|value| value.is_finite());
     match &mut entity.kind {
         EntityKind::Line(l) => {
@@ -328,14 +328,15 @@ fn apply_kind_properties(
                 pl.closed = c;
             }
         }
-        EntityKind::Insert(insert) => set_insert_properties(insert, params),
+        EntityKind::Insert(insert) => set_insert_properties(insert, params)?,
         EntityKind::Dimension(dimension) => set_dimension_properties(dimension, params, dim_style, dim_overrides),
         EntityKind::Hatch(hatch) => set_hatch_properties(hatch, params),
         _ => {}
     }
+    Ok(())
 }
 
-fn set_insert_properties(insert: &mut cadcraft_doc::Insert, params: &Value) {
+fn set_insert_properties(insert: &mut cadcraft_doc::Insert, params: &Value) -> cadcraft_doc::Result<()> {
     let number = |key: &str| params.get(key).and_then(Value::as_f64).filter(|value| value.is_finite());
 
     if let Some(x) = number("rotation") {
@@ -343,37 +344,23 @@ fn set_insert_properties(insert: &mut cadcraft_doc::Insert, params: &Value) {
         insert.rotation = x.to_radians();
         // The attached text turns with the reference, around its insertion point (as ROTATE does).
         let base = insert.insert.xy();
-        for a in &mut insert.attribs {
-            let t = &mut a.text;
-            for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
-                let r = q.xy().rotate_about(base, turn);
-                q.x = r.x;
-                q.y = r.y;
-            }
-            t.rotation = cadcraft_geom::norm_angle(t.rotation + turn);
-            if let Some(ml) = &mut a.multiline {
-                let r = ml.mtext.insert.xy().rotate_about(base, turn);
-                ml.mtext.insert.x = r.x;
-                ml.mtext.insert.y = r.y;
-                ml.mtext.rotation = cadcraft_geom::norm_angle(ml.mtext.rotation + turn);
-            }
+        let matrix = cadcraft_geom::Mat4::from_mat3(&cadcraft_geom::Mat3::rotate_about(base, turn));
+        for attribute in &mut insert.attribs {
+            attribute.try_transform(&matrix)?;
         }
     }
+
     if let Some(x) = number("scale").filter(|x| *x != 0.0) {
         // A new positive scale carries the attached attribute text with it, like SCALE about the insertion point.
         if x > 0.0 && insert.scale.x > 0.0 {
             let m = cadcraft_geom::Mat3::scale_about(insert.insert.xy(), x / insert.scale.x);
-            for a in &mut insert.attribs {
-                let mut k = EntityKind::Text(a.text.clone());
-                k.transform(&m);
-                if let EntityKind::Text(t) = k {
-                    a.text = t;
-                }
-                a.transform_multiline(&m);
+            for attribute in &mut insert.attribs {
+                attribute.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
             }
         }
         insert.scale = Vec3::new(x, x, x);
     }
+    Ok(())
 }
 
 fn set_dimension_properties(

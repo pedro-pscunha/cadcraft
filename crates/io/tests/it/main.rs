@@ -38,6 +38,7 @@ mod dxf_version_gates;
 mod dxf_versions;
 mod dynblock_read;
 mod entity_normals;
+mod entity_plane_manifest;
 mod entity_props_roundtrip;
 mod entity_subclass_groups;
 mod followups_626;

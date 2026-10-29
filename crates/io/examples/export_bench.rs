@@ -29,9 +29,11 @@ fn drawing(grid: usize) -> Drawing {
             }
             let m = Mat3::translate(Vec2::new(step.x * j as f64, step.y * i as f64));
             for e in &ents {
-                let mut e = e.clone();
+                let Ok(mut e) = e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)) else {
+                    eprintln!("the benchmark geometry transform failed");
+                    std::process::exit(1);
+                };
                 e.handle = d.new_handle();
-                e.kind.transform(&m);
                 if let Some(s) = d.space_mut(&Space::Model) {
                     s.push(e);
                 }

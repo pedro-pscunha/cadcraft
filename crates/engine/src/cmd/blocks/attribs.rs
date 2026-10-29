@@ -100,23 +100,23 @@ impl Interactive for AttdispM {
 /// The attributes `ins` gets from the definitions `defs` of its block `blk`: placed, styled and
 /// shown as defined, keeping the values of attributes whose tag (any case) is still defined.
 /// Properties set on single attributes (layer, colour, …) go back to the definitions', as in AutoCAD.
-pub(super) fn synced(blk: &Block, defs: &[&Attrib], ins: &Insert) -> Vec<Attrib> {
+pub(super) fn synced(blk: &Block, defs: &[&Attrib], ins: &Insert) -> Result<Vec<Attrib>> {
     let m = ins.transform(blk.base.xy());
     let mut remaining: Vec<&Attrib> = ins.attribs.iter().collect();
     defs.iter()
         .map(|ad| {
-            let mut k = EntityKind::Text(ad.text.clone());
-            k.transform(&m);
-            let mut t = if let EntityKind::Text(t) = k { t } else { ad.text.clone() };
+            let mut entity = Entity::new(Handle(0), EntityKind::Text(ad.text.clone()));
+            entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
+            let mut t = if let EntityKind::Text(t) = entity.kind { t } else { ad.text.clone() };
             let previous = remaining.iter().position(|a| a.tag.eq_ignore_ascii_case(&ad.tag)).map(|i| remaining.remove(i));
             t.value = previous.map(|a| a.text.value.clone()).unwrap_or_else(|| ad.text.value.clone());
-            Attrib {
+            Ok(Attrib {
                 handle: previous.and_then(|a| a.handle),
                 invisible: ad.invisible,
-                multiline: ad.multiline.as_ref().map(|ml| ml.transformed(&m)),
+                multiline: ad.multiline.as_ref().map(|ml| ml.try_transformed(&cadcraft_geom::Mat4::from_mat3(&m))).transpose()?,
                 modes: ad.modes.for_reference(),
                 ..Attrib::new(ad.tag.clone(), t)
-            }
+            })
         })
         .collect()
 }
@@ -128,16 +128,21 @@ fn references<'a>(ents: impl Iterator<Item = &'a Arc<Entity>>, name: &str) -> Ve
 
 /// Apply `f` to every reference of block `name` (in model space, layouts and other blocks);
 /// returns how many references there were.
-fn update_references(d: &mut cadcraft_doc::Drawing, name: &str, mut f: impl FnMut(&mut Insert)) -> usize {
+fn update_references(d: &mut cadcraft_doc::Drawing, name: &str, mut f: impl FnMut(&mut Insert) -> Result<()>) -> Result<usize> {
     update_reference_entities(d, name, |e| {
         if let EntityKind::Insert(ins) = &mut e.kind {
-            f(ins);
+            f(ins)?;
         }
+        Ok(())
     })
 }
 
 /// [`update_references`], with `f` given the whole object.
-pub(super) fn update_reference_entities(d: &mut cadcraft_doc::Drawing, name: &str, mut update: impl FnMut(&mut Entity)) -> usize {
+pub(super) fn update_reference_entities(
+    d: &mut cadcraft_doc::Drawing,
+    name: &str,
+    mut update: impl FnMut(&mut Entity) -> Result<()>,
+) -> Result<usize> {
     let mut n = 0;
     let spaces: Vec<cadcraft_doc::Space> =
         std::iter::once(cadcraft_doc::Space::Model).chain(d.layouts.iter().map(|l| cadcraft_doc::Space::Paper(l.name.clone()))).collect();
@@ -145,7 +150,9 @@ pub(super) fn update_reference_entities(d: &mut cadcraft_doc::Drawing, name: &st
         let Some(store) = d.space_mut(&sp) else { continue };
         let hs = references(store.iter(), name);
         for h in hs {
-            n += usize::from(store.modify(h, &mut update));
+            let mut entity = store.get(h).ok_or_else(|| EngineError::Other("missing block reference".into()))?.as_ref().clone();
+            update(&mut entity)?;
+            n += usize::from(store.modify(h, |current| *current = entity));
         }
     }
     for (bname, b) in d.blocks.iter_mut() {
@@ -156,11 +163,13 @@ pub(super) fn update_reference_entities(d: &mut cadcraft_doc::Drawing, name: &st
         if !hs.is_empty() {
             let b = Arc::make_mut(b);
             for h in hs {
-                n += usize::from(b.entities.modify(h, &mut update));
+                let mut entity = b.entities.get(h).ok_or_else(|| EngineError::Other("missing nested block reference".into()))?.as_ref().clone();
+                update(&mut entity)?;
+                n += usize::from(b.entities.modify(h, |current| *current = entity));
             }
         }
     }
-    n
+    Ok(n)
 }
 
 /// How many references block `name` has (in model space, layouts and other blocks).
@@ -176,11 +185,12 @@ pub(super) fn reference_count(d: &cadcraft_doc::Drawing, name: &str) -> usize {
 /// their values survive a tag change of the definition. Returns how many references there were.
 pub(super) fn rename_tag(s: &mut Session, name: &str, old: &str, new: &str) -> Result<usize> {
     let d = s.doc_mut()?;
-    Ok(update_references(d, name, |ins| {
+    update_references(d, name, |ins| {
         for a in ins.attribs.iter_mut().filter(|a| a.tag.eq_ignore_ascii_case(old)) {
             a.tag = new.to_string();
         }
-    }))
+        Ok(())
+    })
 }
 
 /// The attribute definitions of `blk` that references carry (constant ones are not).
@@ -200,7 +210,10 @@ pub(super) fn sync(s: &mut Session, name: &str) -> Result<(String, usize)> {
     let blk = s.doc()?.block(name).cloned().ok_or_else(|| EngineError::Other(format!("Block \"{name}\" not found.")))?;
     let defs = attdefs(&blk);
     let d = s.doc_mut()?;
-    let n = update_references(d, &blk.name, |ins| ins.attribs = synced(&blk, &defs, ins));
+    let n = update_references(d, &blk.name, |ins| {
+        ins.attribs = synced(&blk, &defs, ins)?;
+        Ok(())
+    })?;
     d.allocate_missing_attribute_handles();
     Ok((blk.name.clone(), n))
 }

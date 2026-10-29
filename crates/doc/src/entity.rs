@@ -2,7 +2,8 @@
 
 use cadcraft_color::Color;
 use cadcraft_geom::{
-    Arc as GArc, Bounds2, Circle as GCircle, Ellipse as GEllipse, Line as GLine, Mat3, PolyVertex, Polyline, Segment, Spline as GSpline, Vec2, Vec3,
+    Arc as GArc, Bounds2, Circle as GCircle, Ellipse as GEllipse, Line as GLine, Mat3, Mat4, PolyVertex, Polyline, Segment, Spline as GSpline, Vec2,
+    Vec3,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,7 @@ mod block;
 mod common;
 mod curves;
 mod dim;
+mod edit;
 mod fill;
 mod geometry;
 mod layout;
@@ -275,7 +277,7 @@ impl EntityKind {
 
     /// Apply a 2D affine transform (move/rotate/uniform scale/mirror). Non-uniform scale turns
     /// circles into ellipses only where the kind supports it; otherwise radii use the mean scale.
-    pub fn transform(&mut self, m: &Mat3) {
+    fn transform_legacy(&mut self, m: &Mat3) -> crate::Result<()> {
         let t3 = |p: &mut Vec3| {
             let q = m.apply(p.xy());
             p.x = q.x;
@@ -310,14 +312,14 @@ impl EntityKind {
             }
             EntityKind::Ellipse(e) => {
                 if *m == Mat3::IDENTITY {
-                    return;
+                    return Ok(());
                 }
                 if m.a == 1.0 && m.b == 0.0 && m.c == 0.0 && m.d == 1.0 {
                     t3(&mut e.center);
-                    return;
+                    return Ok(());
                 }
                 if !e.flatten() {
-                    return;
+                    return Err(crate::DocError::Invalid("An edge-on or invalid ellipse cannot use the legacy 2D edit.".into()));
                 }
                 let sp = m.apply(e.center.xy() + e.major.xy() * e.start.cos() + e.major.xy().perp() * (e.ratio * e.start.sin()));
                 let ep = m.apply(e.center.xy() + e.major.xy() * e.end.cos() + e.major.xy().perp() * (e.ratio * e.end.sin()));
@@ -355,20 +357,12 @@ impl EntityKind {
                 t3(&mut r.base);
                 r.dir = m.apply_vec(r.dir.xy()).normalized().to3(0.0);
             }
-            EntityKind::Text(t) => transform_text(t, m, s, rot, mirror),
+            EntityKind::Text(t) => edit::text_payload(t, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
             EntityKind::AttDef(a) => {
-                transform_text(&mut a.text, m, s, rot, mirror);
-                a.transform_multiline(m);
+                edit::text_payload(&mut a.text, &Mat4::from_mat3(m), edit::TextOwner::Entity)?;
+                a.try_transform_multiline(&Mat4::from_mat3(m))?;
             }
-            EntityKind::MText(t) => {
-                t3(&mut t.insert);
-                t.height *= s;
-                t.width *= s;
-                if let Some(c) = &mut t.columns {
-                    c.scale(s);
-                }
-                t.rotation = cadcraft_geom::norm_angle(t.rotation + rot);
-            }
+            EntityKind::MText(t) => edit::mtext_payload(t, &Mat4::from_mat3(m), edit::TextOwner::Entity)?,
             EntityKind::Insert(i) => {
                 t3(&mut i.insert);
                 i.scale.x *= s;
@@ -380,8 +374,7 @@ impl EntityKind {
                     i.rotation = cadcraft_geom::norm_angle(rot - (i.rotation - rot));
                 }
                 for a in &mut i.attribs {
-                    transform_text(&mut a.text, m, s, rot, false);
-                    a.transform_multiline(m);
+                    a.try_transform(&Mat4::from_mat3(m))?;
                 }
                 i.col_spacing *= s;
                 i.row_spacing *= s;
@@ -409,18 +402,13 @@ impl EntityKind {
                 }
                 t3(&mut ml.landing);
                 if let Some(t) = &mut ml.text {
-                    t3(&mut t.insert);
-                    t.height *= s;
-                    t.width *= s;
-                    if let Some(c) = &mut t.columns {
-                        c.scale(s);
-                    }
+                    edit::mtext_payload(t, &Mat4::from_mat3(m), edit::TextOwner::MLeaderContent)?;
                 }
                 if let Some(b) = &mut ml.block {
                     // Transformed exactly like a block reference.
-                    let mut k = EntityKind::Insert(b.clone());
-                    k.transform(m);
-                    if let EntityKind::Insert(nb) = k {
+                    let mut entity = Entity::new(Handle(0), EntityKind::Insert(b.clone()));
+                    entity.try_transform(&Mat4::from_mat3(m))?;
+                    if let EntityKind::Insert(nb) = entity.kind {
                         *b = nb;
                     }
                 }
@@ -477,8 +465,9 @@ impl EntityKind {
                 let a = if mirror { t.rotation() } else { t.rotation() + rot };
                 t.dir = Vec2::from_angle(cadcraft_geom::norm_angle(a)).to3(0.0);
             }
-            EntityKind::Unknown(_) => {}
+            EntityKind::Unknown(_) => return Err(crate::DocError::Invalid("This entity has no supported geometry transform.".into())),
         }
+        Ok(())
     }
 
     /// Grip points (editable defining points), in display order.

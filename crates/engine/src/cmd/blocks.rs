@@ -241,15 +241,15 @@ pub(crate) fn insert_with(
                 continue;
             }
             let mut t = ad.text.clone();
-            let mut k = EntityKind::Text(t.clone());
-            k.transform(&m);
-            if let EntityKind::Text(tt) = k {
+            let mut entity = Entity::new(Handle(0), EntityKind::Text(t.clone()));
+            entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
+            if let EntityKind::Text(tt) = entity.kind {
                 t = tt;
             }
             t.value = attedit::value_for(values, &ad.tag).unwrap_or_else(|| ad.text.value.clone());
             ins.attribs.push(Attrib {
                 invisible: ad.invisible,
-                multiline: ad.multiline.as_ref().map(|ml| ml.transformed(&m)),
+                multiline: ad.multiline.as_ref().map(|ml| ml.try_transformed(&cadcraft_geom::Mat4::from_mat3(&m))).transpose()?,
                 modes: ad.modes.for_reference(),
                 ..Attrib::new(ad.tag.clone(), t)
             });
@@ -370,24 +370,13 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     let ents: Vec<Entity> = if let Some(name) = str_param(p, "name") {
         let b = src.block(name).ok_or_else(|| bad("wblock", format!("no block `{name}`")))?;
         let m = Mat3::translate(-base.unwrap_or(b.base.xy()));
-        b.entities
-            .iter()
-            .map(|e| {
-                let mut e = (**e).clone();
-                e.kind.transform(&m);
-                e
-            })
-            .collect()
+        b.entities.iter().map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m))).collect::<cadcraft_doc::Result<Vec<_>>>()?
     } else {
         targets(s, p)?
             .iter()
             .filter_map(|h| src.entity(*h))
-            .map(|e| {
-                let mut e = (**e).clone();
-                e.kind.transform(&m);
-                e
-            })
-            .collect()
+            .map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)))
+            .collect::<cadcraft_doc::Result<Vec<_>>>()?
     };
     let mut d = super::clipboard::defs_for(src, &ents);
     let defaults = cadcraft_doc::Drawing::new_imperial();

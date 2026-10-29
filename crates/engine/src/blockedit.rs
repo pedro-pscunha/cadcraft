@@ -76,14 +76,12 @@ pub fn refusal(d: &Drawing, name: &str) -> Option<String> {
 }
 
 /// `store` moved by `m`, objects in the same order with the same handles.
-fn moved(store: &EntityStore, m: &Mat3) -> EntityStore {
+fn moved(store: &EntityStore, m: &Mat3) -> Result<EntityStore> {
     let mut out = EntityStore::new();
     for e in store.iter() {
-        let mut e = (**e).clone();
-        e.kind.transform(m);
-        out.push(e);
+        out.push(e.transformed(&cadcraft_geom::Mat4::from_mat3(m))?);
     }
-    out
+    Ok(out)
 }
 
 /// Whether any object of `store` refers to block `name`, directly or through nested blocks of `d`.
@@ -106,28 +104,25 @@ fn refers_to(d: &Drawing, store: &EntityStore, name: &str) -> bool {
 impl BlockEdit {
     /// The editor's objects in block coordinates, ready to be the block's: unchanged objects are
     /// the block's own, the others are moved back from the editor's origin to the base point.
-    fn block_objects(&self, editor: &Drawing) -> EntityStore {
+    fn block_objects(&self, editor: &Drawing) -> Result<EntityStore> {
         if self.base == Vec2::ZERO {
-            return editor.model.clone();
+            return Ok(editor.model.clone());
         }
         let (to_editor, back) = (Mat3::translate(-self.base), Mat3::translate(self.base));
         let mut out = EntityStore::new();
         for e in editor.model.iter() {
-            let unchanged = self.original.get(e.handle).filter(|o| {
-                let mut shown = (***o).clone();
-                shown.kind.transform(&to_editor);
-                shown == **e
-            });
+            let unchanged = match self.original.get(e.handle) {
+                Some(original) if original.transformed(&cadcraft_geom::Mat4::from_mat3(&to_editor))? == **e => Some(original),
+                _ => None,
+            };
             match unchanged {
                 Some(o) => out.push((**o).clone()),
                 None => {
-                    let mut e = (**e).clone();
-                    e.kind.transform(&back);
-                    out.push(e);
+                    out.push(e.transformed(&cadcraft_geom::Mat4::from_mat3(&back))?);
                 }
             }
         }
-        out
+        Ok(out)
     }
 
     /// The drawing with the editor's objects saved into block `name` (the edited block, or a new
@@ -156,7 +151,7 @@ impl BlockEdit {
         d.constraints = host.constraints.clone();
         d.vports = host.vports.clone();
         d.hidden_objects = host.hidden_objects.clone();
-        let entities = self.block_objects(editor);
+        let entities = self.block_objects(editor)?;
         // The edited block's properties (the editor's definition, else the drawing's): the objects
         // are placed for its base point, also when saved under another name (BSAVEAS).
         let template = editor.block(&self.name).or_else(|| host.block(&self.name));
@@ -252,7 +247,7 @@ impl DocState {
         };
         let base = block.base.xy();
         let mut d = (*self.doc).clone();
-        d.model = if base == Vec2::ZERO { block.entities.clone() } else { moved(&block.entities, &Mat3::translate(-base)) };
+        d.model = if base == Vec2::ZERO { block.entities.clone() } else { moved(&block.entities, &Mat3::translate(-base))? };
         // The drawing's own groups, constraints and hidden objects stay with it.
         d.groups.clear();
         d.constraints.clear();
