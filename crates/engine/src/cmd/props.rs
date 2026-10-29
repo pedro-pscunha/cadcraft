@@ -217,11 +217,23 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let dim_over = dim_overrides(p)?;
     let anno_scale = d.current_anno_scale();
     let common = CommonEntityProperties { anno_scale: &anno_scale, color, linetype: linetype.as_deref(), lineweight: lw, transparency, thickness };
+    let appearance_only = p.as_object().is_some_and(|params| {
+        params.keys().all(|key| {
+            matches!(key.as_str(), "handle" | "handles" | "layer" | "color" | "linetype" | "lineweight" | "ltscale" | "transparency" | "visible")
+        })
+    });
     for h in &hs {
-        d.try_modify_entity(*h, |e| {
-            set_common_properties(e, p, &common);
-            apply_kind_properties(e, p, dim_style.as_ref(), &dim_over)
-        })?;
+        if appearance_only {
+            d.try_modify_metadata(*h, |properties| {
+                set_appearance_properties(properties, p, &common);
+                Ok(())
+            })?;
+        } else {
+            d.try_modify_entity(*h, |e| {
+                set_common_properties(e, p, &common);
+                apply_kind_properties(e, p, dim_style.as_ref(), &dim_over)
+            })?;
+        }
     }
     Ok(json!({ "changed": hs.len() }))
 }
@@ -420,29 +432,33 @@ fn set_common_properties(entity: &mut cadcraft_doc::Entity, params: &Value, comm
     if let Some(annotative) = params.get("annotative").and_then(Value::as_bool) {
         cadcraft_doc::set_annotative(entity, annotative, common.anno_scale);
     }
-    if let Some(layer) = str_param(params, "layer") {
-        entity.common.layer = layer.to_string();
-    }
-    if let Some(color) = common.color {
-        entity.common.color = color;
-    }
-    if let Some(linetype) = common.linetype {
-        entity.common.linetype = linetype.to_string();
-    }
-    if let Some(lineweight) = common.lineweight {
-        entity.common.lineweight = lineweight;
-    }
-    if let Some(scale) = params.get("ltscale").and_then(Value::as_f64).filter(|scale| *scale > 0.0) {
-        entity.common.ltscale = scale;
-    }
-    if let Some(transparency) = common.transparency {
-        entity.common.transparency = transparency;
-    }
+    set_appearance_properties(&mut entity.common, params, common);
     if let Some(thickness) = common.thickness {
         entity.common.thickness = thickness;
     }
+}
+
+fn set_appearance_properties(properties: &mut cadcraft_doc::Common, params: &Value, common: &CommonEntityProperties<'_>) {
+    if let Some(layer) = str_param(params, "layer") {
+        properties.layer = layer.to_string();
+    }
+    if let Some(color) = common.color {
+        properties.color = color;
+    }
+    if let Some(linetype) = common.linetype {
+        properties.linetype = linetype.to_string();
+    }
+    if let Some(lineweight) = common.lineweight {
+        properties.lineweight = lineweight;
+    }
+    if let Some(scale) = params.get("ltscale").and_then(Value::as_f64).filter(|scale| *scale > 0.0) {
+        properties.ltscale = scale;
+    }
+    if let Some(transparency) = common.transparency {
+        properties.transparency = transparency;
+    }
     if let Some(visible) = params.get("visible").and_then(Value::as_bool) {
-        entity.common.visible = visible;
+        properties.visible = visible;
     }
 }
 

@@ -2,7 +2,7 @@
 
 use cadcraft_geom::{Mat3, Mat4};
 
-use super::{Entity, EntityKind, GeometryRevision, MText, Text};
+use super::{Common, Entity, EntityKind, GeometryRevision, MText, Text};
 use crate::{DocError, Result, has_finite_numbers};
 
 impl Entity {
@@ -74,6 +74,29 @@ impl Entity {
         let mut candidate = self.clone();
         let result = edit(&mut candidate).map_err(|e| if matches!(e, DocError::NonFinite(_)) { DocError::NonFinite(self.handle) } else { e })?;
         candidate.require_legacy_geometry()?;
+        if !has_finite_numbers(&candidate) {
+            return Err(DocError::NonFinite(self.handle));
+        }
+        Ok((candidate, result))
+    }
+
+    pub(crate) fn metadata_edited<F, T>(&self, edit: F) -> Result<(Self, T)>
+    where
+        F: FnOnce(&mut Common) -> Result<T>,
+    {
+        let mut candidate = self.clone();
+        let result =
+            edit(&mut candidate.common).map_err(|e| if matches!(e, DocError::NonFinite(_)) { DocError::NonFinite(self.handle) } else { e })?;
+        let plane =
+            |common: &Common| [common.extrusion.x.to_bits(), common.extrusion.y.to_bits(), common.extrusion.z.to_bits(), common.thickness.to_bits()];
+        let same_snapshot = match (&self.common.geometry, &candidate.common.geometry) {
+            (Some(before), Some(after)) => std::sync::Arc::ptr_eq(before, after),
+            (None, None) => true,
+            _ => false,
+        };
+        if plane(&self.common) != plane(&candidate.common) || !same_snapshot {
+            return Err(DocError::Invalid("A metadata edit cannot change the entity plane, thickness, or source geometry owner.".into()));
+        }
         if !has_finite_numbers(&candidate) {
             return Err(DocError::NonFinite(self.handle));
         }
