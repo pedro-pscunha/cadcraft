@@ -6,6 +6,79 @@ use super::{Entity, EntityKind, GeometryRevision, MText, Text};
 use crate::{DocError, Result, has_finite_numbers};
 
 impl Entity {
+    /// Refuse canonical geometry before an unmigrated routine can inspect or mutate its fields.
+    pub fn require_legacy_geometry(&self) -> Result<()> {
+        self.geometry_revision.require_legacy()?;
+        match &self.kind {
+            EntityKind::AttDef(attribute) => attribute.require_legacy_geometry()?,
+            EntityKind::Insert(insert) => {
+                for attribute in &insert.attribs {
+                    attribute.require_legacy_geometry()?;
+                }
+            }
+            EntityKind::MLeader(leader) => {
+                if let Some(insert) = &leader.block {
+                    for attribute in &insert.attribs {
+                        attribute.require_legacy_geometry()?;
+                    }
+                }
+            }
+            EntityKind::Line(_)
+            | EntityKind::Point(_)
+            | EntityKind::Circle(_)
+            | EntityKind::Arc(_)
+            | EntityKind::Ellipse(_)
+            | EntityKind::LwPolyline(_)
+            | EntityKind::Polyline3d(_)
+            | EntityKind::PolylineMesh(_)
+            | EntityKind::Spline(_)
+            | EntityKind::Helix(_)
+            | EntityKind::Ray(_)
+            | EntityKind::XLine(_)
+            | EntityKind::Text(_)
+            | EntityKind::MText(_)
+            | EntityKind::Dimension(_)
+            | EntityKind::Leader(_)
+            | EntityKind::MLine(_)
+            | EntityKind::Hatch(_)
+            | EntityKind::Solid(_)
+            | EntityKind::Trace(_)
+            | EntityKind::Face3d(_)
+            | EntityKind::Region(_)
+            | EntityKind::Viewport(_)
+            | EntityKind::Image(_)
+            | EntityKind::Wipeout(_)
+            | EntityKind::Table(_)
+            | EntityKind::Tolerance(_)
+            | EntityKind::Unknown(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Run an unmigrated edit only on legacy payloads and commit a finite candidate atomically.
+    pub fn try_legacy_edit<F, T>(&mut self, edit: F) -> Result<T>
+    where
+        F: FnOnce(&mut Entity) -> Result<T>,
+    {
+        let (candidate, result) = self.legacy_edited(edit)?;
+        *self = candidate;
+        Ok(result)
+    }
+
+    pub(crate) fn legacy_edited<F, T>(&self, edit: F) -> Result<(Self, T)>
+    where
+        F: FnOnce(&mut Entity) -> Result<T>,
+    {
+        self.require_legacy_geometry()?;
+        let mut candidate = self.clone();
+        let result = edit(&mut candidate)?;
+        candidate.require_legacy_geometry()?;
+        if !has_finite_numbers(&candidate) {
+            return Err(DocError::Invalid("The geometry result has infinite or undefined coordinates.".into()));
+        }
+        Ok((candidate, result))
+    }
+
     /// Apply an affine world-space transform atomically, or leave this entity unchanged.
     pub fn try_transform(&mut self, transform: &Mat4) -> Result<()> {
         *self = self.transformed(transform)?;
