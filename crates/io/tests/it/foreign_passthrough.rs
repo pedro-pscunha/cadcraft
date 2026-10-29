@@ -183,3 +183,119 @@ fn annotative_style_is_written_once_and_annotative_block_keeps_its_flag() {
         assert_eq!(apps(&named("BLOCK_RECORD", "TAG")), ["AcadAnnotative"], "{text}");
     }
 }
+
+/// A file with a layout, a multileader style, a table style and a scale as AutoCAD writes them:
+/// each has an extension dictionary holding an XRECORD, and xdata CADCraft has no field for.
+fn styled_objects() -> String {
+    let dictionary = |h: &'static str, owner: &'static str, entries: &[(&'static str, &'static str)]| -> Vec<(i32, &'static str)> {
+        let mut g = vec![(0, "DICTIONARY"), (5, h), (330, owner), (100, "AcDbDictionary"), (281, "1")];
+        for (key, target) in entries {
+            g.extend([(3, *key), (350, *target)]);
+        }
+        g
+    };
+    let xrecord = |h: &'static str, owner: &'static str, text: &'static str| -> Vec<(i32, &'static str)> {
+        vec![(0, "XRECORD"), (5, h), (330, owner), (100, "AcDbXrecord"), (280, "1"), (1, text)]
+    };
+    let xdict = [(102, "{ACAD_XDICTIONARY"), (360, ""), (102, "}")];
+    let with_xdict = |mut head: Vec<(i32, &'static str)>, handle: &'static str| {
+        let mut x = xdict;
+        x[1].1 = handle;
+        head.splice(2..2, x);
+        head
+    };
+    let mut g: Vec<(i32, &str)> = vec![(0, "SECTION"), (2, "OBJECTS")];
+    g.extend(dictionary("C", "0", &[("ACAD_LAYOUT", "20"), ("ACAD_MLEADERSTYLE", "21"), ("ACAD_TABLESTYLE", "22"), ("ACAD_SCALELIST", "23")]));
+    g.extend(dictionary("20", "C", &[("A4", "31")]));
+    g.extend(dictionary("21", "C", &[("Callout", "41")]));
+    g.extend(dictionary("22", "C", &[("Schedule", "51")]));
+    g.extend(dictionary("23", "C", &[("A0", "61")]));
+    g.extend(with_xdict(
+        vec![
+            (0, "LAYOUT"),
+            (5, "31"),
+            (330, "20"),
+            (100, "AcDbPlotSettings"),
+            (1, ""),
+            (2, "none_device"),
+            (4, "ISO_A4_(297.00_x_210.00_MM)"),
+            (6, ""),
+            (70, "688"),
+            (100, "AcDbLayout"),
+            (1, "A4"),
+            (70, "1"),
+            (71, "1"),
+            (330, "30"),
+            (1001, "ACAD_PSEXT"),
+            (1000, "DWG To PDF.pc3"),
+            (1001, "PLOTTRANSPARENCY"),
+            (1071, "1"),
+        ],
+        "32",
+    ));
+    g.extend(dictionary("32", "31", &[("ADSK_XREC_LAYOUTTHUMBNAIL", "33")]));
+    g.extend(xrecord("33", "32", "thumbnail"));
+    g.extend(with_xdict(vec![(0, "MLEADERSTYLE"), (5, "41"), (330, "21"), (100, "AcDbMLeaderStyle"), (1001, "ACAD_MLEADERVER"), (1070, "2")], "42"));
+    g.extend(dictionary("42", "41", &[("ACAD_XREC_ROUNDTRIP", "43")]));
+    g.extend(xrecord("43", "42", "roundtrip"));
+    g.extend(with_xdict(vec![(0, "TABLESTYLE"), (5, "51"), (330, "22"), (100, "AcDbTableStyle")], "52"));
+    g.extend(dictionary("52", "51", &[("ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP", "53")]));
+    g.extend(xrecord("53", "52", "cellstylemap"));
+    g.extend([
+        (0, "SCALE"),
+        (5, "61"),
+        (330, "23"),
+        (100, "AcDbScale"),
+        (70, "0"),
+        (300, "A0"),
+        (140, "1"),
+        (141, "50"),
+        (290, "0"),
+        (1001, "ACAD"),
+        (1070, "1"),
+    ]);
+    g.extend([(0, "ENDSEC"), (0, "EOF")]);
+    dxf(&g)
+}
+
+/// The object a saved text's named object dictionary leads to by `dictionary` and `name`
+/// (`ACAD_LAYOUT`, `A4`), and the XRECORD text its extension dictionary holds under `key`.
+fn object_with_xrecord(text: &str, dictionary: &str, name: &str, key: &str) -> (Vec<Tag>, String) {
+    let objs = section(text, "OBJECTS");
+    let by_handle = |h: &str| objs.iter().find(|(_, t)| val(t, 5) == h).map(|(_, t)| t.clone());
+    let root = &objs.first().expect("the named object dictionary").1;
+    let dict = by_handle(&entry(root, dictionary)).unwrap_or_else(|| panic!("no {dictionary}"));
+    let object = by_handle(&entry(&dict, name)).unwrap_or_else(|| panic!("no {name} in {dictionary}"));
+    let xdict = by_handle(&val(&object, 360)).unwrap_or_else(|| panic!("{dictionary} {name} lost its extension dictionary:\n{text}"));
+    assert_eq!(val(&xdict, 330), val(&object, 5), "the extension dictionary names its owner");
+    let record = by_handle(&entry(&xdict, key)).unwrap_or_else(|| panic!("{dictionary} {name} lost {key}"));
+    (object, val(&record, 1))
+}
+
+fn sorted(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v
+}
+
+/// The saved text of a layout, a multileader style, a table style and a scale keeps the xdata
+/// CADCraft has no field for, and their extension dictionaries. A DWG keeps those of a layout and
+/// the scale's xdata; acadrust's DWG objects for multileader and table styles carry neither.
+#[test]
+fn layout_styles_and_scales_keep_their_xdata_and_extension_dictionaries() {
+    let d = cadcraft_io::read_dxf(styled_objects().as_bytes()).unwrap();
+    for (i, text) in saved_twice(&d).into_iter().enumerate() {
+        let in_dxf = i == 0;
+        let (layout, thumb) = object_with_xrecord(&text, "ACAD_LAYOUT", "A4", "ADSK_XREC_LAYOUTTHUMBNAIL");
+        assert_eq!(thumb, "thumbnail");
+        assert_eq!(sorted(apps(&layout)), ["ACAD_PSEXT", "PLOTTRANSPARENCY"], "{text}");
+        let objs = section(&text, "OBJECTS");
+        let scale = objs.iter().find(|(k, t)| k == "SCALE" && val(t, 300) == "A0").map(|(_, t)| t.clone()).expect("the scale");
+        assert_eq!(apps(&scale), ["ACAD"]);
+        if in_dxf {
+            let (style, roundtrip) = object_with_xrecord(&text, "ACAD_MLEADERSTYLE", "Callout", "ACAD_XREC_ROUNDTRIP");
+            assert_eq!((apps(&style), roundtrip.as_str()), (vec!["ACAD_MLEADERVER".to_string()], "roundtrip"));
+            let (_, cells) = object_with_xrecord(&text, "ACAD_TABLESTYLE", "Schedule", "ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP");
+            assert_eq!(cells, "cellstylemap");
+        }
+    }
+}

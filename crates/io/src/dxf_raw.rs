@@ -40,6 +40,11 @@ const MODELLED_KEYS: &[&str] = &[
 /// modelled only when the writer can reproduce every point reference (see [`modelled_xdict_entry`]).
 const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_SORTENTS"];
 
+/// Objects CADCraft writes from its model, by name, in dictionaries of the named object
+/// dictionary. Their extension dictionary and xdata that the writer doesn't write are kept like
+/// those of a table record (`Foreign::records`, under the role `NOD/<dictionary>`).
+const MODELLED_OBJECTS: &[&str] = &["LAYOUT", "MLEADERSTYLE", "TABLESTYLE", "SCALE"];
+
 fn modelled_xdict_entry(key: &str, target: &str, modelled_assoc: &HashSet<String>) -> bool {
     let key = up(key);
     MODELLED_XDICT_KEYS.contains(&key.as_str()) || (key == "ACAD_DIMASSOC" && modelled_assoc.contains(&norm(target)))
@@ -206,7 +211,9 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             && is_dictionary(k)
         {
             for (name, eh) in entries(t) {
-                put(Some(eh), (format!("NOD/{}", up(&key)), up(&name)));
+                // A scale's dictionary key is arbitrary (the writer numbers them): its name is group 300.
+                let scale = by_handle.get(&eh).filter(|_| up(&key) == "ACAD_SCALELIST").and_then(|(_, t)| val(t, 300));
+                put(Some(eh), (format!("NOD/{}", up(&key)), up(&scale.unwrap_or(name))));
             }
         }
     }
@@ -331,8 +338,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             crate::dxf_write::dimassoc_reproducible(d, dimension, t).then(|| head(t).handle).flatten()
         })
         .collect();
-    // Extension dictionaries of entities and records: owner → dictionary.
-    let xdict_of = extension_dictionaries(&tables, &blocks, &entities);
+    // Extension dictionaries of entities, records and the objects CADCraft writes itself: owner → dictionary.
+    let xdict_of = extension_dictionaries(&tables, &blocks, &entities, &objects);
     // Objects by handle: the first of each, and none that has an entity's handle.
     let mut by_handle: HashMap<String, usize> = HashMap::new();
     for (i, (_, _, t)) in objects.iter().enumerate() {
@@ -343,14 +350,16 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
     let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
-    // An extension dictionary of an entity or record (not of another object).
-    let is_xdict = |k: usize| {
-        let Some((_, _, t)) = objects.get(k) else { return false };
-        let hd = head(t);
-        let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
-        !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
+    let scan = Scan {
+        objects: &objects,
+        entities: &ents,
+        records: &ids,
+        by_handle: &by_handle,
+        root_entries: &root_entries,
+        xdict_of: &xdict_of,
+        modelled_assoc: &modelled_assoc,
     };
-    let memo = retained_objects(&objects, &ents, &ids, &by_handle, &root_entries, &xdict_of, &modelled_assoc);
+    let memo = retained_objects(&scan);
     let mut f = Foreign::default();
     let mut kept: HashSet<String> = HashSet::new();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
@@ -359,7 +368,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
         let Some(h) = head(t).handle.and_then(|h| handle(&h)) else { continue };
         let mut tags: Vec<RawTag> = t.iter().map(raw).collect();
-        if is_xdict(i) {
+        if scan.is_xdict(i) {
             cadcraft_doc::foreign::strip_dictionary_entries(&mut tags, |key, target| modelled_xdict_entry(key, target, &modelled_assoc));
         }
         if head(t).owner == root
@@ -392,7 +401,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
-    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")) {
+    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
+    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
         let x = extra(kind, t, kind == "BLOCK", false, &kept);
         if !x.is_empty() {
@@ -476,9 +486,11 @@ fn extension_dictionaries(
     tables: &[(String, usize, &[Tag])],
     blocks: &[(String, usize, &[Tag])],
     entities: &[(String, usize, &[Tag])],
+    objects: &[(String, usize, &[Tag])],
 ) -> HashMap<String, String> {
     let mut dictionaries = HashMap::new();
-    for (kind, _, tags) in tables.iter().chain(blocks).chain(entities) {
+    let modelled = objects.iter().filter(|(kind, _, _)| MODELLED_OBJECTS.contains(&kind.as_str()));
+    for (kind, _, tags) in tables.iter().chain(blocks).chain(entities).chain(modelled) {
         if kind == "ENDBLK" {
             continue;
         }
@@ -490,24 +502,40 @@ fn extension_dictionaries(
     dictionaries
 }
 
-/// Determine which objects belong to unmodelled dictionary entries or owners.
-fn retained_objects(
-    objects: &[(String, usize, &[Tag])],
-    entities: &HashMap<String, bool>,
-    records: &HashMap<String, ForeignKey>,
-    by_handle: &HashMap<String, usize>,
-    root_entries: &[(String, String)],
-    xdict_of: &HashMap<String, String>,
-    modelled_assoc: &HashSet<String>,
-) -> HashMap<usize, bool> {
-    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
-    let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
-    let is_xdict = |index: usize| {
-        let Some((_, _, tags)) = objects.get(index) else { return false };
+/// What deciding which objects of a file are kept looks at.
+struct Scan<'a> {
+    objects: &'a Recs<'a>,
+    /// The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
+    entities: &'a HashMap<String, bool>,
+    /// The roles of the table records, blocks and named object dictionary entries.
+    records: &'a HashMap<String, ForeignKey>,
+    /// Objects by handle (those that are no entity).
+    by_handle: &'a HashMap<String, usize>,
+    root_entries: &'a [(String, String)],
+    /// Extension dictionaries: owner → dictionary.
+    xdict_of: &'a HashMap<String, String>,
+    modelled_assoc: &'a HashSet<String>,
+}
+
+impl Scan<'_> {
+    /// Whether object `index` is the extension dictionary of something CADCraft writes itself: an
+    /// entity, a table record or block, or an object of [`MODELLED_OBJECTS`] (not of another object).
+    fn is_xdict(&self, index: usize) -> bool {
+        let Some((_, _, tags)) = self.objects.get(index) else { return false };
         let header = head(tags);
         let (Some(handle), Some(owner)) = (header.handle, header.owner) else { return false };
-        !by_handle.contains_key(&owner) && xdict_of.get(&owner) == Some(&handle) && (entities.contains_key(&owner) || records.contains_key(&owner))
-    };
+        let by_model =
+            self.by_handle.get(&owner).is_none_or(|&i| self.objects.get(i).is_some_and(|(kind, _, _)| MODELLED_OBJECTS.contains(&kind.as_str())));
+        by_model && self.xdict_of.get(&owner) == Some(&handle) && (self.entities.contains_key(&owner) || self.records.contains_key(&owner))
+    }
+}
+
+/// Determine which objects belong to unmodelled dictionary entries or owners.
+fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
+    let Scan { objects, entities, root_entries, by_handle, modelled_assoc, .. } = *scan;
+    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
+    let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
+    let is_xdict = |index: usize| scan.is_xdict(index);
     let modelled_entry = |tags: &[Tag], handle: &str| {
         entries(tags).iter().any(|(key, entry_handle)| entry_handle == handle && modelled_xdict_entry(key, entry_handle, modelled_assoc))
     };
@@ -532,15 +560,15 @@ fn retained_objects(
             if root.as_deref() == Some(owner.as_str()) {
                 break root_key(&handle).is_some_and(|key| !modelled_key(key));
             }
+            if is_xdict(current) {
+                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
+            }
             if let Some(&parent) = by_handle.get(&owner) {
                 if is_xdict(parent) && objects.get(parent).is_some_and(|object| modelled_entry(object.2, &handle)) {
                     break false;
                 }
                 current = parent;
                 continue;
-            }
-            if is_xdict(current) {
-                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
             }
             break entities.get(&owner) == Some(&true);
         };
@@ -868,21 +896,32 @@ fn merge_xdict(map: &Map<'_>, foreign: &ForeignObject, written: &[Tag]) -> Vec<T
     merged
 }
 
-/// The extras of a written record, if the drawing keeps any for it.
-fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
-    match (rec.sec.as_str(), rec.kind.as_str()) {
-        ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
-        ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
-        ("BLOCKS", "ENDBLK") => None,
-        ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, handle(&head(body).handle?)?),
-        _ => None,
+/// What the extras of a written record are looked up in.
+struct Extras<'a> {
+    f: &'a Foreign,
+    xd: &'a XdataOf<'a>,
+    /// The written file's roles, which name the objects of [`MODELLED_OBJECTS`].
+    ids: &'a HashMap<String, ForeignKey>,
+}
+
+impl<'a> Extras<'a> {
+    /// The extras of a written record, if the drawing keeps any for it.
+    fn of(&self, rec: &Rec, body: &[Tag]) -> Option<Cow<'a, ForeignExtra>> {
+        let f = self.f;
+        match (rec.sec.as_str(), rec.kind.as_str()) {
+            ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
+            ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
+            ("BLOCKS", "ENDBLK") => None,
+            ("ENTITIES" | "BLOCKS", _) => entity_extra(f, self.xd, handle(&head(body).handle?)?),
+            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
+            _ => None,
+        }
     }
 }
 
 /// Plan standalone/merged xdict ownership separately from writing their object graphs.
 fn plan_xdict_attachments(
-    f: &Foreign,
-    xd: &XdataOf,
+    extras: &Extras,
     recs: &[Rec],
     tags: &[Tag],
     roles: &HashMap<ForeignKey, String>,
@@ -893,13 +932,13 @@ fn plan_xdict_attachments(
     let mut merged = HashMap::new();
     for r in recs {
         let body = tags.get(r.start + 1..r.end).unwrap_or(&[]);
-        if let Some(x) = extra_for(f, xd, r, body)
+        if let Some(x) = extras.of(r, body)
             && let Some(dictionary) = x.xdict
         {
             let old = dictionary.hex();
             let header = head(body);
             let owned = owners.get(&old).is_some_and(|owner| {
-                let current = handle(owner).and_then(|h| f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
+                let current = handle(owner).and_then(|h| extras.f.targets.get(&h)).and_then(|role| roles.get(role)).unwrap_or(owner);
                 header.handle.as_ref() == Some(current)
             });
             if !(owned && objects.get(&old).is_some_and(|o| is_dictionary(&o.kind))) {
@@ -1002,7 +1041,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         .iter()
         .filter_map(|o| Some((o.handle.hex(), cadcraft_doc::foreign::object_owner(o.tags.iter().map(|t| (t.code, t.value.as_str())))?.hex())))
         .collect();
-    let (mut attached, merged) = plan_xdict_attachments(f, &xd, &recs, tags, &roles, &objs, &owners);
+    let extras = Extras { f, xd: &xd, ids: &ids };
+    let (mut attached, merged) = plan_xdict_attachments(&extras, &recs, tags, &roles, &objs, &owners);
     for (_, t) in planned.values().flatten() {
         let header = head(t.get(1..).unwrap_or(&[]));
         let x = header.handle.as_ref().and_then(|h| handle(h)).and_then(|h| entity_extra(f, &xd, h));
@@ -1100,7 +1140,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             continue;
         }
         out.extend(tags.get(r.start).cloned());
-        let x = extra_for(f, &xd, r, b);
+        let x = extras.of(r, b);
         if x.is_none() && Some(r.start) != root {
             out.extend(b.iter().cloned());
             continue;
