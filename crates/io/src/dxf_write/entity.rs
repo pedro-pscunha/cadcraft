@@ -370,7 +370,8 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             common(w, e, owner, paper, "AcDbMText");
             w.p(10, t.insert);
             w.f(40, t.height);
-            w.f(41, t.width);
+            // The width of the reference rectangle: all the columns and their gutters, as AutoCAD writes it.
+            w.f(41, t.columns.as_ref().map_or(t.width, |c| c.total_width(t.width)));
             w.i(71, i64::from(t.attach));
             w.i(72, 1);
             // Long contents go in 250-char 3-chunks, the remainder in 1.
@@ -397,7 +398,16 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 if let Some(c) = t.columns.as_ref().filter(|c| c.height > 0.0 && (c.kind == cadcraft_doc::MTextColumnType::Static || c.auto_height)) {
                     w.f(46, c.height);
                 }
+                // The laid-out extents: acadrust takes them from here into the object of its DWG.
+                let (ew, eh) = t.column_extents();
+                if cx.dwg_bridge && (ew > 0.0 || eh > 0.0) {
+                    w.f(42, ew);
+                    w.f(43, eh);
+                }
                 w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t));
+            } else if t.columns.is_some() && cx.target >= Version::R2007 && !cx.entget {
+                // 2007 to 2017: the columns are the ACAD extended data of the entity.
+                w.t.extend(crate::dxf_read::mtext_dxf::xdata_column_tags(t));
             } else {
                 w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
             }

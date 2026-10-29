@@ -119,7 +119,9 @@ fn an_edited_column_text_keeps_its_columns() {
 
 #[test]
 fn the_columns_survive_a_dwg_save() {
-    for source in [MIN1, ACAD_31E46, STATIC3, AUTO] {
+    // The text style of the fixtures is not in a style table, which a DWG would replace by Standard.
+    for source in [MIN1, ACAD_31E46, STATIC3, AUTO].map(|s| s.replace("ROMANS", "Standard")) {
+        let source = source.as_str();
         let d = cadcraft_io::read_dxf(dxf(source).as_bytes()).unwrap();
         let want = mtext(&d);
         let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
@@ -155,4 +157,121 @@ fn a_column_text_is_drawn_with_all_its_text() {
     let wide = cadcraft_io::read_dxf(dxf(STATIC3).as_bytes()).unwrap();
     let b = prims(&wide).bounds;
     assert!(b.max.x - b.min.x > 5.0 && b.max.x - b.min.x <= 70.0, "{b:?}");
+}
+
+/// AutoCAD's own two-column MTEXT of DP Inc (DXFOUT 2018 of the DWG, mateus-lima): dynamic columns with
+/// manual heights, a reference rectangle (41) of all the columns, and laid-out extents (42, 43).
+const DPINC_TWO_COLUMNS: &str = "0 MTEXT\n5 1C2\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 -2888.7344008081\n20 481.533821574024\n30 0\n40 0.2\n41 7.866274197902384\n46 0\n71 1\n72 5\n1 TEXTO\n7 Standard\n73 1\n44 1\n\
+    101 Embedded Object\n70 1\n10 1\n20 0\n30 0\n11 -2888.7344008081\n21 481.533821574024\n31 0\n40 7.866274197902384\n41 0\n42 7.866274197902384\n43 0.5333333333333333\n71 2\n72 2\n44 3.558137098951192\n45 0.75\n73 0\n74 0\n46 0.256343792633015\n46 0";
+
+#[test]
+fn a_multi_column_text_has_the_whole_width_in_41_and_keeps_autocads_extents() {
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let d = cadcraft_io::read_dxf(dxf(DPINC_TWO_COLUMNS).as_bytes()).unwrap();
+    let t = mtext(&d);
+    assert_eq!(t.width, 3.558137098951192, "the text's width is one column's");
+    assert_eq!(t.column_extents(), (7.866274197902384, 0.5333333333333333));
+    for text in [r2018(&d), r2018(&cadcraft_io::read_dxf(r2018(&d).as_bytes()).unwrap())] {
+        let rec = record(&text);
+        let main = &rec[..rec.iter().position(|t| t.code == 101).unwrap()];
+        // 41 of the text is all the columns and their gutter: 2 x 3.558.. + 0.75 (AutoCAD's 7.866274197902384).
+        assert!((num(main, 41)[0] - 7.866274197902384).abs() < 1e-12, "{main:?}");
+        let b = embedded(&text);
+        assert!((num(&b, 40)[0] - 7.866274197902384).abs() < 1e-12);
+        assert_eq!((bits(&num(&b, 42)), bits(&num(&b, 43))), (bits(&[7.866274197902384]), bits(&[0.5333333333333333])));
+        assert_eq!(num(&b, 46), vec![0.256343792633015, 0.0]);
+    }
+    // A DWG keeps the extents; a move keeps them; an edit of the text drops them (AutoCAD lays it out again).
+    let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    assert_eq!(mtext(&back).column_extents(), (7.866274197902384, 0.5333333333333333));
+    let mut moved = d.clone();
+    let h = moved.model.iter().next().unwrap().handle;
+    moved
+        .modify_entity(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind {
+                t.insert.x += 3.0;
+            }
+        })
+        .unwrap();
+    assert_eq!(mtext(&moved).column_extents(), (7.866274197902384, 0.5333333333333333));
+    // Written from the model (the move dropped the snapshot of the main groups), 41 is still all the columns.
+    let rec = record(&r2018(&moved));
+    assert!((num(&rec[..rec.iter().position(|t| t.code == 101).unwrap()], 41)[0] - 7.866274197902384).abs() < 1e-12, "{rec:?}");
+    assert_eq!(num(&embedded(&r2018(&moved)), 42), vec![7.866274197902384]);
+    moved
+        .modify_entity(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind {
+                t.contents = "OTHER TEXT".into();
+            }
+        })
+        .unwrap();
+    assert_eq!(num(&embedded(&r2018(&moved)), 42), vec![0.0]);
+}
+
+/// AutoCAD's own MTEXT of Citycon in a 2010 DXF (DXFOUT 2010 of the DWG, mateus-lima): the columns are in
+/// the ACAD extended data, not in the entity's groups.
+const CITYCON_2010: &str = "0 MTEXT\n5 61697\n100 AcDbEntity\n8 carimbo cor1\n100 AcDbMText\n10 8.554471942766895\n20 20\n30 0\n40 5.854888252773742\n41 182.4335599239948\n46 0\n71 1\n72 5\n1 CARIMBO\n7 Standard\n73 1\n44 1\n\
+    1001 ACAD\n1000 ACAD_MTEXT_COLUMN_INFO_BEGIN\n1070 75\n1070 2\n1070 79\n1070 0\n1070 76\n1070 1\n1070 78\n1070 0\n1070 48\n1040 182.4335599239948\n1070 49\n1040 11.41669000533545\n1070 50\n1070 1\n1040 0\n1000 ACAD_MTEXT_COLUMN_INFO_END";
+
+fn r2010(d: &Drawing) -> String {
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false };
+    String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &opts).unwrap()).unwrap()
+}
+
+/// The values of the ACAD column record (between its markers) of the first MTEXT of a text, and how many
+/// ACAD records the entity has.
+fn xdata_columns(text: &str) -> (Vec<String>, usize) {
+    let rec = record(text);
+    let apps = rec.iter().filter(|t| t.code == 1001 && t.str().trim() == "ACAD").count();
+    let begin = rec.iter().position(|t| t.code == 1000 && t.str() == "ACAD_MTEXT_COLUMN_INFO_BEGIN");
+    let values = begin
+        .map(|b| {
+            rec[b + 1..]
+                .iter()
+                .take_while(|t| t.str() != "ACAD_MTEXT_COLUMN_INFO_END")
+                .map(|t| t.str().trim().parse::<f64>().map_or_else(|_| t.str(), |v| format!("{:x}", v.to_bits())))
+                .collect()
+        })
+        .unwrap_or_default();
+    (values, apps)
+}
+
+#[test]
+fn the_columns_in_acad_xdata_are_read_and_written_from_the_model() {
+    let source = dxf(CITYCON_2010);
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let t = mtext(&d);
+    let c = t.columns.clone().expect("columns");
+    assert_eq!(
+        (c.kind, c.count, c.auto_height, c.flow_reversed, c.gutter, c.heights.clone()),
+        (MTextColumnType::Dynamic, 1, false, false, 11.41669000533545, vec![0.0])
+    );
+    assert_eq!(t.width, 182.4335599239948);
+    // The foreign copy is gone: the entity's xdata no longer holds the record.
+    assert!(d.model.iter().next().unwrap().common.xdata.is_empty(), "{:?}", d.model.iter().next().unwrap().common.xdata);
+    let (want, apps) = xdata_columns(&source);
+    assert_eq!(apps, 1);
+    // A 2010 save writes the record, once and as it was; so do a second save and an edited (moved) text.
+    let first = r2010(&d);
+    assert_eq!(xdata_columns(&first), (want.clone(), 1), "first save");
+    assert!(!record(&first).iter().any(|t| matches!(t.code, 75 | 76 | 78 | 79 | 101)));
+    assert_eq!(xdata_columns(&r2010(&cadcraft_io::read_dxf(first.as_bytes()).unwrap())), (want.clone(), 1), "second save");
+    let mut moved = d.clone();
+    let h = moved.model.iter().next().unwrap().handle;
+    moved
+        .modify_entity(h, |e| {
+            if let EntityKind::MText(t) = &mut e.kind {
+                t.insert.x += 1.0;
+            }
+        })
+        .unwrap();
+    assert_eq!(xdata_columns(&r2010(&moved)), (want.clone(), 1), "moved");
+    // A 2018 save has the embedded object and no xdata record; the main subclass has the whole width.
+    let new = r2018(&d);
+    assert_eq!(xdata_columns(&new).1, 0);
+    assert_eq!(layout(&new)[0], vec![2.0]);
+    // Through a DWG and back to a 2010 DXF: one record.
+    let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    assert_eq!(mtext(&back).columns.map(|c| (c.kind, c.count, c.gutter)), Some((MTextColumnType::Dynamic, 1, 11.41669000533545)));
+    assert_eq!(xdata_columns(&r2010(&back)).1, 1);
 }

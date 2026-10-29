@@ -387,7 +387,9 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let own = OWN_APPS.contains(&app.as_str())
             || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
             || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE") && annotative_on(chunk))
-            || (kind == "LAYER" && layer_xdata_modelled(&app, chunk));
+            || (kind == "LAYER" && layer_xdata_modelled(&app, chunk))
+            // An MTEXT's column record is read into the model and written from it.
+            || (kind == "MTEXT" && app == "ACAD" && crate::dxf_read::mtext_dxf::read_xdata_columns(chunk).is_some());
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
         }

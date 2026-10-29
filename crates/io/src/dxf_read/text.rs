@@ -51,9 +51,11 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     }
     contents.push_str(&t.s(1).unwrap_or_default());
     let contents = mtext_dxf::decode_contents(&contents);
-    // The columns are groups of the MTEXT (75...) or, from R2018, its embedded object (101).
-    let from_embedded = mtext_dxf::read_columns(tags).is_none();
-    let columns = mtext_dxf::read_columns(tags).or_else(|| mtext_dxf::read_embedded_columns(tags));
+    // The columns are groups of the MTEXT (75...), its embedded object (101, from R2018) or its ACAD
+    // extended data (2007 to 2017).
+    let columns = mtext_dxf::read_columns(tags)
+        .or_else(|| mtext_dxf::read_embedded_columns(tags))
+        .or_else(|| mtext_dxf::acad_xdata(tags).and_then(mtext_dxf::read_xdata_columns));
     // The direction comes from the MTEXT's own groups only: in an R2018+ embedded object
     // (group 101), 11 is the insertion point, not the X-axis direction (#667, as in #834).
     let own = T(mtext_dxf::before_columns(tags));
@@ -73,13 +75,12 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
             a => a,
         };
     }
-    MText {
+    let mut text = MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
+        // The text's width is the column width; the rectangle's (41) is the whole text's.
         width: match &columns {
-            // The column width of the embedded object is the text's width; the rectangle's (41) is the whole.
-            Some((_, w)) if from_embedded && *w > 0.0 => *w,
-            Some((_, w)) if t.fd(41, 0.0) <= 0.0 => *w,
+            Some((_, w)) if *w > 0.0 => *w,
             _ => t.fd(41, 0.0).max(0.0),
         },
         attach,
@@ -89,7 +90,11 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         line_spacing: t.fd(44, 1.0),
         line_spacing_exact: t.i(73) == Some(2),
         columns: columns.map(|(c, _)| c),
+    };
+    if let Some((w, h)) = mtext_dxf::read_embedded_extents(tags) {
+        text.set_column_extents(w, h);
     }
+    text
 }
 
 pub(super) fn text_from(t: &T) -> Text {
