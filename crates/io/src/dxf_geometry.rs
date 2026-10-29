@@ -31,8 +31,9 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         "TEXT" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbText", &[73])],
         "ATTRIB" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbAttribute", &[74])],
         "ATTDEF" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbAttributeDefinition", &[74])],
-        // Including the columns (75, 76, 78, 79, 48, 49 and the heights in 50).
-        "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230, 75, 76, 78, 79, 48, 49])],
+        // Only the main groups: a column text has an embedded object (101) with a second set of the same codes,
+        // which the generated record owns.
+        "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230])],
         "INSERT" => &[("AcDbBlockReference", &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230])],
         // The whole curve: flags, degree, counts, tolerances, tangents, knots, weights, controls, fits and the plane.
         "SPLINE" => &[("AcDbSpline", &[210, 220, 230, 70, 71, 72, 73, 74, 42, 43, 44, 12, 22, 32, 13, 23, 33, 40, 41, 10, 20, 30, 11, 21, 31])],
@@ -83,7 +84,9 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
 fn subclass(tags: &[Tag], marker: &str, n: usize) -> Option<std::ops::Range<usize>> {
     let end = tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len());
     let at = tags.iter().take(end).enumerate().filter(|(_, t)| t.code == 100 && t.str().trim() == marker).map(|(i, _)| i).nth(n)?;
-    let stop = tags.iter().take(end).enumerate().skip(at + 1).find(|(_, t)| t.code == 100).map_or(end, |(i, _)| i);
+    // The subclass ends at the next marker, or at an embedded object (101), which has groups of its own
+    // with the same codes (an MTEXT's or an attribute's).
+    let stop = tags.iter().take(end).enumerate().skip(at + 1).find(|(_, t)| matches!(t.code, 100 | 101)).map_or(end, |(i, _)| i);
     Some(at + 1..stop)
 }
 

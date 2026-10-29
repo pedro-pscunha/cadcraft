@@ -624,24 +624,37 @@ fn a_table_keeps_its_plane_direction_and_sizes_through_every_save() {
     }
 }
 
+/// A column text as acadrust writes it for 2018: the main groups, then `101 Embedded Object` and a second set of the
+/// same codes (the column rectangle). An unedited save keeps exactly one of each main group, and the embedded block.
 #[test]
-fn multi_column_text_keeps_its_plane_and_column_groups_through_every_save() {
-    for plane in PLANES {
-        // Static columns: count, flow, width and gutter, and manual heights (50) after the rotation (50).
-        let mtext = format!(
-            "0 MTEXT\n5 220\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n41 30\n71 1\n72 1\n1 Two\\Pcolumns\n7 Standard\n{plane}\n\
-             11 0.6\n21 0.8\n31 0\n73 1\n44 1\n75 2\n76 2\n78 0\n79 0\n48 14.5\n49 1.0\n50 12.5\n50 12.5"
-        );
-        // A DWG writes the groups of a column text its own way: only the plane is compared there.
-        let dxf_only = [10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 44, 48, 49, 50, 75, 76, 78, 79];
-        assert_kept(
-            &dxf(&[&mtext]),
-            "MTEXT",
-            &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 210, 220, 230, 44, 75, 76, 78, 79, 48, 49, 50],
-            &[],
-            &dxf_only,
-        );
+fn a_column_text_keeps_its_main_groups_and_its_embedded_object_apart() {
+    let mtext = "0 MTEXT\n5 A1\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 13772.5\n20 -10439.9\n30 0\n40 0.15\n41 2.055\n71 1\n72 5\n1 PA_JARDL\n7 Standard\n\
+        210 0\n220 0\n230 1\n11 1\n21 0\n31 0\n42 1.348\n43 0.164\n73 1\n44 1\n\
+        101 Embedded Object\n70 1\n10 1\n20 0\n30 0\n11 13772.5\n21 -10439.9\n31 0\n40 2.055\n41 0\n42 0\n43 0\n71 2\n72 1\n44 2.055\n45 0.75\n73 0\n74 0\n46 0.164";
+    let source = dxf(&[mtext]);
+    let want = record(&source, "MTEXT");
+    let main_of = |r: &[Tag]| r[..r.iter().position(|t| t.code == 101).unwrap_or(r.len())].to_vec();
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    let user = String::from_utf8(cadcraft_io::write_with(&d, "x.dxf", &opts).unwrap()).unwrap();
+    let again = String::from_utf8(cadcraft_io::write_with(&cadcraft_io::read_dxf(user.as_bytes()).unwrap(), "x.dxf", &opts).unwrap()).unwrap();
+    for (what, text) in [("DXF", user), ("DXF, second save", again)] {
+        let got = record(&text, "MTEXT");
+        let main = main_of(&got);
+        for code in [10, 11, 40, 41, 71, 72, 44, 73] {
+            assert_eq!(main.iter().filter(|t| t.code == code).count(), 1, "{what}: group {code} once in the main subclass: {got:?}");
+        }
+        for code in [10, 20, 30, 40, 41, 11, 21, 31] {
+            assert_eq!(bits(&main, code), bits(&main_of(&want), code), "{what}: main group {code}");
+        }
     }
+    // Through a DWG the insertion point, the direction, the height and the attachment survive.
+    let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    let (EntityKind::MText(a), EntityKind::MText(b)) = (&d.model.iter().next().unwrap().kind, &back.model.iter().next().unwrap().kind) else {
+        panic!("MTEXT")
+    };
+    assert_eq!((a.insert, a.height, a.attach), (b.insert, b.height, b.attach));
+    assert!((a.rotation - b.rotation).abs() < 1e-9, "{} vs {}", a.rotation, b.rotation);
 }
 
 /// Group 48 of the AcDbMText subclass is the width of a column, not the linetype scale of the entity.
