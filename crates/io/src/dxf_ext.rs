@@ -940,6 +940,27 @@ pub(crate) fn parse_constraints(text: &str) -> Option<(Vec<Constraint>, Parametr
     Some((p.constraints, p.parametric))
 }
 
+/// The insertion units AutoCAD 2000 and 2004 keep in a block record: its ACAD application xdata
+/// `DesignCenter Data { 1, units }`, in place of group 70 (AutoCAD 2007's). `chunk` is the whole xdata of one
+/// application, from its `1001`; it counts only when it holds nothing else.
+pub(crate) fn design_center_units(chunk: &[Tag]) -> Option<u8> {
+    let [app, name, open, version, units, close] = chunk else { return None };
+    let shape = app.code == 1001
+        && app.str().trim().eq_ignore_ascii_case("ACAD")
+        && name.code == 1000
+        && name.str().trim() == "DesignCenter Data"
+        && (open.code, open.str().trim()) == (1002, "{")
+        && (version.code, units.code) == (1070, 1070)
+        && (close.code, close.str().trim()) == (1002, "}");
+    shape.then(|| u8::try_from(units.i64()).ok()).flatten()
+}
+
+/// The units in the `DesignCenter Data` xdata among the groups of a block record, if there are any.
+pub(crate) fn block_record_units(tags: &[Tag]) -> Option<u8> {
+    let starts: Vec<usize> = tags.iter().enumerate().filter(|(_, t)| t.code == 1001).map(|(i, _)| i).collect();
+    starts.iter().enumerate().find_map(|(n, &s)| design_center_units(tags.get(s..starts.get(n + 1).copied().unwrap_or(tags.len()))?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
