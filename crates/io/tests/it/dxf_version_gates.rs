@@ -360,3 +360,47 @@ fn block_units_before_2007_are_design_center_xdata() {
         assert_eq!(read_dxf(later.as_bytes()).unwrap().block("Door").map(|b| b.units), Some(4));
     }
 }
+
+/// MULTILEADER is AutoCAD 2007's. Before it a multileader is one LEADER per leader line and its MTEXT, so the
+/// entity count differs from the drawing's (AutoCAD's own R2000 DXFOUT keeps a graphics-only proxy MULTILEADER,
+/// which CADCraft cannot make: it writes entities that stay editable).
+#[test]
+fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
+    let mleader = cadcraft_doc::MLeader {
+        leaders: vec![
+            vec![cadcraft_geom::Vec3::new(0.0, 0.0, 0.0), cadcraft_geom::Vec3::new(2.0, 3.0, 0.0)],
+            vec![cadcraft_geom::Vec3::new(9.0, 0.0, 0.0), cadcraft_geom::Vec3::new(7.0, 3.0, 0.0)],
+        ],
+        landing: cadcraft_geom::Vec3::new(5.0, 4.0, 0.0),
+        dogleg: 0.75,
+        text: Some(cadcraft_doc::MText {
+            insert: cadcraft_geom::Vec3::new(5.9, 4.0, 0.0),
+            height: 0.4,
+            width: 0.0,
+            attach: 4,
+            rotation: 0.0,
+            style: "Standard".into(),
+            contents: "NOTE".into(),
+            line_spacing: 1.0,
+            line_spacing_exact: false,
+            columns: None,
+        }),
+        style: "Standard".into(),
+        arrow_size: 0.3,
+        spline: false,
+        block: None,
+        arrow_block: String::new(),
+    };
+    let mut d = Drawing::new_metric();
+    d.model.push(cadcraft_doc::Entity::new(cadcraft_doc::Handle(0x80), EntityKind::MLeader(mleader)));
+    d.bump_handseed(cadcraft_doc::Handle(0x90));
+    for version in Version::ALL {
+        let kinds: Vec<String> = section(&save(&d, version), "ENTITIES").into_iter().map(|(k, _)| k).filter(|k| k != "ENDSEC").collect();
+        let count = |k: &str| kinds.iter().filter(|x| *x == k).count();
+        if version >= Version::R2007 {
+            assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (1, 0, 0), "{version:?}: {kinds:?}");
+        } else {
+            assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (0, 2, 1), "{version:?}: {kinds:?}");
+        }
+    }
+}
