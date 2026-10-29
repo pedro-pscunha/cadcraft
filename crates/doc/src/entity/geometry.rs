@@ -173,7 +173,8 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         }
         EntityKind::Hatch(h) => {
             // The boundary objects (`sources`) are references, not geometry.
-            let loops: Vec<_> = h.loops.iter().map(|l| (&l.vertices, l.outer)).collect();
+            // A canonical loop also has its record flags and exact edges.
+            let loops: Vec<_> = h.loops.iter().map(|l| (&l.vertices, l.outer, l.flags, &l.edges)).collect();
             let _ = write!(s, "HATCH{:?}{plane:?}", (&h.pattern, h.solid, loops, h.scale, h.angle, h.style, h.elevation, h.origin, &h.pattern_lines));
         }
         _ => return None,

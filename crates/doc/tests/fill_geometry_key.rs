@@ -1,8 +1,8 @@
 //! Every canonical wipeout field is part of the replay key, so changing it alone retires the source snapshot.
 
 use cadcraft_doc::{
-    Common, EntityKind, Helix, HelixConstrain, HelixFrame, MLine, MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, Wipeout, WipeoutFrame,
-    geometry_key,
+    Common, EntityKind, Hatch, HatchEdge, HatchLoop, HatchSpline, Helix, HelixConstrain, HelixFrame, MLine, MLineJust, MLineStyle, MLineVertex,
+    MLineVertexFrame, Wipeout, WipeoutFrame, geometry_key,
 };
 use cadcraft_geom::{Vec2, Vec3};
 
@@ -146,4 +146,103 @@ fn each_mline_frame_field_alone_changes_the_key() {
     let mut renamed = mline();
     renamed.style = "Other".into();
     assert_eq!(key(&renamed, &common), base, "the style name is a property");
+}
+
+fn hatch() -> Hatch {
+    let spline = HatchSpline {
+        degree: 3,
+        rational: true,
+        periodic: false,
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        control: vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0)],
+        weights: vec![1.0, 0.5],
+        fit: vec![Vec2::new(0.0, 0.0)],
+        start_tangent: Vec2::new(1.0, 1.0),
+        end_tangent: Vec2::new(1.0, -1.0),
+    };
+    let edges = vec![
+        HatchEdge::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.0) },
+        HatchEdge::Arc { center: Vec2::new(1.0, 0.5), radius: 2.0, start: 0.25, end: 1.5, ccw: true },
+        HatchEdge::Ellipse { center: Vec2::new(5.0, 5.0), major: Vec2::new(2.0, 0.0), ratio: 0.5, start: 0.0, end: 3.0, ccw: true },
+        HatchEdge::Spline(spline),
+        HatchEdge::Polyline { vertices: vec![cadcraft_geom::PolyVertex::new(Vec2::new(0.0, 0.0))], closed: true },
+    ];
+    Hatch {
+        pattern: "SOLID".into(),
+        solid: true,
+        loops: vec![HatchLoop { flags: 1, edges, outer: true, ..HatchLoop::default() }],
+        scale: 1.0,
+        angle: 0.0,
+        associative: false,
+        style: 0,
+        elevation: 2.0,
+        gradient: None,
+        origin: Vec2::ZERO,
+        background: None,
+        pattern_lines: Vec::new(),
+    }
+}
+
+#[test]
+fn each_canonical_hatch_edge_field_alone_changes_the_key() {
+    let common = Common { extrusion: Vec3::new(0.0, 0.0, 2.0), ..Common::default() };
+    let key = |h: &Hatch, c: &Common| geometry_key(&EntityKind::Hatch(h.clone()), c).unwrap();
+    let base = key(&hatch(), &common);
+    type Mutation = fn(&mut Hatch, &mut Common);
+    fn spline(h: &mut Hatch) -> &mut HatchSpline {
+        match &mut h.loops[0].edges[3] {
+            HatchEdge::Spline(s) => s,
+            _ => unreachable!(),
+        }
+    }
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("flags", |h, _| h.loops[0].flags = 17),
+        ("line end", |h, _| h.loops[0].edges[0] = HatchEdge::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.5) }),
+        ("arc direction", |h, _| {
+            if let HatchEdge::Arc { ccw, .. } = &mut h.loops[0].edges[1] {
+                *ccw = false;
+            }
+        }),
+        ("arc end", |h, _| {
+            if let HatchEdge::Arc { end, .. } = &mut h.loops[0].edges[1] {
+                *end += 0.5;
+            }
+        }),
+        ("ellipse ratio", |h, _| {
+            if let HatchEdge::Ellipse { ratio, .. } = &mut h.loops[0].edges[2] {
+                *ratio = 0.25;
+            }
+        }),
+        ("ellipse major", |h, _| {
+            if let HatchEdge::Ellipse { major, .. } = &mut h.loops[0].edges[2] {
+                major.y = 0.5;
+            }
+        }),
+        ("spline weight", |h, _| spline(h).weights[1] = 0.75),
+        ("spline knot", |h, _| spline(h).knots[2] = 0.9),
+        ("spline fit point", |h, _| spline(h).fit[0].x = 0.5),
+        ("spline end tangent", |h, _| spline(h).end_tangent.y = -2.0),
+        ("spline periodic", |h, _| spline(h).periodic = true),
+        ("polyline closed", |h, _| {
+            if let HatchEdge::Polyline { closed, .. } = &mut h.loops[0].edges[4] {
+                *closed = false;
+            }
+        }),
+        ("elevation", |h, _| h.elevation = 2.5),
+        ("normal x", |_, c| c.extrusion.x += 0.5),
+        ("normal z", |_, c| c.extrusion.z += 0.5),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let (mut h, mut c) = (hatch(), common.clone());
+        mutate(&mut h, &mut c);
+        let k = key(&h, &c);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    for (i, a) in keys.iter().enumerate() {
+        for b in &keys[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
 }

@@ -118,6 +118,7 @@ fn sample() -> Drawing {
                 vertices: vec![PolyVertex::new(Vec2::ZERO), PolyVertex::new(Vec2::new(2.0, 0.0)), PolyVertex::new(Vec2::new(2.0, 2.0))],
                 outer: true,
                 sources: Vec::new(),
+                ..Default::default()
             }],
             scale: 1.0,
             angle: 0.0,
@@ -1862,7 +1863,7 @@ fn gradient_sample() -> (Drawing, Vec<Option<Gradient>>) {
         let h = Hatch {
             pattern: "SOLID".into(),
             solid: true,
-            loops: vec![HatchLoop { vertices: square.clone(), outer: true, sources: Vec::new() }],
+            loops: vec![HatchLoop { vertices: square.clone(), outer: true, sources: Vec::new(), ..Default::default() }],
             scale: 1.0,
             angle: 0.0,
             associative: false,

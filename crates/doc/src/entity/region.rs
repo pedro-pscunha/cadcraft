@@ -34,7 +34,7 @@ pub struct RegionProps {
 impl Region {
     /// A region bounded by one closed loop.
     pub fn from_loop(vertices: Vec<PolyVertex>) -> Region {
-        Region { loops: vec![HatchLoop { vertices, outer: true, sources: Vec::new() }] }
+        Region { loops: vec![HatchLoop { vertices, outer: true, sources: Vec::new(), ..Default::default() }] }
     }
 
     pub fn polylines(&self) -> Vec<Polyline> {

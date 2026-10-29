@@ -707,27 +707,106 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
     }
 }
 
+/// A canonical loop: its flags and exact edges as its record held them (DXF Reference, HATCH group codes 92 to 74).
+fn canonical_loop(w: &mut W, l: &cadcraft_doc::HatchLoop, cx: &Ctx) {
+    use cadcraft_doc::HatchEdge;
+    w.i(92, i64::from(l.flags));
+    if let [HatchEdge::Polyline { vertices, closed }] = l.edges.as_slice() {
+        let has_bulge = vertices.iter().any(|v| v.bulge != 0.0);
+        w.i(72, i64::from(has_bulge));
+        w.i(73, i64::from(*closed));
+        w.i(93, vertices.len() as i64);
+        for v in vertices {
+            w.p2(10, v.p);
+            if has_bulge {
+                w.f(42, v.bulge);
+            }
+        }
+        return;
+    }
+    w.i(93, l.edges.len() as i64);
+    for edge in &l.edges {
+        match edge {
+            HatchEdge::Line { a, b } => {
+                w.i(72, 1);
+                w.p2(10, *a);
+                w.p2(11, *b);
+            }
+            HatchEdge::Arc { center, radius, start, end, ccw } => {
+                w.i(72, 2);
+                w.p2(10, *center);
+                w.f(40, *radius);
+                w.f(50, start.to_degrees());
+                w.f(51, end.to_degrees());
+                w.i(73, i64::from(*ccw));
+            }
+            HatchEdge::Ellipse { center, major, ratio, start, end, ccw } => {
+                w.i(72, 3);
+                w.p2(10, *center);
+                w.p2(11, *major);
+                w.f(40, *ratio);
+                w.f(50, start.to_degrees());
+                w.f(51, end.to_degrees());
+                w.i(73, i64::from(*ccw));
+            }
+            HatchEdge::Spline(sp) => {
+                w.i(72, 4);
+                w.i(94, i64::from(sp.degree));
+                w.i(73, i64::from(sp.rational));
+                w.i(74, i64::from(sp.periodic));
+                w.i(95, sp.knots.len() as i64);
+                w.i(96, sp.control.len() as i64);
+                for k in &sp.knots {
+                    w.f(40, *k);
+                }
+                for (i, c) in sp.control.iter().enumerate() {
+                    w.p2(10, *c);
+                    if sp.rational {
+                        w.f(42, sp.weights.get(i).copied().unwrap_or(1.0));
+                    }
+                }
+                // The fit data count (97) exists from AutoCAD 2010 on, and from a DWG made by the bridge.
+                if cx.target >= Version::R2010 || cx.dwg_bridge {
+                    w.i(97, sp.fit.len() as i64);
+                    for f in &sp.fit {
+                        w.p2(11, *f);
+                    }
+                    if !sp.fit.is_empty() {
+                        w.p2(12, sp.start_tangent);
+                        w.p2(13, sp.end_tangent);
+                    }
+                }
+            }
+            HatchEdge::Polyline { .. } => {}
+        }
+    }
+}
+
 fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     if let EntityKind::Hatch(h) = &e.kind {
         w.s(0, "HATCH");
         common(w, e, owner, paper, "AcDbHatch");
         w.p(10, Vec3::new(0.0, 0.0, h.elevation));
-        w.p(210, Vec3::Z);
+        w.p(210, canonical_plane(e).unwrap_or(Vec3::Z));
         w.s(2, &h.pattern);
         w.i(70, i64::from(h.solid));
         w.i(71, i64::from(h.associative));
         w.i(91, h.loops.len() as i64);
         for l in &h.loops {
-            w.i(92, 2 | if l.outer { 1 } else { 0 });
-            let has_bulge = l.vertices.iter().any(|v| v.bulge != 0.0);
-            w.i(72, i64::from(has_bulge));
-            w.i(73, 1);
-            w.i(93, l.vertices.len() as i64);
-            for v in &l.vertices {
-                w.p2(10, v.p);
-                if has_bulge {
-                    w.f(42, v.bulge);
+            if l.edges.is_empty() {
+                w.i(92, 2 | if l.outer { 1 } else { 0 });
+                let has_bulge = l.vertices.iter().any(|v| v.bulge != 0.0);
+                w.i(72, i64::from(has_bulge));
+                w.i(73, 1);
+                w.i(93, l.vertices.len() as i64);
+                for v in &l.vertices {
+                    w.p2(10, v.p);
+                    if has_bulge {
+                        w.f(42, v.bulge);
+                    }
                 }
+            } else {
+                canonical_loop(w, l, cx);
             }
             // Source boundary objects of an associative hatch (the ones still beside it, in
             // its space or block, which carry the hatch as a reactor).

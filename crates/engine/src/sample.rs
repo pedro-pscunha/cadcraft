@@ -140,7 +140,7 @@ pub fn bracket() -> Drawing {
         EntityKind::Hatch(Hatch {
             pattern: "ANSI31".into(),
             solid: false,
-            loops: vec![HatchLoop { vertices: rect_vertices(a, bb), outer: true, sources: Vec::new() }],
+            loops: vec![HatchLoop { vertices: rect_vertices(a, bb), outer: true, sources: Vec::new(), ..Default::default() }],
             scale: 1.0,
             angle: 0.0,
             associative: false,

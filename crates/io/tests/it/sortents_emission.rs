@@ -89,6 +89,7 @@ fn every_region_loop_sorts_below_the_cover_even_if_source_handles_are_ascending(
         ],
         outer: true,
         sources: vec![],
+        ..Default::default()
     };
     drawing.add(&Space::Model, Common::default(), EntityKind::Region(Region { loops: vec![square(0.0), square(2.0)] })).unwrap();
     let cover = drawing.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) })).unwrap();
