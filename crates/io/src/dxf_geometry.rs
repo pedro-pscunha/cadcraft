@@ -15,6 +15,10 @@ use cadcraft_dxf::Tag;
 
 type Spec = &'static [(&'static str, &'static [i32])];
 
+/// The geometry groups of a DIMENSION's own `AcDbDimension` subclass: definition point, text point,
+/// text rotation, plane and the horizontal direction.
+const DIMENSION: &[i32] = &[10, 20, 30, 11, 21, 31, 53, 51, 210, 220, 230];
+
 /// The geometry groups of the types that keep a snapshot, by subclass in record order.
 fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
     let has = |marker: &str| tags.iter().take_while(|t| t.code < 1000).any(|t| t.code == 100 && t.str().trim() == marker);
@@ -44,6 +48,21 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         // The image frame (origin, U and V vectors, size) and the clipping boundary; the image link, the display
         // flags and the brightness are the model's.
         "WIPEOUT" => &[("AcDbWipeout", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24])],
+        // The definition point, text position and rotation, the plane and the definition points of the kind
+        // of dimension. The block, the text, the style and the measurement stay what the writer makes.
+        "DIMENSION" if has("AcDbAlignedDimension") && has("AcDbRotatedDimension") => {
+            &[("AcDbDimension", DIMENSION), ("AcDbAlignedDimension", &[13, 23, 33, 14, 24, 34, 50, 52]), ("AcDbRotatedDimension", &[])]
+        }
+        "DIMENSION" if has("AcDbAlignedDimension") => &[("AcDbDimension", DIMENSION), ("AcDbAlignedDimension", &[13, 23, 33, 14, 24, 34, 50, 52])],
+        "DIMENSION" if has("AcDbRadialDimension") => &[("AcDbDimension", DIMENSION), ("AcDbRadialDimension", &[15, 25, 35, 40])],
+        "DIMENSION" if has("AcDbDiametricDimension") => &[("AcDbDimension", DIMENSION), ("AcDbDiametricDimension", &[15, 25, 35, 40])],
+        "DIMENSION" if has("AcDb2LineAngularDimension") => {
+            &[("AcDbDimension", DIMENSION), ("AcDb2LineAngularDimension", &[13, 23, 33, 14, 24, 34, 15, 25, 35, 16, 26, 36])]
+        }
+        "DIMENSION" if has("AcDb3PointAngularDimension") => {
+            &[("AcDbDimension", DIMENSION), ("AcDb3PointAngularDimension", &[13, 23, 33, 14, 24, 34, 15, 25, 35])]
+        }
+        "DIMENSION" if has("AcDbOrdinateDimension") => &[("AcDbDimension", DIMENSION), ("AcDbOrdinateDimension", &[13, 23, 33, 14, 24, 34])],
         "LWPOLYLINE" => &[("AcDbPolyline", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 91, 210, 220, 230])],
         // A POLYLINE is a 2D polyline (with VERTEX children), a 3D polyline or a mesh (their parents).
         "POLYLINE" if has("AcDb2dPolyline") => &[("AcDb2dPolyline", &[10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230])],

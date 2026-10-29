@@ -110,6 +110,14 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::PolylineMesh(m) => {
             let _ = write!(s, "MESH{:?}{plane:?}", (m.kind as u8, m.flags, m.m_count, m.n_count, m.m_density, m.n_density, m.smooth_type));
         }
+        EntityKind::Dimension(dm) => {
+            // Not the block, the text, the style, the measurement or the overrides, which are regenerated.
+            let _ = write!(
+                s,
+                "DIMENSION{:?}{plane:?}",
+                (dm.kind, dm.defpt, dm.text_mid, dm.p13, dm.p14, dm.p15, dm.p16, dm.text_rotation, dm.user_text_pos, dm.marks.oblique)
+            );
+        }
         EntityKind::Tolerance(t) => {
             let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
         }

@@ -416,3 +416,68 @@ fn a_wipeout_keeps_its_frame_and_clipping_boundary_through_every_save() {
     // A DWG closes the boundary with one more vertex.
     assert_kept(&dxf(&[wipeout]), "WIPEOUT", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24], &[], &[71, 91, 14, 24]);
 }
+
+/// A dimension of `kind`: its AcDbDimension groups (type flags `ty`), then its own subclasses.
+fn dimension(ty: i32, plane: &str, own: &str) -> String {
+    format!(
+        "0 DIMENSION\n5 210\n100 AcDbEntity\n8 0\n100 AcDbDimension\n2 *D1\n10 5.5\n20 6.5\n30 1.25\n11 3.5\n21 4.5\n31 1.25\n70 {ty}\n53 12.5\n{plane}\n3 Standard\n{own}"
+    )
+}
+
+#[test]
+fn dimensions_keep_their_plane_and_definition_points_through_every_save() {
+    let base = [10, 20, 30, 11, 21, 31, 53, 210, 220, 230];
+    for plane in PLANES {
+        let cases: [(&str, i32, &str, &[i32]); 6] = [
+            (
+                "linear",
+                32,
+                "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25\n50 15.5\n100 AcDbRotatedDimension",
+                &[13, 14, 50],
+            ),
+            ("aligned", 33, "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25", &[13, 14]),
+            ("radial", 36, "100 AcDbRadialDimension\n15 7.5\n25 8.5\n35 1.25\n40 0", &[15]),
+            ("diameter", 35, "100 AcDbDiametricDimension\n15 7.5\n25 8.5\n35 1.25\n40 0", &[15]),
+            (
+                "angular",
+                34,
+                "100 AcDb2LineAngularDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25\n15 1.5\n25 1.5\n35 1.25\n16 4.5\n26 4.5\n36 1.25",
+                &[13, 14, 15, 16],
+            ),
+            ("ordinate", 38, "100 AcDbOrdinateDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25", &[13, 14]),
+        ];
+        for (name, ty, own, own_codes) in cases {
+            let source = dxf(&[&dimension(ty, plane, own)]);
+            let codes: Vec<i32> =
+                base.iter().copied().chain(own_codes.iter().flat_map(|c| [*c, c + 10, c + 20].into_iter().filter(|c| *c < 50 || *c == 50))).collect();
+            // A DWG's two-line angular dimension has a 2D fourth point.
+            assert_kept(&source, "DIMENSION", &codes, &[53, 50], &[36]);
+            let _ = name;
+        }
+    }
+}
+
+#[test]
+fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
+    let own = "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25";
+    let source = dxf(&[&dimension(33, PLANES[0], own)]);
+    let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let h = first_handle(&d);
+    d.modify_entity(h, |e| {
+        if let EntityKind::Dimension(dm) = &mut e.kind {
+            dm.text = "Over".into();
+        }
+    })
+    .unwrap();
+    let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
+    assert_eq!(bits(&got, 230), vec![(-1.0f64).to_bits()]);
+    assert!(got.iter().any(|t| t.code == 1 && t.str() == "Over"), "{got:?}");
+    d.modify_entity(h, |e| {
+        if let EntityKind::Dimension(dm) = &mut e.kind {
+            dm.p14.x += 1.0;
+        }
+    })
+    .unwrap();
+    let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
+    assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
+}
