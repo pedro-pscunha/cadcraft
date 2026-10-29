@@ -328,6 +328,7 @@ mod tests {
                     const_width: 0.0,
                     elevation: 0.0,
                     plinegen: false,
+                    heavy: false,
                 }),
                 5 => EntityKind::Text(Text {
                     insert: v3(x, y),

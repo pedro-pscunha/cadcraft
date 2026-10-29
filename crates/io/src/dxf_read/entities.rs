@@ -87,7 +87,14 @@ fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> {
             v.bulge = -v.bulge;
         }
     }
-    let pl = LwPolyline { vertices: verts, closed: flags & 1 != 0, const_width: t.fd(43, 0.0), elevation: t.fd(38, 0.0), plinegen: flags & 128 != 0 };
+    let pl = LwPolyline {
+        vertices: verts,
+        closed: flags & 1 != 0,
+        const_width: t.fd(43, 0.0),
+        elevation: t.fd(38, 0.0),
+        plinegen: flags & 128 != 0,
+        heavy: false,
+    };
     // A region CADCraft wrote as polylines (`dxf_region`).
     crate::dxf_region::from_polyline(tags, pl)
 }
@@ -492,7 +499,7 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
             if vflags & 128 != 0 && vflags & 64 == 0 {
                 faces.push([71, 72, 73, 74].map(|c| tt.i(c).unwrap_or(0)));
             } else if vflags & 16 == 0 {
-                pts.push((tt.p(10), tt.fd(42, 0.0), tt.fd(40, 0.0), tt.fd(41, 0.0)));
+                pts.push((tt.p(10), tt.fd(42, 0.0), tt.fd(40, t.fd(40, 0.0)), tt.fd(41, t.fd(41, 0.0))));
             }
             *i += 1;
         } else {
@@ -520,9 +527,11 @@ pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T)
         EntityKind::LwPolyline(LwPolyline {
             vertices: pts.iter().map(|p| PolyVertex { p: Vec2::new(m * p.0.x, p.0.y), bulge: m * p.1, start_width: p.2, end_width: p.3 }).collect(),
             closed: flags & 1 != 0,
-            const_width: t.fd(40, 0.0).min(t.fd(41, 0.0)).max(0.0),
+            // The effective widths live on each vertex, including inherited defaults.
+            const_width: 0.0,
             elevation: t.p(10).z,
             plinegen: flags & 128 != 0,
+            heavy: true,
         })
     };
     Some((c, k, extra))

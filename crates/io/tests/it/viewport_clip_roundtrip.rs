@@ -21,6 +21,7 @@ fn drawing(locked: bool, on: bool) -> (Drawing, Handle, Handle) {
         const_width: 0.0,
         elevation: 0.0,
         plinegen: false,
+        heavy: false,
     };
     let b = d.add(&sheet, Common::default(), EntityKind::LwPolyline(poly)).unwrap();
     let vp = Viewport {

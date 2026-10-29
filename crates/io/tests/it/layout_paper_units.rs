@@ -30,6 +30,7 @@ fn drawing() -> Drawing {
         const_width: 0.0,
         elevation: 0.0,
         plinegen: false,
+        heavy: false,
     };
     d.add(&Space::Paper("SHEET".into()), Common::default(), EntityKind::LwPolyline(pl)).unwrap();
     d

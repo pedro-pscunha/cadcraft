@@ -42,6 +42,8 @@ mod hatch_clockwise_arc_edge;
 mod hatch_pattern_def;
 mod header_fidelity;
 mod header_pointers;
+#[cfg(not(target_arch = "wasm32"))]
+mod heavy_polyline;
 mod helix_roundtrip;
 mod layout_paper_units;
 mod layout_plot_window;

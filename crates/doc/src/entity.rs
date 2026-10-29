@@ -576,7 +576,8 @@ mod grip_tests {
         // Grips are each vertex plus the midpoint of each segment; the segment vector is computed
         // once rather than rebuilt per vertex (CWE-407, row 35).
         let verts: Vec<PolyVertex> = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)].iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect();
-        let e = EntityKind::LwPolyline(LwPolyline { vertices: verts, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false });
+        let e =
+            EntityKind::LwPolyline(LwPolyline { vertices: verts, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false });
         let g = e.grips();
         // 3 vertices + 2 segment midpoints.
         assert_eq!(g.len(), 5, "{g:?}");

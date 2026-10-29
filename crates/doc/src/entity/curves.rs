@@ -48,6 +48,9 @@ pub struct LwPolyline {
     /// Polyline linetype generation (PLINEGEN).
     #[serde(default)]
     pub plinegen: bool,
+    /// Keep the POLYLINE/VERTEX representation of a source 2D polyline.
+    #[serde(default)]
+    pub heavy: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

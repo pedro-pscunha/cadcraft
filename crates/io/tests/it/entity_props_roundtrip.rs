@@ -46,7 +46,7 @@ fn thickness_roundtrips_on_every_entity_that_has_one() {
         EntityKind::Arc(Arc { center: p(0.0, 0.0), radius: 5.0, start: 0.0, end: 1.0 }),
         EntityKind::Point(Point { p: p(1.0, 2.0), angle: 0.0 }),
         EntityKind::Text(text),
-        EntityKind::LwPolyline(LwPolyline { vertices: square(4.0), closed: true, const_width: 0.0, elevation: 0.0, plinegen: false }),
+        EntityKind::LwPolyline(LwPolyline { vertices: square(4.0), closed: true, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false }),
         EntityKind::Polyline3d(Polyline3d { points: vec![p(0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)], closed: false }),
         EntityKind::Solid(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),
         EntityKind::Trace(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),

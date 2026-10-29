@@ -20,7 +20,7 @@ pub fn arc(a: &cadcraft_geom::Arc) -> EntityKind {
 }
 
 pub fn lwpoly(vs: Vec<PolyVertex>, closed: bool) -> EntityKind {
-    EntityKind::LwPolyline(cadcraft_doc::LwPolyline { vertices: vs, closed, const_width: 0.0, elevation: 0.0, plinegen: false })
+    EntityKind::LwPolyline(cadcraft_doc::LwPolyline { vertices: vs, closed, const_width: 0.0, elevation: 0.0, plinegen: false, heavy: false })
 }
 
 pub fn rect_vertices(a: Vec2, b: Vec2) -> Vec<PolyVertex> {
