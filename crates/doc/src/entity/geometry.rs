@@ -32,6 +32,13 @@ pub struct GeometrySnapshot {
     pub model: String,
 }
 
+/// The placement of a multiline attribute's embedded MTEXT.
+fn embedded_geometry(s: &mut String, a: &Attrib) {
+    if let Some(m) = a.multiline.as_ref().map(|m| &m.mtext) {
+        let _ = write!(s, "{:?}", (m.insert, m.height, m.width, m.attach, m.rotation, m.line_spacing, m.line_spacing_exact));
+    }
+}
+
 fn text_geometry(s: &mut String, t: &Text) {
     let _ = write!(s, "{:?}", (t.insert, t.align_pt, t.height, t.rotation, t.width_factor, t.oblique, t.halign, t.valign));
 }
@@ -67,14 +74,78 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::AttDef(a) => {
             s.push_str("ATTDEF");
             text_geometry(&mut s, &a.text);
+            embedded_geometry(&mut s, a);
             let _ = write!(s, "{plane:?}");
         }
-        // A multi-column MTEXT keeps no snapshot.
-        EntityKind::MText(t) if t.columns.is_none() => {
-            let _ = write!(s, "MTEXT{:?}{plane:?}", (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact));
+        EntityKind::MText(t) => {
+            let _ = write!(
+                s,
+                "MTEXT{:?}{plane:?}",
+                (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact, &t.columns)
+            );
         }
         EntityKind::Insert(i) => {
             let _ = write!(s, "INSERT{:?}{plane:?}", (i.insert, i.scale, i.rotation, i.cols, i.rows, i.col_spacing, i.row_spacing));
+        }
+        EntityKind::LwPolyline(p) => {
+            let vertices: Vec<_> = p.vertices.iter().map(|v| (v.p, v.bulge, v.start_width, v.end_width)).collect();
+            let base = (vertices, p.closed, p.plinegen, p.const_width, p.elevation);
+            if p.heavy {
+                // A heavy polyline's VERTEX records follow its parent: the fit data and the vertices are its geometry.
+                let fit = p.fit.as_ref().map(|f| {
+                    let fitted: Vec<_> = f.vertices.iter().map(|v| (v.position, v.flags, v.start_width, v.end_width, v.bulge, v.tangent)).collect();
+                    let display: Vec<_> = f.display_vertices.iter().map(|v| (v.p, v.bulge, v.start_width, v.end_width)).collect();
+                    (
+                        f.flags,
+                        f.smooth_type,
+                        f.m_count,
+                        f.n_count,
+                        f.m_density,
+                        f.n_density,
+                        f.start_width,
+                        f.end_width,
+                        f.elevation,
+                        f.extrusion,
+                        fitted,
+                        display,
+                    )
+                });
+                let _ = write!(s, "HPOLY{base:?}{fit:?}{plane:?}");
+            } else {
+                let _ = write!(s, "LWPOLY{base:?}{plane:?}");
+            }
+        }
+        EntityKind::Polyline3d(p) => {
+            let _ = write!(s, "POLY3D{:?}{plane:?}", p.closed);
+        }
+        EntityKind::PolylineMesh(m) => {
+            let _ = write!(s, "MESH{:?}{plane:?}", (m.kind as u8, m.flags, m.m_count, m.n_count, m.m_density, m.n_density, m.smooth_type));
+        }
+        EntityKind::Dimension(dm) => {
+            // Not the block, the text, the style, the measurement or the overrides, which are regenerated.
+            let _ = write!(
+                s,
+                "DIMENSION{:?}{plane:?}",
+                (dm.kind, dm.defpt, dm.text_mid, dm.p13, dm.p14, dm.p15, dm.p16, dm.text_rotation, dm.user_text_pos, dm.marks.oblique)
+            );
+        }
+        EntityKind::MLeader(m) => {
+            // Not the text, its style or the arrowhead: the paths, landing, dogleg and the content's placement.
+            let text = m.text.as_ref().map(|t| (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact));
+            let block = m.block.as_ref().map(|b| (b.insert, b.scale, b.rotation));
+            let _ = write!(s, "MLEADER{:?}{plane:?}", (&m.leaders, m.landing, m.dogleg, m.spline, text, block));
+        }
+        EntityKind::Table(t) => {
+            let _ = write!(s, "TABLE{:?}{plane:?}", (t.insert, &t.row_heights, &t.col_widths));
+        }
+        EntityKind::Tolerance(t) => {
+            let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
+        }
+        EntityKind::Helix(h) => {
+            let _ = write!(s, "HELIX{h:?}{plane:?}");
+        }
+        EntityKind::Wipeout(w) => {
+            let _ = write!(s, "WIPEOUT{:?}{plane:?}", w.boundary);
         }
         EntityKind::Spline(c) => {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
@@ -97,5 +168,6 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
 pub fn attrib_geometry_key(a: &Attrib) -> String {
     let mut s = String::from("ATTRIB");
     text_geometry(&mut s, &a.text);
+    embedded_geometry(&mut s, a);
     s
 }

@@ -66,8 +66,8 @@ fn saves(d: &Drawing) -> Vec<(&'static str, String)> {
 
 /// Check that the geometry groups `codes` of the first `kind` record of the source are bit for bit
 /// those of every save. A DWG stores angles in radians, so `angles` only agree to the last digits
-/// there. The groups `dxf_only` are checked in the user DXF saves only: acadrust's DXF reader has
-/// no 210/220/230 for an ATTRIB, so a DWG does not keep the plane of an attribute.
+/// there. The groups `dxf_only` are checked in the user DXF saves only (the DWG format or acadrust
+/// does not keep them).
 fn assert_kept(source: &str, kind: &str, codes: &[i32], angles: &[i32], dxf_only: &[i32]) {
     let want = record(source, kind);
     let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
@@ -183,7 +183,7 @@ fn inserts_and_attributes_keep_their_plane_and_geometry_through_every_save() {
         );
         let source = dxf_with_block(&[attdef], &[&insert, &attrib, "0 SEQEND\n5 142\n100 AcDbEntity\n8 0"]);
         assert_kept(&source, "INSERT", &[10, 20, 30, 41, 42, 43, 50, 210, 220, 230], &[50], &[]);
-        assert_kept(&source, "ATTRIB", &[10, 20, 30, 40, 50, 210, 220, 230, 74], &[50], &[210, 220, 230]);
+        assert_kept(&source, "ATTRIB", &[10, 20, 30, 40, 50, 210, 220, 230, 74], &[50], &[]);
     }
 }
 
@@ -300,4 +300,358 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3, "{got:?}");
         assert!(!got.iter().any(|t| (210..=213).contains(&t.code)), "{got:?}");
     }
+}
+
+/// The records of `kind` of the ENTITIES section of a DXF text.
+fn all_records(text: &str, kind: &str) -> Vec<Vec<Tag>> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let section = sections(&tags).into_iter().find(|s| s.name == "ENTITIES").expect("ENTITIES");
+    records(&section.tags).into_iter().filter(|(k, _)| k == kind).map(|(_, t)| t).collect()
+}
+
+/// Every number of the `codes` groups of all the records, as (code, bits) in order.
+fn numbers(records: &[Vec<Tag>], codes: &[i32]) -> Vec<(i32, u64)> {
+    records.iter().flatten().filter(|t| codes.contains(&t.code)).map(|t| (t.code, t.str().trim().parse::<f64>().unwrap().to_bits())).collect()
+}
+
+#[test]
+fn a_lightweight_polyline_keeps_its_plane_elevation_and_vertices_through_every_save() {
+    for plane in PLANES {
+        let polyline = format!(
+            "0 LWPOLYLINE\n5 180\n100 AcDbEntity\n8 0\n100 AcDbPolyline\n90 4\n70 1\n43 0.25\n38 2.5\n39 -0.5\n\
+             10 1.5\n20 2.5\n40 0.1\n41 0.2\n42 0.5\n10 6.5\n20 2.5\n10 6.5\n20 7.5\n42 -0.25\n10 1.5\n20 7.5\n{plane}"
+        );
+        // A DWG gives every vertex a start width, an end width and a bulge, zeros included.
+        assert_kept(&dxf(&[&polyline]), "LWPOLYLINE", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 210, 220, 230], &[], &[40, 41, 42]);
+    }
+}
+
+#[test]
+fn a_lightweight_polyline_keeps_the_defaults_and_vertex_ids_its_file_wrote() {
+    // Explicit zero elevation and constant width, and the vertex identifiers (91) of AutoCAD 2010 and later.
+    let polyline = "0 LWPOLYLINE\n5 181\n100 AcDbEntity\n8 0\n100 AcDbPolyline\n90 2\n70 0\n43 0\n38 0\n39 0\n10 1.5\n20 2.5\n91 11\n10 6.5\n20 2.5\n91 12\n210 0\n220 0\n230 -1";
+    assert_kept(&dxf(&[polyline]), "LWPOLYLINE", &[90, 70, 43, 38, 39, 10, 20, 91, 210, 220, 230], &[], &[43, 38, 39, 91]);
+}
+
+/// A heavy 2D polyline (widths, a bulge), a 3D polyline and a polygon mesh in `plane`.
+fn polylines(plane: &str) -> String {
+    let v2 = |x: f64, y: f64, extra: &str| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDb2dVertex\n10 {x}\n20 {y}\n30 0\n{extra}70 0");
+    let v3 = |x: f64, y: f64, z: f64| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDb3dPolylineVertex\n10 {x}\n20 {y}\n30 {z}\n70 32");
+    let vm = |x: f64, y: f64, z: f64| format!("0 VERTEX\n8 0\n100 AcDbVertex\n100 AcDbPolygonMeshVertex\n10 {x}\n20 {y}\n30 {z}\n70 64");
+    let seqend = "0 SEQEND\n8 0";
+    [
+        format!("0 POLYLINE\n5 190\n100 AcDbEntity\n8 0\n100 AcDb2dPolyline\n66 1\n10 0\n20 0\n30 2.5\n39 -0.5\n70 1\n40 0.25\n41 0.25\n{plane}"),
+        v2(1.5, 2.5, "40 0.1\n41 0.2\n42 0.5\n"),
+        v2(6.5, 2.5, ""),
+        v2(6.5, 7.5, "42 -0.25\n"),
+        seqend.to_string(),
+        format!("0 POLYLINE\n5 191\n100 AcDbEntity\n8 0\n100 AcDb3dPolyline\n66 1\n10 0\n20 0\n30 0\n70 8\n{plane}"),
+        v3(1.0, 2.0, 3.0),
+        v3(4.0, 5.0, -6.0),
+        seqend.to_string(),
+        format!("0 POLYLINE\n5 192\n100 AcDbEntity\n8 0\n100 AcDbPolygonMesh\n66 1\n10 0\n20 0\n30 0\n70 16\n71 2\n72 2\n{plane}"),
+        vm(0.0, 0.0, 1.0),
+        vm(1.0, 0.0, 2.0),
+        vm(0.0, 1.0, 3.0),
+        vm(1.0, 1.0, 4.0),
+        seqend.to_string(),
+    ]
+    .join("\n")
+}
+
+#[test]
+fn polylines_and_meshes_keep_their_plane_and_vertices_through_every_save() {
+    for plane in PLANES {
+        let source = dxf(&[&polylines(plane)]);
+        let want = all_records(&source, "POLYLINE");
+        let want_vertices = all_records(&source, "VERTEX");
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        for (what, text) in saves(&d) {
+            let (got, got_vertices) = (all_records(&text, "POLYLINE"), all_records(&text, "VERTEX"));
+            assert_eq!(got.len(), 3, "{what}: {text}");
+            if what.starts_with("DWG") {
+                // A DWG keeps the plane of the heavy polyline; a 3D polyline and a mesh have none.
+                for code in [210, 220, 230] {
+                    assert_eq!(bits(&got[0], code), bits(&want[0], code), "{what}: POLYLINE group {code}");
+                }
+            } else {
+                let codes = [10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230];
+                assert_eq!(numbers(&got, &codes), numbers(&want, &codes), "{what}: POLYLINE parents {plane}");
+                assert_eq!(
+                    numbers(&got_vertices, &[10, 20, 30, 40, 41, 42, 70]),
+                    numbers(&want_vertices, &[10, 20, 30, 40, 41, 42, 70]),
+                    "{what}: VERTEX records {plane}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_tolerance_keeps_its_position_direction_and_plane_through_every_save() {
+    for plane in PLANES {
+        let tolerance = format!(
+            "0 TOLERANCE\n5 200\n100 AcDbEntity\n8 0\n100 AcDbFcf\n3 Standard\n10 1.5\n20 2.5\n30 3.5\n1 {{\\Fgdt;j}}%%v0.5\n{plane}\n11 0.6\n21 0.8\n31 0"
+        );
+        assert_kept(&dxf(&[&tolerance]), "TOLERANCE", &[10, 20, 30, 11, 21, 31, 210, 220, 230], &[], &[]);
+    }
+}
+
+#[test]
+fn a_helix_keeps_its_spline_and_helix_groups_through_every_save() {
+    for plane in PLANES {
+        let helix = format!(
+            "0 HELIX\n5 201\n100 AcDbEntity\n8 0\n100 AcDbSpline\n{plane}\n70 8\n71 3\n72 8\n73 4\n74 0\n42 1e-7\n43 1e-7\n\
+             40 0\n40 0\n40 0\n40 0\n40 1\n40 1\n40 1\n40 1\n10 1\n20 0\n30 0\n10 1.5\n20 2.5\n30 1\n10 -1.5\n20 2.5\n30 2\n10 -1\n20 0\n30 3\n\
+             100 AcDbHelix\n90 29\n91 63\n10 0\n20 0\n30 0\n11 1\n21 0\n31 0\n12 0\n22 0\n32 1\n40 1\n41 1\n42 3\n290 1\n280 2"
+        );
+        assert_kept(&dxf(&[&helix]), "HELIX", &[210, 220, 230, 71, 72, 73, 40, 10, 20, 30, 41, 42, 290, 280], &[], &[210, 220, 230]);
+    }
+}
+
+#[test]
+fn a_wipeout_keeps_its_frame_and_clipping_boundary_through_every_save() {
+    let wipeout = "0 WIPEOUT\n5 202\n100 AcDbEntity\n8 0\n100 AcDbWipeout\n90 0\n10 1.5\n20 2.5\n30 3.5\n11 0.1\n21 0\n31 0.2\n12 0\n22 0.1\n32 0.3\n\
+         13 1\n23 1\n70 7\n280 1\n281 50\n282 50\n283 0\n71 2\n91 4\n14 -0.5\n24 -0.5\n14 0.5\n24 -0.5\n14 0.5\n24 0.5\n14 -0.5\n24 0.5";
+    // A DWG closes the boundary with one more vertex.
+    assert_kept(&dxf(&[wipeout]), "WIPEOUT", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24], &[], &[71, 91, 14, 24]);
+}
+
+/// A dimension of `kind`: its AcDbDimension groups (type flags `ty`), then its own subclasses.
+fn dimension(ty: i32, plane: &str, own: &str) -> String {
+    format!(
+        "0 DIMENSION\n5 210\n100 AcDbEntity\n8 0\n100 AcDbDimension\n2 *D1\n10 5.5\n20 6.5\n30 1.25\n11 3.5\n21 4.5\n31 1.25\n70 {ty}\n53 12.5\n{plane}\n3 Standard\n{own}"
+    )
+}
+
+#[test]
+fn dimensions_keep_their_plane_and_definition_points_through_every_save() {
+    let base = [10, 20, 30, 11, 21, 31, 53, 210, 220, 230];
+    for plane in PLANES {
+        let cases: [(&str, i32, &str, &[i32]); 6] = [
+            (
+                "linear",
+                32,
+                "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25\n50 15.5\n100 AcDbRotatedDimension",
+                &[13, 14, 50],
+            ),
+            ("aligned", 33, "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25", &[13, 14]),
+            ("radial", 36, "100 AcDbRadialDimension\n15 7.5\n25 8.5\n35 1.25\n40 0", &[15]),
+            ("diameter", 35, "100 AcDbDiametricDimension\n15 7.5\n25 8.5\n35 1.25\n40 0", &[15]),
+            (
+                "angular",
+                34,
+                "100 AcDb2LineAngularDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25\n15 1.5\n25 1.5\n35 1.25\n16 4.5\n26 4.5\n36 1.25",
+                &[13, 14, 15, 16],
+            ),
+            ("ordinate", 38, "100 AcDbOrdinateDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 1.5\n34 1.25", &[13, 14]),
+        ];
+        for (name, ty, own, own_codes) in cases {
+            let source = dxf(&[&dimension(ty, plane, own)]);
+            let codes: Vec<i32> =
+                base.iter().copied().chain(own_codes.iter().flat_map(|c| [*c, c + 10, c + 20].into_iter().filter(|c| *c <= 50))).collect();
+            // A DWG's two-line angular dimension has a 2D fourth point.
+            assert_kept(&source, "DIMENSION", &codes, &[53, 50], &[36]);
+            let _ = name;
+        }
+    }
+}
+
+#[test]
+fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
+    let own = "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25";
+    let source = dxf(&[&dimension(33, PLANES[0], own)]);
+    let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let h = first_handle(&d);
+    d.modify_entity(h, |e| {
+        if let EntityKind::Dimension(dm) = &mut e.kind {
+            dm.text = "Over".into();
+        }
+    })
+    .unwrap();
+    let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
+    assert_eq!(bits(&got, 230), vec![(-1.0f64).to_bits()]);
+    assert!(got.iter().any(|t| t.code == 1 && t.str() == "Over"), "{got:?}");
+    d.modify_entity(h, |e| {
+        if let EntityKind::Dimension(dm) = &mut e.kind {
+            dm.p14.x += 1.0;
+        }
+    })
+    .unwrap();
+    let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
+    assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
+}
+
+/// A drawing saved as 2018 DXF: the version with a native MULTILEADER.
+fn save_2018(d: &Drawing) -> String {
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &opts).unwrap()).unwrap()
+}
+
+/// The (depth, code, bits) of the geometry groups of a MULTILEADER record: the content context (depth 1),
+/// a leader root (2) and a leader line (3).
+fn mleader_numbers(record: &[Tag]) -> Vec<(usize, i32, u64)> {
+    let mut depth = 0usize;
+    let mut out = Vec::new();
+    for t in record {
+        let value = t.str();
+        if matches!(t.code, 301 | 303 | 305) && value.trim() == "}" {
+            depth = depth.saturating_sub(1);
+        }
+        let geometry = match depth {
+            1 => matches!(t.code, 10..=16 | 20..=26 | 30..=36 | 42 | 43 | 46 | 47 | 110..=112 | 120..=122 | 130..=132),
+            2 => matches!(t.code, 10 | 11 | 20 | 21 | 30 | 31 | 40),
+            3 => matches!(t.code, 10 | 20 | 30),
+            _ => false,
+        };
+        if geometry && let Ok(v) = value.trim().parse::<f64>() {
+            out.push((depth, t.code, v.to_bits()));
+        }
+        if matches!(t.code, 300 | 302 | 304) && value.trim().ends_with('{') {
+            depth += 1;
+        }
+    }
+    out
+}
+
+/// A multileader the way CADCraft writes it, with the content plane and the landing's Z of the source changed.
+fn mleader_source(plane: (f64, f64, f64)) -> String {
+    use cadcraft_doc::{Common, MLeader, MText, Space};
+    use cadcraft_geom::Vec3;
+    let mut d = Drawing::new_imperial();
+    let text = MText {
+        insert: Vec3::new(8.0, 4.0, 0.0),
+        height: 0.18,
+        width: 3.0,
+        attach: 1,
+        rotation: 0.0,
+        style: "Standard".into(),
+        contents: "Note".into(),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+    };
+    let m = MLeader {
+        leaders: vec![vec![Vec3::new(0.0, 0.0, 0.5), Vec3::new(2.0, 1.0, 0.5)]],
+        landing: Vec3::new(5.0, 4.0, 0.5),
+        dogleg: 0.36,
+        text: Some(text),
+        style: "Standard".into(),
+        arrow_size: 0.18,
+        spline: false,
+        block: None,
+        arrow_block: String::new(),
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::MLeader(m)).unwrap();
+    let text = save_2018(&d);
+    // Change the content's plane (11, 21, 31 under the CONTEXT_DATA) and its axes (110-112).
+    let mut tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 0 && t.str() == "MULTILEADER").unwrap();
+    let context = tags.iter().skip(start).position(|t| t.code == 300).unwrap() + start;
+    let normal = tags.iter().skip(context).position(|t| t.code == 11).unwrap() + context;
+    for (k, v) in [plane.0, plane.1, plane.2].into_iter().enumerate() {
+        tags[normal + k] = Tag::f(11 + 10 * k as i32, v);
+    }
+    let axes = tags.iter().skip(context).position(|t| t.code == 111).unwrap() + context;
+    for (k, v) in [0.6, 0.8, 1e-9].into_iter().enumerate() {
+        tags[axes + k] = Tag::f(111 + 10 * k as i32, v);
+    }
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+#[test]
+fn a_multileader_keeps_its_context_planes_and_leader_geometry_through_every_save() {
+    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8), (1e-8, -2e-8, -0.9999999999999999)] {
+        let source = mleader_source(plane);
+        let want = mleader_numbers(&all_records(&source, "MULTILEADER")[0]);
+        assert!(want.len() > 20, "{want:?}");
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        let first = save_2018(&d);
+        let second = save_2018(&cadcraft_io::read_dxf(first.as_bytes()).unwrap());
+        let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+        let through = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+        let (dwg_first, dwg_second) =
+            (save_2018(&through), save_2018(&cadcraft_io::read(&cadcraft_io::write(&through, "x.dwg").unwrap(), "x.dwg").unwrap()));
+        for (what, text) in [("DXF", first), ("DXF, second save", second), ("DWG", dwg_first), ("DWG, second save", dwg_second)] {
+            assert_eq!(mleader_numbers(&all_records(&text, "MULTILEADER")[0]), want, "{what}: {plane:?}");
+        }
+    }
+}
+
+/// A table the way CADCraft writes it, with a plane, an insertion Z, a direction and odd sizes.
+fn table_source(plane: (f64, f64, f64)) -> String {
+    use cadcraft_doc::{Common, Space, Table, TableCell};
+    use cadcraft_geom::Vec3;
+    let mut d = Drawing::new_imperial();
+    let cell = |t: &str| TableCell { text: t.into(), ..Default::default() };
+    let t = Table {
+        insert: Vec3::new(1.0, 10.0, 0.0),
+        col_widths: vec![3.0, 2.0],
+        row_heights: vec![0.6, 0.4],
+        cells: vec![vec![cell("a"), cell("b")], vec![cell("c"), cell("d")]],
+        ..Table::default()
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+    let mut tags = cadcraft_dxf::parse(save_2018(&d).as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 0 && t.str() == "ACAD_TABLE").unwrap();
+    let ten = tags.iter().skip(start).position(|t| t.code == 10).unwrap() + start;
+    tags[ten + 2] = Tag::f(30, 2.5);
+    for (k, v) in [plane.0, plane.1, plane.2].into_iter().enumerate() {
+        tags.insert(ten + 3 + k, Tag::f(210 + 10 * k as i32, v));
+    }
+    let table = tags.iter().skip(ten).position(|t| t.code == 11).unwrap() + ten;
+    for (k, v) in [0.6, 0.8, 1e-9].into_iter().enumerate() {
+        tags[table + k] = Tag::f(11 + 10 * k as i32, v);
+    }
+    let rows = tags.iter().skip(ten).position(|t| t.code == 141).unwrap() + ten;
+    tags[rows] = Tag::f(141, 0.123456789012345);
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+#[test]
+fn a_table_keeps_its_plane_direction_and_sizes_through_every_save() {
+    for plane in [(0.0, 0.0, -1.0), (0.6, 0.0, 0.8)] {
+        let source = table_source(plane);
+        let want = all_records(&source, "ACAD_TABLE").remove(0);
+        let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        let first = save_2018(&d);
+        let second = save_2018(&cadcraft_io::read_dxf(first.as_bytes()).unwrap());
+        for (what, text) in [("DXF", first), ("DXF, second save", second)] {
+            let got = all_records(&text, "ACAD_TABLE").remove(0);
+            let codes = [10, 20, 30, 210, 220, 230, 11, 21, 31, 141, 142];
+            assert_eq!(numbers(&[got], &codes), numbers(std::slice::from_ref(&want), &codes), "{what}: {plane:?}");
+        }
+    }
+}
+
+#[test]
+fn multi_column_text_keeps_its_plane_and_column_groups_through_every_save() {
+    for plane in PLANES {
+        // Static columns: count, flow, width and gutter, and manual heights (50) after the rotation (50).
+        let mtext = format!(
+            "0 MTEXT\n5 220\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n41 30\n71 1\n72 1\n1 Two\\Pcolumns\n7 Standard\n{plane}\n\
+             11 0.6\n21 0.8\n31 0\n73 1\n44 1\n75 2\n76 2\n78 0\n79 0\n48 14.5\n49 1.0\n50 12.5\n50 12.5"
+        );
+        // A DWG writes the groups of a column text its own way: only the plane is compared there.
+        let dxf_only = [10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 44, 48, 49, 50, 75, 76, 78, 79];
+        assert_kept(
+            &dxf(&[&mtext]),
+            "MTEXT",
+            &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 210, 220, 230, 44, 75, 76, 78, 79, 48, 49, 50],
+            &[],
+            &dxf_only,
+        );
+    }
+}
+
+/// Group 48 of the AcDbMText subclass is the width of a column, not the linetype scale of the entity.
+#[test]
+fn the_column_width_of_a_text_is_not_its_linetype_scale() {
+    let mtext = "0 MTEXT\n5 221\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1\n20 2\n30 0\n40 2.5\n41 30\n71 1\n72 1\n1 Two\\Pcolumns\n7 Standard\n73 1\n44 1\n75 2\n76 2\n78 0\n79 0\n48 14.5\n49 1.0\n50 12.5\n50 12.5";
+    let d = cadcraft_io::read_dxf(dxf(&[mtext]).as_bytes()).unwrap();
+    assert_eq!(d.model.iter().next().unwrap().common.ltscale, 1.0);
+    assert!(!record(&cadcraft_io::write_dxf(&d), "MTEXT").iter().take_while(|t| t.code != 100 || t.str() == "AcDbEntity").any(|t| t.code == 48));
+    let line = "0 LINE\n5 222\n100 AcDbEntity\n8 0\n48 0.5\n100 AcDbLine\n10 0\n20 0\n30 0\n11 1\n21 0\n31 0";
+    let d = cadcraft_io::read_dxf(dxf(&[line]).as_bytes()).unwrap();
+    assert_eq!(d.model.iter().next().unwrap().common.ltscale, 0.5, "the linetype scale of the entity subclass still reads");
 }

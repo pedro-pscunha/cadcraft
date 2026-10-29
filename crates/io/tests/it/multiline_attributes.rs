@@ -335,3 +335,42 @@ fn damaged_embedded_text_does_not_panic() {
         let _ = read_dxf(save(&d).as_bytes()).unwrap();
     }
 }
+
+/// The numbers of the embedded MTEXT (after the `101` group) of the first ATTRIB of a DXF text, as (code, bits).
+fn embedded_numbers(text: &str) -> Vec<(i32, u64)> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let entities = cadcraft_dxf::sections(&tags).into_iter().find(|s| s.name == "ENTITIES").unwrap();
+    let (_, attrib) = cadcraft_dxf::records(&entities.tags).into_iter().find(|(k, _)| k == "ATTRIB").unwrap();
+    let at = attrib.iter().position(|t| t.code == 101).expect("an embedded object");
+    attrib
+        .iter()
+        .skip(at + 1)
+        .take_while(|t| t.code < 1000)
+        .filter(|t| matches!(t.code, 10 | 20 | 30 | 40 | 41 | 46 | 71 | 72 | 11 | 21 | 31 | 50 | 73 | 44 | 210 | 220 | 230))
+        .map(|t| (t.code, t.str().trim().parse::<f64>().unwrap().to_bits()))
+        .collect()
+}
+
+/// The embedded MTEXT of an attribute has a plane of its own, kept as it was read while its placement is.
+#[test]
+fn an_embedded_mtext_keeps_its_plane_and_placement() {
+    let source =
+        dxf(&FIXTURE.replace("NORTH\\PWELL 7\n7 Standard\n73 1\n44 1\n", "NORTH\\PWELL 7\n7 Standard\n210 0.6\n220 0\n230 0.8\n73 1\n44 1\n"));
+    assert!(source.contains("210\n0.6\n"), "the fixture gets the plane");
+    let want = embedded_numbers(&source);
+    assert!(want.iter().any(|(c, _)| *c == 230), "{want:?}");
+    let d = read_dxf(source.as_bytes()).unwrap();
+    assert_eq!(embedded_numbers(&save(&d)), want);
+    assert_eq!(embedded_numbers(&save(&read_dxf(save(&d).as_bytes()).unwrap())), want, "second save");
+    // A text edit keeps the plane and writes the new text.
+    let mut edited = d.clone();
+    let h = edited.model.iter().next().unwrap().handle;
+    edited
+        .modify_entity(h, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.attribs[0].text.value = "EAST".into();
+            }
+        })
+        .unwrap();
+    assert_eq!(embedded_numbers(&save(&edited)).iter().filter(|(c, _)| *c == 230).count(), 1);
+}

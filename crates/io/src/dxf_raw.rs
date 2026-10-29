@@ -1428,7 +1428,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     let map = Map { f, alive, objects: objs, owners, roles, entities, geometry };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
-    for r in &recs {
+    // The heavy polyline whose VERTEX records are being written, and how many it has had.
+    let mut family: Option<(&cadcraft_doc::GeometrySnapshot, usize)> = None;
+    for (n, r) in recs.iter().enumerate() {
         let b = body(r);
         let added = write_table_records(&map, r, b, &mut table, &unnamed, &mut out);
         if r.kind == "ENDSEC" && r.sec == "CLASSES" {
@@ -1456,7 +1458,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
             let ur = Rec { sec: sec.clone(), kind: zero.str(), start: 0, end: 0 };
             let x = head(ub).handle.and_then(|h| handle(&h)).and_then(|h| entity_extra(f, &xd, h));
             out.push(zero.clone());
-            record(&map, &ur, ub, x.as_deref(), true, false, &mut out);
+            record(&map, &ur, ub, x.as_deref(), None, true, false, &mut out);
         }
         if r.sec == "OBJECTS"
             && is_dictionary(&r.kind)
@@ -1468,11 +1470,11 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         let start = out.len();
         out.extend(tags.get(r.start).cloned());
         let x = extras.of(r, b);
-        let replayed = handle_of_record(b).is_some_and(|h| map.geometry.contains_key(&h));
-        if x.is_none() && Some(r.start) != root && !replayed {
+        let geometry = record_geometry(&map, &recs, n, b, &mut family);
+        if x.is_none() && Some(r.start) != root && geometry.is_none() {
             out.extend(b.iter().cloned());
         } else {
-            record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
+            record(&map, r, b, x.as_deref(), geometry, false, Some(r.start) == root, &mut out);
         }
         if added > 0
             && let Some(count) = out.get_mut(start..).and_then(|t| t.iter_mut().find(|t| t.code == 70))
@@ -1553,9 +1555,42 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
     out
 }
 
+/// The source geometry of record `n` of `recs` (its groups `b`): its own snapshot, or the next VERTEX
+/// record of a polyline that has one (`family`: that snapshot and the VERTEX records handed out).
+fn record_geometry<'a>(
+    map: &'a Map,
+    recs: &[Rec],
+    n: usize,
+    b: &[Tag],
+    family: &mut Option<(&'a cadcraft_doc::GeometrySnapshot, usize)>,
+) -> Option<&'a cadcraft_doc::GeometryRecord> {
+    let kind = recs.get(n)?.kind.as_str();
+    if kind == "VERTEX" {
+        return family.as_mut().and_then(|(g, i)| {
+            *i += 1;
+            g.records.get(*i)
+        });
+    }
+    let written = recs.iter().skip(n + 1).take_while(|v| v.kind == "VERTEX").count();
+    // A polyline replays its VERTEX records only if they are as many as the source's.
+    let g = handle_of_record(b).and_then(|h| map.geometry.get(&h)).filter(|g| g.records.len() == 1 || g.records.len() == written + 1);
+    *family = if kind == "POLYLINE" { g.map(|g| (g.as_ref(), 0)) } else { None };
+    g.and_then(|g| g.records.first())
+}
+
 /// A written record with its kept extras, remapped references (unknown entities) and kept
 /// dictionary entries (the named object dictionary).
-fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool, root: bool, out: &mut Vec<Tag>) {
+#[allow(clippy::too_many_arguments)]
+fn record(
+    map: &Map,
+    r: &Rec,
+    b: &[Tag],
+    x: Option<&ForeignExtra>,
+    geometry: Option<&cadcraft_doc::GeometryRecord>,
+    unknown: bool,
+    root: bool,
+    out: &mut Vec<Tag>,
+) {
     let patched;
     let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
         Some(x) => {
@@ -1566,14 +1601,11 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     };
     // The source geometry of an entity whose geometry is as it was read.
     let replayed;
-    let b = match handle_of_record(b).and_then(|h| map.geometry.get(&h)) {
-        Some(g) => match g.records.first().and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, |t| map.group(t))) {
-            Some(tags) => {
-                replayed = tags;
-                replayed.as_slice()
-            }
-            None => b,
-        },
+    let b = match geometry.and_then(|g| crate::dxf_geometry::restore(&r.kind, b, &g.groups, |t| map.group(t))) {
+        Some(tags) => {
+            replayed = tags;
+            replayed.as_slice()
+        }
         None => b,
     };
     let h = head(b);

@@ -58,7 +58,10 @@ pub(super) fn common(t: &T) -> Common {
     if let Some(lw) = t.i(370) {
         c.lineweight = Lineweight::from_dxf(lw as i16);
     }
-    if let Some(s) = t.f(48) {
+    // The linetype scale is a group of the AcDbEntity subclass: 48 is a column width in an MTEXT.
+    let entity_end = t.0.iter().enumerate().filter(|(_, g)| g.code == 100).map(|(i, _)| i).nth(1);
+    let entity = T(entity_end.map_or(t.0, |end| t.0.get(..end).unwrap_or(t.0)));
+    if let Some(s) = entity.f(48) {
         c.ltscale = if s > 0.0 { s } else { 1.0 };
     }
     if t.i(60) == Some(1) {
