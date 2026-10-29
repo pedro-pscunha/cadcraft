@@ -1011,6 +1011,15 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             w.i(280, i64::from(explodable));
             w.i(281, i64::from(scale_uniformly));
         }
+        // Before 2007 the units are ACAD xdata, and only a block that has some has it.
+        if let Some(b) = blk.filter(|b| version < Version::R2007 && !dwg_bridge && b.units != 0) {
+            w.s(1001, "ACAD");
+            w.s(1000, "DesignCenter Data");
+            w.s(1002, "{");
+            w.i(1070, 1);
+            w.i(1070, i64::from(b.units));
+            w.s(1002, "}");
+        }
         if let Some(a) = blk.and_then(|b| b.array.as_ref()) {
             w.s(1001, dxf_ext::APP);
             w.xdata(dxf_ext::array_xdata(a));

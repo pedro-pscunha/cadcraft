@@ -391,6 +391,7 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
             .flatten();
         let own = OWN_APPS.contains(&app.as_str())
             || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"))
+            || (kind == "BLOCK_RECORD" && crate::dxf_ext::design_center_units(chunk).is_some())
             || (app == "ACADANNOTATIVE" && matches!(kind, "STYLE" | "DIMSTYLE") && annotative_on(chunk))
             || (kind == "LAYER" && layer_xdata_modelled(&app, chunk))
             || columns.is_some_and(|(b, e)| b == 1 && e + 1 == chunk.len());

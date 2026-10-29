@@ -324,3 +324,39 @@ fn a_visual_style_is_written_in_the_form_of_the_release() {
         assert!(!old.iter().any(|t| t.code == 177), "{version:?}: and has no lighting model");
     }
 }
+
+/// Before 2007 a block's insertion units are not group 70 but the ACAD xdata `DesignCenter Data { 1, units }` of its
+/// block record, which AutoCAD writes for a block that has units. A save writes it once, and a file with it opens
+/// with the units, also when it is saved again.
+#[test]
+fn block_units_before_2007_are_design_center_xdata() {
+    let mut d = Drawing::new_metric();
+    for (name, units) in [("Door", 4), ("Plain", 0)] {
+        let mut b = cadcraft_doc::Block::new(name);
+        b.units = units;
+        d.blocks.insert(name.into(), std::sync::Arc::new(b));
+    }
+    let xdata_of = |text: &str, name: &str| -> Vec<(i32, String)> {
+        let tables = sections(&cadcraft_dxf::parse(text.as_bytes()).unwrap()).into_iter().find(|s| s.name == "TABLES").unwrap();
+        let record =
+            records(&tables.tags).into_iter().find(|(k, t)| k == "BLOCK_RECORD" && t.iter().any(|t| t.code == 2 && t.str() == name)).unwrap().1;
+        let at = record.iter().position(|t| t.code == 1001).unwrap_or(record.len());
+        record[at..].iter().map(|t| (t.code, t.str())).collect()
+    };
+    let expected: Vec<(i32, String)> = [(1001, "ACAD"), (1000, "DesignCenter Data"), (1002, "{"), (1070, "1"), (1070, "4"), (1002, "}")]
+        .iter()
+        .map(|(c, v)| (*c, v.to_string()))
+        .collect();
+    for version in [Version::R2000, Version::R2004] {
+        let text = save(&d, version);
+        assert_eq!(xdata_of(&text, "Door"), expected, "{version:?}");
+        assert!(xdata_of(&text, "Plain").is_empty(), "{version:?}: no units, no xdata");
+        let back = read_dxf(text.as_bytes()).unwrap();
+        assert_eq!(back.block("Door").map(|b| b.units), Some(4), "{version:?}: read back");
+        // Saved again, as the same version or a later one, the units are written once.
+        assert_eq!(xdata_of(&save(&back, version), "Door"), expected, "{version:?}: second save");
+        let later = save(&back, Version::R2018);
+        assert!(xdata_of(&later, "Door").is_empty(), "{version:?}: 2018 has group 70 instead");
+        assert_eq!(read_dxf(later.as_bytes()).unwrap().block("Door").map(|b| b.units), Some(4));
+    }
+}
