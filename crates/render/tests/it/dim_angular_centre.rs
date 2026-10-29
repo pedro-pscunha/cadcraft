@@ -53,7 +53,7 @@ fn angular_extension_lines_follow_their_legs_when_the_arc_is_swapped() {
     assert_eq!(ext_lines(&a, &DimStyle { suppress_ext1: true, ..DimStyle::default() }), lines);
     assert!(ext_lines(&a, &DimStyle { suppress_ext2: true, ..DimStyle::default() }).is_empty());
     // DIMBLK1 sits on leg 1's end of the arc.
-    let dot1 = DimStyle { arrow_block1: "_DOT".into(), arrow_block2: "_NONE".into(), ..DimStyle::default() };
+    let dot1 = DimStyle { separate_arrows: true, arrow_block1: "_DOT".into(), arrow_block2: "_NONE".into(), ..DimStyle::default() };
     let g = dimension_geometry(&a, &dot1, 1.0);
     assert!(!g.fills.is_empty() && g.fills.iter().flatten().all(|p| p.dist(Vec2::new(r, 0.0)) < st.arrow_size), "{:?}", g.fills.first());
 }

@@ -236,8 +236,8 @@ impl<'a> DimConfig<'a> {
         let arrow_size = style.arrow_size * scale;
         let text_height = if font.fixed_height > 0.0 { font.fixed_height } else { style.text_height * scale };
         let tick_size = style.tick_size * scale;
-        let first_arrow = if style.arrow_block1.is_empty() { &style.arrow_block } else { &style.arrow_block1 };
-        let second_arrow = if style.arrow_block2.is_empty() { &style.arrow_block } else { &style.arrow_block2 };
+        let first_arrow = if style.separate_arrows { &style.arrow_block1 } else { &style.arrow_block };
+        let second_arrow = if style.separate_arrows { &style.arrow_block2 } else { &style.arrow_block };
         Self {
             dimension,
             style,
