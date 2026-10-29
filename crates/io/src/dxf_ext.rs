@@ -940,27 +940,6 @@ pub(crate) fn parse_constraints(text: &str) -> Option<(Vec<Constraint>, Parametr
     Some((p.constraints, p.parametric))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_dimvar_has_a_code() {
-        for (_, field) in cadcraft_doc::DIMVARS {
-            assert!(dim_code(field).is_some(), "{field} has no DXF group code");
-        }
-    }
-
-    #[test]
-    fn arrow_names() {
-        assert_eq!(arrow_block_name("_DOT").map(|x| x.0).as_deref(), Some("_DOT"));
-        assert_eq!(arrow_block_name("Architectural tick").map(|x| x.0).as_deref(), Some("_ArchTick"));
-        assert!(arrow_block_name("").is_none());
-        assert!(arrow_block_name("nonsense").is_none());
-        assert!(is_standard_arrow("_dot"));
-    }
-}
-
 /// The insertion units AutoCAD 2000 and 2004 keep in a block record: its ACAD application xdata
 /// `DesignCenter Data { 1, units }`, in place of group 70 (AutoCAD 2007's). `chunk` is the whole xdata of one
 /// application, from its `1001`; it counts only when it holds nothing else.
@@ -980,4 +959,25 @@ pub(crate) fn design_center_units(chunk: &[Tag]) -> Option<u8> {
 pub(crate) fn block_record_units(tags: &[Tag]) -> Option<u8> {
     let starts: Vec<usize> = tags.iter().enumerate().filter(|(_, t)| t.code == 1001).map(|(i, _)| i).collect();
     starts.iter().enumerate().find_map(|(n, &s)| design_center_units(tags.get(s..starts.get(n + 1).copied().unwrap_or(tags.len()))?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_dimvar_has_a_code() {
+        for (_, field) in cadcraft_doc::DIMVARS {
+            assert!(dim_code(field).is_some(), "{field} has no DXF group code");
+        }
+    }
+
+    #[test]
+    fn arrow_names() {
+        assert_eq!(arrow_block_name("_DOT").map(|x| x.0).as_deref(), Some("_DOT"));
+        assert_eq!(arrow_block_name("Architectural tick").map(|x| x.0).as_deref(), Some("_ArchTick"));
+        assert!(arrow_block_name("").is_none());
+        assert!(arrow_block_name("nonsense").is_none());
+        assert!(is_standard_arrow("_dot"));
+    }
 }
