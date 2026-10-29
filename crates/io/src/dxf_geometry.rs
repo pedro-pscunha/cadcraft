@@ -31,7 +31,8 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         "TEXT" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbText", &[73])],
         "ATTRIB" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbAttribute", &[74])],
         "ATTDEF" => &[("AcDbText", &[39, 10, 20, 30, 40, 50, 41, 51, 72, 11, 21, 31, 210, 220, 230]), ("AcDbAttributeDefinition", &[74])],
-        "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230])],
+        // Including the columns (75, 76, 78, 79, 48, 49 and the heights in 50).
+        "MTEXT" => &[("AcDbMText", &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230, 75, 76, 78, 79, 48, 49])],
         "INSERT" => &[("AcDbBlockReference", &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230])],
         // The whole curve: flags, degree, counts, tolerances, tangents, knots, weights, controls, fits and the plane.
         "SPLINE" => &[("AcDbSpline", &[210, 220, 230, 70, 71, 72, 73, 74, 42, 43, 44, 12, 22, 32, 13, 23, 33, 40, 41, 10, 20, 30, 11, 21, 31])],
@@ -86,6 +87,17 @@ fn subclass(tags: &[Tag], marker: &str, n: usize) -> Option<std::ops::Range<usiz
     Some(at + 1..stop)
 }
 
+/// The groups of the embedded object of a multiline attribute (`101 Embedded Object` up to the xdata): its MTEXT.
+const EMBEDDED: &[i32] = &[10, 20, 30, 40, 41, 46, 71, 72, 11, 21, 31, 50, 73, 44, 210, 220, 230];
+
+/// The range of the groups of the embedded object of `tags`.
+fn embedded(tags: &[Tag]) -> Option<std::ops::Range<usize>> {
+    let end = tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len());
+    let at = tags.iter().take(end).position(|t| t.code == 101)?;
+    let stop = tags.iter().take(end).enumerate().skip(at + 1).find(|(_, t)| t.code == 100).map_or(end, |(i, _)| i);
+    Some(at + 1..stop)
+}
+
 /// The place of the subclass of `spec` entry `i` among the entries with its marker.
 fn occurrence(spec: Spec, i: usize) -> usize {
     spec.iter().take(i).filter(|(m, _)| *m == spec[i].0).count()
@@ -108,6 +120,15 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
         out.push(RawTag { code: 100, value: (*marker).to_string() });
         out.extend(tags.get(range).unwrap_or_default().iter().filter(|t| codes.contains(&t.code)).map(|t| RawTag { code: t.code, value: t.str() }));
     }
+    // A multiline attribute's embedded MTEXT, after a `101` group.
+    if matches!(kind, "ATTRIB" | "ATTDEF")
+        && let Some(range) = embedded(tags)
+    {
+        out.push(RawTag { code: 101, value: "Embedded Object".into() });
+        out.extend(
+            tags.get(range).unwrap_or_default().iter().filter(|t| EMBEDDED.contains(&t.code)).map(|t| RawTag { code: t.code, value: t.str() }),
+        );
+    }
     Some(out)
 }
 
@@ -122,6 +143,11 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
     }
 
     let spec = spec(kind, generated)?;
+    // The embedded MTEXT of a multiline attribute follows its `101` group in the kept groups.
+    let (kept, embedded_kept) = match kept.iter().position(|t| t.code == 101) {
+        Some(at) => (kept.get(..at)?, kept.get(at + 1..)),
+        None => (kept, None),
+    };
     let mut parts = kept.split(|t| t.code == 100).skip(1);
     // For each entry: the subclass's range, where its replacement goes (the first geometry group
     // the writer made, else the end of the subclass), its geometry codes and the kept groups.
@@ -143,6 +169,25 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], convert: i
     }
     for (.., groups) in edits.iter().filter(|e| e.1 >= generated.len()) {
         out.extend(groups.iter().map(&convert));
+    }
+    // The embedded MTEXT, when the writer made one too.
+    if let Some(groups) = embedded_kept
+        && let Some(range) = embedded(&out)
+    {
+        let at = out.get(range.clone())?.iter().position(|t| EMBEDDED.contains(&t.code)).map_or(range.end, |p| range.start + p);
+        let mut next = Vec::with_capacity(out.len() + groups.len());
+        for (i, t) in out.iter().enumerate() {
+            if i == at {
+                next.extend(groups.iter().map(&convert));
+            }
+            if !(range.contains(&i) && EMBEDDED.contains(&t.code)) {
+                next.push(t.clone());
+            }
+        }
+        if at >= out.len() {
+            next.extend(groups.iter().map(&convert));
+        }
+        out = next;
     }
     Some(out)
 }

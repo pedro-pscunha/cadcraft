@@ -32,6 +32,13 @@ pub struct GeometrySnapshot {
     pub model: String,
 }
 
+/// The placement of a multiline attribute's embedded MTEXT.
+fn embedded_geometry(s: &mut String, a: &Attrib) {
+    if let Some(m) = a.multiline.as_ref().map(|m| &m.mtext) {
+        let _ = write!(s, "{:?}", (m.insert, m.height, m.width, m.attach, m.rotation, m.line_spacing, m.line_spacing_exact));
+    }
+}
+
 fn text_geometry(s: &mut String, t: &Text) {
     let _ = write!(s, "{:?}", (t.insert, t.align_pt, t.height, t.rotation, t.width_factor, t.oblique, t.halign, t.valign));
 }
@@ -67,11 +74,15 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::AttDef(a) => {
             s.push_str("ATTDEF");
             text_geometry(&mut s, &a.text);
+            embedded_geometry(&mut s, a);
             let _ = write!(s, "{plane:?}");
         }
-        // A multi-column MTEXT keeps no snapshot.
-        EntityKind::MText(t) if t.columns.is_none() => {
-            let _ = write!(s, "MTEXT{:?}{plane:?}", (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact));
+        EntityKind::MText(t) => {
+            let _ = write!(
+                s,
+                "MTEXT{:?}{plane:?}",
+                (t.insert, t.height, t.width, t.attach, t.rotation, t.line_spacing, t.line_spacing_exact, &t.columns)
+            );
         }
         EntityKind::Insert(i) => {
             let _ = write!(s, "INSERT{:?}{plane:?}", (i.insert, i.scale, i.rotation, i.cols, i.rows, i.col_spacing, i.row_spacing));
@@ -157,5 +168,6 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
 pub fn attrib_geometry_key(a: &Attrib) -> String {
     let mut s = String::from("ATTRIB");
     text_geometry(&mut s, &a.text);
+    embedded_geometry(&mut s, a);
     s
 }

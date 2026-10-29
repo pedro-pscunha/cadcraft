@@ -623,3 +623,35 @@ fn a_table_keeps_its_plane_direction_and_sizes_through_every_save() {
         }
     }
 }
+
+#[test]
+fn multi_column_text_keeps_its_plane_and_column_groups_through_every_save() {
+    for plane in PLANES {
+        // Static columns: count, flow, width and gutter, and manual heights (50) after the rotation (50).
+        let mtext = format!(
+            "0 MTEXT\n5 220\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1.25\n20 2.5\n30 3.75\n40 2.5\n41 30\n71 1\n72 1\n1 Two\\Pcolumns\n7 Standard\n{plane}\n\
+             11 0.6\n21 0.8\n31 0\n73 1\n44 1\n75 2\n76 2\n78 0\n79 0\n48 14.5\n49 1.0\n50 12.5\n50 12.5"
+        );
+        // A DWG writes the groups of a column text its own way: only the plane is compared there.
+        let dxf_only = [10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 44, 48, 49, 50, 75, 76, 78, 79];
+        assert_kept(
+            &dxf(&[&mtext]),
+            "MTEXT",
+            &[10, 20, 30, 40, 41, 71, 72, 11, 21, 31, 210, 220, 230, 44, 75, 76, 78, 79, 48, 49, 50],
+            &[],
+            &dxf_only,
+        );
+    }
+}
+
+/// Group 48 of the AcDbMText subclass is the width of a column, not the linetype scale of the entity.
+#[test]
+fn the_column_width_of_a_text_is_not_its_linetype_scale() {
+    let mtext = "0 MTEXT\n5 221\n100 AcDbEntity\n8 0\n100 AcDbMText\n10 1\n20 2\n30 0\n40 2.5\n41 30\n71 1\n72 1\n1 Two\\Pcolumns\n7 Standard\n73 1\n44 1\n75 2\n76 2\n78 0\n79 0\n48 14.5\n49 1.0\n50 12.5\n50 12.5";
+    let d = cadcraft_io::read_dxf(dxf(&[mtext]).as_bytes()).unwrap();
+    assert_eq!(d.model.iter().next().unwrap().common.ltscale, 1.0);
+    assert!(!record(&cadcraft_io::write_dxf(&d), "MTEXT").iter().take_while(|t| t.code != 100 || t.str() == "AcDbEntity").any(|t| t.code == 48));
+    let line = "0 LINE\n5 222\n100 AcDbEntity\n8 0\n48 0.5\n100 AcDbLine\n10 0\n20 0\n30 0\n11 1\n21 0\n31 0";
+    let d = cadcraft_io::read_dxf(dxf(&[line]).as_bytes()).unwrap();
+    assert_eq!(d.model.iter().next().unwrap().common.ltscale, 0.5, "the linetype scale of the entity subclass still reads");
+}
