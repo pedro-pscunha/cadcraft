@@ -282,3 +282,45 @@ fn a_block_keeps_its_preview_until_it_is_edited() {
     edited.blocks.insert("Door".into(), std::sync::Arc::new(b));
     assert!(!has_310(&save(&edited, Version::R2018)), "an edited block has no old preview");
 }
+
+/// A VISUALSTYLE of AutoCAD 2010 (the style "2dWireframe" as its DXFOUT writes it): the form depends on the
+/// release (below 2010, 2010 to 2012, 2013 and later), and AutoCAD LT 2025 ends a short form early in a 2013 or
+/// later file. A save writes the record as it was while the release has the same form, and in the form of the
+/// release otherwise.
+#[test]
+fn a_visual_style_is_written_in_the_form_of_the_release() {
+    let style = "0 VISUALSTYLE\n5 42\n330 41\n100 AcDbVisualStyle\n2 2dWireframe\n70 4\n177 2\n291 0\n71 0\n176 1\n72 2\n176 1\n73 0\n176 1\n90 0\n176 1\n\
+        40 0.6\n176 1\n41 30.0\n176 1\n63 7\n421 16777215\n176 1\n74 1\n176 1\n91 4\n176 1\n64 7\n176 1\n65 257\n176 1\n75 1\n176 1\n175 1\n176 1\n\
+        42 1.0\n176 1\n92 0\n176 1\n66 257\n176 1\n43 1.0\n176 1\n76 1\n176 1\n77 6\n176 1\n78 2\n176 1\n67 7\n176 1\n79 5\n176 1\n\
+        170 0\n176 1\n171 0\n176 1\n290 0\n176 1\n93 1\n176 1\n44 0.0\n176 1\n173 0\n176 1";
+    let source = [
+        "0 SECTION\n2 HEADER\n9 $ACADVER\n1 AC1024\n0 ENDSEC",
+        "0 SECTION\n2 OBJECTS",
+        "0 DICTIONARY\n5 C\n330 0\n100 AcDbDictionary\n281 1\n3 ACAD_VISUALSTYLE\n350 41",
+        "0 DICTIONARY\n5 41\n330 C\n100 AcDbDictionary\n281 1\n3 2dWireframe\n350 42",
+        style,
+        "0 ENDSEC\n0 EOF\n",
+    ]
+    .iter()
+    .flat_map(|l| l.lines())
+    .map(|l| l.split_once(' ').map_or(format!("{l}\n"), |(c, v)| format!("{c}\n{v}\n")))
+    .collect::<String>();
+    let d = read_dxf(source.as_bytes()).unwrap();
+    let style_of =
+        |version: Version| section(&save(&d, version), "OBJECTS").into_iter().find(|(k, _)| k == "VISUALSTYLE").expect("the style is kept").1;
+    let short = style_of(Version::R2010);
+    assert!(short.iter().any(|t| t.code == 71) && short.iter().any(|t| t.code == 421), "unchanged for 2010: {short:?}");
+    let count = |t: &[Tag], code: i32| t.iter().filter(|t| t.code == code).count();
+    assert_eq!(count(&short, 176), 28);
+    for version in [Version::R2013, Version::R2018] {
+        let long = style_of(version);
+        assert!(!long.iter().any(|t| t.code == 71), "{version:?}: no short form property codes");
+        assert!(long.len() > short.len() * 3 / 2, "{version:?}: {} groups against {}", long.len(), short.len());
+        assert_eq!(long.iter().find(|t| t.code == 2).map(|t| t.str()).as_deref(), Some("2dWireframe"));
+    }
+    for version in [Version::R2000, Version::R2004] {
+        let old = style_of(version);
+        assert!(old.iter().any(|t| t.code == 71), "{version:?}: the older form keeps its property codes");
+        assert!(!old.iter().any(|t| t.code == 177), "{version:?}: and has no lighting model");
+    }
+}

@@ -450,6 +450,27 @@ mod native {
         }
     }
 
+    /// The release of a `$ACADVER` code ("AC1027").
+    fn release(code: &str) -> Option<acadrust::DxfVersion> {
+        Some(match code.trim().to_ascii_uppercase().as_str() {
+            "AC1015" => acadrust::DxfVersion::AC1015,
+            "AC1018" => acadrust::DxfVersion::AC1018,
+            "AC1021" => acadrust::DxfVersion::AC1021,
+            "AC1024" => acadrust::DxfVersion::AC1024,
+            "AC1027" => acadrust::DxfVersion::AC1027,
+            "AC1032" => acadrust::DxfVersion::AC1032,
+            _ => return None,
+        })
+    }
+
+    /// One DXF record (`tags`: every group, `0 <kind>` first, binary groups as hex text) written for the release
+    /// `from` ("AC1024") in the form of the release `to`. Only the kinds whose form depends on the release read
+    /// back: visual styles, assoc 2D constraint groups, and the records with embedded DWG entities. `None` for
+    /// another kind, an unknown release, or a record that does not read.
+    pub fn reform_object(kind: &str, tags: &[(i32, String)], from: &str, to: &str) -> Option<Vec<(i32, String)>> {
+        acadrust::reform_object(kind, tags, release(from)?, release(to)?)
+    }
+
     /// Oldest DWG version written; older DXF input is written as this version.
     const MIN_DWG_VERSION: acadrust::DxfVersion = acadrust::DxfVersion::AC1018;
 
@@ -632,7 +653,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_as_noted};
+pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_as_noted, reform_object};
 
 /// The error for a DWG version CADCraft can't write.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -641,6 +662,10 @@ fn unsupported(version: &str) -> String {
     format!("DWG version `{version}` can't be written (CADCraft writes {})", list.join(", "))
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn reform_object(_kind: &str, _tags: &[(i32, String)], _from: &str, _to: &str) -> Option<Vec<(i32, String)>> {
+    None
+}
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf(_bytes: &[u8]) -> Result<Vec<u8>, String> {
     Err("DWG files can't be opened in the web build yet; save as DXF".into())
