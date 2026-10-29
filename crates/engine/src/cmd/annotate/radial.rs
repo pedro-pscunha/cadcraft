@@ -7,6 +7,7 @@ fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
         (c, pt, None)
     } else {
         let h = targets(s, p)?.first().copied().ok_or_else(|| bad(id, "`handle` of a circle/arc, or {center, point}"))?;
+        super::common::require_legacy_source(s, h)?;
         let (c, r) = circle_of(s, h).ok_or_else(|| bad(id, "object is not a circle or arc"))?;
         let at = point_param(p, "at");
         let dir = at.unwrap_or(c + Vec2::from_angle(std::f64::consts::FRAC_PI_4));
@@ -75,7 +76,11 @@ impl Interactive for RadialM {
         }
         match (self.target, i) {
             (None, Input::Point(p)) => {
-                match pick_at(s, p).and_then(|h| circle_of(s, h)) {
+                let handle = pick_at(s, p);
+                if let Some(handle) = handle {
+                    super::common::require_legacy_source(s, handle)?;
+                }
+                match handle.and_then(|h| circle_of(s, h)) {
                     Some(t) => self.target = Some(t),
                     None => s.echo("Object selected is not a circle or arc."),
                 }

@@ -6,7 +6,10 @@ use super::{
 
 pub(super) fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
     let (a, b) = match p.get("object").and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))) {
-        Some(h) => object_extent(s, h).ok_or_else(|| bad("dimlinear", "`object` must be a line, arc, circle or polyline segment"))?,
+        Some(h) => {
+            super::common::require_legacy_source(s, h)?;
+            object_extent(s, h).ok_or_else(|| bad("dimlinear", "`object` must be a line, arc, circle or polyline segment"))?
+        }
         None => (point_req("dimlinear", p, "p1")?, point_req("dimlinear", p, "p2")?),
     };
     let at = point_req("dimlinear", p, "at")?;
@@ -186,6 +189,7 @@ impl Interactive for LinearM {
                     s.echo("*Invalid selection*");
                     return Ok(Step::Continue);
                 };
+                super::common::require_legacy_source(s, h)?;
                 let seg =
                     s.doc()?.entity(h).and_then(|e| e.kind.prims().into_iter().find_map(|pr| if let Prim::Seg(sg) = pr { Some(sg) } else { None }));
                 match seg {

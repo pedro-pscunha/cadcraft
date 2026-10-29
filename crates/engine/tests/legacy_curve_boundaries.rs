@@ -156,6 +156,34 @@ fn region_booleans_check_every_source_before_combining_or_consuming_it() {
 }
 
 #[test]
+fn radial_and_arc_dimensions_check_the_source_plane_revision() {
+    for command in ["dimradius", "dimdiameter", "dimarc"] {
+        let mut session = Session::new();
+        let source = if command == "dimarc" {
+            create(&mut session, "arc", json!({"center": [0, 0], "radius": 5, "start": 0, "end": 90}))
+        } else {
+            create(&mut session, "circle", json!({"center": [0, 0], "radius": 5}))
+        };
+        check_refusals(session.doc().unwrap(), command, json!({"handle": source.hex(), "at": [8, 8]}), &[source]);
+    }
+}
+
+#[test]
+fn angular_dimensions_check_both_line_sources() {
+    let mut session = Session::new();
+    let a = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    let b = create(&mut session, "line", json!({"points": [[0, 0], [0, 10]]}));
+    check_refusals(session.doc().unwrap(), "dimangular", json!({"lines": [a.hex(), b.hex()], "at": [3, 3]}), &[a, b]);
+}
+
+#[test]
+fn linear_dimensions_check_an_object_source_before_projecting_it() {
+    let mut session = Session::new();
+    let source = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    check_refusals(session.doc().unwrap(), "dimlinear", json!({"object": source.hex(), "at": [0, 5]}), &[source]);
+}
+
+#[test]
 fn typed_curve_tools_refuse_canonical_inputs_without_a_geometry_change() {
     let cases = [
         ("pline", json!({"points": [[0, 0], [10, 0], [10, 10]]}), "PEDIT 5,0 R\n\n"),

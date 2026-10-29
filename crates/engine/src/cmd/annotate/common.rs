@@ -67,6 +67,13 @@ pub(super) fn with_assoc(k: EntityKind, assoc: Vec<DimAssoc>) -> EntityKind {
     }
 }
 
+pub(super) fn require_legacy_source(s: &Session, handle: Handle) -> Result<()> {
+    if let Some(entity) = s.doc()?.entity(handle) {
+        entity.require_legacy_geometry()?;
+    }
+    Ok(())
+}
+
 /// Centre and radius of a circle/arc entity.
 pub(super) fn circle_of(s: &Session, h: Handle) -> Option<(Vec2, f64)> {
     match &s.doc().ok()?.entity(h)?.kind {
