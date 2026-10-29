@@ -999,6 +999,11 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         w.s(100, "AcDbBlockTableRecord");
         w.s(2, name);
         w.s(340, layout.unwrap_or("0"));
+        if let Some(p) = blk.and_then(|b| b.preview.as_ref().filter(|p| p.key == b.content_key())) {
+            for group in &p.groups {
+                w.s(310, group);
+            }
+        }
         // Insertion units (70), explodability (280) and scalability (281) are AutoCAD 2007's, on every record.
         if version >= Version::R2007 || dwg_bridge {
             let (units, explodable, scale_uniformly) = blk.map_or((0, true, false), |b| (b.units, b.explodable, b.scale_uniformly));

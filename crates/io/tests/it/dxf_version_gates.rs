@@ -245,3 +245,40 @@ fn a_block_record_has_units_explodability_and_scalability_from_2007() {
     let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
     assert_eq!(door(&cadcraft_io::read(&dwg, "x.dwg").unwrap()), Some((4, false, true)), "the DWG bridge");
 }
+
+/// AutoCAD keeps a preview image (BLOCK_RECORD group 310) with each block and makes a new one after an edit.
+/// A save writes the preview it read while the block is as it was read, in a DXF and in a DWG.
+#[test]
+fn a_block_keeps_its_preview_until_it_is_edited() {
+    let preview = "424D360000000000000036000000280000000100000001000000010018000000000004000000000000000000000000000000000000";
+    let mut b = cadcraft_doc::Block::new("Door");
+    let line = |x: f64| {
+        cadcraft_doc::Entity::new(
+            cadcraft_doc::Handle(0x500),
+            EntityKind::Line(cadcraft_doc::Line { a: cadcraft_geom::Vec3::new(0.0, 0.0, 0.0), b: cadcraft_geom::Vec3::new(x, 1.0, 0.0) }),
+        )
+    };
+    b.entities.push(line(5.0));
+    b.preview = Some(cadcraft_doc::BlockPreview { groups: vec![preview.into()], key: b.content_key() });
+    let mut d = Drawing::new_metric();
+    d.bump_handseed(cadcraft_doc::Handle(0x510));
+    d.blocks.insert("Door".into(), std::sync::Arc::new(b));
+    let previews = |d: &Drawing| d.block("Door").and_then(|b| b.preview.as_ref().map(|p| p.groups.concat().to_ascii_uppercase()));
+    let has_310 = |text: &str| text.lines().any(|l| l.trim().eq_ignore_ascii_case(preview));
+    for version in Version::ALL {
+        assert!(has_310(&save(&d, version)), "{version:?}: the preview is written");
+    }
+    let back = read_dxf(save(&d, Version::R2018).as_bytes()).unwrap();
+    assert_eq!(previews(&back), Some(preview.to_ascii_uppercase()), "read again");
+    let dwg = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    assert_eq!(previews(&dwg), Some(preview.to_ascii_uppercase()), "the DWG bridge");
+    // An edit of the block's contents, a property edit included, drops the preview.
+    let mut edited = d.clone();
+    let mut b = (*edited.blocks["Door"]).clone();
+    let mut moved = (**b.entities.iter().next().unwrap()).clone();
+    moved.common.layer = "Other".into();
+    b.entities = cadcraft_doc::EntityStore::new();
+    b.entities.push(moved);
+    edited.blocks.insert("Door".into(), std::sync::Arc::new(b));
+    assert!(!has_310(&save(&edited, Version::R2018)), "an edited block has no old preview");
+}
