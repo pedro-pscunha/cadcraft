@@ -133,6 +133,16 @@ fn a_path_array_checks_its_path_before_creating_copies() {
 }
 
 #[test]
+fn hatch_and_boundary_trace_only_supported_source_revisions() {
+    for (command, by_point) in [("hatch", false), ("gradient", false), ("region", false), ("hatch", true), ("boundary", true)] {
+        let mut session = Session::new();
+        let source = create(&mut session, "rectang", json!({"p1": [0, 0], "p2": [10, 10]}));
+        let params = if by_point { json!({"points": [[5, 5]]}) } else { json!({"handle": source.hex()}) };
+        check_refusals(session.doc().unwrap(), command, params, &[source]);
+    }
+}
+
+#[test]
 fn typed_curve_tools_refuse_canonical_inputs_without_a_geometry_change() {
     let cases = [
         ("pline", json!({"points": [[0, 0], [10, 0], [10, 10]]}), "PEDIT 5,0 R\n\n"),
