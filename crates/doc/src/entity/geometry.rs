@@ -110,6 +110,15 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
         EntityKind::PolylineMesh(m) => {
             let _ = write!(s, "MESH{:?}{plane:?}", (m.kind as u8, m.flags, m.m_count, m.n_count, m.m_density, m.n_density, m.smooth_type));
         }
+        EntityKind::Tolerance(t) => {
+            let _ = write!(s, "TOLERANCE{:?}{plane:?}", (t.insert, t.dir));
+        }
+        EntityKind::Helix(h) => {
+            let _ = write!(s, "HELIX{h:?}{plane:?}");
+        }
+        EntityKind::Wipeout(w) => {
+            let _ = write!(s, "WIPEOUT{:?}{plane:?}", w.boundary);
+        }
         EntityKind::Spline(c) => {
             let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
         }

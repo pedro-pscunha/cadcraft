@@ -34,6 +34,16 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         // The vertices and the plane of the leader, and the annotation's size and offsets (the style, the
         // arrow, the path type and the link to the annotation are the model's and `subclass_groups`').
         "LEADER" => &[("AcDbLeader", &[76, 10, 20, 30, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233, 40, 41])],
+        // The frame's position, direction and plane; its text and style are the model's.
+        "TOLERANCE" => &[("AcDbFcf", &[10, 20, 30, 11, 21, 31, 210, 220, 230])],
+        // A helix is a spline through points on it, then the helix data.
+        "HELIX" => &[
+            ("AcDbSpline", &[210, 220, 230, 70, 71, 72, 73, 74, 42, 43, 44, 12, 22, 32, 13, 23, 33, 40, 41, 10, 20, 30, 11, 21, 31]),
+            ("AcDbHelix", &[90, 91, 10, 20, 30, 11, 21, 31, 12, 22, 32, 40, 41, 42, 290, 280]),
+        ],
+        // The image frame (origin, U and V vectors, size) and the clipping boundary; the image link, the display
+        // flags and the brightness are the model's.
+        "WIPEOUT" => &[("AcDbWipeout", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24])],
         "LWPOLYLINE" => &[("AcDbPolyline", &[90, 70, 43, 38, 39, 10, 20, 40, 41, 42, 91, 210, 220, 230])],
         // A POLYLINE is a 2D polyline (with VERTEX children), a 3D polyline or a mesh (their parents).
         "POLYLINE" if has("AcDb2dPolyline") => &[("AcDb2dPolyline", &[10, 20, 30, 39, 70, 40, 41, 71, 72, 73, 74, 75, 210, 220, 230])],

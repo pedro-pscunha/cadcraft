@@ -386,3 +386,33 @@ fn polylines_and_meshes_keep_their_plane_and_vertices_through_every_save() {
         }
     }
 }
+
+#[test]
+fn a_tolerance_keeps_its_position_direction_and_plane_through_every_save() {
+    for plane in PLANES {
+        let tolerance = format!(
+            "0 TOLERANCE\n5 200\n100 AcDbEntity\n8 0\n100 AcDbFcf\n3 Standard\n10 1.5\n20 2.5\n30 3.5\n1 {{\\Fgdt;j}}%%v0.5\n{plane}\n11 0.6\n21 0.8\n31 0"
+        );
+        assert_kept(&dxf(&[&tolerance]), "TOLERANCE", &[10, 20, 30, 11, 21, 31, 210, 220, 230], &[], &[]);
+    }
+}
+
+#[test]
+fn a_helix_keeps_its_spline_and_helix_groups_through_every_save() {
+    for plane in PLANES {
+        let helix = format!(
+            "0 HELIX\n5 201\n100 AcDbEntity\n8 0\n100 AcDbSpline\n{plane}\n70 8\n71 3\n72 8\n73 4\n74 0\n42 1e-7\n43 1e-7\n\
+             40 0\n40 0\n40 0\n40 0\n40 1\n40 1\n40 1\n40 1\n10 1\n20 0\n30 0\n10 1.5\n20 2.5\n30 1\n10 -1.5\n20 2.5\n30 2\n10 -1\n20 0\n30 3\n\
+             100 AcDbHelix\n90 29\n91 63\n10 0\n20 0\n30 0\n11 1\n21 0\n31 0\n12 0\n22 0\n32 1\n40 1\n41 1\n42 3\n290 1\n280 2"
+        );
+        assert_kept(&dxf(&[&helix]), "HELIX", &[210, 220, 230, 71, 72, 73, 40, 10, 20, 30, 41, 42, 290, 280], &[], &[210, 220, 230]);
+    }
+}
+
+#[test]
+fn a_wipeout_keeps_its_frame_and_clipping_boundary_through_every_save() {
+    let wipeout = "0 WIPEOUT\n5 202\n100 AcDbEntity\n8 0\n100 AcDbWipeout\n90 0\n10 1.5\n20 2.5\n30 3.5\n11 0.1\n21 0\n31 0.2\n12 0\n22 0.1\n32 0.3\n\
+         13 1\n23 1\n70 7\n280 1\n281 50\n282 50\n283 0\n71 2\n91 4\n14 -0.5\n24 -0.5\n14 0.5\n24 -0.5\n14 0.5\n24 0.5\n14 -0.5\n24 0.5";
+    // A DWG closes the boundary with one more vertex.
+    assert_kept(&dxf(&[wipeout]), "WIPEOUT", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24], &[], &[71, 91, 14, 24]);
+}
