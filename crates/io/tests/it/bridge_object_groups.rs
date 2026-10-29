@@ -489,3 +489,27 @@ fn a_table_style_keeps_its_name() {
         assert_eq!(names, ["Standard"], "{what}: table style names");
     }
 }
+
+
+/// The cell style borders of a table style point at the ByBlock linetype, as AutoCAD writes them
+/// (acadrust `TableCellBorder::line_type`).
+#[test]
+fn a_table_style_keeps_the_byblock_linetype_of_its_borders() {
+    let doc = CadDocument::with_version(DxfVersion::AC1032);
+    for (what, back) in saves(&doc) {
+        let by_block = back.line_types.get("ByBlock").expect("ByBlock").handle;
+        let style = back
+            .objects
+            .values()
+            .find_map(|o| match o {
+                ObjectType::TableStyle(s) if s.name == "Standard" => Some(s),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{what}: Standard table style lost"));
+        assert!(!style.modern_overrides.is_empty(), "{what}: cell style overrides");
+        for (key, s) in &style.modern_overrides {
+            let handles: Vec<Handle> = s.cell_style.borders.iter().map(|g| g.line_type).collect();
+            assert_eq!(handles, vec![by_block; 6], "{what}: override {key}");
+        }
+    }
+}
