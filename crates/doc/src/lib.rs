@@ -375,15 +375,20 @@ impl Drawing {
         let store = self.space_mut(&sp).ok_or(DocError::NoEntity(h))?;
         if store.modify(h, f) { Ok(()) } else { Err(DocError::NoEntity(h)) }
     }
-    /// Commit one candidate edit only after the operation succeeds.
+    /// Commit one legacy candidate edit only after its revision check and operation succeed.
     pub fn try_modify_entity<F, T>(&mut self, h: Handle, edit: F) -> Result<T>
     where
         F: FnOnce(&mut Entity) -> Result<T>,
     {
-        let mut candidate = self.entity(h).ok_or(DocError::NoEntity(h))?.as_ref().clone();
-        let result = edit(&mut candidate)?;
+        let (candidate, result) = self.entity(h).ok_or(DocError::NoEntity(h))?.legacy_edited(edit)?;
         self.modify_entity(h, |entity| *entity = candidate)?;
         Ok(result)
+    }
+
+    /// Apply the entity's typed affine operation, independently from legacy edit callbacks.
+    pub fn transform_entity(&mut self, h: Handle, transform: &cadcraft_geom::Mat4) -> Result<()> {
+        let candidate = self.entity(h).ok_or(DocError::NoEntity(h))?.transformed(transform)?;
+        self.modify_entity(h, |entity| *entity = candidate)
     }
 
     /// Modify a globally unique record in model/layout space or a block definition.

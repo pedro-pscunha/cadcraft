@@ -85,6 +85,93 @@ fn embedded_mtext_checks_its_revision_independently_of_the_attribute() {
 }
 
 #[test]
+fn canonical_geometry_never_enters_an_untyped_candidate_callback() {
+    let mut drawing = cadcraft_doc::Drawing::new_metric();
+    let mut entity = line();
+    entity.geometry_revision = GeometryRevision::CanonicalV2;
+    let before = entity.clone();
+    drawing.model.push(entity);
+    let called = std::cell::Cell::new(false);
+    let result = drawing.try_modify_entity(Handle(1), |entity| {
+        called.set(true);
+        entity.kind = EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::ZERO });
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert!(!called.get());
+    assert_eq!(drawing.entity(Handle(1)).unwrap().as_ref(), &before);
+}
+
+#[test]
+fn a_canonical_child_blocks_the_legacy_parent_callback_before_it_runs() {
+    let mut drawing = cadcraft_doc::Drawing::new_metric();
+    let mut child = attribute();
+    child.geometry_revision = GeometryRevision::CanonicalV2;
+    let insert = cadcraft_doc::Insert {
+        block: "Block".into(),
+        insert: Vec3::ZERO,
+        scale: Vec3::new(1.0, 1.0, 1.0),
+        rotation: 0.0,
+        attribs: vec![child.clone()],
+        cols: 1,
+        rows: 1,
+        col_spacing: 0.0,
+        row_spacing: 0.0,
+    };
+    let leader = cadcraft_doc::MLeader {
+        leaders: Vec::new(),
+        landing: Vec3::ZERO,
+        dogleg: 0.0,
+        text: None,
+        style: "Standard".into(),
+        arrow_size: 1.0,
+        spline: false,
+        block: Some(insert.clone()),
+        arrow_block: String::new(),
+    };
+    for kind in [EntityKind::AttDef(child), EntityKind::Insert(insert), EntityKind::MLeader(leader)] {
+        let entity = Entity::new(Handle(1), kind);
+        let before = entity.clone();
+        drawing.model.push(entity);
+        let called = std::cell::Cell::new(false);
+        let result = drawing.try_modify_entity(Handle(1), |_| {
+            called.set(true);
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(drawing.entity(Handle(1)).unwrap().as_ref(), &before);
+    }
+}
+
+#[test]
+fn a_legacy_callback_cannot_commit_non_finite_geometry() {
+    let mut entity = line();
+    let before = entity.clone();
+    let result = entity.try_legacy_edit(|entity| {
+        entity.common.thickness = f64::INFINITY;
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(entity, before);
+}
+
+#[test]
+fn a_legacy_callback_cannot_relabel_its_result_as_canonical() {
+    let mut entity = line();
+    let before = entity.clone();
+    assert!(
+        entity
+            .try_legacy_edit(|entity| {
+                entity.geometry_revision = GeometryRevision::CanonicalV2;
+                Ok(())
+            })
+            .is_err()
+    );
+    assert_eq!(entity, before);
+}
+
+#[test]
 fn unknown_payload_revisions_refuse_deserialization() {
     let mut value = serde_json::to_value(line()).unwrap();
     value["geometryRevision"] = serde_json::json!("canonicalV99");

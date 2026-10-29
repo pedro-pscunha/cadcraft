@@ -73,13 +73,14 @@ fn part_grips_move_parts() {
     let grips = k.grips();
     assert_eq!(grips, vec![Vec2::new(0.0, 0.0), Vec2::new(7.0, 0.0)]);
     // Drag the second part's grip; the first part stays.
-    let moved = cadcraft_engine::grips::stretch_grip(&k, 1, Vec2::new(9.0, -2.0)).unwrap();
-    let EntityKind::Table(t) = &moved else { panic!() };
+    let entity = s.doc().unwrap().entity(Handle::parse_hex(&h).unwrap()).unwrap();
+    let moved = cadcraft_engine::grips::stretch_grip(entity, 1, Vec2::new(9.0, -2.0)).unwrap().unwrap();
+    let EntityKind::Table(t) = &moved.kind else { panic!() };
     let parts = t.parts();
     assert_eq!((parts[0].origin, parts[1].origin), (Vec2::new(0.0, 0.0), Vec2::new(9.0, -2.0)));
     // The insertion grip moves everything.
-    let all = cadcraft_engine::grips::stretch_grip(&moved, 0, Vec2::new(1.0, 1.0)).unwrap();
-    let EntityKind::Table(t) = &all else { panic!() };
+    let all = cadcraft_engine::grips::stretch_grip(&moved, 0, Vec2::new(1.0, 1.0)).unwrap().unwrap();
+    let EntityKind::Table(t) = &all.kind else { panic!() };
     assert_eq!(t.parts()[1].origin, Vec2::new(10.0, -1.0));
     // Typed: select the table by a point, then the height.
     s.execute("table.break", &json!({ "handle": h, "enabled": false })).unwrap();

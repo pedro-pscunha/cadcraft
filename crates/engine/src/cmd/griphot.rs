@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, EntityKind, Handle};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Handle};
 use cadcraft_geom::{Mat3, Vec2};
 
 use super::gripcmds::stretch_grips;
@@ -171,10 +171,10 @@ impl GripEdit {
     }
 
     /// The object after the multifunctional `action` with the point `to` or value `value`.
-    fn acted(&self, s: &Session, action: GripAction, to: Option<Vec2>, value: Option<f64>) -> Option<(Handle, EntityKind)> {
-        let &(h, i) = self.hot.first()?;
-        let e = s.doc().ok()?.entity(h)?;
-        grip_action(&e.kind, i, action, to, value).map(|k| (h, k))
+    fn acted(&self, s: &Session, action: GripAction, to: Option<Vec2>, value: Option<f64>) -> Result<Option<(Handle, Entity)>> {
+        let Some(&(h, i)) = self.hot.first() else { return Ok(None) };
+        let Some(e) = s.doc()?.entity(h) else { return Ok(None) };
+        Ok(grip_action(e, i, action, to, value)?.map(|entity| (h, entity)))
     }
 
     /// Apply a multifunctional option; the grip edit ends.
@@ -182,8 +182,8 @@ impl GripEdit {
         if self.hot.first().is_some_and(|(h, _)| super::curves::is_locked(s, *h)) {
             return Err(other("The object is on a locked layer."));
         }
-        let (h, k) = self.acted(s, action, to, value).ok_or_else(|| other("That would make a degenerate object."))?;
-        s.doc_mut()?.modify_entity(h, |e| e.kind = k)?;
+        let (h, k) = self.acted(s, action, to, value)?.ok_or_else(|| other("That would make a degenerate object."))?;
+        s.doc_mut()?.modify_entity(h, |e| *e = k)?;
         Ok(Step::Done)
     }
 
@@ -435,7 +435,7 @@ impl Interactive for GripEdit {
         }
         let base = match self.ask {
             Ask::Action(a) => {
-                let mut out: Vec<EntityKind> = self.acted(s, a, Some(c), None).map(|(_, k)| k).into_iter().collect();
+                let mut out: Vec<EntityKind> = self.acted(s, a, Some(c), None).ok().flatten().map(|(_, entity)| entity.kind).into_iter().collect();
                 out.push(line(self.base, c));
                 return out;
             }
@@ -445,7 +445,12 @@ impl Interactive for GripEdit {
         };
         let Ok(d) = s.doc() else { return Vec::new() };
         let mut out: Vec<EntityKind> = if self.mode == GripMode::Stretch {
-            super::gripcmds::stretched(s, &self.hot, &self.targets, c - base).into_iter().take(500).map(|(_, k)| k).collect()
+            super::gripcmds::stretched(s, &self.hot, &self.targets, c - base)
+                .unwrap_or_default()
+                .into_iter()
+                .take(500)
+                .map(|(_, entity)| entity.kind)
+                .collect()
         } else {
             match self.matrix(c) {
                 Some(m) => self

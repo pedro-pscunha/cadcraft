@@ -85,7 +85,7 @@ fn degenerate_ellipse_cannot_move_from_its_center_grip() {
         start: 0.0,
         end: cadcraft_geom::TAU,
     });
-    assert!(super::stretch_grip(&ellipse, 0, v(1.0, 1.0)).is_none());
+    assert!(super::stretch_grip(&cadcraft_doc::Entity::new(Handle(0), ellipse), 0, v(1.0, 1.0)).unwrap().is_none());
 }
 
 #[test]
@@ -228,8 +228,8 @@ fn grips_on_locked_layers_and_hostile_values() {
     for (hd, n) in hs {
         for i in 0..n + 1 {
             for to in [v(0.0, 0.0), v(1e9, -1e9), v(3.0, 4.0)] {
-                if let Some(k) = s.doc().unwrap().entity(hd).map(|e| e.kind.clone()) {
-                    let _ = stretch_grip(&k, i, to);
+                if let Some(entity) = s.doc().unwrap().entity(hd) {
+                    let _ = stretch_grip(entity, i, to);
                 }
             }
         }
