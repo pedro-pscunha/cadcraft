@@ -15,8 +15,9 @@ pub(crate) fn arraypath(
     spacing: Option<f64>,
     align: bool,
 ) -> Result<Vec<Handle>> {
-    let pk = curves::entity(s, path)?.kind;
-    let c = Chain::of(&pk).ok_or_else(|| other("Select a line, arc, circle, polyline, ellipse or spline as the path."))?;
+    let path_entity = curves::entity(s, path)?;
+    path_entity.require_legacy_geometry()?;
+    let c = Chain::of(&path_entity.kind).ok_or_else(|| other("Select a line, arc, circle, polyline, ellipse or spline as the path."))?;
     let l = c.len();
     if l <= 1e-12 {
         return Err(other("The path has no length."));
@@ -104,7 +105,9 @@ impl Interactive for PathArrayM {
         match (self.path, i) {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                Chain::of(&curves::entity(s, h)?.kind).ok_or_else(|| other("Select a curve as the path."))?;
+                let entity = curves::entity(s, h)?;
+                entity.require_legacy_geometry()?;
+                Chain::of(&entity.kind).ok_or_else(|| other("Select a curve as the path."))?;
                 self.path = Some(h);
                 Ok(Step::Continue)
             }

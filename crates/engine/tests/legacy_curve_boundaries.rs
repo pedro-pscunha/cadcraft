@@ -99,6 +99,40 @@ fn single_curve_edits_refuse_legacy_dispatch_for_canonical_inputs() {
 }
 
 #[test]
+fn divide_and_measure_check_the_curve_before_creating_markers() {
+    for command in ["divide", "measure"] {
+        let mut session = Session::new();
+        let source = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+        let params = if command == "divide" { json!({"handle": source.hex(), "segments": 4}) } else { json!({"handle": source.hex(), "length": 2}) };
+        check_refusals(session.doc().unwrap(), command, params, &[source]);
+    }
+}
+
+#[test]
+fn tangent_circles_check_both_sources_before_curve_extraction() {
+    let mut session = Session::new();
+    let a = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    let b = create(&mut session, "line", json!({"points": [[0, 0], [0, 10]]}));
+    check_refusals(session.doc().unwrap(), "circle.ttr", json!({"h1": a.hex(), "h2": b.hex(), "p1": [8, 0], "p2": [0, 8], "radius": 1}), &[a, b]);
+}
+
+#[test]
+fn blend_checks_both_sources_before_projected_curve_fitting() {
+    let mut session = Session::new();
+    let a = create(&mut session, "line", json!({"points": [[0, 0], [5, 0]]}));
+    let b = create(&mut session, "line", json!({"points": [[8, 2], [12, 2]]}));
+    check_refusals(session.doc().unwrap(), "blend", json!({"h1": a.hex(), "h2": b.hex(), "p1": [5, 0], "p2": [8, 2]}), &[a, b]);
+}
+
+#[test]
+fn a_path_array_checks_its_path_before_creating_copies() {
+    let mut session = Session::new();
+    let object = create(&mut session, "circle", json!({"center": [0, 2], "radius": 0.5}));
+    let path = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    check_refusals(session.doc().unwrap(), "arraypath", json!({"handles": [object.hex()], "path": path.hex(), "count": 3}), &[path]);
+}
+
+#[test]
 fn typed_curve_tools_refuse_canonical_inputs_without_a_geometry_change() {
     let cases = [
         ("pline", json!({"points": [[0, 0], [10, 0], [10, 10]]}), "PEDIT 5,0 R\n\n"),
