@@ -41,6 +41,7 @@ fn nested_leaves(d: &cadcraft_doc::Drawing, ins: &cadcraft_doc::Insert, m: &Mat3
 fn leaves_of(s: &Session, h: Handle) -> Result<Vec<NestedLeaf>> {
     let e = curves::entity(s, h)?;
     let EntityKind::Insert(ins) = &e.kind else { return Err(other("Select a block reference.")) };
+    crate::cmd::modify::check_block_expansion(s.doc()?, &e, &Mat3::IDENTITY, 0)?;
     let mut out = Vec::new();
     nested_leaves(s.doc()?, ins, &Mat3::IDENTITY, &mut vec![h], &mut out);
     Ok(out)

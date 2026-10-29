@@ -307,7 +307,14 @@ impl EntityKind {
                 }
             }
             EntityKind::Ellipse(e) => {
-                if *m == Mat3::IDENTITY || !e.flatten() {
+                if *m == Mat3::IDENTITY {
+                    return;
+                }
+                if m.a == 1.0 && m.b == 0.0 && m.c == 0.0 && m.d == 1.0 {
+                    t3(&mut e.center);
+                    return;
+                }
+                if !e.flatten() {
                     return;
                 }
                 let sp = m.apply(e.center.xy() + e.major.xy() * e.start.cos() + e.major.xy().perp() * (e.ratio * e.start.sin()));

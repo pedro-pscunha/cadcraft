@@ -162,6 +162,9 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
     if nesting(d, &refs, &mut Default::default(), 0) + 2 > MAX_BLOCK_DEPTH {
         return Err(other(format!("The objects nest block references too deeply (more than {MAX_BLOCK_DEPTH} levels).")));
     }
+    for entity in &ents {
+        crate::cmd::modify::check_ellipse_transform(entity, &inv)?;
+    }
     let d = s.doc_mut()?;
     let name = d.anonymous_block_name("*U");
     let mut b = Block::new(&name);
@@ -249,6 +252,9 @@ fn open_source(s: &mut Session, h: Handle, item: (u32, u32, u32)) -> Result<Vec<
     let src = d.block(&p.source).cloned().ok_or_else(|| other("The array's source block is missing."))?;
     let m = ins.transform(blk.base.xy()).then_before(item_place(&p, item)?).then_before(Mat3::translate(-src.base.xy()));
     let space = d.space_of(h).unwrap_or_default();
+    for entity in src.entities.iter() {
+        crate::cmd::modify::check_ellipse_transform(entity, &m)?;
+    }
     let d = s.doc_mut()?;
     let mut out = Vec::new();
     let entities = src.entities.iter().map(|e| (**e).clone()).collect();
@@ -295,6 +301,15 @@ fn close_source(s: &mut Session, save: bool) -> Result<Value> {
     let live = d.entity(ed.array).is_some_and(|e| matches!(&e.kind, EntityKind::Insert(i) if i.block.eq_ignore_ascii_case(&blk_name)));
     if save && live && objs.is_empty() {
         return Err(other("The source would have no objects; enter ARRAYCLOSE No to discard the changes, or erase the array."));
+    }
+    if save && live {
+        let (ins, blk, p) = array_of(d, ed.array)?;
+        let inv = ins.transform(blk.base.xy()).then_before(item_place(&p, ed.item)?).inverse().ok_or_else(|| other("The array's scale is zero."))?;
+        for handle in &objs {
+            if let Some(entity) = d.entity(*handle) {
+                crate::cmd::modify::check_ellipse_transform(entity, &inv)?;
+            }
+        }
     }
     let d = s.doc_mut()?;
     if let Some(b) = d.blocks.get_mut(&blk_name) {

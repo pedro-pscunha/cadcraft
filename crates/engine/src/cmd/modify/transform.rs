@@ -62,12 +62,28 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
     Ok(out)
 }
 
-fn check_ellipse_transform(entity: &cadcraft_doc::Entity, m: &Mat3) -> Result<()> {
-    if *m != Mat3::IDENTITY
+pub(crate) fn check_ellipse_transform(entity: &cadcraft_doc::Entity, m: &Mat3) -> Result<()> {
+    if !(m.a == 1.0 && m.b == 0.0 && m.c == 0.0 && m.d == 1.0)
         && let cadcraft_doc::EntityKind::Ellipse(ellipse) = &entity.kind
         && !ellipse.clone().flatten()
     {
         return Err(bad("transform", "An edge-on or invalid ellipse cannot be edited in the 2D plane."));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_block_expansion(d: &cadcraft_doc::Drawing, entity: &cadcraft_doc::Entity, m: &Mat3, depth: usize) -> Result<()> {
+    if depth > cadcraft_doc::MAX_BLOCK_DEPTH {
+        return Err(bad("transform", "The block references nest too deeply to expand."));
+    }
+    check_ellipse_transform(entity, m)?;
+    if let cadcraft_doc::EntityKind::Insert(insert) = &entity.kind
+        && let Some(block) = d.block(&insert.block)
+    {
+        let m = m.then_before(insert.transform(block.base.xy()));
+        for child in block.entities.iter() {
+            check_block_expansion(d, child, &m, depth + 1)?;
+        }
     }
     Ok(())
 }
