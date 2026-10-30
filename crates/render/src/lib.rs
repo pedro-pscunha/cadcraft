@@ -34,7 +34,7 @@ pub use dim::{ArrowGeom, Arrowhead, DimGeometry, DimText, LineRole, arrowhead, d
 pub use fill::triangulate_evenodd;
 pub use hatch::{fill_loops as hatch_fill_loops, pattern_swatch};
 pub use paper::{PAPER_SIZES, PaperSize, Sheet, paper_size, sheet};
-pub use tolerance::{gdt_points, tolerance_in};
+pub use tolerance::{gdt_points, tolerance_in, tolerance_layout};
 
 /// A resolved colour: its RGB, whether it is colour 7, and its index colour (0 = a true
 /// colour), which picks the style of a colour-dependent plot style table.
@@ -299,12 +299,13 @@ impl Builder<'_> {
 }
 
 mod table;
-pub use table::{MAX_LAYOUT_CELLS, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_style_of};
+pub use table::{MAX_LAYOUT_CELLS, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_layout, table_style_of};
 
 mod blocks;
 mod dim_draw;
 mod display;
 mod draw;
+pub use draw::leader_arrow_layout;
 mod pipeline;
 mod props;
 mod text_entity;

@@ -54,6 +54,8 @@ mod geometry;
 mod helix_canonical;
 mod layout;
 mod layout_canonical;
+mod leader_canonical;
+mod legacy_recovery;
 mod mesh;
 mod mleader;
 mod mline_canonical;
@@ -62,12 +64,13 @@ mod text;
 mod text_canonical;
 mod world;
 mod world_families;
+pub use legacy_recovery::{Promotion, promote_legacy_spline_leader};
 pub use spline_canonical::spline_transformed_canonical;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
-    TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives,
-    mline_primitives, mtext_primitives, solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives,
-    wipeout_primitives,
+    LeaderArrowLayout, TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives,
+    leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives, solid_primitives, spline_primitives, table_primitives,
+    text_primitives, tolerance_primitives, wipeout_primitives,
 };
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
@@ -76,7 +79,7 @@ pub use curves::{
     Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
     Solid,
 };
-pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader};
+pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
 pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutFrame};
 pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};

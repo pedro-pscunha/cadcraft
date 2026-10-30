@@ -10,7 +10,7 @@ use cadcraft_geom::OcsFrame;
 
 use super::common::{T, common};
 
-/// A CIRCLE, ARC, SOLID, TRACE, SPLINE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
+/// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
 /// another kind, a normal without direction, a radius that is not a positive finite number, or an LWPOLYLINE that is a
 /// CADCraft region.
 pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
@@ -27,6 +27,7 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
             if name == "SOLID" { EntityKind::Solid(Solid { corners }) } else { EntityKind::Trace(Solid { corners }) }
         }
         "SPLINE" => EntityKind::Spline(spatial_spline(&t)?),
+        "LEADER" => EntityKind::Leader(spatial_leader(&t)?),
         "LWPOLYLINE" => {
             // The legacy reader mirrors under a negative Z: read the vertices as if the plane were +Z.
             let k = super::entities::lwpolyline(tags, &Common { extrusion: cadcraft_geom::Vec3::Z, ..c.clone() }, &t)?;
@@ -87,4 +88,29 @@ fn spatial_spline(t: &T) -> Option<cadcraft_geom::Spline> {
         spline.fit_opts.knots = spline.infer_knot_param();
     }
     Some(spline)
+}
+
+/// A LEADER with its vertices as WCS points (their Z kept), and its direction, offsets and annotation size as the record
+/// holds them. `None` when the vertex coordinates do not match in count.
+fn spatial_leader(t: &T) -> Option<cadcraft_doc::Leader> {
+    use cadcraft_doc::{Leader, LeaderFrame};
+    use cadcraft_geom::Vec3;
+    let (xs, ys, zs) = (t.all_f(10), t.all_f(20), t.all_f(30));
+    if xs.len() != ys.len() || xs.len() != zs.len() {
+        return None;
+    }
+    let vector = |code: i32, default: Vec3| if t.f(code).is_some() { t.p(code) } else { default };
+    Some(Leader {
+        vertices: xs.into_iter().zip(ys).zip(zs).map(|((x, y), z)| Vec3::new(x, y, z)).collect(),
+        arrow: t.i(71).unwrap_or(1) != 0,
+        spline: t.i(72).unwrap_or(0) != 0,
+        style: t.s(3).unwrap_or_else(|| "Standard".into()),
+        frame: Some(LeaderFrame {
+            direction: vector(211, Vec3::new(1.0, 0.0, 0.0)),
+            block_offset: vector(212, Vec3::ZERO),
+            annotation_offset: vector(213, Vec3::ZERO),
+            text_height: t.fd(40, 0.0),
+            text_width: t.fd(41, 0.0),
+        }),
+    })
 }

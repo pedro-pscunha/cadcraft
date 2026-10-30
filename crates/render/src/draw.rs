@@ -375,6 +375,16 @@ fn table(b: &mut Builder, ctx: &Ctx, t: &cadcraft_doc::Table, rgb: Ink, lw: f32)
 
 /// The overall scale of a leader drawn with dimension style `st`: its DIMSCALE, else the
 /// drawing's.
+/// The arrowhead of a leader in the local coordinates of its first segment, for the world builders: laid out as the
+/// renderer draws it (the style's leader arrow block, DIMASZ x DIMSCALE) with its tip at the origin, pointing along +X.
+pub fn leader_arrow_layout(d: &Drawing, leader: &cadcraft_doc::Leader) -> cadcraft_doc::LeaderArrowLayout {
+    let st = d.dim_style(&leader.style);
+    let size = st.map(|s| s.arrow_size).unwrap_or(0.18) * leader_scale(d, st);
+    let kind = dim::Arrowhead::parse(st.map(|s| s.leader_arrow_block.as_str()).unwrap_or(""));
+    let g = dim::arrowhead(kind, Vec2::ZERO, Vec2::X, size);
+    cadcraft_doc::LeaderArrowLayout { lines: g.lines, tris: g.tris }
+}
+
 fn leader_scale(d: &Drawing, st: Option<&cadcraft_doc::DimStyle>) -> f64 {
     let dimscale = d.header.f64("DIMSCALE", 1.0);
     st.map(|s| s.effective_scale(dimscale)).unwrap_or_else(|| cadcraft_doc::DimStyle::default().effective_scale(dimscale))

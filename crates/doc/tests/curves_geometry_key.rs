@@ -156,3 +156,47 @@ fn each_spatial_spline_field_alone_changes_the_key() {
     distinct(&keys);
     assert_ne!(base, key(&cadcraft_geom::Spline { space: None, ..spline() }, &common()), "a planar spline is not the spatial one");
 }
+
+#[test]
+fn each_canonical_leader_field_alone_changes_the_key() {
+    use cadcraft_doc::{Leader, LeaderFrame};
+    let leader = || Leader {
+        vertices: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(3.0, 1.0, 2.0)],
+        frame: Some(LeaderFrame {
+            direction: Vec3::new(1.0, 0.0, 0.0),
+            block_offset: Vec3::new(0.0, 0.5, 0.0),
+            annotation_offset: Vec3::new(1.0, 0.25, 0.0),
+            text_height: 0.2,
+            text_width: 3.0,
+        }),
+        ..Leader::default()
+    };
+    let key = |l: &Leader, c: &Common| geometry_key(&EntityKind::Leader(l.clone()), c).unwrap();
+    let base = key(&leader(), &common());
+    type Mutation = fn(&mut Leader, &mut Common);
+    fn frame(l: &mut Leader) -> &mut LeaderFrame {
+        l.frame.as_mut().unwrap()
+    }
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("vertex z", |l, _| l.vertices[1].z += 0.5),
+        ("direction z", |l, _| frame(l).direction.z += 0.5),
+        ("block offset y", |l, _| frame(l).block_offset.y += 0.5),
+        ("annotation offset z", |l, _| frame(l).annotation_offset.z += 0.5),
+        ("text height", |l, _| frame(l).text_height += 0.5),
+        ("text width", |l, _| frame(l).text_width += 0.5),
+        ("normal x", |_, c| c.extrusion.x += 0.5),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let (mut l, mut c) = (leader(), common());
+        mutate(&mut l, &mut c);
+        let k = key(&l, &c);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    distinct(&keys);
+    let mut renamed = leader();
+    renamed.style = "Other".into();
+    renamed.arrow = false;
+    assert_eq!(key(&renamed, &common()), base, "the style and the arrow switch are properties");
+}

@@ -217,4 +217,26 @@ pub struct Leader {
     pub spline: bool,
     #[serde(default = "standard")]
     pub style: String,
+    /// The direction, offsets and sizes of a canonical leader as its record holds them (see [`LeaderFrame`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<LeaderFrame>,
+}
+
+/// What a canonical LEADER holds beside its WCS vertices and the normal of its plane (`Common.extrusion`): the
+/// horizontal direction (DXF group 211), the offsets of the last vertex from the block reference (212) and from the
+/// annotation placement (213), and the annotation text height (40) and width (41).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaderFrame {
+    pub direction: Vec3,
+    pub block_offset: Vec3,
+    pub annotation_offset: Vec3,
+    pub text_height: f64,
+    pub text_width: f64,
+}
+
+impl Default for Leader {
+    fn default() -> Self {
+        Leader { vertices: Vec::new(), arrow: true, spline: false, style: "Standard".into(), frame: None }
+    }
 }

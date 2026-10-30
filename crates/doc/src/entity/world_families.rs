@@ -10,6 +10,7 @@ use cadcraft_geom::{Mat4, OcsFrame, Spline, Vec2, Vec3, bulge_to_arc};
 
 use super::block::Attrib;
 use super::curves::{Arc, Circle, LwPolyline, Solid};
+use super::dim::Leader;
 use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop, Wipeout};
 use super::helix::Helix;
 use super::layout::Table;
@@ -155,6 +156,38 @@ pub fn lwpolyline_primitives(polyline: &LwPolyline, normal: Vec3, parent: &Mat4)
         out.push(segment(f, v.p, w.p, v.bulge, z));
         let (wa, wb) = if polyline.const_width > 0.0 { (polyline.const_width, polyline.const_width) } else { (v.start_width, v.end_width) };
         out.extend(strip(f, v.p, w.p, v.bulge, wa, wb, z));
+    }
+    finish(out, parent)
+}
+
+/// An arrowhead laid out at the origin pointing along +X (the shape the renderer draws for the style's leader arrow
+/// block): outline polylines and filled triangles (three points each), in the local coordinates of the leader's first
+/// segment, where x runs out of the leader along that segment and y is the plane normal crossed into x.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LeaderArrowLayout {
+    pub lines: Vec<Vec<Vec2>>,
+    pub tris: Vec<Vec2>,
+}
+
+/// A canonical leader: the segments through its WCS vertices (as the renderer draws them today, whatever its path type)
+/// and, when it has an arrow and two distinct first vertices, its arrowhead placed at the first vertex.
+pub fn leader_primitives(leader: &Leader, normal: Vec3, arrow: &LeaderArrowLayout, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    affine(parent)?;
+    leader.canonical_frame()?;
+    let unit_normal = frame(normal)?.to_world(Vec3::Z);
+    let mut out: Vec<WorldPrimitive> = leader.vertices.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }).collect();
+    if let (true, Some(&tip), Some(&next)) = (leader.arrow, leader.vertices.first(), leader.vertices.get(1)) {
+        let out_of_leader = tip - next;
+        if out_of_leader.len() > 1e-12 {
+            let x_axis = out_of_leader.normalized();
+            let arrow_frame = TextFrame { origin: tip, x_axis, y_axis: unit_normal.cross(x_axis), normal: unit_normal };
+            for line in &arrow.lines {
+                out.extend(line.windows(2).map(|w| WorldPrimitive::Line { a: local(&arrow_frame, w[0]), b: local(&arrow_frame, w[1]) }));
+            }
+            for tri in arrow.tris.as_chunks::<3>().0 {
+                out.push(WorldPrimitive::Fill(WorldFill { loops: vec![local_loop(&arrow_frame, tri)], kind: WorldFillKind::Solid, style: 0 }));
+            }
+        }
     }
     finish(out, parent)
 }
@@ -992,5 +1025,36 @@ mod tests {
         let mut perspective = Mat4::IDENTITY;
         perspective.m[3][0] = 0.1;
         assert!(spline_primitives(&sp, &perspective).is_err());
+    }
+
+    #[test]
+    fn a_leader_has_its_segments_and_an_arrowhead_out_of_its_first_segment() {
+        use super::super::dim::LeaderFrame;
+        let leader = Leader {
+            vertices: vec![Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 2.0, 7.0), Vec3::new(4.0, 2.0, 7.0)],
+            frame: Some(LeaderFrame { direction: EX, block_offset: Vec3::ZERO, annotation_offset: Vec3::ZERO, text_height: 0.0, text_width: 0.0 }),
+            ..Leader::default()
+        };
+        // An arrow of length 1 and half width 0.2 pointing along +X from the origin tip, back along -X.
+        let arrow = LeaderArrowLayout {
+            lines: vec![vec![Vec2::new(-1.0, 0.2), Vec2::new(0.0, 0.0)]],
+            tris: vec![Vec2::new(0.0, 0.0), Vec2::new(-1.0, 0.2), Vec2::new(-1.0, -0.2)],
+        };
+        let normal = Vec3::new(0.0, 3.0, 0.0);
+        let got = leader_primitives(&leader, normal, &arrow, &parent()).unwrap();
+        let drawn = lines(&got);
+        // Two leader segments and the arrow outline.
+        assert_eq!(drawn.len(), 3);
+        assert!(near(drawn[0].0, parent().apply(Vec3::new(1.0, 2.0, 3.0))) && near(drawn[0].1, parent().apply(Vec3::new(1.0, 2.0, 7.0))));
+        // The tip points out of the leader: from (1,2,7) to (1,2,3) is -Z, so x = -Z; the plane normal is +Y and y = Y x x = (-1, 0, 0) x ... written out by hand.
+        let x = Vec3::new(0.0, 0.0, -1.0);
+        let y = Vec3::new(0.0, 1.0, 0.0).cross(x);
+        assert!(near(y, Vec3::new(-1.0, 0.0, 0.0)));
+        let wing = Vec3::new(1.0, 2.0, 3.0) + x * -1.0 + y * 0.2;
+        assert!(near(drawn[2].0, parent().apply(wing)) && near(drawn[2].1, parent().apply(Vec3::new(1.0, 2.0, 3.0))), "{:?}", drawn[2]);
+        assert!(got.iter().any(|p| matches!(p, WorldPrimitive::Fill(_))));
+        let no_arrow = Leader { arrow: false, ..leader.clone() };
+        assert_eq!(leader_primitives(&no_arrow, normal, &arrow, &parent()).unwrap().len(), 2);
+        assert!(leader_primitives(&Leader { frame: None, ..leader }, normal, &arrow, &parent()).is_err());
     }
 }

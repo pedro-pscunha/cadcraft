@@ -438,3 +438,185 @@ fn the_canonical_spline_reader_refuses_mismatched_data() {
     tags.remove(at);
     assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags).is_none());
 }
+
+fn leader() -> cadcraft_doc::Leader {
+    cadcraft_doc::Leader {
+        vertices: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(3.0, 1.0, 2.0), Vec3::new(5.0, 1.0, 2.5)],
+        spline: false,
+        frame: Some(cadcraft_doc::LeaderFrame {
+            direction: Vec3::new(1.0, 0.0, 0.0),
+            block_offset: Vec3::new(0.0, 0.5, 0.0),
+            annotation_offset: Vec3::new(1.0, 0.25, 0.0),
+            text_height: 0.2,
+            text_width: 3.0,
+        }),
+        ..cadcraft_doc::Leader::default()
+    }
+}
+
+#[test]
+fn each_leader_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    type Mutation = fn(&mut cadcraft_doc::Leader, &mut Vec3);
+    fn frame(l: &mut cadcraft_doc::Leader) -> &mut cadcraft_doc::LeaderFrame {
+        l.frame.as_mut().unwrap()
+    }
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("vertex z", |l, _| l.vertices[1].z = 2.5),
+        ("vertex x", |l, _| l.vertices[2].x = 5.5),
+        ("direction y", |l, _| frame(l).direction.y = 0.5),
+        ("block offset z", |l, _| frame(l).block_offset.z = 0.75),
+        ("annotation offset x", |l, _| frame(l).annotation_offset.x = 1.5),
+        ("text height", |l, _| frame(l).text_height = 0.3),
+        ("text width", |l, _| frame(l).text_width = 4.0),
+        ("normal y", |_, n| n.y = 3.5),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut l, mut n) = (leader(), NORMAL);
+        mutate(&mut l, &mut n);
+        (drawing(EntityKind::Leader(l.clone()), n, 0.0), l, n)
+    };
+    let base = groups(&dxf(&make(|_, _| {}).0), "LEADER");
+    for (name, mutate) in cases {
+        let (d, l, n) = make(mutate);
+        let out = dxf(&d);
+        assert_ne!(groups(&out, "LEADER"), base, "{name}");
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups("LEADER", &record(&out, "LEADER")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        assert_eq!(c.extrusion, n, "{name}");
+        assert_eq!(kind, EntityKind::Leader(l.clone()), "{name}");
+        let stored = dwg_entities(&d)
+            .into_iter()
+            .find_map(|e| if let EntityType::Leader(x) = e { Some(x) } else { None })
+            .unwrap_or_else(|| panic!("{name}: a LEADER in the DWG"));
+        let f = l.frame.as_ref().unwrap();
+        assert!(
+            stored.vertices.iter().zip(&l.vertices).all(|(a, b)| near(v3(*a), *b)) && stored.vertices.len() == l.vertices.len(),
+            "{name}: DWG vertices"
+        );
+        assert!(near(v3(stored.normal), n), "{name}: DWG normal {:?}", stored.normal);
+        assert!(near(v3(stored.horizontal_direction), f.direction), "{name}: DWG direction {:?}", stored.horizontal_direction);
+        assert!(near(v3(stored.block_offset), f.block_offset) && near(v3(stored.annotation_offset), f.annotation_offset), "{name}: DWG offsets");
+        // A DWG leader has no text box size (AutoCAD derives it from the annotation): the sizes reach the DXF only.
+    }
+}
+
+#[test]
+fn the_canonical_leader_reader_keeps_z_and_the_legacy_one_drops_it() {
+    let out = dxf(&drawing(EntityKind::Leader(leader()), Vec3::Z, 0.0));
+    let (_, kind) = cadcraft_io::canonical_curve_from_groups("LEADER", &record(&out, "LEADER")).unwrap();
+    let EntityKind::Leader(read) = kind else { panic!("not a leader") };
+    assert_eq!(read.vertices[1].z, 2.0);
+    let legacy = cadcraft_io::read(out.as_bytes(), "x.dxf").unwrap();
+    let EntityKind::Leader(l) = &legacy.model.iter().find(|e| matches!(e.kind, EntityKind::Leader(_))).unwrap().kind else { panic!("leader") };
+    assert!(l.vertices.iter().all(|v| v.z == 0.0) && l.frame.is_none(), "no canonical import is active");
+    let tags = vec![Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(10, 1.0)];
+    assert!(cadcraft_io::canonical_curve_from_groups("LEADER", &tags).is_none(), "the vertex coordinates must match in count");
+}
+
+// Old serialized SPLINE and LEADER payloads.
+
+use cadcraft_doc::{Promotion, promote_legacy_spline_leader};
+
+/// An entity as an old document stored it: the JSON of a legacy payload, with no revision and no spatial fields.
+fn old_entity(kind: EntityKind, normal: Vec3) -> Entity {
+    let mut e = Entity::new(cadcraft_doc::Handle(0x100), kind);
+    e.common = Common { extrusion: normal, ..Common::default() };
+    let mut json = serde_json::to_value(&e).unwrap();
+    let object = json.as_object_mut().unwrap();
+    assert!(object.remove("geometryRevision").is_some() || e.geometry_revision == GeometryRevision::LegacyProjectedV1);
+    let back: Entity = serde_json::from_value(json).unwrap();
+    assert_eq!(back, e, "an old payload opens as the legacy entity it was");
+    back
+}
+
+fn legacy_spline() -> cadcraft_geom::Spline {
+    cadcraft_geom::Spline { space: None, fit: vec![Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0)], ..spline() }
+}
+
+fn legacy_leader() -> cadcraft_doc::Leader {
+    cadcraft_doc::Leader { frame: None, vertices: vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(3.0, 1.0, 0.0)], ..leader() }
+}
+
+fn drawing_of(e: &Entity) -> Drawing {
+    let mut d = Drawing::new_metric();
+    d.model.push(e.clone());
+    d
+}
+
+/// The groups of the record without its plane groups, which only the canonical writer adds.
+fn without_plane(g: Vec<(i32, String)>) -> Vec<(i32, String)> {
+    g.into_iter().filter(|(c, _)| !matches!(c, 210 | 220 | 230)).collect()
+}
+
+#[test]
+fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_resave() {
+    for normal in [Vec3::Z, Vec3::new(0.0, 0.0, 2.0)] {
+        let mut e = old_entity(EntityKind::Spline(legacy_spline()), normal);
+        let before = without_plane(groups(&dxf(&drawing_of(&e)), "SPLINE"));
+        assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
+        assert_eq!(e.geometry_revision, GeometryRevision::CanonicalV2);
+        let EntityKind::Spline(s) = &e.kind else { panic!("spline") };
+        assert_eq!(s.space.as_ref().unwrap().control, vec![0.0; 3], "promoted at Z = 0");
+        // Resaved by the canonical writer: every number is the text the legacy writer wrote (only the planar flag may
+        // differ, and it stays set because the controls lie in the plane).
+        let after = groups(&dxf(&drawing_of(&e)), "SPLINE");
+        assert_eq!(point(&after, 210), Some(normal), "the plane is kept as it was");
+        assert_eq!(without_plane(after), before, "{normal:?}: identical groups after promotion and resave");
+        // And the canonical reader returns the same XY bits.
+        let (_, kind) = cadcraft_io::canonical_curve_from_groups("SPLINE", &record(&dxf(&drawing_of(&e)), "SPLINE")).unwrap();
+        let EntityKind::Spline(read) = kind else { panic!("spline") };
+        assert_eq!((read.control, read.knots, read.weights, read.fit), (s.control.clone(), s.knots.clone(), s.weights.clone(), s.fit.clone()));
+    }
+}
+
+#[test]
+fn an_old_plus_z_leader_keeps_its_vertices_bit_for_bit_after_promotion_and_resave() {
+    let mut e = old_entity(EntityKind::Leader(legacy_leader()), Vec3::Z);
+    let before = groups(&dxf(&drawing_of(&e)), "LEADER");
+    assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
+    let after = groups(&dxf(&drawing_of(&e)), "LEADER");
+    let vertex_groups = |g: &[(i32, String)]| g.iter().filter(|(c, _)| matches!(c, 10 | 20 | 30 | 3 | 71 | 72 | 76)).cloned().collect::<Vec<_>>();
+    assert_eq!(vertex_groups(&after), vertex_groups(&before), "identical vertices and flags after promotion and resave");
+    let EntityKind::Leader(l) = &e.kind else { panic!("leader") };
+    assert_eq!(l.vertices, legacy_leader().vertices);
+    assert_eq!(l.frame.as_ref().unwrap().direction, Vec3::new(1.0, 0.0, 0.0));
+}
+
+#[test]
+fn an_old_non_plus_z_payload_stays_legacy_opens_saves_unchanged_and_a_refused_edit_changes_nothing() {
+    for (kind, normal) in
+        [(EntityKind::Spline(legacy_spline()), Vec3::new(0.0, 0.0, -1.0)), (EntityKind::Leader(legacy_leader()), Vec3::new(0.0, 3.0, 4.0))]
+    {
+        let mut e = old_entity(kind, normal);
+        let original = e.clone();
+        let saved = dxf(&drawing_of(&e));
+        assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::KeptLegacy);
+        assert_eq!(e, original, "nothing changed");
+        assert_eq!(dxf(&drawing_of(&e)), saved, "saves as before");
+        // A spatial edit has no legacy form: refused, and the entity is as it was.
+        let (s, c) = 0.4f64.sin_cos();
+        let rx = cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, c, -s, 0.0], [0.0, s, c, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        assert!(e.try_transform(&rx).is_err());
+        assert_eq!(e, original, "a refused edit changes nothing");
+        // A planar legacy edit still works as it does today.
+        let shift = cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        assert!(e.try_transform(&shift).is_ok());
+        assert_ne!(e, original);
+    }
+}
+
+#[test]
+fn promotion_leaves_other_payloads_and_canonical_ones_alone() {
+    let mut line = Entity::new(cadcraft_doc::Handle(1), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 1.0 }));
+    assert_eq!(promote_legacy_spline_leader(&mut line), Promotion::NotApplicable);
+    let mut canonical = Entity::new(cadcraft_doc::Handle(2), EntityKind::Spline(spline()));
+    canonical.geometry_revision = GeometryRevision::CanonicalV2;
+    assert_eq!(promote_legacy_spline_leader(&mut canonical), Promotion::NotApplicable);
+}
+
+#[test]
+fn an_unknown_geometry_revision_still_refuses_to_open() {
+    let e = Entity::new(cadcraft_doc::Handle(3), EntityKind::Spline(legacy_spline()));
+    let mut json = serde_json::to_value(&e).unwrap();
+    json.as_object_mut().unwrap().insert("geometryRevision".into(), serde_json::json!("FutureV9"));
+    assert!(serde_json::from_value::<Entity>(json).is_err());
+}
