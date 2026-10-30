@@ -550,10 +550,17 @@ fn group_rank(order: &[i32], code: i32) -> usize {
 /// source's groups (the versioned presentation groups, the geometry, the properties) each place theirs, and AutoCAD refuses a file
 /// whose version group (280) does not follow a dimension's subclass marker ("unexpected DXF group code: 280"). A multiline text's
 /// embedded object (after its 101) and the xdata are not subclass groups.
-pub(crate) fn order_subclass_groups(tags: &mut [Tag]) {
+pub(crate) fn order_subclass_groups(tags: &mut [Tag], d: &Drawing) {
+    let raw = raw_handles(d);
+    let mut raw_record = false;
     let mut at = 0;
     while at < tags.len() {
-        if tags[at].code != 100 {
+        if tags[at].code == 0 {
+            let start = at + 1;
+            let stop = tags[start..].iter().position(|tag| tag.code == 0).map_or(tags.len(), |offset| start + offset);
+            raw_record = head(&tags[start..stop]).handle.is_some_and(|handle| raw.contains(&handle));
+        }
+        if raw_record || tags[at].code != 100 {
             at += 1;
             continue;
         }
@@ -571,9 +578,9 @@ pub(crate) fn order_subclass_groups(tags: &mut [Tag]) {
 /// the drawing came from gave them, wherever a group names one: the written handle of a role the
 /// file had becomes the file's, unless another record of the written file already has it. A role
 /// the file did not have keeps its new handle.
-pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
+pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) -> BTreeMap<Handle, Handle> {
     if d.source_symbols.handles.is_empty() {
-        return;
+        return BTreeMap::new();
     }
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
@@ -591,7 +598,7 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
         })
         .collect();
     if renamed.is_empty() {
-        return;
+        return BTreeMap::new();
     }
     let mut section = String::new();
     let mut opening = false;
@@ -610,13 +617,14 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
             continue;
         }
         // The header's group 5 is the next free handle, not a record's.
-        if !(is_pointer(t.code) || matches!(t.code, 5 | 105) && section != "HEADER") {
+        if !(crate::dxf_write::raw_reference(t.code) || matches!(t.code, 5 | 105) && section != "HEADER") {
             continue;
         }
         if let Some(new) = renamed.get(&norm(&t.str())) {
             *t = Tag::s(t.code, new.clone());
         }
     }
+    renamed.iter().filter_map(|(old, new)| Some((Handle::parse_hex(old)?, Handle::parse_hex(new)?))).collect()
 }
 
 /// Other applications' xdata of a record of type `kind`: whole applications, each with valid
@@ -1349,6 +1357,23 @@ fn written_records(tags: &[Tag]) -> Vec<Rec> {
     out
 }
 
+/// Identity remapping for a later, independent raw-preservation check.
+#[derive(Default)]
+pub(crate) struct WrittenReferences {
+    pub handles: BTreeMap<Handle, Handle>,
+    pub roles: BTreeMap<ForeignKey, Handle>,
+}
+
+impl WrittenReferences {
+    pub fn restore(&mut self, restored: &BTreeMap<Handle, Handle>) {
+        for handle in self.handles.values_mut().chain(self.roles.values_mut()) {
+            if let Some(source) = restored.get(handle) {
+                *handle = *source;
+            }
+        }
+    }
+}
+
 /// Remaps the kept data's handles onto a written file.
 struct Map<'a> {
     f: &'a Foreign,
@@ -1375,6 +1400,17 @@ struct Map<'a> {
 }
 
 impl Map<'_> {
+    fn written_references(&self) -> WrittenReferences {
+        if self.raw.is_empty() {
+            return WrittenReferences::default();
+        }
+        let mut handles: BTreeMap<Handle, Handle> =
+            self.alive.iter().filter_map(|(old, new)| Some((Handle::parse_hex(old)?, Handle::parse_hex(new)?))).collect();
+        handles.extend(self.f.targets.keys().filter_map(|old| Some((*old, Handle::parse_hex(&self.get(&old.hex())?)?))));
+        let roles = self.roles.iter().filter_map(|(role, value)| Some((role.clone(), Handle::parse_hex(value)?))).collect();
+        WrittenReferences { handles, roles }
+    }
+
     fn write_record(
         &self,
         record_info: &Rec,
@@ -1859,7 +1895,7 @@ fn declared_version(tags: &[Tag], dwg_bridge: bool) -> u32 {
 }
 
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
-pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) {
+pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) -> WrittenReferences {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
     let f = public.as_ref().unwrap_or(&d.foreign);
     let opaque = raw_handles(d);
@@ -1871,7 +1907,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         // No kept object a header pointer could name.
         remap_header_pointers(tags, |_| "0".into());
         remap_table_fields(tags, |_| None);
-        return;
+        return WrittenReferences::default();
     }
     // APPID roles must exist before handle remapping, not only after foreign xdata is emitted.
     let apps = f
@@ -2079,6 +2115,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     remap_header_pointers(&mut out, |h| map.get(h).unwrap_or_else(|| "0".into()));
     remap_table_fields(&mut out, |h| map.get(h).filter(|n| n != "0"));
     *tags = out;
+    map.written_references()
 }
 
 /// Where the entities of types CADCraft doesn't model go: each before the next written entity of
