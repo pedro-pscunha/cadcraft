@@ -41,8 +41,16 @@ pub struct DPrim {
     pub len: u32,
 }
 
+/// A canonical object whose display geometry refuses. The source drawing remains unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeometryRefusal {
+    pub handle: Handle,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DisplayList {
+    pub geometry_refusals: Vec<GeometryRefusal>,
     pub prims: Vec<DPrim>,
     pub verts: Vec<Vec2>,
     pub tris: Vec<Vec2>,
@@ -107,6 +115,18 @@ pub fn alpha(transparency: u8) -> u8 {
 pub const MAX_TRANSPARENCY: u8 = 90;
 
 impl DisplayList {
+    /// Refuse an export when any source object lacks supported display geometry.
+    pub fn require_complete_geometry(&self) -> cadcraft_doc::Result<()> {
+        if let Some(refusal) = self.geometry_refusals.first() {
+            return Err(cadcraft_doc::DocError::Invalid(format!(
+                "Entity {} has no complete display geometry: {}",
+                refusal.handle.hex(),
+                refusal.reason
+            )));
+        }
+        Ok(())
+    }
+
     pub fn segment_count(&self) -> usize {
         self.prims.iter().filter(|p| p.kind == Kind::Polyline).map(|p| p.len.saturating_sub(1) as usize).sum()
     }
@@ -149,6 +169,7 @@ pub(crate) fn append(dst: &mut DisplayList, src: DisplayList) {
         t
     }));
     dst.pens.extend(src.pens);
+    dst.geometry_refusals.extend(src.geometry_refusals);
     dst.bounds = dst.bounds.union(&src.bounds);
     dst.expanded = dst.expanded.saturating_add(src.expanded);
 }

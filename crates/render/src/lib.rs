@@ -25,11 +25,12 @@ mod tolerance;
 pub mod units;
 mod wide;
 mod world_geometry;
+mod world_paint;
 pub use world_geometry::entity_world_geometry;
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Lineweight, Prim, Space};
-use cadcraft_geom::{Bounds2, Mat3, Polyline, Vec2};
+use cadcraft_geom::{Bounds2, Mat3, Mat4, Polyline, Vec2};
 use pen::Pen;
 
 pub use dim::{ArrowGeom, Arrowhead, DimGeometry, DimText, LineRole, arrowhead, dimension_geometry, dimension_geometry_with, format_linear_value};
@@ -85,6 +86,7 @@ fn max_scale(m: &Mat3) -> f64 {
 struct Ctx<'a> {
     d: &'a Drawing,
     xf: Mat3,
+    world: Mat4,
     block_color: Color,
     block_layer: Option<String>,
     block_lw: Lineweight,
@@ -314,7 +316,7 @@ mod text_entity;
 mod viewports;
 
 pub use dim_draw::{dim_text, dimension_in, dimension_layout, mleader_arrow_layout};
-pub use display::{DPrim, DisplayList, Kind, MAX_TRANSPARENCY, NO_LAYER, PlotText, VIEWPORT_CONTENT, alpha};
+pub use display::{DPrim, DisplayList, GeometryRefusal, Kind, MAX_TRANSPARENCY, NO_LAYER, PlotText, VIEWPORT_CONTENT, alpha};
 pub use pipeline::{Options, build, build_entities, build_plot};
 use props::{default_lineweight, resolve_common};
 use text_entity::text_style;

@@ -87,6 +87,7 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
     let ropts = cadcraft_render::Options { tolerance, lineweights, plot_style_table: table, transparency, ..cadcraft_render::Options::default() };
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
+    list.require_complete_geometry().map_err(|error| IoError::Format(error.to_string()))?;
     let half = Vec2::new(f64::from(width), f64::from(height)) / (2.0 * k);
     let b = window.unwrap_or(list.bounds);
     let s = if fit { fit_scale(&b, &sheet, &o) } else { 1.0 };
@@ -111,7 +112,7 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let Space::Model = space else {
         let (sheet, page) = sheet(d, space, &o)?;
         let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-        return Ok(crate::svg::export_window_with(d, space, Some(sheet.bounds()), transparency).into_bytes());
+        return Ok(crate::svg::export_window_with(d, space, Some(sheet.bounds()), transparency)?.into_bytes());
     };
     // Model space as plotted: the plot style table, lineweights, and the table's ends, joins and
     // fills at the scale that fits the window (or the extents) on the device's paper.
@@ -128,7 +129,7 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
     let s = fit_scale(&window.unwrap_or(list.bounds), &sheet, &o);
     cadcraft_render::pen::apply(&mut list, s * sheet.unit_mm);
-    Ok(crate::svg::export_list(&list, window).into_bytes())
+    Ok(crate::svg::export_list(&list, window)?.into_bytes())
 }
 
 #[cfg(test)]

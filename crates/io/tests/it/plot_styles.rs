@@ -43,9 +43,9 @@ fn layout_svg_follows_display_plot_styles() {
     let mut d = layout_with_red_line();
     d.layouts[0].page.plot_style_table = "monochrome.ctb".into();
     let space = Space::Paper("Layout1".into());
-    assert!(svg::export(&d, &space).contains("#ff0000"));
+    assert!(svg::export(&d, &space).unwrap().contains("#ff0000"));
     d.layouts[0].page.show_plot_styles = true;
-    let s = svg::export(&d, &space);
+    let s = svg::export(&d, &space).unwrap();
     assert!(!s.contains("#ff0000") && s.contains("#000000"), "{s}");
 }
 

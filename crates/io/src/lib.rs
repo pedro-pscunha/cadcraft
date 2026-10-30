@@ -146,7 +146,7 @@ pub fn write_framed(d: &Drawing, name: impl AsRef<Path>, window: Option<Bounds2>
     }
     match format {
         Some(Format::Dxf | Format::Dwg) => write_with(d, name, &SaveOptions::default()),
-        Some(Format::Svg) => Ok(svg::export_window(d, &Space::Model, window).into_bytes()),
+        Some(Format::Svg) => Ok(svg::export_window(d, &Space::Model, window)?.into_bytes()),
         Some(Format::Png) => png_framed(d, &Space::Model, 2400, 1600, window),
         Some(Format::Pdf) => pdf::pdf(d, &Space::Model, &PdfOptions { compress: true, window, ..PdfOptions::default() }),
         _ => Err(IoError::Unsupported(ext(name))),
@@ -191,6 +191,7 @@ pub fn png(d: &Drawing, space: &Space, width: u32, height: u32) -> Result<Vec<u8
 /// screen.
 pub fn png_framed(d: &Drawing, space: &Space, width: u32, height: u32, window: Option<Bounds2>) -> Result<Vec<u8>> {
     let list = cadcraft_render::build(d, space, &cadcraft_render::Options { transparency: true, ..cadcraft_render::Options::default() });
+    list.require_complete_geometry().map_err(|error| IoError::Format(error.to_string()))?;
     let view = png_view(&list.bounds, width, height, window);
     cadcraft_render::raster::render_png(&list, &view, &cadcraft_render::raster::RasterOptions::default())
         .ok_or_else(|| IoError::Format("render failed".into()))
