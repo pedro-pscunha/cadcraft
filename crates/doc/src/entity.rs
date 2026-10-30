@@ -458,10 +458,22 @@ impl EntityKind {
             }
             EntityKind::Hatch(h) => {
                 for l in &mut h.loops {
+                    // Exact edges follow the map when they can keep their types, else the loop is written from its vertices.
+                    let edges = l.exact_edges().and_then(|edges| edges.iter().map(|e| e.transformed(m)).collect::<Option<Vec<_>>>());
                     for v in &mut l.vertices {
                         v.p = m.apply(v.p);
                         if mirror {
                             v.bulge = -v.bulge;
+                        }
+                    }
+                    match edges {
+                        Some(edges) => {
+                            l.edges = edges;
+                            l.edge_vertices.clone_from(&l.vertices);
+                        }
+                        None => {
+                            l.edges.clear();
+                            l.edge_vertices.clear();
                         }
                     }
                 }

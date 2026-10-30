@@ -18,6 +18,63 @@ pub struct HatchLoop {
     /// The exact boundary edges of a canonical loop, in the record's order. When they are set `vertices` is empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edges: Vec<HatchEdge>,
+    /// A legacy loop that came from edges: the `vertices` when `edges` were read. `edges` still describe the loop only while
+    /// `vertices` are these (an edit of the vertices makes the exact edges stale, and the loop is written from its vertices).
+    /// Empty for a canonical loop, whose `edges` are the loop, and for a loop with no exact edges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edge_vertices: Vec<PolyVertex>,
+}
+
+impl HatchLoop {
+    /// The exact edges that describe this loop: those of a canonical loop (no vertices), or of a legacy loop whose vertices are
+    /// still the ones its edges were read with. `None` for a loop written from its vertices.
+    pub fn exact_edges(&self) -> Option<&[HatchEdge]> {
+        (!self.edges.is_empty() && (self.vertices.is_empty() || self.vertices == self.edge_vertices)).then_some(self.edges.as_slice())
+    }
+}
+
+impl HatchEdge {
+    /// This edge after the 2D map `m`, or `None` when the edge cannot keep its type under it: lines and splines follow any
+    /// affine map; arcs, ellipses and polyline edges need a similarity (a rotation, uniform scale and reflection). A reflection
+    /// reverses the direction of an arc or ellipse, so its angles mirror about the image of the X axis and `ccw` flips.
+    pub fn transformed(&self, m: &cadcraft_geom::Mat3) -> Option<HatchEdge> {
+        let k = m.scale_factor();
+        let (a, b, c, d) = (m.a, m.b, m.c, m.d);
+        let similar = ((a * c + b * d).abs() <= 1e-9 * k * k) && ((a * a + b * b - c * c - d * d).abs() <= 1e-9 * k * k);
+        let mirror = m.is_mirroring();
+        let delta = m.rotation();
+        let turn = |angle: f64| if mirror { delta - angle } else { angle + delta };
+        Some(match self {
+            HatchEdge::Line { a, b } => HatchEdge::Line { a: m.apply(*a), b: m.apply(*b) },
+            HatchEdge::Arc { center, radius, start, end, ccw } if similar => {
+                HatchEdge::Arc { center: m.apply(*center), radius: radius * k, start: turn(*start), end: turn(*end), ccw: ccw ^ mirror }
+            }
+            HatchEdge::Ellipse { center, major, ratio, start, end, ccw } if similar => {
+                let (start, end) = if mirror { (-start, -end) } else { (*start, *end) };
+                HatchEdge::Ellipse { center: m.apply(*center), major: m.apply_vec(*major), ratio: *ratio, start, end, ccw: ccw ^ mirror }
+            }
+            HatchEdge::Spline(sp) => HatchEdge::Spline(HatchSpline {
+                control: sp.control.iter().map(|p| m.apply(*p)).collect(),
+                fit: sp.fit.iter().map(|p| m.apply(*p)).collect(),
+                start_tangent: m.apply_vec(sp.start_tangent),
+                end_tangent: m.apply_vec(sp.end_tangent),
+                ..sp.clone()
+            }),
+            HatchEdge::Polyline { vertices, closed } if similar => HatchEdge::Polyline {
+                vertices: vertices
+                    .iter()
+                    .map(|v| PolyVertex {
+                        p: m.apply(v.p),
+                        start_width: v.start_width * k,
+                        end_width: v.end_width * k,
+                        bulge: if mirror { -v.bulge } else { v.bulge },
+                    })
+                    .collect(),
+                closed: *closed,
+            },
+            _ => return None,
+        })
+    }
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -121,7 +178,7 @@ impl Hatch {
     /// boundary, a seed point it left outside is dropped. The loops of a canonical hatch (exact edges) only move, turn and
     /// scale with their seed points, so all of them stay.
     pub fn kept_seed_points(&self) -> Vec<Vec2> {
-        if self.loops.iter().any(|l| !l.edges.is_empty()) {
+        if self.loops.iter().any(|l| l.vertices.is_empty() && !l.edges.is_empty()) {
             return self.seed_points.clone();
         }
         let loops: Vec<cadcraft_geom::Polyline> =

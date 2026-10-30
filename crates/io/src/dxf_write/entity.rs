@@ -751,10 +751,10 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
 }
 
 /// A canonical loop: its flags and exact edges as its record held them (DXF Reference, HATCH group codes 92 to 74).
-fn canonical_loop(w: &mut W, l: &cadcraft_doc::HatchLoop, cx: &Ctx) {
+fn canonical_loop(w: &mut W, l: &cadcraft_doc::HatchLoop, edges: &[cadcraft_doc::HatchEdge], cx: &Ctx) {
     use cadcraft_doc::HatchEdge;
     w.i(92, i64::from(l.flags));
-    if let [HatchEdge::Polyline { vertices, closed }] = l.edges.as_slice() {
+    if let [HatchEdge::Polyline { vertices, closed }] = edges {
         let has_bulge = vertices.iter().any(|v| v.bulge != 0.0);
         w.i(72, i64::from(has_bulge));
         w.i(73, i64::from(*closed));
@@ -767,8 +767,8 @@ fn canonical_loop(w: &mut W, l: &cadcraft_doc::HatchLoop, cx: &Ctx) {
         }
         return;
     }
-    w.i(93, l.edges.len() as i64);
-    for edge in &l.edges {
+    w.i(93, edges.len() as i64);
+    for edge in edges {
         match edge {
             HatchEdge::Line { a, b } => {
                 w.i(72, 1);
@@ -836,8 +836,11 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
         w.i(71, i64::from(h.associative));
         w.i(91, h.loops.len() as i64);
         for l in &h.loops {
-            if l.edges.is_empty() {
-                w.i(92, 2 | if l.outer { 1 } else { 0 });
+            if let Some(edges) = l.exact_edges() {
+                canonical_loop(w, l, edges, cx);
+            } else {
+                // Loop type flags beyond external and polyline (derived, text box, outermost) stay as the file had them.
+                w.i(92, i64::from(l.flags & !1) | 2 | i64::from(l.outer));
                 let has_bulge = l.vertices.iter().any(|v| v.bulge != 0.0);
                 w.i(72, i64::from(has_bulge));
                 w.i(73, 1);
@@ -848,8 +851,6 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
                         w.f(42, v.bulge);
                     }
                 }
-            } else {
-                canonical_loop(w, l, cx);
             }
             // Source boundary objects of an associative hatch (the ones still beside it, in
             // its space or block, which carry the hatch as a reactor).
