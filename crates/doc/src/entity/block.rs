@@ -213,6 +213,9 @@ pub struct AttribProps {
     /// A plot style name, or ByBlock (see `Common::plot_style`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plot_style: Option<String>,
+    /// Whether the attribute is shown (its own group 60), independently of its definition's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
 }
 
 impl AttribProps {
@@ -228,6 +231,7 @@ impl AttribProps {
             linetype: self.linetype.clone().unwrap_or_else(|| base.linetype.clone()),
             lineweight: self.lineweight.unwrap_or(base.lineweight),
             plot_style: self.plot_style.clone().unwrap_or_else(|| base.plot_style.clone()),
+            visible: self.visible.unwrap_or(base.visible),
             ..base.clone()
         }
     }

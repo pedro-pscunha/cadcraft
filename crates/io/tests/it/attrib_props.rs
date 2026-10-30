@@ -45,7 +45,7 @@ fn drawing(attribs: Vec<Attrib>) -> (Drawing, Handle) {
     .into_iter()
     .enumerate()
     {
-        let e = Entity::new(Handle(0x100 + i as u64), EntityKind::AttDef(attrib(tag, 0.0, AttribProps::default())));
+        let e = Entity::new(Handle(0x7000 + i as u64), EntityKind::AttDef(attrib(tag, 0.0, AttribProps::default())));
         blk.entities.push(Entity { common, ..e });
     }
     d.blocks.insert(blk.name.clone(), Arc::new(blk));
@@ -80,6 +80,7 @@ fn attribute_properties_roundtrip() {
         linetype: Some("DASHED".into()),
         lineweight: Some(Lineweight::Mm100(50)),
         plot_style: Some("ByBlock".into()),
+        visible: Some(false),
     };
     let red = AttribProps { color: Some(Color::ByLayer), ..AttribProps::default() };
     let (d, h) = drawing(vec![attrib("OWN", 0.0, own.clone()), attrib("DEFLAYER", 10.0, AttribProps::default()), attrib("RED", 20.0, red.clone())]);
@@ -112,4 +113,30 @@ fn hostile_attrib_groups_do_not_panic() {
     let p = &i.attribs.first().expect("attrib").props;
     assert_eq!((p.layer.as_deref(), p.linetype.as_deref()), (None, None), "empty names are not properties");
     let _ = write_dxf(&d);
+}
+
+#[test]
+fn an_attribute_on_layer_zero_and_one_hidden_by_itself_keep_both_in_dxf_and_dwg() {
+    // OWN: an ATTRIB of a reference on layer INS that is itself on layer 0 (not the reference's) and hidden (group 60) although
+    // its definition is shown; DEFLAYER: untouched.
+    let own = AttribProps { layer: Some("0".into()), visible: Some(false), ..AttribProps::default() };
+    let (d, h) = drawing(vec![attrib("OWN", 0.0, own.clone()), attrib("DEFLAYER", 10.0, AttribProps::default())]);
+    let text = write_dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).expect("parse");
+    let section = cadcraft_dxf::sections(&tags).into_iter().find(|s| s.name == "ENTITIES").expect("entities");
+    let records = cadcraft_dxf::records(&section.tags);
+    let attribs: Vec<&Vec<cadcraft_dxf::Tag>> = records.iter().filter(|(k, _)| k == "ATTRIB").map(|(_, t)| t).collect();
+    let group = |t: &Vec<cadcraft_dxf::Tag>, code: i32| t.iter().find(|g| g.code == code).map(|g| g.str());
+    assert_eq!((group(attribs[0], 8).as_deref(), group(attribs[0], 60).as_deref()), (Some("0"), Some("1")));
+    assert_eq!((group(attribs[1], 8).as_deref(), group(attribs[1], 60)), (Some("TXT"), None));
+    for reopened in [reopened_attribs(&d, h), {
+        let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+        match &back.model.iter().next().expect("insert").kind {
+            EntityKind::Insert(i) => i.attribs.clone(),
+            k => panic!("not an insert: {k:?}"),
+        }
+    }] {
+        assert_eq!((reopened[0].props.layer.as_deref(), reopened[0].props.visible), (Some("0"), Some(false)), "{:?}", reopened[0].props);
+        assert_eq!(reopened[1].props.visible, None);
+    }
 }

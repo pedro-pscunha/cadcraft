@@ -451,8 +451,8 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 let (c, base) = attrib_common(d, e, i, a);
                 layer_and_props(w, &c, Some(&base));
                 plot_style(w, &c.plot_style);
-                // Hidden with its definition (a dynamic block's visibility state hides it).
-                if !base.visible {
+                // Hidden as the attribute is: its own visibility, else its definition's (a dynamic block's visibility state hides it).
+                if !c.visible {
                     w.i(60, 1);
                 }
                 w.s(100, "AcDbText");
