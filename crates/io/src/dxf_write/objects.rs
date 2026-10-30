@@ -132,6 +132,17 @@ pub(super) fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str
     w.i(273, s.attach_bottom);
 }
 
+/// The key of each scale in the scale list: the one it had in its file, else the next free key of
+/// AutoCAD's own series (`A0`..`A9`, `B0`..`B9`, and so on). A key the list already uses is not given twice.
+fn scale_keys(scales: &[(&cadcraft_doc::AnnoScale, String)]) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    let mut keys: Vec<Option<String>> =
+        scales.iter().map(|(s, _)| Some(s.key.clone()).filter(|k| !k.is_empty() && used.insert(k.to_lowercase()))).collect();
+    // ponytail: past 260 scales the letter runs out of the alphabet and the key is `S<n>`.
+    let mut series = (0usize..).map(|n| if n < 260 { format!("{}{}", char::from(b'A' + (n / 10) as u8), n % 10) } else { format!("S{n}") });
+    keys.iter_mut().map(|key| key.take().unwrap_or_else(|| series.by_ref().find(|k| used.insert(k.to_lowercase())).unwrap_or_default())).collect()
+}
+
 /// The ACAD_SCALELIST dictionary and its SCALE objects (DXF Reference, OBJECTS section): name
 /// (300), paper units (140), drawing units (141), unit scale flag (290).
 pub(super) fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)], dict: &str, root: &str) {
@@ -141,8 +152,8 @@ pub(super) fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)
     w.s(330, root);
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
-    for (i, (_, h)) in scales.iter().enumerate() {
-        w.s(3, format!("S{i}"));
+    for (key, (_, h)) in scale_keys(scales).into_iter().zip(scales) {
+        w.s(3, key);
         w.s(350, h.clone());
     }
     for (s, h) in scales {

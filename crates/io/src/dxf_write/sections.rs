@@ -1067,14 +1067,16 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     // The annotation scale list: the ACAD_SCALELIST dictionary of SCALE objects.
     let scale_dict = w.h();
     let scales: Vec<(&cadcraft_doc::AnnoScale, String)> = d.scales.iter().filter(|s| s.is_valid()).map(|s| (s, w.h())).collect();
-    // Plot style names used by layers and objects (Normal always), each a placeholder object.
+    // Plot style names of the file and the ones layers and objects use (Normal always), each a
+    // placeholder object. The file's entries stay, the logical ByLayer and ByBlock among them
+    // (AutoCAD lists a ByLayer placeholder nothing points at); an entity names no placeholder for those.
     let pstyle_dict = w.h();
     let mut pstyle_names: Vec<String> = vec![cadcraft_doc::NORMAL_STYLE.to_string()];
-    let named = d
-        .plot_style_names
+    let logical = |n: &str| ["", "bylayer", "byblock", "bydictionarydefault"].iter().any(|l| n.eq_ignore_ascii_case(l));
+    let used = d
+        .layers
         .iter()
-        .map(String::as_str)
-        .chain(d.layers.iter().map(|l| l.plot_style.as_str()))
+        .map(|l| l.plot_style.as_str())
         .chain(every.iter().map(|e| e.common.plot_style.as_str()))
         .chain(
             every
@@ -1082,16 +1084,16 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
                 .filter_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i) } else { None })
                 .flat_map(|i| &i.attribs)
                 .filter_map(|a| a.props.plot_style.as_deref()),
-        );
-    for n in named {
+        )
+        .filter(|n| !logical(n.trim()));
+    for n in d.plot_style_names.iter().map(String::as_str).chain(used) {
         let n = n.trim();
-        let logical = ["", "bylayer", "byblock", "bydictionarydefault"].iter().any(|l| n.eq_ignore_ascii_case(l));
-        if !logical && pstyle_names.len() < dxf_ext::MAX_PLOT_STYLE_NAMES && !pstyle_names.iter().any(|x| x.eq_ignore_ascii_case(n)) {
+        if !n.is_empty() && pstyle_names.len() < dxf_ext::MAX_PLOT_STYLE_NAMES && !pstyle_names.iter().any(|x| x.eq_ignore_ascii_case(n)) {
             pstyle_names.push(n.to_string());
         }
     }
     let pstyles: Vec<(String, String)> = pstyle_names.into_iter().map(|n| (n, w.h())).collect();
-    w.pstyles = pstyles.iter().map(|(n, h)| (n.to_ascii_uppercase(), h.clone())).collect();
+    w.pstyles = pstyles.iter().filter(|(n, _)| !logical(n)).map(|(n, h)| (n.to_ascii_uppercase(), h.clone())).collect();
     let model_layout = w.h();
     let layout_handles: Vec<String> = ps_brs.iter().map(|_| w.h()).collect();
 
