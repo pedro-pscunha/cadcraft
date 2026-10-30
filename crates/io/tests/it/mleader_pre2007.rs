@@ -8,7 +8,7 @@ use cadcraft_doc::{
 };
 use cadcraft_dxf::{Tag, Version, records, sections};
 use cadcraft_geom::{Mat4, Vec3};
-use cadcraft_io::{SaveOptions, write_with};
+use cadcraft_io::{SaveOptions, write_with, write_with_noted};
 
 /// The plane of every point: X along the world X axis, Y up (0, 0.6, 0.8); its normal is X cross Y.
 const NORMAL: Vec3 = Vec3 { x: 0.0, y: -0.8, z: 0.6 };
@@ -265,4 +265,23 @@ fn a_legacy_multileader_splits_as_before() {
     let parts = entities(&d);
     assert_eq!(parts.iter().filter(|(k, _)| k == "LEADER").count(), 3, "no dogleg part for a legacy payload");
     assert!(parts.iter().all(|(_, t)| t.iter().all(|g| g.code != 210)), "a legacy part has no plane");
+}
+
+#[test]
+fn the_attributes_left_out_by_a_non_uniform_scale_are_a_note_of_the_save() {
+    let m = leader(Some(Vec3::new(1.5, 2.0, 0.5)));
+    let d = drawing(&m);
+    let handle = d.model.iter().next().unwrap().handle;
+    let note = format!("MULTILEADER {}: 1 block attribute(s) left out", handle.hex());
+    // A DXF and a DWG before R2007 report it; a uniform scale and a file from R2007 on do not.
+    for name in ["x.dxf", "x.dwg"] {
+        let (_, notes) = write_with_noted(&d, name, &SaveOptions { version: Some(Version::R2004), binary: false }).unwrap();
+        assert!(notes.iter().any(|n| n.starts_with(&note)), "{name}: {notes:?}");
+        let (_, notes) = write_with_noted(&d, name, &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap();
+        assert!(notes.iter().all(|n| !n.contains("MULTILEADER")), "{name}: {notes:?}");
+    }
+    let (_, notes) =
+        write_with_noted(&drawing(&leader(Some(Vec3::new(2.0, 2.0, 2.0)))), "x.dxf", &SaveOptions { version: Some(Version::R2004), binary: false })
+            .unwrap();
+    assert!(notes.is_empty(), "{notes:?}");
 }

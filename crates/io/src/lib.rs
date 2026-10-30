@@ -106,7 +106,7 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
             } else {
                 cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes()
             };
-            Ok((bytes, Vec::new()))
+            Ok((bytes, dxf_write::omitted_notes(d, version)))
         }
         // The DWG bridge reads our R2000 DXF and writes the DWG at the version asked for. Without
         // one, at least 2004: R2000 DWG has no true colours, transparency, table styles or
@@ -116,7 +116,10 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
             let page = d.header.str("DWGCODEPAGE", "ANSI_1252");
             let page = page.trim();
             let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
-            cadcraft_dwg::dxf_to_dwg_as_noted(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)
+            let (bytes, mut notes) =
+                cadcraft_dwg::dxf_to_dwg_as_noted(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)?;
+            notes.extend(dxf_write::omitted_notes(d, version));
+            Ok((bytes, notes))
         }
         _ if opts.binary => Err(IoError::Format(format!("binary output is for DXF files, not `{}`", ext(name)))),
         _ => write_framed(d, name, None).map(|bytes| (bytes, Vec::new())),

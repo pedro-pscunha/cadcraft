@@ -171,6 +171,34 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false)
 }
 
+/// Notes for what a save at `target` leaves out of the multileaders that are split into parts (a file before R2007 has no
+/// MULTILEADER): the block attributes of a canonical multileader whose block matrix places no text exactly (a non-uniform
+/// scale), by multileader handle and count.
+pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
+    if target >= Version::R2007 {
+        return Vec::new();
+    }
+    let style = d.header.str("DIMSTYLE", "Standard");
+    let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
+    spaces
+        .flat_map(|s| s.iter())
+        .filter(|e| e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2)
+        .filter_map(|e| {
+            let EntityKind::MLeader(m) = &e.kind else { return None };
+            let base = m.block.as_ref().and_then(|b| d.block(&b.block)).map_or(cadcraft_geom::Vec3::ZERO, |b| b.base);
+            let parts = m.split_canonical(&style, base).ok()?;
+            let kept = parts.block.as_ref().map_or(0, |(i, _)| i.attribs.len());
+            let left_out = m.block.as_ref().map_or(0, |b| b.attribs.len()).saturating_sub(kept);
+            (left_out > 0).then(|| {
+                format!(
+                    "MULTILEADER {}: {left_out} block attribute(s) left out of the file: its block scale is not uniform, so no attribute text is exact before AutoCAD 2007.",
+                    e.handle.hex()
+                )
+            })
+        })
+        .collect()
+}
+
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's (MULTILEADER from 2007). Its text is in the Windows single-byte page it declares,
 /// so the bridge stores representable characters rather than their literal Unicode escapes.
