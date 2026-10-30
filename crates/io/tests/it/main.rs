@@ -113,6 +113,7 @@ mod tablestyle_border_dwg;
 mod tablestyle_cell_order;
 mod tablestyle_true_colors;
 mod text_canonical;
+mod text_direction_roundtrip;
 mod text_generation_flags;
 mod text_left_justify;
 mod tolerance_roundtrip;

@@ -77,9 +77,12 @@ fn attribute_dispatch_updates_plain_and_embedded_payloads_atomically() {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         },
         read_as: "value".into(),
         normal: cadcraft_geom::Vec3::Z,
+        embedded_46: None,
+        type_72: None,
     });
     attribute.try_transform(&Mat4::from_mat3(&Mat3::translate(Vec2::new(2.0, 3.0)))).unwrap();
     assert_eq!(attribute.text.insert, Vec3::new(3.0, 5.0, 3.0));

@@ -167,6 +167,7 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str, plane
                 line_spacing_exact: false,
                 columns: None,
                 direction,
+                drawing_direction: None,
             }),
         });
     }
@@ -225,6 +226,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
                     line_spacing_exact: false,
                     columns: None,
                     direction: None,
+                    drawing_direction: None,
                 }),
             });
         }

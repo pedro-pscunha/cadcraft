@@ -22,6 +22,7 @@ fn leader() -> MLeader {
             line_spacing_exact: false,
             columns: None,
             direction: Some(Vec3::new(1.0, 0.0, 0.0)),
+            drawing_direction: None,
         }),
     );
     m.roots.push(MLeaderRoot::new(Vec3::new(-10.0, 18.0, 3.0), 3.0, true, vec![vec![Vec3::new(-2.0, 0.0, 3.0)]]));

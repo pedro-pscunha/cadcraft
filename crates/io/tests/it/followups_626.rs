@@ -49,6 +49,7 @@ fn mleader_drawing() -> (Drawing, MLeader) {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
         style: "Standard".into(),
         arrow_size: 1.0,

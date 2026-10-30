@@ -129,6 +129,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
                 line_spacing_exact: false,
                 columns: None,
                 direction: None,
+                drawing_direction: None,
             }),
         });
     }

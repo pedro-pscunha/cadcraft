@@ -23,6 +23,7 @@ fn with_embedded_object(rotation: f64, dir: (f64, f64)) -> String {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::MText(t)).unwrap();
     let dxf = write_dxf(&d);

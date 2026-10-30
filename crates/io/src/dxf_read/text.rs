@@ -36,11 +36,20 @@ pub(super) fn split_embedded(tags: &[Tag]) -> (&[Tag], Option<&[Tag]>) {
     }
 }
 
-/// A multiline attribute's text, from the MTEXT groups embedded in it.
-pub(super) fn multiline_attrib(embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
-    let mtext = mtext_from(embedded.filter(|e| !e.is_empty())?, c);
+/// The groups of a multiline attribute that its model has no field for, as the file gave them: group 46 of the embedded text, and
+/// the group 72 after the attribute type (the last 71 of the attribute's own groups, before the embedded object).
+pub(super) fn embedded_groups(own: &[Tag], embedded: &[Tag]) -> (Option<f64>, Option<i64>) {
+    let after_type = own.iter().rposition(|t| t.code == 71).map_or(&[][..], |i| own.get(i + 1..).unwrap_or_default());
+    (T(embedded).f(46), after_type.iter().find(|t| t.code == 72).map(Tag::i64))
+}
+
+/// A multiline attribute's text, from the MTEXT groups embedded in it (`own` is the attribute's groups before them).
+pub(super) fn multiline_attrib(own: &[Tag], embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
+    let embedded = embedded.filter(|e| !e.is_empty())?;
+    let mtext = mtext_from(embedded, c);
     let read_as = cadcraft_fonts::plain_mtext(&mtext.contents);
-    Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as, normal: cadcraft_geom::Vec3::Z })
+    let (embedded_46, type_72) = embedded_groups(own, embedded);
+    Some(MultilineAttrib { geometry_revision: Default::default(), mtext, read_as, normal: cadcraft_geom::Vec3::Z, embedded_46, type_72 })
 }
 
 /// Multiline text from MTEXT groups (an MTEXT entity's, or a multiline attribute's embedded ones).
@@ -93,6 +102,7 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         line_spacing_exact: t.i(73) == Some(2),
         columns: columns.map(|(c, _)| c),
         direction: None,
+        drawing_direction: own.i(72).and_then(|v| u8::try_from(v).ok()),
     };
     if let Some((w, h)) = mtext_dxf::read_embedded_extents(tags) {
         text.set_column_extents(w, h);
@@ -187,7 +197,7 @@ fn mirror_text(t: &mut Text, align: Option<Vec3>, insert: Vec3) {
 pub(super) fn attdef(tags: &[Tag], c: &Common) -> Attrib {
     // A multiline definition has its text as embedded MTEXT after its own groups.
     let (own, embedded) = split_embedded(tags);
-    let multiline = multiline_attrib(embedded, c);
+    let multiline = multiline_attrib(own, embedded, c);
     let own = T(own);
     let mut text = text_from(&own);
     if let Some(m) = &multiline {

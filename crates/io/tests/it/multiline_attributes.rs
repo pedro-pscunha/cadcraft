@@ -18,7 +18,7 @@ fn dxf(src: &str) -> String {
     out
 }
 
-const FIXTURE: &str = "
+pub(super) const FIXTURE: &str = "
 0 SECTION
 2 HEADER
 9 $ACADVER

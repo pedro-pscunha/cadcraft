@@ -369,7 +369,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             // The width of the reference rectangle: all the columns and their gutters, as AutoCAD writes it.
             w.f(41, t.columns.as_ref().map_or(t.width, |c| c.total_width(t.width)));
             w.i(71, i64::from(t.attach));
-            w.i(72, 1);
+            w.i(72, t.drawing_direction.map_or(1, i64::from));
             // Long contents go in 250-char 3-chunks, the remainder in 1.
             let chars: Vec<char> = crate::dxf_read::mtext_dxf::encode_contents(&t.contents).chars().collect();
             let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();

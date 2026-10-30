@@ -67,6 +67,7 @@ fn legacy_multileader_parts_sent_to_back_all_sort_below_the_cover() {
                     line_spacing_exact: false,
                     columns: None,
                     direction: None,
+                    drawing_direction: None,
                 }),
                 arrow_block: String::new(),
                 context: cadcraft_doc::MLeaderContext::default(),

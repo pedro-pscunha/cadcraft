@@ -145,6 +145,7 @@ fn mtext() -> MText {
         line_spacing_exact: false,
         columns: Some(MTextColumns { kind: MTextColumnType::Static, count: 2, gutter: 1.0, height: 3.0, ..MTextColumns::default() }),
         direction: Some(Vec3::new(0.4f64.cos(), 0.4f64.sin(), 0.0)),
+        drawing_direction: None,
     }
 }
 

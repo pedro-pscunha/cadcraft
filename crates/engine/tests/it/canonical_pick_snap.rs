@@ -107,6 +107,7 @@ fn a_canonical_mtext_is_picked_on_its_words_turned_by_its_full_direction() {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(0.6, 0.8, 0.0)),
+        drawing_direction: None,
     };
     let (d, h) = drawing(EntityKind::MText(mtext), Vec3::Z);
     let along = Vec2::new(0.6, 0.8);
@@ -135,6 +136,7 @@ fn a_canonical_multileader_is_picked_on_its_lines_and_its_text() {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(1.0, 0.0, 0.0)),
+        drawing_direction: None,
     };
     let mut m = MLeader::single(Vec3::new(18.0, 10.0, 3.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 3.0), Vec3::new(10.0, 5.0, 3.0)]], Some(text));
     m.context = MLeaderContext { geometry_revision: GeometryRevision::CanonicalV2, origin: Vec3::new(0.0, 0.0, 3.0), ..MLeaderContext::default() };

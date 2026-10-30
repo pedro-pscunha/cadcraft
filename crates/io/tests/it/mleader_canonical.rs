@@ -30,6 +30,7 @@ fn mtext() -> MText {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(0.6, 0.8, 0.0)),
+        drawing_direction: None,
     }
 }
 
