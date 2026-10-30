@@ -111,6 +111,7 @@ mod mtext_embedded_object;
 mod mtext_line_spacing;
 mod mtext_style_group;
 mod multiline_attributes;
+mod objects_keep_handles;
 mod paperview_marker;
 mod passthrough_image_roundtrip;
 mod pdf_followups;
