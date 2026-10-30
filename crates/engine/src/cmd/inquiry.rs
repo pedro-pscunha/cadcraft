@@ -210,7 +210,14 @@ fn dist_text(s: &Session, a: Vec3, b: Vec3) -> String {
 fn point3_req(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec3> {
     let q = point_req(cmd, p, key)?;
     let z = p.get(key).and_then(|v| v.get(2)).and_then(Value::as_f64).filter(|z| z.is_finite());
-    Ok(Vec3::new(q.x, q.y, z.unwrap_or_else(|| z_at(s, q))))
+    Ok(Vec3::new(
+        q.x,
+        q.y,
+        match z {
+            Some(z) => z,
+            None => z_at(s, q)?,
+        },
+    ))
 }
 
 fn run_dist(s: &mut Session, p: &Value) -> Result<Value> {
@@ -241,24 +248,46 @@ fn run_id(s: &mut Session, p: &Value) -> Result<Value> {
 /// The Z of what is drawn at `p`: the object a pick finds there, at that point, or the current
 /// elevation (ELEVATION) when there is none. Points come from the canvas in 2D; the object
 /// under a snapped point gives its Z back, as AutoCAD's ID and DIST report a snapped point's.
-pub(crate) fn z_at(s: &Session, p: Vec2) -> f64 {
-    let Ok(d) = s.doc() else { return 0.0 };
+/// A canonical object whose Z at `p` cannot be told (text and fills, several Z values at one point) is an error, never the elevation.
+pub(crate) fn z_at(s: &Session, p: Vec2) -> Result<f64> {
+    let Ok(d) = s.doc() else { return Ok(0.0) };
     let elevation = d.header.f64("ELEVATION", 0.0);
+    let elevation = if elevation.is_finite() { elevation } else { 0.0 };
     let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
     let space = s.space();
-    crate::select::pick(d, &space, p, ap)
-        .and_then(|h| d.entity(h))
-        .and_then(|e| entity_z(d, e, p, ap))
-        .filter(|z| z.is_finite())
-        .unwrap_or(if elevation.is_finite() { elevation } else { 0.0 })
+    let Some(e) = crate::select::pick(d, &space, p, ap).and_then(|h| d.entity(h)) else { return Ok(elevation) };
+    match entity_z(d, e, p, ap) {
+        ZSample::Z(z) if z.is_finite() => Ok(z),
+        ZSample::Z(_) | ZSample::Miss => Ok(elevation),
+        ZSample::Refused(why) => Err(bad("id", format!("object {} has no single Z at that point: {why}", e.handle.hex()))),
+    }
+}
+
+/// What the Z of an entity at a plan-view point is.
+enum ZSample {
+    Z(f64),
+    /// The entity has no geometry under the point.
+    Miss,
+    /// A canonical entity whose world Z cannot be told at the point.
+    Refused(String),
 }
 
 /// The Z of `e` at the point of it nearest `p` (seen from above), when it has one there. A canonical entity gives the Z of its world
 /// geometry within `tol` of `p`, never a field read as a world value.
-fn entity_z(d: &cadcraft_doc::Drawing, e: &Entity, p: Vec2, tol: f64) -> Option<f64> {
+fn entity_z(d: &cadcraft_doc::Drawing, e: &Entity, p: Vec2, tol: f64) -> ZSample {
     if let Some(flat) = crate::canonical::flatten(d, e) {
-        return flat.world_points(p, tol).into_iter().min_by(|a, b| a.xy().dist(p).total_cmp(&b.xy().dist(p))).map(|w| w.z);
+        return match flat.sample(p, tol) {
+            crate::canonical::WorldSample::Hit(w) => ZSample::Z(w.z),
+            crate::canonical::WorldSample::Miss => ZSample::Miss,
+            crate::canonical::WorldSample::Ambiguous => ZSample::Refused("parts of it at that point have different Z values".into()),
+            crate::canonical::WorldSample::Unsupported(why) => ZSample::Refused(why.into()),
+        };
     }
+    legacy_entity_z(e, p).map_or(ZSample::Miss, ZSample::Z)
+}
+
+/// The Z of a legacy entity at the point of it nearest `p`.
+fn legacy_entity_z(e: &Entity, p: Vec2) -> Option<f64> {
     let on_segment = |a: Vec3, b: Vec3| {
         let d = b.xy() - a.xy();
         let l2 = d.dot(d);
@@ -406,7 +435,7 @@ fn list_text(s: &Session, h: Handle) -> String {
                 }
             } else {
                 // The elevation, in world Z (down Z for a mirrored polyline).
-                let z = entity_z(d, e, Vec2::ZERO, 0.0).unwrap_or(p.elevation);
+                let z = legacy_entity_z(e, Vec2::ZERO).unwrap_or(p.elevation);
                 t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
                 for v in &p.vertices {
                     t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
@@ -941,7 +970,7 @@ impl Interactive for DistM {
                     (Some(first), Some(second)) if first.viewport == second.viewport => (first.point, second.point),
                     _ => (a, b),
                 };
-                let (za, zb) = if self.first_source.is_some() || s.picked_viewport.is_some() { (0.0, 0.0) } else { (z_at(s, a), z_at(s, b)) };
+                let (za, zb) = if self.first_source.is_some() || s.picked_viewport.is_some() { (0.0, 0.0) } else { (z_at(s, a)?, z_at(s, b)?) };
                 let t = dist_text(s, Vec3::new(a.x, a.y, za), Vec3::new(b.x, b.y, zb));
                 for l in t.lines() {
                     s.echo(l.to_string());
@@ -989,7 +1018,7 @@ impl Interactive for IdM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Input::Point(p) = i {
-            let m = id_text(s, Vec3::new(p.x, p.y, z_at(s, p)));
+            let m = id_text(s, Vec3::new(p.x, p.y, z_at(s, p)?));
             s.echo(m);
         }
         Ok(Step::Done)
