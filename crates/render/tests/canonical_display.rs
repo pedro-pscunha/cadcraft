@@ -33,14 +33,15 @@ fn nonfinite_canonical_output_never_reaches_the_display_buffers() {
 }
 
 #[test]
-fn an_unwired_extrusion_does_not_silently_display_as_zero_thickness() {
+fn a_thickness_is_displayed_as_an_extrusion_not_as_zero_thickness() {
     let mut drawing = circle(Vec3::new(0.0, 1.0, 0.0));
     let mut entity = drawing.model.iter().next().unwrap().as_ref().clone();
     entity.common.thickness = 1.0;
     drawing.model.push(entity);
     let list = build(&drawing, &Space::Model, &Options::default());
-    assert!(list.prims.is_empty());
-    assert!(list.require_complete_geometry().is_err());
+    // The circle, its far copy and the four side edges.
+    assert_eq!(list.prims.len(), 6);
+    assert!(list.require_complete_geometry().is_ok());
 }
 
 fn block_drawing(child: Entity) -> Drawing {
