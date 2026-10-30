@@ -870,7 +870,7 @@ fn each_line_and_point_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_rea
         assert!((read.angle - p.angle).abs() < 1e-12, "{name}");
         let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Point(x) = e { Some(x) } else { None }).expect("a POINT");
         assert!(near(v3(s.location), p.p) && near(v3(s.normal), n) && s.thickness == t, "{name}: DWG");
-        assert!((s.x_axis_angle.to_radians() - p.angle).abs() < 1e-9, "{name}: DWG angle {} (degrees)", s.x_axis_angle);
+        assert!((s.x_axis_angle - p.angle).abs() < 1e-9, "{name}: DWG angle {} (radians)", s.x_axis_angle);
     }
 }
 
