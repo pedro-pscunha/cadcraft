@@ -241,12 +241,14 @@ impl Ellipse {
         let an = Vec2::new(an.x / scale, an.y / scale);
         let t0 = 0.5 * (2.0 * am.dot(an)).atan2(am.dot(am) - an.dot(an));
         let (s0, c0) = t0.sin_cos();
-        let (u, v) = (am * c0 + an * s0, an * c0 - am * s0);
-        let ratio = if u.len() > 0.0 { (v.len() / u.len()).min(1.0) } else { 0.0 };
+        let u = am * c0 + an * s0;
+        let area = am.cross(an);
+        // The determinant is the product of the principal radii; a rotated residual can invent a minor axis.
+        let ratio = if u.len2() > 0.0 { (area.abs() / u.len2()).min(1.0) } else { 0.0 };
         if ccw_sweep(start, end) == TAU {
             return Self::full(center, u * scale, ratio);
         }
-        let (start, end) = if u.cross(v) >= 0.0 { (start - t0, end - t0) } else { (t0 - end, t0 - start) };
+        let (start, end) = if area >= 0.0 { (start - t0, end - t0) } else { (t0 - end, t0 - start) };
         Self { center, major: u * scale, ratio, start: norm_angle(start), end: norm_angle(end) }
     }
 

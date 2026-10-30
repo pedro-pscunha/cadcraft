@@ -242,4 +242,14 @@ fn an_arc_projects_to_an_ellipse_and_an_edge_on_circle_to_a_segment() {
     let edge = WorldGeometry::from_primitives(Handle(0), vec![circle(Vec3::new(0.0, 0.0, 2.0))]).unwrap().project_xy().unwrap();
     let [Prim::Seg(Segment::Line(l))] = edge.as_slice() else { panic!("{edge:?}") };
     assert!((l.a.dist(l.b) - 4.0).abs() < 1e-9 && l.a.y == 0.0 && l.b.y == 0.0);
+    let vertical = WorldPrimitive::Conic {
+        center: Vec3::ZERO,
+        axis_u: Vec3::new(0.0, 0.0, 2.0),
+        axis_v: Vec3::new(0.0, 2.0, 0.0),
+        start: 0.0,
+        end: std::f64::consts::TAU,
+    };
+    let edge = WorldGeometry::from_primitives(Handle(0), vec![vertical]).unwrap().project_xy().unwrap();
+    let [Prim::Seg(Segment::Line(l))] = edge.as_slice() else { panic!("{edge:?}") };
+    assert!((l.a.dist(l.b) - 4.0).abs() < 1e-9 && l.a.x == 0.0 && l.b.x == 0.0);
 }
