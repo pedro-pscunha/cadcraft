@@ -11,15 +11,7 @@ pub struct OcsFrame {
 impl OcsFrame {
     /// Refuse zero or non-finite normals without a drawing-unit tolerance.
     pub fn new(normal: Vec3) -> Option<Self> {
-        if !normal.is_finite() {
-            return None;
-        }
-        let scale = normal.x.abs().max(normal.y.abs()).max(normal.z.abs());
-        if scale == 0.0 {
-            return None;
-        }
-        // Divide components separately: a reciprocal can overflow for subnormal normals.
-        let z = Vec3::new(normal.x / scale, normal.y / scale, normal.z / scale).normalized();
+        let z = normal.try_normalized()?;
         let x = if z.x.abs() < 1.0 / 64.0 && z.y.abs() < 1.0 / 64.0 { Vec3::new(0.0, 1.0, 0.0).cross(z) } else { Vec3::Z.cross(z) }.normalized();
         let y = z.cross(x).normalized();
         Some(Self { x, y, z })
