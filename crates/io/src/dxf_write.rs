@@ -171,7 +171,60 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false)
 }
 
-/// Save notes for repaired handles, a refused unsaved extent pair, and block attributes lost when canonical multileaders split
+struct SaveExtents {
+    min: Option<Vec3>,
+    max: Option<Vec3>,
+    refusal: Option<(Handle, cadcraft_doc::DocError)>,
+}
+
+fn save_extents(d: &Drawing) -> SaveExtents {
+    let mut result = SaveExtents { min: d.header.point("EXTMIN"), max: d.header.point("EXTMAX"), refusal: None };
+    let saved = match (result.min, result.max) {
+        (Some(_), Some(_)) => true,
+        (None, None) => false,
+        _ => return result,
+    };
+    let mut bounds = Bounds2::EMPTY;
+    for entity in d.model.iter() {
+        if saved
+            && let Some(source) = &entity.common.geometry
+            && cadcraft_doc::geometry_key(&entity.kind, &entity.common).as_deref() == Some(source.model.as_str())
+        {
+            continue;
+        }
+        match cadcraft_doc::legacy_entity_bounds(d, entity, 0) {
+            Ok(entity_bounds) => bounds = bounds.union(&entity_bounds),
+            Err(error) if result.refusal.is_none() => {
+                let handle = if let cadcraft_doc::DocError::CanonicalExtent(handle) = &error { *handle } else { entity.handle };
+                result.refusal = Some((handle, error));
+            }
+            Err(_) => {}
+        }
+    }
+    if !bounds.is_empty() {
+        if let (Some(min), Some(max)) = (&mut result.min, &mut result.max) {
+            // Legacy bounds are XY only. Keep the source Z and grow only beyond its saved limits.
+            if bounds.min.x < min.x {
+                min.x = bounds.min.x;
+            }
+            if bounds.min.y < min.y {
+                min.y = bounds.min.y;
+            }
+            if bounds.max.x > max.x {
+                max.x = bounds.max.x;
+            }
+            if bounds.max.y > max.y {
+                max.y = bounds.max.y;
+            }
+        } else if result.refusal.is_none() {
+            result.min = Some(bounds.min.to3(0.0));
+            result.max = Some(bounds.max.to3(0.0));
+        }
+    }
+    result
+}
+
+/// Save notes for repaired handles, refused extents, and block attributes lost when canonical multileaders split
 /// before R2007: a non-uniform block scale places no attribute text exactly.
 pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
@@ -193,13 +246,10 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
             )
         })
         .collect();
-    if d.header.point("EXTMIN").is_none()
-        && d.header.point("EXTMAX").is_none()
-        && let Some((entity, error)) =
-            d.model.iter().find_map(|entity| cadcraft_doc::legacy_entity_bounds(d, entity, 0).err().map(|error| (entity, error)))
-    {
-        let handle = if let cadcraft_doc::DocError::CanonicalExtent(handle) = &error { *handle } else { entity.handle };
-        notes.push(format!("EXTMIN/EXTMAX omitted: the legacy extent query refused object {} ({error}).", handle.hex()));
+    let extents = save_extents(d);
+    if let Some((handle, error)) = extents.refusal {
+        let action = if extents.min.is_some() { "growth incomplete" } else { "omitted" };
+        notes.push(format!("EXTMIN/EXTMAX {action}: the legacy extent query refused object {} ({error}).", handle.hex()));
     }
     if target >= Version::R2007 {
         return notes;

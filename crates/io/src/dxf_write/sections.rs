@@ -299,20 +299,10 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     w.s(1, version.code());
     w.s(9, "$DWGCODEPAGE");
     w.s(3, code_page(d, version));
-    // Saving source records must not require a display adapter or replace their saved WCS extents.
-    let computed = if d.header.point("EXTMIN").is_none() && d.header.point("EXTMAX").is_none() {
-        d.model
-            .iter()
-            .try_fold(cadcraft_geom::Bounds2::EMPTY, |bounds, entity| {
-                cadcraft_doc::legacy_entity_bounds(d, entity, 0).map(|entity_bounds| bounds.union(&entity_bounds))
-            })
-            .ok()
-            .filter(|bounds| !bounds.is_empty())
-    } else {
-        None
-    };
-    for (name, fallback) in [("EXTMIN", computed.map(|bounds| bounds.min.to3(0.0))), ("EXTMAX", computed.map(|bounds| bounds.max.to3(0.0)))] {
-        if let Some(point) = d.header.point(name).or(fallback) {
+    // Unchanged source geometry must not replace AutoCAD's saved bounds with a display estimate.
+    let extents = super::save_extents(d);
+    for (name, point) in [("EXTMIN", extents.min), ("EXTMAX", extents.max)] {
+        if let Some(point) = point {
             w.s(9, format!("${name}"));
             w.p(10, point);
         }
