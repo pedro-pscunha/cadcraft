@@ -562,7 +562,16 @@ pub(crate) fn plan<'a>(d: &Drawing, every: impl Iterator<Item = &'a Entity>, mut
 
 /// The `ACAD_MLINESTYLE` dictionary (owned by the root dictionary `root`) and its styles.
 pub(crate) fn objects(plan: &Plan, root: &str) -> Vec<Tag> {
-    let mut t = vec![Tag::s(0, "DICTIONARY"), Tag::s(5, plan.dict.clone()), Tag::s(330, root), Tag::s(100, "AcDbDictionary"), Tag::i(281, 1)];
+    let mut t = vec![
+        Tag::s(0, "DICTIONARY"),
+        Tag::s(5, plan.dict.clone()),
+        Tag::s(102, "{ACAD_REACTORS"),
+        Tag::s(330, root),
+        Tag::s(102, "}"),
+        Tag::s(330, root),
+        Tag::s(100, "AcDbDictionary"),
+        Tag::i(281, 1),
+    ];
     for (s, h) in &plan.styles {
         t.push(Tag::s(3, s.name.trim()));
         t.push(Tag::s(350, h.clone()));

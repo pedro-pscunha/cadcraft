@@ -33,6 +33,7 @@ mod dim_oblique_90;
 mod dimassoc_foreign_roundtrip;
 mod dimension_and_face_flags;
 mod dimension_association_xdata;
+mod dictionary_reactors;
 mod dimension_group_order;
 mod dimstyle_fidelity;
 mod dimstyle_vars_roundtrip;

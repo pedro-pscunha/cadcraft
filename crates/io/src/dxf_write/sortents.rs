@@ -130,7 +130,7 @@ fn objects(w: &mut W, tables: &[Table]) {
         if table.new_dictionary {
             w.s(0, "DICTIONARY");
             w.s(5, table.dictionary.hex());
-            w.group("ACAD_REACTORS", 330, &[&table.owner.hex()]);
+            // AutoCAD's extension dictionaries of a block record have no reactor.
             w.s(330, table.owner.hex());
             w.s(100, "AcDbDictionary");
             w.i(280, 1);
