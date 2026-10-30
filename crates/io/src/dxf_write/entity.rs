@@ -868,15 +868,19 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
         w.p(10, v.center);
         w.f(40, v.width);
         w.f(41, v.height);
-        // Status 68: a positive value is "on" (the stacking order; 1 is the active viewport), 0 off.
-        w.i(68, if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 });
+        // Keep source stacking status, including -1, until an ON/OFF edit changes it.
+        let source = v.source_status.filter(|s| v.on == s.is_on());
+        w.i(68, source.map(|s| s.stacking).unwrap_or_else(|| if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 }));
         w.i(69, i64::from(v.id));
         w.p2(12, v.view_center);
         w.f(45, v.view_height);
         // Status flags: 16384 = display locked, 32768 = always set, 65536 = clipped by the
         // 340 entity, 131072 = off.
         let clip = v.clip.filter(|h| *h != e.handle && d.entity(*h).is_some());
-        let flags = 32768 | if v.locked { 16384 } else { 0 } | if clip.is_some() { 65536 } else { 0 } | if v.on { 0 } else { 131072 };
+        let flags = (v.source_status.map_or(32768, |s| s.flags) & !(16384 | 65536 | 131072))
+            | if v.locked { 16384 } else { 0 }
+            | if clip.is_some() { 65536 } else { 0 }
+            | source.map_or_else(|| if v.on { 0 } else { 131072 }, |s| s.flags & 131072);
         w.i(90, flags);
         if let Some(h) = clip {
             w.s(340, h.hex());

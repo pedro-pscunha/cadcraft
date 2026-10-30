@@ -25,6 +25,21 @@ pub struct Viewport {
     /// Display on (MVIEW ON/OFF). An off viewport shows its border but no model space.
     #[serde(default = "yes")]
     pub on: bool,
+    /// Source stacking status and display flags, before MVIEW edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_status: Option<ViewportStatus>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViewportStatus {
+    pub stacking: i64,
+    pub flags: i64,
+}
+
+impl ViewportStatus {
+    pub fn is_on(self) -> bool {
+        self.stacking != 0 && self.flags & 131072 == 0
+    }
 }
 
 impl Default for Viewport {
@@ -41,6 +56,7 @@ impl Default for Viewport {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            source_status: None,
         }
     }
 }
