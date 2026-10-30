@@ -20,6 +20,7 @@ mod break_keeps_z;
 mod burst;
 mod canonical_grips;
 mod canonical_pick_snap;
+mod canonical_previews;
 mod compare_export;
 mod constraint_geometry;
 mod constraint_infer;

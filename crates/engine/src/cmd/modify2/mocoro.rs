@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, EntityKind, Handle};
+use cadcraft_doc::{Drawing, Entity, Handle};
 use cadcraft_geom::{Mat3, Vec2};
 use serde_json::{Value, json};
 
@@ -270,20 +270,15 @@ impl Interactive for MocoroM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         let (Some(m), Ok(d)) = (self.matrix(c), s.doc()) else { return Vec::new() };
-        let mut out: Vec<EntityKind> = self
-            .objs
-            .iter()
-            .take(500)
-            .filter_map(|h| d.entity(*h))
-            .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
-            .collect();
-        out.push(line(self.base, c));
+        let mut out: Vec<Entity> =
+            self.objs.iter().take(500).filter_map(|h| d.entity(*h)).filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok()).collect();
+        out.push(s.preview_entity(line(self.base, c)));
         out
     }
-    fn drag(&self, _s: &Session, c: Vec2) -> Option<Drag> {
+    fn drag(&self, s: &Session, c: Vec2) -> Option<Drag> {
         let matrix = self.matrix(c)?;
-        Some(Drag { handles: self.objs.clone(), matrix, extra: vec![line(self.base, c)], clipboard: false })
+        Some(Drag { handles: self.objs.clone(), matrix, extra: vec![s.preview_entity(line(self.base, c))], clipboard: false })
     }
 }
