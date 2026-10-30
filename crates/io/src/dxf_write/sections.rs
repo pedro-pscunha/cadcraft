@@ -29,7 +29,8 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
     // in the STYLE table below: (tag position, style name, is a shape) are filled in there.
     let mut ltype_handles: HashMap<String, String> = HashMap::new();
     let mut ltype_style_refs: Vec<(usize, Option<String>, bool)> = Vec::new();
-    let th = table_head(w, "LTYPE", d.linetypes.len());
+    // AutoCAD counts the linetypes without ByBlock and ByLayer, which it keeps in the table control itself.
+    let th = table_head(w, "LTYPE", d.linetypes.len().saturating_sub(2));
     for lt in &d.linetypes {
         let h = record_head(w, "LTYPE", &th, "AcDbLinetypeTableRecord");
         ltype_handles.entry(lt.name.to_ascii_uppercase()).or_insert(h.clone());
@@ -1080,7 +1081,12 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
 
     // BLOCK_RECORD
     let block_refs = block_references(d, &every);
-    let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());
+    // AutoCAD counts the block records without *Model_Space and *Paper_Space, which the table control keeps.
+    let th = table_head(
+        &mut w,
+        "BLOCK_RECORD",
+        (ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len()).saturating_sub(1),
+    );
     let br_rec = |w: &mut W, h: &str, name: &str, layout: Option<&str>, blk: Option<&Block>| {
         w.s(0, "BLOCK_RECORD");
         w.s(5, h);
