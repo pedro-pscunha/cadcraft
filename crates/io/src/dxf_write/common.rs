@@ -116,43 +116,18 @@ pub(super) fn common_x(w: &mut W, e: &Entity, owner: &str, paper: bool, subclass
     }
 }
 
-/// Named plot styles use group 390. Group 380 is private to the DWG bridge.
+/// An entity's plot style: group 380 is the plot style type (1 = by block, 2 = by dictionary default, 3 = by object), and group 390 the
+/// hard pointer to the named style's placeholder. By layer is the default and has neither.
 pub(super) fn plot_style(w: &mut W, style: &str) {
     let style = style.trim();
     if let Some(h) = w.pstyles.get(&style.to_ascii_uppercase()).cloned() {
-        if w.dwg_bridge {
-            w.i(380, 3);
-        }
+        w.i(380, 3);
         w.s(390, h);
-    } else if w.dwg_bridge && style.eq_ignore_ascii_case("byblock") {
+    } else if style.eq_ignore_ascii_case("byblock") {
         w.i(380, 1);
-    } else if w.dwg_bridge && style.eq_ignore_ascii_case("bydictionarydefault") {
+    } else if style.eq_ignore_ascii_case("bydictionarydefault") {
         w.i(380, 2);
     }
-}
-
-/// Preserve logical plot styles in user DXF without private common entity groups.
-pub(super) fn plot_style_xdata(w: &mut W, style: &str, start: usize) {
-    if w.dwg_bridge || start >= w.t.len() {
-        return;
-    }
-    let value = if style.eq_ignore_ascii_case("byblock") {
-        1
-    } else if style.eq_ignore_ascii_case("bydictionarydefault") {
-        2
-    } else {
-        return;
-    };
-    let end = w.t.iter().enumerate().skip(start + 1).find(|(_, t)| t.code == 0).map_or(w.t.len(), |(i, _)| i);
-    let own = w.t.get(start..end).unwrap_or_default().iter().position(|t| t.code == 1001 && t.str() == dxf_ext::APP);
-    let mut tags = vec![cadcraft_dxf::Tag::s(1000, "PLOTSTYLE"), cadcraft_dxf::Tag::i(1070, value)];
-    let at = if let Some(i) = own {
-        start + i + 1
-    } else {
-        tags.insert(0, cadcraft_dxf::Tag::s(1001, dxf_ext::APP));
-        end
-    };
-    w.t.splice(at..at, tags);
 }
 
 /// Layer, linetype, colour and lineweight groups (8, 6, 62/420, 370). ByLayer is left out, unless
