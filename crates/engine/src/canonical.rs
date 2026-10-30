@@ -214,15 +214,33 @@ impl Flat {
             })
     }
 
-    /// The WCS points of the geometry whose XY view is `p` (within `tol`): one per primitive that passes through it.
-    /// When they do not agree on a Z the point is ambiguous in a 2D view.
-    pub fn world_points(&self, p: Vec2, tol: f64) -> Vec<Vec3> {
-        let centers = self.world.iter().filter_map(|w| match w {
-            WorldPrimitive::Conic { center, .. } if center.xy().dist(p) <= tol => Some(*center),
-            _ => None,
-        });
-        self.world.iter().filter_map(|w| world_point(w, p, tol)).chain(centers).collect()
+    /// The WCS points of the geometry whose XY view is `p` (within `tol`): one per primitive that passes through it, and more than one
+    /// where a primitive passes through it at different heights. When they do not agree on a Z the point is ambiguous in a 2D view.
+    /// The reason comes with them when a primitive could not be told there: its answer is then unknown, which is not a miss.
+    fn collect(&self, p: Vec2, tol: f64) -> Collected {
+        let mut out = Collected::default();
+        for w in &self.world {
+            match w {
+                WorldPrimitive::Spline { degree, knots, control, weights } => match spline_hits(*degree, knots, control, weights, p, tol) {
+                    SplineProbe::Points(points) => out.points.extend(points),
+                    SplineProbe::Unsupported(why) => out.unsupported = out.unsupported.or(Some(why)),
+                },
+                WorldPrimitive::Conic { center, .. } if center.xy().dist(p) <= tol => {
+                    out.points.extend(world_point(w, p, tol));
+                    out.points.push(*center);
+                }
+                _ => out.points.extend(world_point(w, p, tol)),
+            }
+        }
+        out
     }
+}
+
+/// What `Flat::collect` found at a plan-view point.
+#[derive(Default)]
+struct Collected {
+    points: Vec<Vec3>,
+    unsupported: Option<&'static str>,
 }
 
 /// The WCS point of `w` whose XY is `p`, if `w` passes through it.
@@ -266,15 +284,29 @@ fn world_point(w: &WorldPrimitive, p: Vec2, tol: f64) -> Option<Vec3> {
             let point = at(t);
             (point.xy().dist(p) <= tol).then_some(point)
         }
-        WorldPrimitive::Spline { degree, knots, control, weights } => spline_point(*degree, knots, control, weights, p, tol),
+        // A spline can pass through `p` more than once: `Flat::collect` asks `spline_hits`.
+        WorldPrimitive::Spline { .. } => None,
         // A text and a fill have no single WCS point at a plan-view point.
         WorldPrimitive::Text(_) | WorldPrimitive::Fill(_) => None,
     }
 }
 
-/// The WCS point of a (rational) B-spline whose XY is nearest `p`, when it is within `tol`. Z is evaluated as a second spline over the
-/// same knots and weights (the Z of the control points on the first axis), which is the Z of the same rational curve.
-fn spline_point(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], p: Vec2, tol: f64) -> Option<Vec3> {
+/// What the plan-view point finds on one spline.
+enum SplineProbe {
+    /// The WCS points of the curve whose XY is the point: none for a miss, two or more where it passes through at different heights.
+    Points(Vec<Vec3>),
+    /// The curve cannot be told at the point.
+    Unsupported(&'static str),
+}
+
+/// The WCS points of a (rational) B-spline whose XY is within `tol` of `p`. Z is evaluated as a second spline over the same knots and
+/// weights (the Z of the control points on the first axis), which is the Z of the same rational curve.
+///
+/// A curve can pass a plan-view point more than once (a self-crossing at different heights) or stay on it over a stretch (a vertical
+/// segment), so the answer is every place where the distance to `p` has a local minimum within `tol`, and a stretch that stays on `p`
+/// (within a thousandth of `tol`) gives the points at its lowest and highest Z. Sampling cannot prove that two passes are not closer than one sample step: the
+/// ceiling is one sample per 1/32 of a control interval.
+fn spline_hits(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], p: Vec2, tol: f64) -> SplineProbe {
     let plan = cadcraft_geom::Spline {
         degree,
         knots: knots.to_vec(),
@@ -283,36 +315,71 @@ fn spline_point(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64],
         ..Default::default()
     };
     if !plan.is_valid() {
-        return None;
+        return SplineProbe::Points(Vec::new());
+    }
+    if !(control.iter().all(|c| c.x.is_finite() && c.y.is_finite() && c.z.is_finite()) && knots.iter().all(|k| k.is_finite())) {
+        return SplineProbe::Unsupported("its spline has a non-finite control point or knot");
     }
     let height = cadcraft_geom::Spline { control: control.iter().map(|c| Vec2::new(c.z, 0.0)).collect(), ..plan.clone() };
     let (lo, hi) = plan.domain();
     if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
-        return None;
+        return SplineProbe::Points(Vec::new());
     }
     let n = (control.len() * 32).max(256);
-    let (mut best_t, mut best) = (lo, f64::INFINITY);
-    for i in 0..=n {
-        let t = lo + (hi - lo) * i as f64 / n as f64;
-        let d = plan.eval(t).dist(p);
-        if d < best {
-            (best_t, best) = (t, d);
+    let ts: Vec<f64> = (0..=n).map(|i| lo + (hi - lo) * i as f64 / n as f64).collect();
+    let dist: Vec<f64> = ts.iter().map(|t| plan.eval(*t).dist(p)).collect();
+    let point_at = |t: f64| {
+        let at = plan.eval(t);
+        Vec3::new(at.x, at.y, height.eval(t).x)
+    };
+    let mut hits: Vec<Vec3> = Vec::new();
+    // `tol` is a pick radius, so a curve passes within it over many samples. The curve stays ON the point (a vertical stretch) only where it
+    // is within a thousandth of the radius.
+    let stay = (tol * 1e-3).max(1e-9);
+    let mut i = 0;
+    while i <= n {
+        if dist[i] <= stay {
+            // A stretch of samples on the point: the curve stays there over it, whatever its Z does.
+            let start = i;
+            while i < n && dist[i + 1] <= stay {
+                i += 1;
+            }
+            let zs = (start..=i).map(|k| point_at(ts[k]));
+            let low = zs.clone().min_by(|a, b| a.z.total_cmp(&b.z));
+            let high = zs.max_by(|a, b| a.z.total_cmp(&b.z));
+            hits.extend(low);
+            hits.extend(high);
+            i += 1;
+            continue;
+        }
+        // A local minimum of the distance: refine between its neighbours (the curve is smooth between samples).
+        let left = if i == 0 { f64::INFINITY } else { dist[i - 1] };
+        let right = if i == n { f64::INFINITY } else { dist[i + 1] };
+        if dist[i] <= left && dist[i] < right {
+            let (mut a, mut b) = (ts[i.saturating_sub(1)], ts[(i + 1).min(n)]);
+            for _ in 0..60 {
+                let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
+                if plan.eval(m1).dist(p) < plan.eval(m2).dist(p) {
+                    b = m2;
+                } else {
+                    a = m1;
+                }
+            }
+            let t = (a + b) / 2.0;
+            if plan.eval(t).dist(p) <= tol {
+                hits.push(point_at(t));
+            }
+        }
+        i += 1;
+    }
+    // The same place found twice (the end of a refined minimum and a sample on it) is one point.
+    let mut points: Vec<Vec3> = Vec::new();
+    for hit in hits {
+        if !points.iter().any(|q| (q.x - hit.x).abs() <= tol && (q.y - hit.y).abs() <= tol && (q.z - hit.z).abs() <= tol) {
+            points.push(hit);
         }
     }
-    // Refine around the best sample (the curve is smooth between samples; a ternary search finds the local minimum).
-    let step = (hi - lo) / n as f64;
-    let (mut a, mut b) = ((best_t - step).max(lo), (best_t + step).min(hi));
-    for _ in 0..60 {
-        let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
-        if plan.eval(m1).dist(p) < plan.eval(m2).dist(p) {
-            b = m2;
-        } else {
-            a = m1;
-        }
-    }
-    let t = (a + b) / 2.0;
-    let at = plan.eval(t);
-    (at.dist(p) <= tol).then(|| Vec3::new(at.x, at.y, height.eval(t).x))
+    SplineProbe::Points(points)
 }
 
 /// What a plan-view sample of a canonical entity finds.
@@ -334,7 +401,10 @@ impl Flat {
         if self.refused {
             return WorldSample::Unsupported("its geometry has no world form");
         }
-        let mut points = self.world_points(p, tol);
+        let Collected { mut points, unsupported } = self.collect(p, tol);
+        if let Some(why) = unsupported {
+            return WorldSample::Unsupported(why);
+        }
         if points.is_empty() {
             return if self.covers(p) { WorldSample::Unsupported("text and filled areas have no single world point") } else { WorldSample::Miss };
         }
@@ -356,8 +426,9 @@ pub(crate) fn with_world(world: Vec<WorldPrimitive>, mut hit: crate::snap::SnapH
     }
     let tol = 1e-6 * hit.point.x.abs().max(hit.point.y.abs()).max(1.0);
     let flat = Flat { world, ..Flat::default() };
-    let points = flat.world_points(hit.point, tol);
+    let Collected { points, unsupported } = flat.collect(hit.point, tol);
     if let Some(first) = points.first()
+        && unsupported.is_none()
         && points.iter().all(|p| (p.z - first.z).abs() <= tol)
     {
         hit.world = Some(*first);
@@ -457,5 +528,49 @@ mod tests {
             assert!((w.z - x).abs() < 1e-6, "z {} at x {x}", w.z);
         }
         assert_eq!(flat.sample(Vec2::new(4.0, 2.0), 1e-6), WorldSample::Miss);
+    }
+
+    fn polyline_spline(points: &[(f64, f64, f64)]) -> WorldPrimitive {
+        // Degree 1 with uniform interior knots: the curve is the polyline through the control points.
+        let n = points.len();
+        let mut knots = vec![0.0];
+        knots.extend((0..n).map(|i| i as f64 / (n - 1) as f64));
+        knots.push(1.0);
+        WorldPrimitive::Spline { degree: 1, knots, control: points.iter().map(|p| Vec3::new(p.0, p.1, p.2)).collect(), weights: Vec::new() }
+    }
+
+    #[test]
+    fn a_vertical_spline_has_no_single_z_at_its_plan_view_point() {
+        // Both controls project to (0, 0): the whole curve is one plan-view point with every Z from 0 to 10.
+        let flat = Flat { world: vec![polyline_spline(&[(0.0, 0.0, 0.0), (0.0, 0.0, 10.0)])], ..Flat::default() };
+        assert_eq!(flat.sample(Vec2::new(0.0, 0.0), 1e-6), WorldSample::Ambiguous);
+        assert_eq!(flat.sample(Vec2::new(1.0, 0.0), 1e-6), WorldSample::Miss);
+    }
+
+    #[test]
+    fn a_spline_that_crosses_itself_in_plan_view_at_different_heights_is_ambiguous_there() {
+        // AB runs along y = x at Z 0 and CD along y = 10 - x at Z 6: they cross at (5, 5), and BC joins them.
+        let curve = [(0.0, 0.0, 0.0), (10.0, 10.0, 0.0), (10.0, 0.0, 6.0), (0.0, 10.0, 6.0)];
+        let flat = Flat { world: vec![polyline_spline(&curve)], ..Flat::default() };
+        assert_eq!(flat.sample(Vec2::new(5.0, 5.0), 1e-6), WorldSample::Ambiguous);
+        // Away from the crossing each pass is single: AB at (2, 2) is at Z 0, and CD at (2, 8) is at Z 6.
+        assert_hit(&flat, (2.0, 2.0), 0.0);
+        assert_hit(&flat, (2.0, 8.0), 6.0);
+        // The same curve crossing itself at one height has a single Z there.
+        let level = [(0.0, 0.0, 3.0), (10.0, 10.0, 3.0), (10.0, 0.0, 3.0), (0.0, 10.0, 3.0)];
+        let flat = Flat { world: vec![polyline_spline(&level)], ..Flat::default() };
+        assert_hit(&flat, (5.0, 5.0), 3.0);
+    }
+
+    #[test]
+    fn a_spline_with_a_non_finite_control_point_is_unsupported_not_a_miss() {
+        let flat = Flat { world: vec![polyline_spline(&[(0.0, 0.0, 0.0), (f64::NAN, 1.0, 2.0)])], ..Flat::default() };
+        assert!(matches!(flat.sample(Vec2::new(0.0, 0.0), 1e-6), WorldSample::Unsupported(_)));
+    }
+
+    /// The sample is a hit at `at` with the height `z` (the refinement finds the point to about 1e-9).
+    fn assert_hit(flat: &Flat, at: (f64, f64), z: f64) {
+        let WorldSample::Hit(w) = flat.sample(Vec2::new(at.0, at.1), 1e-6) else { panic!("no hit at {at:?}") };
+        assert!((w.x - at.0).abs() < 1e-6 && (w.y - at.1).abs() < 1e-6 && (w.z - z).abs() < 1e-6, "{w:?} at {at:?}");
     }
 }
