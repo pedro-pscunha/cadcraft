@@ -475,38 +475,59 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     }
 }
 
-/// The place of a group in the `AcDbDimension` subclass of a DIMENSION as AutoCAD reads it (DXF Reference): its version (280) first,
-/// then the block, the points, the type and presentation groups, the measurement, the text, the rotation, the normal and the style.
-/// A coordinate's x, y and z groups share the place of the first.
-fn dimension_rank(code: i32) -> usize {
-    const ORDER: [i32; 20] = [280, 2, 10, 11, 12, 70, 71, 72, 41, 42, 73, 74, 75, 1, 53, 51, 54, 210, 3, 0];
+/// The order AutoCAD writes (and reads) the groups of a subclass in, by subclass marker. A coordinate's x, y and z groups share the
+/// place of the first. Codes not listed follow the listed ones in the order they were written.
+/// - `AcDbDimension`: the version (280) first, then the block, the points, the type and presentation groups, the measurement, the text,
+///   the rotation, the normal and the style (DXF Reference).
+/// - `AcDbEntity`: measured on the entities of the AutoCAD 2010 and 2018 saves of Citycon, DPInc and Planeta.
+/// - `AcDbMText`, `AcDbText`, `AcDbWipeout`, `AcDbRasterImage`, `AcDbTextStyleTableRecord`, `AcDbLeader`, `AcDbPlotSettings`: the same.
+const SUBCLASS_ORDER: [(&str, &[i32]); 9] = [
+    ("AcDbDimension", &[280, 2, 10, 11, 12, 70, 1, 71, 72, 41, 42, 73, 74, 75, 53, 51, 54, 210, 3]),
+    ("AcDbEntity", &[67, 410, 8, 6, 347, 62, 420, 430, 440, 48, 60, 92, 160, 310, 370, 380, 390, 284, 348]),
+    ("AcDbMText", &[10, 40, 41, 46, 71, 72, 3, 1, 7, 210, 11, 73, 44, 90, 63, 421, 45, 441]),
+    ("AcDbText", &[39, 10, 40, 1, 50, 41, 51, 7, 71, 72, 11, 210, 73]),
+    ("AcDbWipeout", &[90, 10, 11, 12, 13, 340, 70, 280, 281, 282, 283, 290, 360, 71, 91, 14]),
+    ("AcDbRasterImage", &[90, 10, 11, 12, 13, 340, 70, 280, 281, 282, 283, 290, 360, 71, 91, 14]),
+    ("AcDbTextStyleTableRecord", &[2, 70, 40, 41, 50, 71, 42, 3, 4]),
+    ("AcDbLeader", &[3, 71, 72, 73, 74, 75, 40, 41, 76, 10, 77, 340, 210, 211, 212, 213]),
+    ("AcDbPlotSettings", &[1, 2, 4, 6, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 140, 141, 142, 143, 70, 72, 73, 74, 7, 75, 147, 76, 77, 78, 148, 149]),
+];
+
+/// The place of a group in a subclass `order`.
+fn group_rank(order: &[i32], code: i32) -> usize {
     let base = match code {
         20 | 30 => 10,
         21 | 31 => 11,
         22 | 32 => 12,
+        23 => 13,
+        24 => 14,
         220 | 230 => 210,
+        221 | 231 => 211,
+        222 | 232 => 212,
+        223 | 233 => 213,
         c => c,
     };
-    ORDER.iter().position(|c| *c == base).unwrap_or(ORDER.len())
+    order.iter().position(|c| *c == base).unwrap_or(order.len())
 }
 
-/// Put the groups of the `AcDbDimension` subclass of every DIMENSION in AutoCAD's order. The writer and the replays of the source's
-/// groups (the versioned presentation groups, the geometry) each place theirs, and AutoCAD refuses a file whose version group (280)
-/// does not follow the subclass marker ("unexpected DXF group code: 280").
-pub(crate) fn order_dimension_groups(tags: &mut [Tag]) {
+/// Put the groups of the subclasses in `SUBCLASS_ORDER`, of every record, in AutoCAD's order. The writer and the replays of the
+/// source's groups (the versioned presentation groups, the geometry, the properties) each place theirs, and AutoCAD refuses a file
+/// whose version group (280) does not follow a dimension's subclass marker ("unexpected DXF group code: 280"). A multiline text's
+/// embedded object (after its 101) and the xdata are not subclass groups.
+pub(crate) fn order_subclass_groups(tags: &mut [Tag]) {
     let mut at = 0;
     while at < tags.len() {
-        if !(tags[at].code == 0 && tags[at].str() == "DIMENSION") {
+        if tags[at].code != 100 {
             at += 1;
             continue;
         }
-        let end = tags[at + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |n| at + 1 + n);
-        let start = tags[at..end].iter().position(|t| t.code == 100 && t.str() == "AcDbDimension").map(|n| at + n + 1);
-        if let Some(start) = start {
-            let stop = tags[start..end].iter().position(|t| t.code == 100 || t.code >= 1000).map_or(end, |n| start + n);
-            tags[start..stop].sort_by_key(|t| dimension_rank(t.code));
+        let marker = tags[at].str();
+        let start = at + 1;
+        let stop = tags[start..].iter().position(|t| matches!(t.code, 0 | 100 | 101) || t.code >= 1000).map_or(tags.len(), |n| start + n);
+        if let Some((_, order)) = SUBCLASS_ORDER.iter().find(|(m, _)| *m == marker.trim()) {
+            tags[start..stop].sort_by_key(|t| group_rank(order, t.code));
         }
-        at = end;
+        at = stop;
     }
 }
 

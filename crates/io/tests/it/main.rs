@@ -136,6 +136,7 @@ mod spline_fit_data;
 mod spline_groups_roundtrip;
 mod split_entities_section;
 mod style_typeface;
+mod subclass_group_order;
 mod svg_arc_budget;
 mod svg_tiny_extents;
 mod table_cell_blocks;
