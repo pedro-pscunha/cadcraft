@@ -24,6 +24,8 @@ mod text;
 mod tolerance;
 pub mod units;
 mod wide;
+mod world_geometry;
+pub use world_geometry::entity_world_geometry;
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Lineweight, Prim, Space};
