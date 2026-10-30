@@ -381,7 +381,7 @@ fn spline_search(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64]
         return (SplineProbe::Points(Vec::new()), 0);
     }
     if candidates.saturating_mul(SPAN_SAMPLES) + runs.len() > MAX_SAMPLES {
-        return (SplineProbe::Unsupported("too many parts of its spline pass near that point"), 0);
+        return (SplineProbe::Unsupported("too many parts of its spline pass near that point: zoom in, because the pick radius follows the view"), 0);
     }
 
     let evals = std::cell::Cell::new(0usize);
@@ -425,7 +425,12 @@ fn spline_search(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64]
             if dist[i] <= left && dist[i] < right {
                 passes += 1;
                 if passes > MAX_PASSES {
-                    return (SplineProbe::Unsupported("too many parts of its spline pass near that point"), evals.get());
+                    return (
+                        SplineProbe::Unsupported(
+                            "too many parts of its spline pass near that point: zoom in, because the pick radius follows the view",
+                        ),
+                        evals.get(),
+                    );
                 }
                 let (mut a, mut b) = (ts[i.saturating_sub(1)], ts[(i + 1).min(n)]);
                 for _ in 0..60 {
