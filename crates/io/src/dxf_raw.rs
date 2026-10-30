@@ -627,11 +627,14 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
 /// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
 /// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
-    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION" | "HATCH");
+    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION" | "HATCH" | "IMAGE" | "WIPEOUT");
     let (marker, codes): (&str, &[i32]) = match kind {
         // The reference column height (46) and the background fill: its setting (90), colour (63, 421), box scale (45) and transparency (441).
         "MTEXT" => ("AcDbMText", &[46, 90, 63, 421, 45, 441]),
         "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
+        // The clip mode of an image (290) and the null pointers a wipeout has where an image has its definition (340, 360).
+        "IMAGE" => ("AcDbRasterImage", &[290]),
+        "WIPEOUT" => ("AcDbWipeout", &[290, 340, 360]),
         "HATCH" if tags.iter().any(|t| t.code == 450 && t.i64() == 0) => ("AcDbHatch", &[450, 451, 452, 453, 460, 461, 462, 463, 63, 421, 470]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.

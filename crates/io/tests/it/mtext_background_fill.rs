@@ -62,3 +62,56 @@ fn the_background_fill_and_the_layer_pointer_come_back() {
         }
     }
 }
+
+/// An IMAGE keeps its clip mode (group 290) and a WIPEOUT its null pointers (290, 340, 360), which the model has no field for.
+#[test]
+fn an_image_and_a_wipeout_keep_their_unmodelled_groups() {
+    let wipeout = dxf(&[
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "WIPEOUT"),
+        (5, "30"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbWipeout"),
+        (90, "0"),
+        (10, "0"),
+        (20, "0"),
+        (30, "0"),
+        (11, "1"),
+        (21, "0"),
+        (31, "0"),
+        (12, "0"),
+        (22, "1"),
+        (32, "0"),
+        (13, "1"),
+        (23, "1"),
+        (340, "0"),
+        (70, "7"),
+        (280, "1"),
+        (281, "50"),
+        (282, "50"),
+        (283, "0"),
+        (360, "0"),
+        (71, "2"),
+        (91, "5"),
+        (14, "-0.5"),
+        (24, "-0.5"),
+        (14, "0.5"),
+        (24, "-0.5"),
+        (14, "0.5"),
+        (24, "0.5"),
+        (14, "-0.5"),
+        (24, "0.5"),
+        (14, "-0.5"),
+        (24, "-0.5"),
+        (290, "0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ]);
+    let d = cadcraft_io::read_dxf(wipeout.as_bytes()).unwrap();
+    let (_, w) = section(&cadcraft_io::write_dxf(&d), "ENTITIES").into_iter().find(|(k, _)| k == "WIPEOUT").unwrap();
+    for code in [290, 340, 360] {
+        assert_eq!(val(&w, code), "0", "WIPEOUT group {code}");
+    }
+}
