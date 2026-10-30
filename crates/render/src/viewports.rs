@@ -212,6 +212,14 @@ enum Clip<'a> {
 /// Append `src` to `dst`, clipped to `clip`.
 fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
     dst.geometry_refusals.extend_from_slice(&src.geometry_refusals);
+    let area = match clip {
+        Clip::Rect(area) => *area,
+        Clip::Poly(poly) => poly.bounds(),
+    };
+    dst.unresolved.extend(src.unresolved.iter().cloned().map(|mut record| {
+        record.clip = Some(area);
+        record
+    }));
     for p in &src.prims {
         let pts = src.points(p);
         match (p.kind, clip) {

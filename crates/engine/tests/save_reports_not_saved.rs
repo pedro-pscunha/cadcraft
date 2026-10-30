@@ -59,6 +59,25 @@ fn save_lists_the_entities_the_file_does_not_keep() {
 }
 
 #[test]
+fn plot_preview_refuses_unresolved_raw_geometry_with_its_handle() {
+    use cadcraft_engine::doc::{Entity, RawCompound, RawRecord};
+    let mut session = Session::new();
+    session.doc_mut().unwrap().model.push(Entity::from_raw(
+        RawCompound::new(
+            RawRecord::new("WIDGETX".into(), vec![RawTag { code: 5, value: "A0".into() }, RawTag { code: 330, value: "1F".into() }]).unwrap(),
+            Vec::new(),
+            Default::default(),
+            "No exact WIDGETX adapter.".into(),
+        )
+        .unwrap(),
+    ));
+    let result = session.execute("preview", &json!({"width":64}));
+    assert!(result.is_err(), "preview silently omitted raw geometry");
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains("A0") && message.contains("unresolved"), "{message}");
+}
+
+#[test]
 fn templates_report_what_dwg_does_not_keep() {
     use cadcraft_engine::cmd::file::drops_unknown;
     assert!(drops_unknown("a.dwg") && drops_unknown("B.DWT"));

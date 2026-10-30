@@ -41,16 +41,26 @@ pub struct DPrim {
     pub len: u32,
 }
 
-/// A canonical object whose display geometry refuses. The source drawing remains unchanged.
+/// A source object whose display geometry refuses. The source drawing remains unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeometryRefusal {
     pub handle: Handle,
     pub reason: String,
 }
 
+/// A raw record placeholder. Its position is a display hint, never a computed geometric extent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnresolvedRecord {
+    pub handle: Handle,
+    pub reason: String,
+    pub location: Vec2,
+    pub clip: Option<Bounds2>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DisplayList {
     pub geometry_refusals: Vec<GeometryRefusal>,
+    pub unresolved: Vec<UnresolvedRecord>,
     pub prims: Vec<DPrim>,
     pub verts: Vec<Vec2>,
     pub tris: Vec<Vec2>,
@@ -117,6 +127,13 @@ pub const MAX_TRANSPARENCY: u8 = 90;
 impl DisplayList {
     /// Refuse an export when any source object lacks supported display geometry.
     pub fn require_complete_geometry(&self) -> cadcraft_doc::Result<()> {
+        if !self.unresolved.is_empty() {
+            let handles: std::collections::BTreeSet<_> = self.unresolved.iter().map(|record| record.handle).collect();
+            return Err(cadcraft_doc::DocError::Invalid(format!(
+                "Raw display is unresolved for records {}. These records are excluded from computed extents.",
+                handles.into_iter().map(Handle::hex).collect::<Vec<_>>().join(", ")
+            )));
+        }
         if let Some(refusal) = self.geometry_refusals.first() {
             return Err(cadcraft_doc::DocError::Invalid(format!(
                 "Entity {} has no complete display geometry: {}",
@@ -170,6 +187,7 @@ pub(crate) fn append(dst: &mut DisplayList, src: DisplayList) {
     }));
     dst.pens.extend(src.pens);
     dst.geometry_refusals.extend(src.geometry_refusals);
+    dst.unresolved.extend(src.unresolved);
     dst.bounds = dst.bounds.union(&src.bounds);
     dst.expanded = dst.expanded.saturating_add(src.expanded);
 }

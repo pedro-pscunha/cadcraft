@@ -20,6 +20,7 @@ mod grid;
 mod grips;
 mod list;
 mod pick;
+mod unresolved;
 mod viewport;
 mod widgets;
 
@@ -86,6 +87,7 @@ pub struct CanvasState {
     list_gen: u64,
     reported_geometry_refusals: Option<(u64, Vec<cadcraft_render::GeometryRefusal>)>,
     geometry_refusal_generation: Option<(u64, u64, u64)>,
+    unresolved_records: Vec<cadcraft_render::GeometryRefusal>,
     prim_index: PrimIndex,
     /// Set when the app runs on wgpu: entities are drawn by [`crate::gpu`]; otherwise on the CPU.
     pub gpu: Option<crate::gpu::GpuTarget>,
@@ -185,6 +187,7 @@ impl CanvasState {
             return Vec::new();
         }
         self.geometry_refusal_generation = Some(generation);
+        self.unresolved_records = unresolved::summary(self.list.iter().flat_map(|list| list.unresolved.iter()).chain(self.vp.unresolved().iter()));
         let mut refusals = self.list.as_ref().map(|list| list.geometry_refusals.clone()).unwrap_or_default();
         refusals.extend_from_slice(self.vp.geometry_refusals());
         refusals.sort_by(|a, b| a.handle.cmp(&b.handle).then(a.reason.cmp(&b.reason)));
@@ -401,6 +404,10 @@ fn paint_content_highlights(frame: &mut CanvasPaint<'_>, bg: Rgb, sel: &[Handle]
     } else if let Some(list) = &app.canvas.list {
         draw_list(painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
     }
+    if let Some(list) = &app.canvas.list {
+        unresolved::markers(painter, &xf_paper, &list.unresolved);
+    }
+    unresolved::indicator(ui, rect, &app.canvas.unresolved_records, t);
     if let Some(vp) = &active_vp {
         // The active viewport: a heavy border, highlights in model units clipped to it.
         let r = Rect::from_two_pos(

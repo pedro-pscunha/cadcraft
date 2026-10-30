@@ -1,6 +1,6 @@
 //! DXF → Drawing.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::{
@@ -171,7 +171,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool) -> R
     // (#495), so it is left to that.
     let ours = secs.iter().any(|s| s.name == "OBJECTS" && s.tags.iter().any(|t| t.code == 3 && t.str() == crate::dxf_ext::HANDSEED_KEY));
     reserve_instance_handles(&mut secs, &mut d, ours);
-    let mut skipped = std::collections::BTreeMap::new();
+    let mut skipped = BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
         match s.name.as_str() {
@@ -197,7 +197,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool) -> R
     shift_dimension_blocks(&mut d, &rx)?;
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
     note_layouts_without_sheet(&mut d, &rx, &paper_block_for);
-    apply_sortents(&mut d, &objs, &rx, &paper_block_for, &first_layout);
+    let sort_tables = apply_sortents(&mut d, &objs, &rx, &paper_block_for, &first_layout);
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
@@ -210,6 +210,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool) -> R
         d.layers.insert(0, Layer::default());
     }
     crate::dxf_raw::read(&secs, &mut d);
+    std::sync::Arc::make_mut(&mut d.foreign).sort_tables = sort_tables;
     // Read kept objects and symbol roles before repairing missing identities: both still use
     // their input namespace in foreign references until writing remaps them.
     let kept: Vec<_> = d.foreign.objects.iter().map(|o| o.handle).chain(d.foreign.targets.keys().copied()).collect();

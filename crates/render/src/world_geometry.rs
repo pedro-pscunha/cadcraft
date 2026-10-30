@@ -98,7 +98,7 @@ fn append_block_geometry(
 ) -> cadcraft_doc::Result<()> {
     for child in block.entities.iter() {
         // Definitions are replaced by instances; unknown records have no modeled display geometry.
-        if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_))
+        if (matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || child.unresolved_display().is_some())
             || !child.common.visible
             || (child.common.layer != "0" && drawing.layer(&child.common.layer).is_some_and(|layer| !layer.visible()))
         {

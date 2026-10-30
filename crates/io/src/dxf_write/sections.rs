@@ -539,6 +539,7 @@ fn write_layout_objects(w: &mut W, plan: &ObjectWritePlan<'_>) {
     let layout_handles = plan.layout_handles;
     w.s(0, "DICTIONARY");
     w.s(5, layout_dict.clone());
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -627,6 +628,7 @@ fn write_root_group_objects(
     w.s(350, scale_dict.clone());
     w.s(0, "DICTIONARY");
     w.s(5, group_dict);
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -650,6 +652,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
     // Multileader styles.
     w.s(0, "DICTIONARY");
     w.s(5, mleader_dict.to_string());
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -673,6 +676,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
     // Table styles.
     w.s(0, "DICTIONARY");
     w.s(5, table_style_dict.clone());
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -1293,15 +1297,18 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     // multileaders and region loops into their source entity's position, and reuse restored xdicts.
     let written = super::sortents::written(&mut w);
     let mut sortents = Vec::new();
-    super::sortents::plan(&mut w, &mut sortents, &written, &ms_br, d.model.iter().map(|e| e.as_ref()));
+    let source = |kind: &str, name: &str| d.foreign.sort_tables.get(&(kind.to_string(), name.to_string()));
+    super::sortents::plan(&mut w, &mut sortents, &written, &ms_br, source("MODEL", ""), d.model.iter().map(|e| e.as_ref()));
     for (_, owner, layout) in &ps_brs {
-        super::sortents::plan(&mut w, &mut sortents, &written, owner, layout.entities.iter().map(|e| e.as_ref()));
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, source("LAYOUT", &layout.name), layout.entities.iter().map(|e| e.as_ref()));
     }
-    for (_, owner, block) in &user_blocks {
-        super::sortents::plan(&mut w, &mut sortents, &written, owner, block.entities.iter().map(|e| e.as_ref()));
+    for (name, owner, block) in &user_blocks {
+        let table = source("BLOCK", &name.to_ascii_uppercase());
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, table, block.entities.iter().map(|e| e.as_ref()));
     }
-    for (_, owner, entities) in dim_defs.iter().chain(arrow_defs.iter()).chain(table_defs.iter()) {
-        super::sortents::plan(&mut w, &mut sortents, &written, owner, entities.iter());
+    for (name, owner, entities) in dim_defs.iter().chain(arrow_defs.iter()).chain(table_defs.iter()) {
+        let table = source("BLOCK", &name.to_ascii_uppercase());
+        super::sortents::plan(&mut w, &mut sortents, &written, owner, table, entities.iter());
     }
     super::sortents::attach(&mut w, &sortents);
     if let Some(tag) = w.t.get_mut(seed_pos + 1) {
