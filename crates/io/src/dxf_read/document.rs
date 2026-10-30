@@ -1,5 +1,6 @@
 use super::common::T;
-use super::entities::{entity_extras, entity_plot_style, entity_with_table_budget, insert_attribs, polyline_entity};
+use super::entities::{entity_plot_style, entity_with_table_budget, insert_attribs, polyline_entity};
+use super::extras::entity_extras;
 use super::objects::{MAX_OBJECTS, Objects, SortentsTable, page_setup};
 use super::{BTreeMap, Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
 
@@ -54,8 +55,9 @@ pub(super) fn parse_entities(
                 }
                 None => d.new_handle(),
             };
-            entity_extras(kind, tags, h, &mut k, rx);
-            out.push((owner, paper, Entity { geometry_revision: Default::default(), handle: h, common: c, kind: k }));
+            let geometry_revision = cadcraft_doc::GeometryRevision::LegacyProjectedV1;
+            entity_extras(kind, tags, h, &mut k, rx, geometry_revision);
+            out.push((owner, paper, Entity { geometry_revision, handle: h, common: c, kind: k }));
         } else if kind == "HATCH" {
             // Without boundary data. The other records `entity` returns nothing for are read
             // elsewhere (the writer's paper viewport, the loops of a region).

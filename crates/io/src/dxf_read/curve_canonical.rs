@@ -121,19 +121,9 @@ fn spatial_leader(t: &T) -> Option<cadcraft_doc::Leader> {
 }
 
 /// A DIMENSION whose OCS text midpoint and arc point are kept as the record holds them, with its oblique angle (52) in the
-/// OCS of the plane. Associations, overrides and the marks of CADCraft's extended data are read by the caller with the
-/// legacy extras (`entity_extras`), which must not recompute the oblique angle of a canonical dimension.
+/// OCS of the plane. The caller resolves associations and overrides, then applies revision-aware geometry extras.
 fn spatial_dimension(t: &T, normal: cadcraft_geom::Vec3) -> cadcraft_doc::Dimension {
-    use cadcraft_doc::DimKind;
     let mut dm = super::entities::dimension_from(t, None);
-    let oblique = t.f(52).filter(|o| o.is_finite() && o.rem_euclid(180.0) != 0.0);
-    let base = match dm.kind {
-        DimKind::Linear { rotation } => Some(rotation),
-        DimKind::Aligned => OcsFrame::new(normal).map(|f| (f.to_ocs(dm.p14) - f.to_ocs(dm.p13)).xy().angle()),
-        _ => None,
-    };
-    if let (Some(base), Some(o)) = (base, oblique) {
-        dm.marks.oblique = Some(cadcraft_geom::norm_angle(base + o.to_radians()));
-    }
+    super::extras::dimension_oblique(&mut dm, t, normal, cadcraft_doc::GeometryRevision::CanonicalV2);
     dm
 }
