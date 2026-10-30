@@ -293,13 +293,13 @@ pub fn mtext_primitives(text: &MText, normal: Vec3, parent: &Mat4) -> Result<Vec
     finish(vec![primitive], parent)
 }
 
-/// A canonical attribute instance: its text in its own plane, and its multiline text in the plane of its own.
+/// An attribute's displayed text in its own plane. Embedded multiline text replaces the plain backup payload.
 pub fn attrib_primitives(attrib: &Attrib, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
-    let mut out = text_primitives(&attrib.text, attrib.plane.normal, parent)?;
-    if let Some(m) = &attrib.multiline {
-        out.extend(mtext_primitives(&m.mtext, m.normal, parent)?);
+    if let Some((multiline, text)) = attrib.multiline.as_ref().zip(attrib.multiline_text()) {
+        mtext_primitives(&text, multiline.normal, parent)
+    } else {
+        text_primitives(&attrib.text, attrib.plane.normal, parent)
     }
-    Ok(out)
 }
 
 /// The WCS point of the local 2D point `p` of a flat annotation frame (x along the frame, y up the plane).
@@ -839,6 +839,9 @@ mod tests {
         use super::super::block::MultilineAttrib;
         let mut a = Attrib::new("TAG", text_at(Vec3::new(1.0, 2.0, 3.0), 0.0));
         a.plane.normal = Vec3::new(3.0, 0.0, 0.0);
+        let plain = attrib_primitives(&a, &Mat4::IDENTITY).unwrap();
+        let [WorldPrimitive::Text(t)] = plain.as_slice() else { panic!("plain text") };
+        assert!(near(t.frame.origin, Vec3::new(3.0, 1.0, 2.0)) && near(t.frame.normal, EX), "(x, y, z) -> (z, x, y) in the (1, 0, 0) plane");
         let mtext = crate::MText {
             insert: Vec3::new(1.0, 1.0, 1.0),
             height: 1.0,
@@ -854,9 +857,7 @@ mod tests {
         };
         a.multiline = Some(MultilineAttrib { geometry_revision: Default::default(), normal: Vec3::new(0.0, 1.0, 0.0), mtext, read_as: "x".into() });
         let got = attrib_primitives(&a, &Mat4::IDENTITY).unwrap();
-        assert_eq!(got.len(), 2);
-        let (WorldPrimitive::Text(t), WorldPrimitive::Text(m)) = (&got[0], &got[1]) else { panic!("texts") };
-        assert!(near(t.frame.origin, Vec3::new(3.0, 1.0, 2.0)) && near(t.frame.normal, EX), "(x, y, z) -> (z, x, y) in the (1, 0, 0) plane");
+        let [WorldPrimitive::Text(m)] = got.as_slice() else { panic!("multiline text") };
         // The embedded text: WCS insertion and direction as held, and its own normal.
         assert!(near(m.frame.origin, Vec3::new(1.0, 1.0, 1.0)) && near(m.frame.x_axis, Vec3::new(0.0, 0.0, 1.0)) && near(m.frame.normal, EY));
     }
