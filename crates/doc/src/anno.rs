@@ -23,6 +23,10 @@ pub struct AnnoScale {
     /// that was never in a file: the save gives it the next free key. Not part of the scale.
     #[serde(skip)]
     pub key: String,
+    /// The unit scale flag the file gave it (group 290). AutoCAD flags the built-in 1:1 only: a scale of the same ratio
+    /// under another name has none. `None` for a scale that was never in a file.
+    #[serde(skip)]
+    pub unit: Option<bool>,
 }
 
 impl PartialEq for AnnoScale {
@@ -36,7 +40,7 @@ pub const MAX_SCALES: usize = 1000;
 
 impl AnnoScale {
     pub fn new(name: &str, paper_units: f64, drawing_units: f64) -> Self {
-        AnnoScale { name: name.to_string(), paper_units, drawing_units, key: String::new() }
+        AnnoScale { name: name.to_string(), paper_units, drawing_units, key: String::new(), unit: None }
     }
     /// The 1:1 scale.
     pub fn unit() -> Self {
@@ -46,6 +50,10 @@ impl AnnoScale {
     pub fn is_valid(&self) -> bool {
         let ok = |v: f64| v.is_finite() && v > 0.0;
         ok(self.paper_units) && ok(self.drawing_units) && ok(self.drawing_units / self.paper_units)
+    }
+    /// Whether the scale is flagged as the unit scale: the file's flag, else the built-in `1:1` only.
+    pub fn is_unit_scale(&self) -> bool {
+        self.unit.unwrap_or_else(|| self.name.trim() == "1:1" && same_factor(self.factor(), 1.0))
     }
     /// Drawing units per paper unit (1:50 → 50): what an annotative object's paper size is
     /// multiplied by. 1 for an invalid scale.

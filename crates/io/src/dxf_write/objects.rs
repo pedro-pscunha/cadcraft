@@ -166,7 +166,7 @@ pub(super) fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)
         w.s(300, dxf_ext::xdata_str(&s.name));
         w.f(140, s.paper_units);
         w.f(141, s.drawing_units);
-        w.i(290, i64::from(cadcraft_doc::same_factor(s.factor(), 1.0)));
+        w.i(290, i64::from(s.is_unit_scale()));
     }
 }
 
