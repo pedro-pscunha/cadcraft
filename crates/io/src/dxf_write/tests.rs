@@ -282,6 +282,20 @@ fn purge_preventer_block_pointer_stays_in_the_dwg_bridge() {
     assert!(bridge.iter().any(|t| t.code == 340 && t.str() != "0"), "bridge preventer keeps its block: {bridge:?}");
 }
 
+#[test]
+fn the_surface_modeler_cache_stays_in_the_private_bridge_without_dropping_xdata() {
+    let text = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nSURFACE\n5\n60\n330\n1F\n100\nAcDbEntity\n8\n0\n100\nAcDbSurface\n71\n6\n72\n6\n100\nAcDbAcadrustSurfaceCache\n310\nAABBCC\n340\n0\n1001\nACME\n1000\nsurface-user-data\n0\nENDSEC\n0\nEOF\n";
+    let d = crate::read_dxf(text.as_bytes()).unwrap();
+    let public = tags(&d, Version::R2018);
+    assert!(!public.iter().any(|tag| tag.str() == "AcDbAcadrustSurfaceCache"));
+    assert!(!public.iter().any(|tag| tag.code == 310 && tag.str() == "AABBCC"));
+    assert!(public.iter().any(|tag| tag.code == 1000 && tag.str() == "surface-user-data"));
+    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap();
+    assert!(bridge.iter().any(|tag| tag.str() == "AcDbAcadrustSurfaceCache"));
+    assert!(bridge.iter().any(|tag| tag.code == 310 && tag.str() == "AABBCC"));
+    assert!(bridge.iter().any(|tag| tag.code == 1000 && tag.str() == "surface-user-data"));
+}
+
 /// The bridge records the DWG layout of the bytes of an embedded entity in group 455, in SOLID history steps and
 /// surfaces. A user DXF holds only the groups of the DXF Reference; the DWG bridge keeps the group.
 #[test]
