@@ -1,7 +1,8 @@
 //! The arc, spline, text and fill world primitives: validation, the complete parent transform and the XY projection.
 
 use cadcraft_doc::{
-    Handle, Prim, Text, TextFrame, WorldFill, WorldFillKind, WorldGeometry, WorldPattern, WorldPrimitive, WorldText, WorldTextContent,
+    Gradient, Handle, Prim, Text, TextFrame, WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText,
+    WorldTextContent,
 };
 use cadcraft_geom::{Mat4, Segment, Vec3};
 
@@ -90,17 +91,41 @@ fn text() -> WorldPrimitive {
 }
 
 #[test]
-fn a_text_follows_a_similarity_and_refuses_anything_else() {
-    let WorldPrimitive::Text(moved) = text().transformed(&similarity()).unwrap() else { panic!("not a text") };
-    assert!(near(moved.frame.origin, similarity().apply(Vec3::new(1.0, 2.0, 0.0))));
-    assert!(near(moved.frame.x_axis, Y) && near(moved.frame.y_axis, Vec3::new(-1.0, 0.0, 0.0)) && near(moved.frame.normal, Vec3::Z));
-    assert!(near(moved.align.unwrap(), similarity().apply(Vec3::new(3.0, 2.0, 0.0))));
-    let WorldTextContent::Text(t) = moved.content else { panic!("not a text") };
-    assert_eq!(t.height, 4.0, "the scale grows the height");
-    assert!(text().transformed(&shear()).is_err());
+fn text_layout_points_follow_every_affine_parent() {
+    let WorldPrimitive::Text(source) = text() else { panic!("not a text") };
     let mirror = matrix([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]);
-    assert!(text().transformed(&mirror).is_err());
-    // A text has no 2D primitive: the frame stays in the geometry.
+    for parent in [similarity(), shear(), mirror] {
+        let WorldPrimitive::Text(moved) = text().transformed(&parent).unwrap() else { panic!("not a text") };
+        assert_eq!(moved.content, source.content, "layout sizes stay local");
+        for (x, y) in [(0.0, 0.0), (2.0, 3.0), (-1.0, 4.0)] {
+            let original = source.frame.origin + source.frame.x_axis * x + source.frame.y_axis * y;
+            let actual = moved.frame.origin + moved.frame.x_axis * x + moved.frame.y_axis * y;
+            assert!(near(actual, parent.apply(original)), "parent {parent:?}");
+        }
+        assert!(near(moved.align.unwrap(), parent.apply(source.align.unwrap())));
+        assert!(moved.frame.normal.dot(moved.frame.x_axis).abs() < 1e-9);
+        assert!(moved.frame.normal.dot(moved.frame.y_axis).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn affine_text_composition_and_collapsed_frames_remain_displayable() {
+    let first = text().transformed(&shear()).unwrap();
+    let actual = first.transformed(&similarity()).unwrap();
+    let expected = text().transformed(&similarity().mul(&shear())).unwrap();
+    let (WorldPrimitive::Text(actual), WorldPrimitive::Text(expected)) = (actual, expected) else { panic!("not text") };
+    assert!(near(actual.frame.origin, expected.frame.origin));
+    assert!(near(actual.frame.x_axis, expected.frame.x_axis) && near(actual.frame.y_axis, expected.frame.y_axis));
+    assert!(near(actual.frame.normal, expected.frame.normal));
+    assert_eq!(actual.content, expected.content);
+    let collapsed = matrix([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]);
+    let WorldPrimitive::Text(flat) = text().transformed(&collapsed).unwrap() else { panic!("not text") };
+    assert_eq!(flat.frame.normal, Vec3::ZERO);
+    assert_eq!(flat.frame.y_axis, Vec3::ZERO);
+}
+
+#[test]
+fn text_keeps_its_frame_outside_the_curve_projection() {
     assert!(WorldGeometry::from_primitives(Handle(0), vec![text()]).unwrap().project_xy().unwrap().is_empty());
 }
 
@@ -126,17 +151,35 @@ fn pattern() -> WorldFillKind {
 }
 
 #[test]
-fn solid_and_wipeout_fills_accept_any_affine_but_patterns_need_a_similarity() {
+fn all_fill_bases_accept_affine_parents() {
     for kind in [WorldFillKind::Solid, WorldFillKind::Wipeout] {
         let WorldPrimitive::Fill(moved) = fill(kind).transformed(&shear()).unwrap() else { panic!("not a fill") };
         let WorldPrimitive::Line { b, .. } = &moved.loops[0][1] else { panic!("not a line") };
         assert!(near(*b, shear().apply(Vec3::new(2.0, 2.0, 0.0))));
     }
-    assert!(fill(pattern()).transformed(&shear()).is_err());
-    let WorldPrimitive::Fill(moved) = fill(pattern()).transformed(&similarity()).unwrap() else { panic!("not a fill") };
-    let WorldFillKind::Pattern(p) = moved.kind else { panic!("not a pattern") };
-    assert_eq!((p.scale, p.angle), (3.0, 0.25));
-    assert!(near(p.origin, similarity().apply(Vec3::new(1.0, 1.0, 0.0))) && near(p.x_axis, Y));
+    for parent in [shear(), similarity()] {
+        let WorldPrimitive::Fill(moved) = fill(pattern()).transformed(&parent).unwrap() else { panic!("not a fill") };
+        let WorldFillKind::Pattern(p) = moved.kind else { panic!("not a pattern") };
+        assert_eq!((p.scale, p.angle), (1.5, 0.25), "pattern lengths stay local");
+        let original = Vec3::new(1.0, 1.0, 0.0) + X * 2.0 + Y * 3.0;
+        assert!(near(p.origin + p.x_axis * 2.0 + p.y_axis * 3.0, parent.apply(original)));
+    }
+}
+
+#[test]
+fn a_gradient_retains_its_affine_basis_and_local_parameters() {
+    let gradient = Gradient {
+        name: "LINEAR".into(),
+        color1: cadcraft_color::Color::Index(1),
+        color2: cadcraft_color::Color::Index(5),
+        angle: 0.5,
+        centered: false,
+    };
+    let source = WorldGradient { gradient: gradient.clone(), origin: Vec3::new(1.0, 2.0, 3.0), x_axis: X, y_axis: Y };
+    let WorldPrimitive::Fill(moved) = fill(WorldFillKind::Gradient(source.clone())).transformed(&shear()).unwrap() else { panic!("not fill") };
+    let WorldFillKind::Gradient(moved) = moved.kind else { panic!("not gradient") };
+    assert_eq!(moved.gradient, gradient);
+    assert!(near(moved.origin + moved.x_axis * 2.0 + moved.y_axis * 3.0, shear().apply(source.origin + X * 2.0 + Y * 3.0)));
 }
 
 #[test]

@@ -1,10 +1,9 @@
 //! World-geometry builders for the canonical families: the WCS primitives of a payload, its plane and a parent transform.
 //!
 //! A builder takes the canonical payload, the normal of its plane (when the payload has one beside it) and the parent
-//! transform, and returns the primitives of `WorldGeometry`'s vocabulary after the complete parent. It refuses (an
-//! error, no fallback) a zero or non-finite normal, a payload that is not canonical, a perspective parent, and for texts
-//! and patterns a parent that is not a similarity. Projection to the view happens only after this, in
-//! `WorldGeometry::project_xy`.
+//! transform, and returns the primitives of `WorldGeometry`'s vocabulary after the complete parent. It refuses a zero
+//! or non-finite normal, a payload that is not canonical, or a perspective parent. Text and fill bases retain the complete
+//! affine parent. Projection to the view happens only after this, in `WorldGeometry::project_xy`.
 
 use cadcraft_geom::{Mat4, OcsFrame, Spline, Vec2, Vec3, bulge_to_arc};
 
@@ -788,9 +787,9 @@ mod tests {
         };
         let gradient = hatch_primitives(&hatch(true, Some(g)), Vec3::Z, &Mat4::IDENTITY).unwrap();
         assert!(matches!(&gradient[0], WorldPrimitive::Fill(f) if matches!(f.kind, WorldFillKind::Gradient(_))));
-        // A pattern needs a similarity; a solid fill does not.
+        // Display bases keep the full affine parent even when persistence cannot encode it.
         let shear = Mat4 { m: [[2.0, 0.5, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
-        assert!(hatch_primitives(&hatch(false, None), Vec3::Z, &shear).is_err());
+        assert!(hatch_primitives(&hatch(false, None), Vec3::Z, &shear).is_ok());
         assert!(hatch_primitives(&hatch(true, None), Vec3::Z, &shear).is_ok());
         let mut legacy = hatch(true, None);
         legacy.loops[0].edges.clear();
@@ -829,7 +828,9 @@ mod tests {
             assert_eq!(content.height, 2.0, "this parent does not scale");
         }
         let shear = Mat4 { m: [[2.0, 0.5, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
-        assert!(text_primitives(&text_at(Vec3::ZERO, 0.0), Vec3::Z, &shear).is_err());
+        let moved = text_primitives(&text_at(Vec3::ZERO, 0.0), Vec3::Z, &shear).unwrap();
+        let WorldPrimitive::Text(text) = &moved[0] else { panic!("not a text") };
+        assert!(near(text.frame.x_axis, shear.apply_vec(EX)) && near(text.frame.y_axis, shear.apply_vec(EY)));
         assert!(text_primitives(&text_at(Vec3::ZERO, 0.0), Vec3::ZERO, &Mat4::IDENTITY).is_err());
     }
 

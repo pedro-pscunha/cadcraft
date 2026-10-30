@@ -2,7 +2,6 @@
 
 use cadcraft_geom::{Ellipse as GEllipse, Line as GLine, Mat4, OcsFrame, Segment, Spline as GSpline, TAU, Vec2, Vec3};
 
-use super::text_canonical::Similarity;
 use super::{Entity, EntityKind, GeometryRevision, Gradient, Handle, MText, Prim, Text, TextFrame};
 use crate::library::PatternLine;
 use crate::{DocError, Result, has_finite_numbers};
@@ -33,15 +32,15 @@ pub enum WorldPrimitive {
         control: Vec<Vec3>,
         weights: Vec<f64>,
     },
-    /// Text placed by its WCS frame. A parent must be a similarity (a mirror, a shear and a non-uniform scale refuse).
+    /// Text placed by its complete affine WCS frame. Layout lengths remain in local units.
     Text(WorldText),
     /// A filled region. The fill plane is the plane of its loops.
     Fill(WorldFill),
 }
 
-/// A text with its WCS frame (see [`TextFrame`]: the unit baseline and height directions, the unit plane normal) and the
-/// payload its layout reads. The point and angle fields of the payload are source data; the frame and `align` place it,
-/// and the heights and widths are in world units.
+/// Text with its affine WCS frame and unchanged layout payload. Unlike a source [`TextFrame`], the baseline and height
+/// axes carry the complete parent scale and shear. The normal follows their orientation; a collapsed frame has a zero
+/// normal. Layout points use `origin + x_axis * x + y_axis * y`. Heights and widths remain in local units.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldText {
     pub frame: TextFrame,
@@ -74,9 +73,8 @@ pub enum WorldFillKind {
     Gradient(WorldGradient),
 }
 
-/// A hatch pattern placed in the fill plane: the pattern lines are relative to `origin` and the in-plane unit axes
-/// (`x_axis` is the plane's X axis, `y_axis` the plane normal crossed into it); `angle` turns the pattern from `x_axis`
-/// towards `y_axis`, and `scale` grows its lines.
+/// A hatch pattern placed by an affine basis. Pattern lines remain relative to `origin`, `x_axis` and `y_axis`.
+/// The axes retain the complete parent scale and shear. The angle and scale remain in local pattern coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldPattern {
     pub name: String,
@@ -88,7 +86,7 @@ pub struct WorldPattern {
     pub lines: Vec<PatternLine>,
 }
 
-/// A gradient placed in the fill plane; its angle is measured from `x_axis` towards `y_axis`.
+/// A gradient placed by an affine basis. Its angle remains local, measured from `x_axis` towards `y_axis`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldGradient {
     pub gradient: Gradient,
@@ -150,8 +148,8 @@ impl WorldPrimitive {
         }
     }
 
-    /// This primitive after the affine `parent`. A text and a pattern or gradient fill need a similarity; every other
-    /// primitive (and a solid or wipeout fill) accepts any affine map, because its control geometry maps exactly.
+    /// This primitive after the complete affine `parent`. Display bases retain scale, shear and reflection without
+    /// imposing the representability limits of persisted entities.
     pub fn transformed(&self, parent: &Mat4) -> Result<WorldPrimitive> {
         if parent.m[3] != [0.0, 0.0, 0.0, 1.0] || !has_finite_numbers(parent) {
             return Err(invalid("A world geometry parent must be a finite affine transform."));
@@ -167,51 +165,31 @@ impl WorldPrimitive {
                 weights: weights.clone(),
             },
             WorldPrimitive::Text(t) => {
-                let sim = Similarity::from_mat4(parent)?;
-                let frame = TextFrame {
-                    origin: sim.point(t.frame.origin),
-                    x_axis: sim.direction(t.frame.x_axis),
-                    y_axis: sim.direction(t.frame.y_axis),
-                    normal: sim.direction(t.frame.normal),
+                let x_axis = parent.apply_vec(t.frame.x_axis);
+                let y_axis = parent.apply_vec(t.frame.y_axis);
+                let normal = match (x_axis.try_normalized(), y_axis.try_normalized()) {
+                    (Some(x), Some(y)) => x.cross(y).try_normalized().unwrap_or(Vec3::ZERO),
+                    _ => Vec3::ZERO,
                 };
-                let k = sim.scale;
-                let content = match &t.content {
-                    WorldTextContent::Text(text) => WorldTextContent::Text(Text { height: text.height * k, ..text.clone() }),
-                    WorldTextContent::MText(text) => {
-                        let mut text = text.clone();
-                        text.height *= k;
-                        text.width *= k;
-                        if let Some(c) = &mut text.columns {
-                            c.scale(k);
-                        }
-                        WorldTextContent::MText(text)
-                    }
-                };
-                WorldPrimitive::Text(WorldText { frame, align: t.align.map(|a| sim.point(a)), content })
+                let frame = TextFrame { origin: parent.apply(t.frame.origin), x_axis, y_axis, normal };
+                WorldPrimitive::Text(WorldText { frame, align: t.align.map(|a| parent.apply(a)), content: t.content.clone() })
             }
             WorldPrimitive::Fill(fill) => {
                 let kind = match &fill.kind {
                     WorldFillKind::Solid => WorldFillKind::Solid,
                     WorldFillKind::Wipeout => WorldFillKind::Wipeout,
-                    WorldFillKind::Pattern(p) => {
-                        let sim = Similarity::from_mat4(parent)?;
-                        WorldFillKind::Pattern(WorldPattern {
-                            scale: p.scale * sim.scale,
-                            origin: sim.point(p.origin),
-                            x_axis: sim.direction(p.x_axis),
-                            y_axis: sim.direction(p.y_axis),
-                            ..p.clone()
-                        })
-                    }
-                    WorldFillKind::Gradient(g) => {
-                        let sim = Similarity::from_mat4(parent)?;
-                        WorldFillKind::Gradient(WorldGradient {
-                            origin: sim.point(g.origin),
-                            x_axis: sim.direction(g.x_axis),
-                            y_axis: sim.direction(g.y_axis),
-                            ..g.clone()
-                        })
-                    }
+                    WorldFillKind::Pattern(p) => WorldFillKind::Pattern(WorldPattern {
+                        origin: parent.apply(p.origin),
+                        x_axis: parent.apply_vec(p.x_axis),
+                        y_axis: parent.apply_vec(p.y_axis),
+                        ..p.clone()
+                    }),
+                    WorldFillKind::Gradient(g) => WorldFillKind::Gradient(WorldGradient {
+                        origin: parent.apply(g.origin),
+                        x_axis: parent.apply_vec(g.x_axis),
+                        y_axis: parent.apply_vec(g.y_axis),
+                        ..g.clone()
+                    }),
                 };
                 let loops =
                     fill.loops.iter().map(|l| l.iter().map(|p| p.transformed(parent)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
