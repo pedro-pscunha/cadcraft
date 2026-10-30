@@ -25,6 +25,7 @@ mod dim_moved_roundtrip;
 mod dim_named_block;
 mod dim_oblique_90;
 mod dimassoc_foreign_roundtrip;
+mod dimension_association_xdata;
 mod dimstyle_fidelity;
 mod dimstyle_vars_roundtrip;
 mod dimtfill_roundtrip;

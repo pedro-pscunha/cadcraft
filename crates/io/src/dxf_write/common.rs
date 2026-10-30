@@ -14,8 +14,8 @@ pub(super) fn annotative_xdata(w: &mut W) {
     w.s(1002, "}");
 }
 
-/// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
-pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
+/// Override (`ACAD` DSTYLE) and, when the DIMASSOC object does not hold every link (`standard_assoc`), associativity (`CADCRAFT` ASSOC) xdata of a dimension.
+pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx, standard_assoc: bool) {
     let mut entries: Vec<(i64, Vec<cadcraft_dxf::Tag>)> = Vec::new();
     let mut sah = false;
     for (k, v) in &dm.overrides {
@@ -54,7 +54,9 @@ pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
     if matches!(dm.kind, DimKind::ArcLength) {
         ours.extend(dxf_ext::arclen_xdata(dm.p15));
     }
-    if !dm.assoc.is_empty() {
+    // The links travel as CADCraft xdata only when the DIMASSOC object AutoCAD uses does not hold them all: a public file carries what
+    // AutoCAD writes. The reader still reads the xdata of files CADCraft saved before.
+    if !dm.assoc.is_empty() && !standard_assoc {
         ours.extend(dxf_ext::assoc_xdata(&dm.assoc));
     }
     ours.extend(dxf_ext::marks_xdata(&dm.marks));
