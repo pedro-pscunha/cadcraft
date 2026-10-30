@@ -129,6 +129,7 @@ mod polyline_parent_plot_style;
 mod raw_dwg_bridge;
 mod region_roundtrip;
 mod roundtrip_audit;
+mod scale_list_keys;
 mod skipped_records;
 mod sortents;
 mod sortents_emission;

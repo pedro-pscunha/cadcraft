@@ -36,8 +36,8 @@ impl SortentsTable {
 pub(super) struct Objects {
     /// Dictionary entry handle (upper case) → entry name.
     names: HashMap<String, String>,
-    /// SCALE objects (the annotation scale list), in file order.
-    scales: Vec<cadcraft_doc::AnnoScale>,
+    /// SCALE objects (the annotation scale list) with their handles, in file order.
+    scales: Vec<(String, cadcraft_doc::AnnoScale)>,
     /// XRECORD handle (upper case) → its groups.
     xrecords: HashMap<String, Vec<Tag>>,
     /// TABLESTYLE objects: (handle, groups).
@@ -66,9 +66,9 @@ impl Objects {
         match kind {
             "SCALE" if self.scales.len() < cadcraft_doc::MAX_SCALES => {
                 if let Some(s) = crate::dxf_ext::read_scale(tags)
-                    && !self.scales.iter().any(|x| x.name.eq_ignore_ascii_case(&s.name))
+                    && !self.scales.iter().any(|(_, x)| x.name.eq_ignore_ascii_case(&s.name))
                 {
-                    self.scales.push(s);
+                    self.scales.push((h, s));
                 }
             }
             "DICTIONARY" | "ACDBDICTIONARYWDFLT" => {
@@ -299,7 +299,12 @@ impl Objects {
         // The annotation scale list (a metric drawing without one gets the metric defaults),
         // then CADCraft's annotative scaling record.
         if !self.scales.is_empty() {
-            d.scales = self.scales.clone();
+            // Each scale keeps the key of its entry in the scale list dictionary.
+            d.scales = self
+                .scales
+                .iter()
+                .map(|(handle, scale)| cadcraft_doc::AnnoScale { key: self.names.get(handle).cloned().unwrap_or_default(), ..scale.clone() })
+                .collect();
         } else if d.header.i64("MEASUREMENT", 0) == 1 {
             d.scales = cadcraft_doc::metric_scales();
         }

@@ -13,12 +13,22 @@ use serde::{Deserialize, Serialize};
 use crate::{Common, Drawing, Entity, EntityKind};
 
 /// A named annotation scale: `paper_units` on paper show `drawing_units` of the drawing.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnnoScale {
     pub name: String,
     pub paper_units: f64,
     pub drawing_units: f64,
+    /// The key of its entry in the file's ACAD_SCALELIST dictionary (`A0`, `*A1`), empty for a scale
+    /// that was never in a file: the save gives it the next free key. Not part of the scale.
+    #[serde(skip)]
+    pub key: String,
+}
+
+impl PartialEq for AnnoScale {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.paper_units == other.paper_units && self.drawing_units == other.drawing_units
+    }
 }
 
 /// The most scales a drawing's list or one object holds (hostile files and parameters).
@@ -26,7 +36,7 @@ pub const MAX_SCALES: usize = 1000;
 
 impl AnnoScale {
     pub fn new(name: &str, paper_units: f64, drawing_units: f64) -> Self {
-        AnnoScale { name: name.to_string(), paper_units, drawing_units }
+        AnnoScale { name: name.to_string(), paper_units, drawing_units, key: String::new() }
     }
     /// The 1:1 scale.
     pub fn unit() -> Self {
