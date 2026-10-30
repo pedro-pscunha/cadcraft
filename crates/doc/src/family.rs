@@ -39,6 +39,40 @@ pub enum Family {
 }
 
 impl Family {
+    /// Every family, in order.
+    pub const ALL: [Family; 30] = [
+        Family::Circle,
+        Family::Arc,
+        Family::Ellipse,
+        Family::Line,
+        Family::Point,
+        Family::Ray,
+        Family::XLine,
+        Family::LwPolyline,
+        Family::Polyline,
+        Family::Solid,
+        Family::Trace,
+        Family::Face3d,
+        Family::Spline,
+        Family::Leader,
+        Family::Dimension,
+        Family::Text,
+        Family::MText,
+        Family::AttDef,
+        Family::Attrib,
+        Family::Tolerance,
+        Family::Hatch,
+        Family::Wipeout,
+        Family::MLine,
+        Family::Helix,
+        Family::Image,
+        Family::Table,
+        Family::Insert,
+        Family::MLeader,
+        Family::Region,
+        Family::Viewport,
+    ];
+
     /// The family of an entity kind, `None` for a kind without a canonical reader (unknown and raw records).
     pub fn of(kind: &EntityKind) -> Option<Family> {
         Some(match kind {
@@ -90,6 +124,16 @@ impl FamilySet {
 
     pub fn contains(self, family: Family) -> bool {
         self.0 & (1 << (family as u8)) != 0
+    }
+
+    /// Whether every family of this set is in `other`.
+    pub fn is_subset_of(self, other: FamilySet) -> bool {
+        self.0 & !other.0 == 0
+    }
+
+    /// The families of this set, in the order of [`Family`].
+    pub fn families(self) -> impl Iterator<Item = Family> {
+        Family::ALL.into_iter().filter(move |f| self.contains(*f))
     }
 
     /// This set without `family`.

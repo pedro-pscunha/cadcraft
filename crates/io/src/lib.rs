@@ -70,19 +70,24 @@ fn ext(name: impl AsRef<Path>) -> String {
 }
 
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
-/// (SVG and gzip-compressed SVGZ).
+/// (SVG and gzip-compressed SVGZ). The activation policy is the environment's ([`activation::ReaderPolicy::current`]).
 pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
+    read_with_policy(bytes, name, dxf_read::current_policy()?)
+}
+
+/// [`read`] with the activation policy of the caller.
+pub fn read_with_policy(bytes: &[u8], name: impl AsRef<Path>, policy: activation::ReaderPolicy) -> Result<Drawing> {
     let name = name.as_ref();
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read_from_dwg(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        let mut d = dxf_read::read_from_dwg(&dxf, policy).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
         d.read_notes.extend(notes);
         return Ok(d);
     }
     match (Format::from_path(name), ext(name).as_str()) {
         (Some(Format::Svg | Format::Svgz), _) => svg_read::read(bytes),
-        (Some(Format::Dxf), _) => dxf_read::read(bytes),
-        (_, e) if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
+        (Some(Format::Dxf), _) => dxf_read::read_with_policy(bytes, policy),
+        (_, e) if bytes.len() > 4 => dxf_read::read_with_policy(bytes, policy).map_err(|_| IoError::Unsupported(e.to_string())),
         (_, e) => Err(IoError::Unsupported(e.to_string())),
     }
 }

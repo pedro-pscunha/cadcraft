@@ -26,6 +26,93 @@ impl NodeId {
 
 pub use cadcraft_doc::{Family, FamilySet};
 
+/// The environment variable that overrides [`ACTIVATION_DEFAULT`] (`off`, `safe` or `all`).
+pub const READER_ENV: &str = "CADCRAFT_READER";
+
+/// The mode of this build when the environment does not say: `safe`, the steady state of the plan.
+pub const ACTIVATION_DEFAULT: ReaderMode = ReaderMode::Safe;
+
+/// The families this build activates: each stage adds its own. Stage 0 activates none, so every mode reads as the reader did before.
+pub const ACTIVE_FAMILIES: FamilySet = FamilySet::NONE;
+
+/// The families whose canonical reader the reader calls. No reader calls one yet.
+pub const WIRED_FAMILIES: FamilySet = FamilySet::NONE;
+
+/// The rollback switch of the activation (plan v3, section 9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReaderMode {
+    /// Pre-activation behavior for the records Legacy loses nothing from. A record that needs Canonical is read Canonical if its
+    /// component can activate under the mask, else kept Raw: `off` never drops Z, a plane or a frame silently.
+    Off,
+    /// The minimum set: only the components that need Canonical are Canonical, the rest is Legacy.
+    Safe,
+    /// Every record of the active families is Canonical (tests and measurements).
+    All,
+}
+
+/// A setting that is not one of the modes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReaderModeError(String);
+
+impl std::fmt::Display for ReaderModeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{READER_ENV}={:?} is not a reader mode: use off, safe or all", self.0)
+    }
+}
+
+impl std::error::Error for ReaderModeError {}
+
+impl ReaderMode {
+    /// A mode from its setting, in any case.
+    pub fn parse(text: &str) -> Result<ReaderMode, ReaderModeError> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "off" => Ok(ReaderMode::Off),
+            "safe" => Ok(ReaderMode::Safe),
+            "all" => Ok(ReaderMode::All),
+            _ => Err(ReaderModeError(text.to_string())),
+        }
+    }
+}
+
+/// What a read does about the activation: the mode of the switch and the families the build has active. The caller's own, so
+/// concurrent reads with different policies share nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReaderPolicy {
+    mode: ReaderMode,
+    active: FamilySet,
+}
+
+impl ReaderPolicy {
+    pub fn new(mode: ReaderMode, active: FamilySet) -> ReaderPolicy {
+        ReaderPolicy { mode, active }
+    }
+
+    /// The policy of a setting (the value of [`READER_ENV`]) over this build: [`ACTIVATION_DEFAULT`] when there is none.
+    pub fn resolve(setting: Option<&str>) -> Result<ReaderPolicy, ReaderModeError> {
+        let mode = setting.map_or(Ok(ACTIVATION_DEFAULT), ReaderMode::parse)?;
+        Ok(ReaderPolicy::new(mode, ACTIVE_FAMILIES))
+    }
+
+    /// The policy of the environment this process runs in.
+    pub fn current() -> Result<ReaderPolicy, ReaderModeError> {
+        ReaderPolicy::resolve(std::env::var(READER_ENV).ok().as_deref())
+    }
+
+    pub fn mode(&self) -> ReaderMode {
+        self.mode
+    }
+
+    /// The families the reader may read Canonical: none when off.
+    pub fn mask(&self) -> FamilySet {
+        if self.mode == ReaderMode::Off { FamilySet::NONE } else { self.active }
+    }
+
+    /// Whether a record that Legacy loses nothing from is read Canonical too: only in mode `all`.
+    pub fn reads_plain_canonical(&self) -> bool {
+        self.mode == ReaderMode::All
+    }
+}
+
 /// Whether Legacy would lose data from a record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Need {

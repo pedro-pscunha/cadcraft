@@ -13,6 +13,7 @@ use cadcraft_doc::{
 use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
+use crate::activation::{ReaderPolicy, WIRED_FAMILIES};
 use crate::{IoError, Result};
 
 mod common;
@@ -137,15 +138,24 @@ fn xdata_blocks(secs: &[Section], brs: &HashMap<String, String>) -> HashSet<Stri
         .collect()
 }
 
-/// Read a DXF file into a drawing.
+/// Read a DXF file into a drawing, with the activation policy of the environment.
 pub fn read(bytes: &[u8]) -> Result<Drawing> {
-    read_budgeted(bytes, 4_000_000, false)
+    read_with_policy(bytes, current_policy()?)
+}
+
+/// Read a DXF file into a drawing with the activation policy of the caller.
+pub fn read_with_policy(bytes: &[u8], policy: ReaderPolicy) -> Result<Drawing> {
+    read_budgeted(bytes, 4_000_000, false, policy)
+}
+
+pub(crate) fn current_policy() -> Result<ReaderPolicy> {
+    ReaderPolicy::current().map_err(|e| IoError::Format(e.to_string()))
 }
 
 /// Read the DXF that the DWG reader made from a DWG file. Groups that the DWG reader writes as fixed values, and a DWG does not
 /// hold, are not the file's data and are left unread.
-pub fn read_from_dwg(bytes: &[u8]) -> Result<Drawing> {
-    read_budgeted(bytes, 4_000_000, true)
+pub fn read_from_dwg(bytes: &[u8], policy: ReaderPolicy) -> Result<Drawing> {
+    read_budgeted(bytes, 4_000_000, true, policy)
 }
 
 /// A block definition read from BLOCKS: name, base point, description, entities (owner, paper
@@ -156,7 +166,11 @@ type BlockDef = (String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)
 type LayoutDef = (String, u32, String, PageSetup);
 
 /// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
-fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool) -> Result<Drawing> {
+fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool, policy: ReaderPolicy) -> Result<Drawing> {
+    // No canonical reader is called yet: a mask that asks for one cannot be honored, and the read says so.
+    if let Some(family) = policy.mask().families().find(|f| !WIRED_FAMILIES.contains(*f)) {
+        return Err(IoError::Format(format!("the reader policy turns on {family:?}, which has no canonical reader")));
+    }
     let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
     let mut secs = sections(&tags);
     if secs.is_empty() {
@@ -320,7 +334,7 @@ mod table_budget_tests {
         let dxf = format!(
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nTEST\n10\n0\n20\n0\n{table}0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{table}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{table}0\nENDSEC\n0\nEOF\n"
         );
-        let d = read_budgeted(dxf.as_bytes(), 2, false).unwrap();
+        let d = read_budgeted(dxf.as_bytes(), 2, false, ReaderPolicy::resolve(None).unwrap()).unwrap();
         let block = d.block("TEST").unwrap();
         let count = |e: &Entity| match &e.kind {
             EntityKind::Table(t) => t.cells.iter().map(Vec::len).sum::<usize>(),
