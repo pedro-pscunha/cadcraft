@@ -28,6 +28,10 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
     spend(remaining, 1, entity.handle)?;
     match &entity.kind {
         EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining),
+        EntityKind::Dimension(dimension) => {
+            let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
+            entity.world_geometry_with_layout(parent, Some(WorldLayout::Dimension(&layout)))
+        }
         EntityKind::Table(table) => {
             let layout = crate::table_layout(drawing, table);
             entity.world_geometry_with_layout(parent, Some(WorldLayout::Table(&layout)))

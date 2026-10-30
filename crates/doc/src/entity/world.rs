@@ -285,6 +285,7 @@ fn loop_polygon(loop_: &[WorldPrimitive], owner: Handle) -> Result<Vec<Vec2>> {
 /// Style-dependent graphics in local coordinates. The caller supplies the same layout that it draws.
 #[derive(Clone, Copy, Debug)]
 pub enum WorldLayout<'a> {
+    Dimension(&'a super::DimensionLayout),
     Leader(&'a super::LeaderArrowLayout),
     Tolerance { layout: &'a crate::GdtLayout, text_style: &'a str },
     Table(&'a super::TableLayout),
@@ -357,6 +358,9 @@ impl Entity {
         }
         if let Some(layout) = layout {
             let primitives = match (&self.kind, layout) {
+                (EntityKind::Dimension(dimension), WorldLayout::Dimension(layout)) => {
+                    super::dimension_primitives(dimension, self.common.extrusion, layout, parent)?
+                }
                 (EntityKind::Leader(leader), WorldLayout::Leader(arrow)) => super::leader_primitives(leader, self.common.extrusion, arrow, parent)?,
                 (EntityKind::Tolerance(tolerance), WorldLayout::Tolerance { layout, text_style }) => {
                     super::tolerance_primitives(tolerance, self.common.extrusion, layout, text_style, parent)?
