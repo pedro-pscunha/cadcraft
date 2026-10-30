@@ -1,4 +1,4 @@
-use cadcraft_doc::{Entity, EntityKind, GeometryRevision, Handle, Leader};
+use cadcraft_doc::{Entity, EntityKind, GeometryRevision, Handle, Leader, Promotion, promote_legacy_spline_leader};
 use cadcraft_geom::{Mat4, Spline, Vec2, Vec3};
 
 fn old_payload(kind: EntityKind, normal: Option<Vec3>) -> (Entity, serde_json::Value) {
@@ -19,10 +19,27 @@ fn spline() -> EntityKind {
 }
 
 #[test]
-fn serialized_plus_z_splines_recover_without_an_explicit_promotion_call() {
+fn deserialization_keeps_old_payloads_legacy_until_reader_activation() {
+    for normal in [None, Some(Vec3::Z)] {
+        let (original, value) = old_payload(spline(), normal);
+        let loaded: Entity = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.geometry_revision, GeometryRevision::LegacyProjectedV1);
+        assert_eq!(loaded, original);
+    }
+}
+
+/// An old payload loaded, then promoted as reader activation will do.
+fn promoted(value: serde_json::Value) -> Entity {
+    let mut entity: Entity = serde_json::from_value(value).unwrap();
+    assert_eq!(promote_legacy_spline_leader(&mut entity), Promotion::Promoted);
+    entity
+}
+
+#[test]
+fn serialized_plus_z_splines_recover_through_the_promotion() {
     for normal in [None, Some(Vec3::Z), Some(Vec3::new(0.0, 0.0, 2.0))] {
         let (original, value) = old_payload(spline(), normal);
-        let recovered: Entity = serde_json::from_value(value).unwrap();
+        let recovered = promoted(value);
         assert_eq!(recovered.geometry_revision, GeometryRevision::CanonicalV2);
         assert_eq!(recovered.common, original.common);
         let (EntityKind::Spline(old), EntityKind::Spline(new)) = (&original.kind, &recovered.kind) else { panic!("not splines") };
@@ -37,11 +54,11 @@ fn serialized_plus_z_splines_recover_without_an_explicit_promotion_call() {
 }
 
 #[test]
-fn serialized_entity_collections_recover_leaders_without_changing_source_vertices() {
+fn serialized_entity_collections_promote_leaders_without_changing_source_vertices() {
     let kind = EntityKind::Leader(Leader { vertices: vec![Vec3::new(-0.0, 1.25, 0.0), Vec3::new(2.5, -3.75, 0.0)], ..Leader::default() });
     let (original, value) = old_payload(kind, None);
-    let recovered: Vec<Entity> = serde_json::from_value(serde_json::json!([value])).unwrap();
-    let recovered = recovered.first().unwrap();
+    let loaded: Vec<Entity> = serde_json::from_value(serde_json::json!([value])).unwrap();
+    let recovered = &promoted(serde_json::to_value(loaded.first().unwrap()).unwrap());
     assert_eq!(recovered.geometry_revision, GeometryRevision::CanonicalV2);
     let (EntityKind::Leader(old), EntityKind::Leader(new)) = (&original.kind, &recovered.kind) else { panic!("not leaders") };
     for (a, b) in old.vertices.iter().zip(&new.vertices) {

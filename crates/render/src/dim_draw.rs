@@ -17,6 +17,31 @@ pub fn dimension_in(d: &Drawing, dm: &cadcraft_doc::Dimension) -> DimGeometry {
     dim::dimension_geometry_with(dm, &style, d.header.f64("DIMSCALE", 1.0), &dim_text(d, &st))
 }
 
+/// The dimension laid out in the OCS of the plane of `normal`, for the world builders: its WCS points are put in the plane
+/// and the renderer's layout draws it there. Every point of the result is a local 2D point.
+pub fn dimension_layout(
+    d: &Drawing,
+    dm: &cadcraft_doc::Dimension,
+    normal: cadcraft_geom::Vec3,
+) -> cadcraft_doc::Result<cadcraft_doc::DimensionLayout> {
+    let local = dm.localized(normal)?;
+    let g = dimension_in(d, &local);
+    let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
+    Ok(cadcraft_doc::DimensionLayout {
+        lines: g.lines.clone(),
+        fills: g.fills.clone(),
+        text_fill: g.text_fill.clone(),
+        text: (!g.value.is_empty()).then(|| cadcraft_doc::DimensionLayoutText {
+            at: g.text_pos,
+            angle: g.text_angle,
+            height: g.text_height,
+            style: style.text_style.clone(),
+            contents: g.mtext_contents(),
+        }),
+        elevation: local.defpt.z,
+    })
+}
+
 /// `lw` / `lt` are the dimension's own lineweight and linetype (ByBlock in DIMLWD, DIMLWE,
 /// DIMLTYPE, DIMLTEX1 and DIMLTEX2).
 pub(crate) fn dimension(

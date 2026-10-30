@@ -10,7 +10,7 @@ use cadcraft_geom::OcsFrame;
 
 use super::common::{T, common};
 
-/// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
+/// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER, DIMENSION, LINE, POINT, ELLIPSE, 3DFACE, RAY, XLINE, IMAGE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
 /// another kind, a normal without direction, a radius that is not a positive finite number, or an LWPOLYLINE that is a
 /// CADCraft region.
 pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
@@ -26,8 +26,21 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
             let corners = [t.p(10), t.p(11), t.p(12), if t.f(13).is_some() { t.p(13) } else { t.p(12) }];
             if name == "SOLID" { EntityKind::Solid(Solid { corners }) } else { EntityKind::Trace(Solid { corners }) }
         }
+        "LINE" => EntityKind::Line(cadcraft_doc::Line { a: t.p(10), b: t.p(11) }),
+        "POINT" => EntityKind::Point(cadcraft_doc::Point { p: t.p(10), angle: t.fd(50, 0.0).to_radians() }),
+        "ELLIPSE" => EntityKind::Ellipse(super::entities::ellipse(&c, &t)),
+        name @ ("RAY" | "XLINE") => {
+            let ray = cadcraft_doc::RayLine { base: t.p(10), dir: t.p(11) };
+            if name == "RAY" { EntityKind::Ray(ray) } else { EntityKind::XLine(ray) }
+        }
+        // The file path comes from the IMAGEDEF object, as for the legacy reader.
+        "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
+        "3DFACE" => {
+            EntityKind::Face3d(cadcraft_doc::Face3d { corners: [t.p(10), t.p(11), t.p(12), t.p(13)], hidden_edges: t.i(70).unwrap_or(0) as u8 })
+        }
         "SPLINE" => EntityKind::Spline(spatial_spline(&t)?),
         "LEADER" => EntityKind::Leader(spatial_leader(&t)?),
+        "DIMENSION" => EntityKind::Dimension(spatial_dimension(&t, c.extrusion)),
         "LWPOLYLINE" => {
             // The legacy reader mirrors under a negative Z: read the vertices as if the plane were +Z.
             let k = super::entities::lwpolyline(tags, &Common { extrusion: cadcraft_geom::Vec3::Z, ..c.clone() }, &t)?;
@@ -41,18 +54,15 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
     Some((c, kind))
 }
 
-/// A 2D POLYLINE from its parent record and the child records that follow it (VERTEX, then SEQEND), each with its groups
+/// A 2D or 3D POLYLINE or a polygon or polyface mesh from its parent record and the child records that follow it (VERTEX, then SEQEND), each with its groups
 /// without the `0` group, read canonically: the vertices stay in the OCS, with the fit data and record identities as
 /// the legacy reader keeps them. `None` for a 3D polyline or a mesh, or a normal without direction.
 pub fn canonical_polyline_from_groups(parent: &[Tag], children: &[(String, Vec<Tag>)]) -> Option<(Common, EntityKind)> {
     let t = T(parent);
-    let flags = t.i(70).unwrap_or(0);
-    if flags & (8 | 16 | 64) != 0 || OcsFrame::new(common(&t).extrusion).is_none() {
-        return None;
-    }
+    OcsFrame::new(common(&t).extrusion)?;
     let (mut drawing, rx) = (Drawing::default(), Default::default());
     let (c, kind) = super::entities::polyline_entity_in(children, &mut 0, &t, &mut drawing, &rx, true);
-    matches!(kind, EntityKind::LwPolyline(_)).then_some((c, kind))
+    matches!(kind, EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) | EntityKind::PolylineMesh(_)).then_some((c, kind))
 }
 
 /// A SPLINE as a spatial spline: the X and Y values in the planar fields and the Z values beside them, the end tangents
@@ -113,4 +123,22 @@ fn spatial_leader(t: &T) -> Option<cadcraft_doc::Leader> {
             text_width: t.fd(41, 0.0),
         }),
     })
+}
+
+/// A DIMENSION whose OCS text midpoint and arc point are kept as the record holds them, with its oblique angle (52) in the
+/// OCS of the plane. Associations, overrides and the marks of CADCraft's extended data are read by the caller with the
+/// legacy extras (`entity_extras`), which must not recompute the oblique angle of a canonical dimension.
+fn spatial_dimension(t: &T, normal: cadcraft_geom::Vec3) -> cadcraft_doc::Dimension {
+    use cadcraft_doc::DimKind;
+    let mut dm = super::entities::dimension_from(t, None);
+    let oblique = t.f(52).filter(|o| o.is_finite() && o.rem_euclid(180.0) != 0.0);
+    let base = match dm.kind {
+        DimKind::Linear { rotation } => Some(rotation),
+        DimKind::Aligned => OcsFrame::new(normal).map(|f| (f.to_ocs(dm.p14) - f.to_ocs(dm.p13)).xy().angle()),
+        _ => None,
+    };
+    if let (Some(base), Some(o)) = (base, oblique) {
+        dm.marks.oblique = Some(cadcraft_geom::norm_angle(base + o.to_radians()));
+    }
+    dm
 }

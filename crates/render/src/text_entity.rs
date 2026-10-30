@@ -5,7 +5,7 @@ pub(crate) fn text_style(d: &Drawing, name: &str) -> cadcraft_doc::TextStyle {
     d.text_style(name).cloned().unwrap_or_default()
 }
 
-/// Shape a TEXT / ATTRIB / ATTDEF with its style's font and generation flags.
+/// Shape a TEXT / ATTRIB / ATTDEF with its style's font, and the generation flags of its style and of the entity.
 pub fn place_text_entity(d: &Drawing, t: &cadcraft_doc::Text, value: &str) -> (cadcraft_fonts::Shaped, Bounds2) {
     let ts = text_style(d, &t.style);
     let font = cadcraft_fonts::TextFont::resolve(&ts.font);
@@ -19,8 +19,9 @@ pub fn place_text_entity(d: &Drawing, t: &cadcraft_doc::Text, value: &str) -> (c
         oblique: t.oblique,
         h,
         v,
-        backwards: ts.backwards,
-        upside_down: ts.upside_down,
+        // The generation flags of the entity (group 71) join those of its style, like AutoCAD draws them.
+        backwards: ts.backwards || t.backward,
+        upside_down: ts.upside_down || t.upside_down,
     };
     cadcraft_fonts::place(&font, value, &p)
 }

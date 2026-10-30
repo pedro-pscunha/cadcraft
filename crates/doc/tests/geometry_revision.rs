@@ -16,7 +16,21 @@ fn absent_payload_revisions_mean_legacy_projected_geometry() {
 
 #[test]
 fn a_canonical_payload_never_uses_the_legacy_transform() {
-    let mut entity = line();
+    // A family with no canonical hook yet (an INSERT); a LINE has one and moves in 3D.
+    let mut entity = Entity::new(
+        Handle(1),
+        EntityKind::Insert(cadcraft_doc::Insert {
+            block: "B".into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        }),
+    );
     entity.geometry_revision = GeometryRevision::CanonicalV2;
     let before = entity.clone();
     let transform = Mat4::from_mat3(&Mat3::translate(Vec2::new(3.0, 4.0)));

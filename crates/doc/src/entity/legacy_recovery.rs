@@ -22,11 +22,12 @@ pub(super) struct SerializedEntity {
     kind: EntityKind,
 }
 
+// Deserialization does not promote yet: until display, snaps, pick and grips read canonical payloads, a promoted
+// spline or leader would be refused by every edit that still takes the legacy path. Reader activation calls
+// `promote_legacy_spline_leader` here.
 impl From<SerializedEntity> for Entity {
     fn from(value: SerializedEntity) -> Self {
-        let mut entity = Entity { geometry_revision: value.geometry_revision, handle: value.handle, common: value.common, kind: value.kind };
-        promote_legacy_spline_leader(&mut entity);
-        entity
+        Entity { geometry_revision: value.geometry_revision, handle: value.handle, common: value.common, kind: value.kind }
     }
 }
 

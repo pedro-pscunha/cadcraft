@@ -152,6 +152,7 @@ pub(crate) fn as_lwpoly(k: &EntityKind) -> Option<LwPolyline> {
     }
 }
 
+mod pedit_multi;
 mod pedit_vertex;
 
 // =====================================================================================

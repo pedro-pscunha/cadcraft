@@ -43,11 +43,13 @@ pub use region::*;
 mod revision;
 pub use revision::GeometryRevision;
 
+mod affine_canonical;
 mod block;
 mod common;
 mod curves;
 mod curves_canonical;
 mod dim;
+mod dimension_canonical;
 mod edit;
 mod fill;
 mod fill_canonical;
@@ -70,9 +72,9 @@ pub use legacy_recovery::{Promotion, promote_legacy_spline_leader};
 pub use spline_canonical::spline_transformed_canonical;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldLayout, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
-    LeaderArrowLayout, TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives,
-    leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives, solid_primitives, spline_primitives, table_primitives,
-    text_primitives, tolerance_primitives, wipeout_primitives,
+    DimensionLayout, DimensionLayoutText, LeaderArrowLayout, TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives,
+    dimension_primitives, hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives,
+    solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
 };
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};

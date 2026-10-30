@@ -550,7 +550,7 @@ fn wblock_from_editor_block_redefinition_and_external_rename_keep_unique_identit
     for extension in ["dxf", "dwg"] {
         let path = std::env::temp_dir().join(format!("cadcraft-editor-wblock-{}.{}", std::process::id(), extension));
         s.execute("wblock", &json!({"path":path,"handles":selected})).unwrap();
-        let d = cadcraft_io::read(&std::fs::read(&path).unwrap(), &path.to_string_lossy()).unwrap();
+        let d = cadcraft_io::read(&std::fs::read(&path).unwrap(), &path).unwrap();
         assert_file_unique(&d);
         std::fs::remove_file(path).unwrap();
     }

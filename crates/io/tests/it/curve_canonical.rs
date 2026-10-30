@@ -235,13 +235,6 @@ fn a_heavy_polyline_with_fit_data_round_trips_in_the_ocs() {
     assert_eq!(mirrored.vertices[1].p.x, -3.0);
 }
 
-#[test]
-fn the_canonical_polyline_reader_leaves_3d_polylines_and_meshes_alone() {
-    let parent = vec![Tag::i(70, 8)];
-    assert!(cadcraft_io::canonical_polyline_from_groups(&parent, &[]).is_none());
-    assert!(cadcraft_io::canonical_polyline_from_groups(&[Tag::i(70, 64)], &[]).is_none());
-}
-
 fn solid() -> Solid {
     Solid { corners: [Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 3.0, 2.0), Vec3::new(2.0, 3.0, 2.0)] }
 }
@@ -517,14 +510,15 @@ fn the_canonical_leader_reader_keeps_z_and_the_legacy_one_drops_it() {
 use cadcraft_doc::{Promotion, promote_legacy_spline_leader};
 
 /// An entity as an old document stored it: the JSON of a legacy payload, with no revision and no spatial fields.
-fn old_entity(kind: EntityKind, normal: Vec3) -> (Entity, Entity) {
+fn old_entity(kind: EntityKind, normal: Vec3) -> Entity {
     let mut e = Entity::new(cadcraft_doc::Handle(0x100), kind);
     e.common = Common { extrusion: normal, ..Common::default() };
     let mut json = serde_json::to_value(&e).unwrap();
     let object = json.as_object_mut().unwrap();
     assert!(object.remove("geometryRevision").is_some() || e.geometry_revision == GeometryRevision::LegacyProjectedV1);
     let back: Entity = serde_json::from_value(json).unwrap();
-    (e, back)
+    assert_eq!(back, e, "an old payload opens as the legacy entity it was");
+    back
 }
 
 fn legacy_spline() -> cadcraft_geom::Spline {
@@ -549,8 +543,9 @@ fn without_plane(g: Vec<(i32, String)>) -> Vec<(i32, String)> {
 #[test]
 fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_resave() {
     for normal in [Vec3::Z, Vec3::new(0.0, 0.0, 2.0)] {
-        let (legacy, e) = old_entity(EntityKind::Spline(legacy_spline()), normal);
-        let before = without_plane(groups(&dxf(&drawing_of(&legacy)), "SPLINE"));
+        let mut e = old_entity(EntityKind::Spline(legacy_spline()), normal);
+        let before = without_plane(groups(&dxf(&drawing_of(&e)), "SPLINE"));
+        assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
         assert_eq!(e.geometry_revision, GeometryRevision::CanonicalV2);
         let EntityKind::Spline(s) = &e.kind else { panic!("spline") };
         assert_eq!(s.space.as_ref().unwrap().control, vec![0.0; 3], "promoted at Z = 0");
@@ -568,9 +563,9 @@ fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_res
 
 #[test]
 fn an_old_plus_z_leader_keeps_its_vertices_bit_for_bit_after_promotion_and_resave() {
-    let (legacy, e) = old_entity(EntityKind::Leader(legacy_leader()), Vec3::Z);
-    let before = groups(&dxf(&drawing_of(&legacy)), "LEADER");
-    assert_eq!(e.geometry_revision, GeometryRevision::CanonicalV2);
+    let mut e = old_entity(EntityKind::Leader(legacy_leader()), Vec3::Z);
+    let before = groups(&dxf(&drawing_of(&e)), "LEADER");
+    assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
     let after = groups(&dxf(&drawing_of(&e)), "LEADER");
     let vertex_groups = |g: &[(i32, String)]| g.iter().filter(|(c, _)| matches!(c, 10 | 20 | 30 | 3 | 71 | 72 | 76)).cloned().collect::<Vec<_>>();
     assert_eq!(vertex_groups(&after), vertex_groups(&before), "identical vertices and flags after promotion and resave");
@@ -584,8 +579,8 @@ fn an_old_non_plus_z_payload_stays_legacy_opens_saves_unchanged_and_a_refused_ed
     for (kind, normal) in
         [(EntityKind::Spline(legacy_spline()), Vec3::new(0.0, 0.0, -1.0)), (EntityKind::Leader(legacy_leader()), Vec3::new(0.0, 3.0, 4.0))]
     {
-        let (original, mut e) = old_entity(kind, normal);
-        assert_eq!(e, original, "a lossy serialized payload keeps its legacy representation");
+        let mut e = old_entity(kind, normal);
+        let original = e.clone();
         let saved = dxf(&drawing_of(&e));
         assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::KeptLegacy);
         assert_eq!(e, original, "nothing changed");
@@ -617,4 +612,382 @@ fn an_unknown_geometry_revision_still_refuses_to_open() {
     let mut json = serde_json::to_value(&e).unwrap();
     json.as_object_mut().unwrap().insert("geometryRevision".into(), serde_json::json!("FutureV9"));
     assert!(serde_json::from_value::<Entity>(json).is_err());
+}
+
+// DIMENSION.
+
+use cadcraft_doc::{DimKind, Dimension};
+
+/// The WCS point of the OCS point (x, y, z) of the plane of `NORMAL` = (0, 3, 4), by the arbitrary axis rule written out by
+/// hand: |Ny| >= 1/64, so the OCS X axis is Wz x N = (-1, 0, 0), the Y axis is N x X = (0, -0.8, 0.6), and Z is N / |N|.
+fn plane(x: f64, y: f64, z: f64) -> Vec3 {
+    Vec3::new(-x, -0.8 * y + 0.6 * z, 0.6 * y + 0.8 * z)
+}
+
+fn dimension(kind: DimKind) -> Dimension {
+    Dimension {
+        kind,
+        defpt: plane(10.0, 3.0, 2.0),
+        text_mid: Vec3::new(5.0, 3.0, 2.0),
+        p13: plane(0.0, 0.0, 2.0),
+        p14: plane(10.0, 0.0, 2.0),
+        p15: plane(10.0, 5.0, 2.0),
+        p16: Vec3::new(6.0, 4.0, 2.0),
+        text: String::new(),
+        style: "Standard".into(),
+        measurement: 10.0,
+        text_rotation: 0.0,
+        user_text_pos: true,
+        block: None,
+        overrides: Default::default(),
+        assoc: Vec::new(),
+        marks: Default::default(),
+    }
+}
+
+fn dimension_groups(d: &Dimension, normal: Vec3) -> (String, Vec<(i32, String)>) {
+    let out = dxf(&drawing(EntityKind::Dimension(d.clone()), normal, 0.0));
+    let g = groups(&out, "DIMENSION");
+    (out, g)
+}
+
+fn dwg_dimension(d: &Dimension, normal: Vec3) -> acadrust::entities::Dimension {
+    dwg_entities(&drawing(EntityKind::Dimension(d.clone()), normal, 0.0))
+        .into_iter()
+        .find_map(|e| if let EntityType::Dimension(x) = e { Some(*x) } else { None })
+        .expect("a DIMENSION in the DWG")
+}
+
+#[test]
+fn each_linear_dimension_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    type Mutation = fn(&mut Dimension, &mut Vec3);
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("definition point", |d, _| d.defpt = plane(10.0, 3.5, 2.0)),
+        ("first point z", |d, _| d.p13.z += 0.5),
+        ("second point", |d, _| d.p14 = plane(11.0, 0.0, 2.0)),
+        ("text midpoint x", |d, _| d.text_mid.x = 5.5),
+        ("text midpoint elevation", |d, _| d.text_mid.z = 2.5),
+        ("rotation", |d, _| d.kind = DimKind::Linear { rotation: 0.5 }),
+        ("text rotation", |d, _| d.text_rotation = 0.25),
+        ("normal x", |_, n| n.x = 0.25),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut d, mut n) = (dimension(DimKind::Linear { rotation: 0.0 }), NORMAL);
+        mutate(&mut d, &mut n);
+        (d, n)
+    };
+    let base = dimension_groups(&make(|_, _| {}).0, NORMAL).1;
+    for (name, mutate) in cases {
+        let (d, n) = make(mutate);
+        let (out, g) = dimension_groups(&d, n);
+        assert_ne!(g, base, "{name}");
+        assert!(near(point(&g, 10).unwrap(), d.defpt) && near(point(&g, 13).unwrap(), d.p13) && near(point(&g, 14).unwrap(), d.p14), "{name}");
+        assert!(near(point(&g, 11).unwrap(), d.text_mid), "{name}: the OCS text midpoint keeps its Z: {g:?}");
+        assert!(near(point(&g, 210).unwrap(), n), "{name}");
+        let (_, kind) =
+            cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        let EntityKind::Dimension(read) = kind else { panic!("not a dimension") };
+        assert_eq!((read.defpt, read.text_mid, read.p13, read.p14), (d.defpt, d.text_mid, d.p13, d.p14), "{name}");
+        let (DimKind::Linear { rotation: a }, DimKind::Linear { rotation: b }) = (read.kind, d.kind) else { panic!("kind") };
+        assert!((a - b).abs() < 1e-12 && (read.text_rotation - d.text_rotation).abs() < 1e-12, "{name}");
+        let stored = dwg_dimension(&d, n);
+        let base_data = stored.base();
+        assert!(near(v3(base_data.text_middle_point), d.text_mid) && near(v3(base_data.normal), n), "{name}: DWG text midpoint/normal");
+        let acadrust::entities::Dimension::Linear(l) = &stored else { panic!("not linear in the DWG") };
+        assert!(near(v3(l.first_point), d.p13) && near(v3(l.second_point), d.p14) && near(v3(l.definition_point), d.defpt), "{name}: DWG points");
+    }
+}
+
+#[test]
+fn the_measurement_is_taken_in_the_plane_whatever_its_tilt() {
+    // p13 and p14 are 10 apart along the OCS X axis of the tilted plane, so the dimension measures 10 and the layout is
+    // the planar one; a reading in the XY plane would not give that.
+    let (_, g) = dimension_groups(&dimension(DimKind::Linear { rotation: 0.0 }), NORMAL);
+    assert!((num(&g, 42).unwrap() - 10.0).abs() < 1e-9, "{g:?}");
+    let mut vertical = dimension(DimKind::Linear { rotation: std::f64::consts::FRAC_PI_2 });
+    vertical.p14 = plane(10.0, 4.0, 2.0);
+    let (_, g) = dimension_groups(&vertical, NORMAL);
+    assert!((num(&g, 42).unwrap() - 4.0).abs() < 1e-9, "a vertical dimension measures the OCS y distance: {g:?}");
+}
+
+#[test]
+fn the_other_dimension_kinds_keep_their_points_in_the_dxf_the_dwg_and_the_canonical_reader() {
+    for kind in [DimKind::Aligned, DimKind::Angular, DimKind::Angular3P, DimKind::Radius, DimKind::Diameter, DimKind::Ordinate { x_type: true }] {
+        let d = dimension(kind);
+        let (out, g) = dimension_groups(&d, NORMAL);
+        let (_, read) =
+            cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap_or_else(|| panic!("{kind:?}: unreadable"));
+        let EntityKind::Dimension(read) = read else { panic!("not a dimension") };
+        assert_eq!(read.kind, kind);
+        assert_eq!((read.defpt, read.text_mid), (d.defpt, d.text_mid), "{kind:?}");
+        let uses = |points: &[i32]| points.iter().all(|c| point(&g, *c).is_some());
+        match kind {
+            DimKind::Aligned | DimKind::Ordinate { .. } => {
+                assert!(uses(&[13, 14]) && read.p13 == d.p13 && read.p14 == d.p14, "{kind:?}");
+            }
+            DimKind::Angular => {
+                assert!(uses(&[13, 14, 15, 16]), "{kind:?}");
+                assert_eq!((read.p13, read.p14, read.p15, read.p16), (d.p13, d.p14, d.p15, d.p16), "the arc point stays an OCS point");
+            }
+            DimKind::Angular3P => assert!(uses(&[13, 14, 15]) && read.p15 == d.p15, "{kind:?}"),
+            _ => assert!(uses(&[15]) && read.p15 == d.p15, "{kind:?}"),
+        }
+        let stored = dwg_dimension(&d, NORMAL);
+        assert!(near(v3(stored.base().normal), NORMAL) && near(v3(stored.base().text_middle_point), d.text_mid), "{kind:?}: DWG");
+    }
+}
+
+#[test]
+fn the_canonical_dimension_reader_applies_the_oblique_angle_in_the_plane_and_refuses_a_zero_normal() {
+    let mut d = dimension(DimKind::Aligned);
+    // The extension lines lean 30 degrees off the dimension line direction, measured in the plane (the OCS angle of p14 - p13 is 0).
+    d.marks.oblique = Some(std::f64::consts::FRAC_PI_6);
+    let (out, g) = dimension_groups(&d, NORMAL);
+    assert!((num(&g, 52).unwrap() - 30.0).abs() < 1e-9, "{g:?}");
+    let (_, read) = cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap();
+    let EntityKind::Dimension(read) = read else { panic!("dimension") };
+    assert!((read.marks.oblique.unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-9);
+    let mut zero = record(&out, "DIMENSION");
+    zero.iter_mut().filter(|t| matches!(t.code, 210 | 220 | 230)).for_each(|t| *t = Tag::f(t.code, 0.0));
+    assert!(cadcraft_io::canonical_curve_from_groups("DIMENSION", &zero).is_none());
+}
+
+#[test]
+fn a_dimension_block_of_a_canonical_dimension_holds_wcs_lines_in_its_plane() {
+    let mut d = dimension(DimKind::Linear { rotation: 0.0 });
+    d.user_text_pos = false;
+    let drawing = drawing(EntityKind::Dimension(d.clone()), NORMAL, 0.0);
+    let text = dxf(&drawing);
+    // The generated *D block: its LINE endpoints lie in the dimension plane (distance 2 above the OCS xy plane along the normal).
+    let n = NORMAL.normalized();
+    let blocks = tags_of(&text, "BLOCKS");
+    let block_lines: Vec<Vec3> = blocks
+        .iter()
+        .filter(|(k, _)| k == "LINE")
+        .flat_map(|(_, tags)| {
+            let g: Vec<(i32, String)> = tags.iter().map(|t| (t.code, t.str())).collect();
+            [point(&g, 10).unwrap(), point(&g, 11).unwrap()]
+        })
+        .collect();
+    assert!(!block_lines.is_empty(), "the dimension block has lines");
+    assert!(block_lines.iter().all(|p| (p.dot(n) - 2.0).abs() < 1e-9), "every block line lies in the plane: {block_lines:?}");
+    // And the DXF reads back as a document (the block is valid DXF).
+    assert!(cadcraft_io::read(text.as_bytes(), "x.dxf").is_ok());
+}
+
+#[test]
+fn a_canonical_dimension_keeps_its_associations_with_a_tilted_source_line() {
+    use cadcraft_doc::{AssocSnap, DimAssoc, Line};
+    // dimension-assoc-tilted-001: a source LINE with nonzero Z; one attachment follows its end, the other its start.
+    let mut d = Drawing::new_metric();
+    let line_handle = d.new_handle();
+    let line = Line { a: plane(0.0, 0.0, 2.0), b: plane(10.0, 0.0, 2.0) };
+    d.model.push(Entity::new(line_handle, EntityKind::Line(line.clone())));
+    let mut dm = dimension(DimKind::Linear { rotation: 0.0 });
+    dm.assoc = vec![
+        DimAssoc { point: "p13".into(), handle: line_handle, snap: AssocSnap::Start },
+        DimAssoc { point: "p14".into(), handle: line_handle, snap: AssocSnap::End },
+    ];
+    let handle = d.new_handle();
+    let mut e = Entity::new(handle, EntityKind::Dimension(dm.clone()));
+    e.geometry_revision = GeometryRevision::CanonicalV2;
+    e.common = Common { extrusion: NORMAL, ..Common::default() };
+    d.model.push(e);
+    let text = dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let objects = sections(&tags).into_iter().find(|s| s.name == "OBJECTS").unwrap();
+    let assoc = records(&objects.tags).into_iter().find(|(k, _)| k == "DIMASSOC").expect("the DIMASSOC object is written, not dropped").1;
+    let g: Vec<(i32, String)> = assoc.iter().map(|t| (t.code, t.str())).collect();
+    let references: Vec<&String> = g.iter().filter(|t| t.0 == 331).map(|t| &t.1).collect();
+    assert_eq!(references.len(), 2, "one reference per attachment: {g:?}");
+    assert!(references.iter().all(|h| u64::from_str_radix(h.trim(), 16).ok() == Some(line_handle.0)), "both name the source line");
+    // The reference points keep their Z (the tilted plane), as the dimension holds them.
+    let xyz = |code: i32| -> Vec<f64> { g.iter().filter(|t| t.0 == code).map(|t| t.1.trim().parse().unwrap()).collect() };
+    let (xs, ys, zs) = (xyz(10), xyz(20), xyz(30));
+    assert!(near(Vec3::new(xs[0], ys[0], zs[0]), dm.p13) && near(Vec3::new(xs[1], ys[1], zs[1]), dm.p14), "{g:?}");
+    // Written back and read again (the legacy reader), the link to the line is still there.
+    let back = cadcraft_io::read(text.as_bytes(), "x.dxf").unwrap();
+    let linked =
+        back.model.iter().any(|e| matches!(&e.kind, EntityKind::Dimension(x) if x.assoc.len() == 2 && x.assoc.iter().all(|a| a.handle.0 != 0)));
+    assert!(linked, "the associations survive the save");
+}
+
+// LINE, POINT, ELLIPSE, 3DFACE, 3D POLYLINE.
+
+#[test]
+fn each_line_and_point_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    type LineMutation = fn(&mut cadcraft_doc::Line, &mut Vec3, &mut f64);
+    let line_cases: Vec<(&str, LineMutation)> = vec![
+        ("start z", |l, _, _| l.a.z = 1.5),
+        ("end y", |l, _, _| l.b.y = 1.5),
+        ("normal y", |_, n, _| n.y = 3.5),
+        ("thickness", |_, _, t| *t = -0.75),
+    ];
+    let make_line = |mutate: LineMutation| {
+        let (mut l, mut n, mut t) = (cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 1.0), b: Vec3::new(4.0, 1.0, 2.0) }, NORMAL, 0.5);
+        mutate(&mut l, &mut n, &mut t);
+        (drawing(EntityKind::Line(l.clone()), n, t), l, n, t)
+    };
+    let base = groups(&dxf(&make_line(|_, _, _| {}).0), "LINE");
+    for (name, mutate) in line_cases {
+        let (d, l, n, t) = make_line(mutate);
+        let out = dxf(&d);
+        let g = groups(&out, "LINE");
+        assert_ne!(g, base, "{name}");
+        assert!(
+            near(point(&g, 10).unwrap(), l.a) && near(point(&g, 11).unwrap(), l.b) && near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t),
+            "{name}"
+        );
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups("LINE", &record(&out, "LINE")).unwrap();
+        assert_eq!((c.extrusion, c.thickness, kind), (n, t, EntityKind::Line(l.clone())), "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Line(x) = e { Some(x) } else { None }).expect("a LINE");
+        assert!(near(v3(s.start), l.a) && near(v3(s.end), l.b) && near(v3(s.normal), n) && s.thickness == t, "{name}: DWG");
+    }
+
+    type PointMutation = fn(&mut cadcraft_doc::Point, &mut Vec3, &mut f64);
+    let point_cases: Vec<(&str, PointMutation)> = vec![
+        ("position z", |p, _, _| p.p.z = 1.5),
+        ("angle", |p, _, _| p.angle = 0.75),
+        ("normal x", |_, n, _| n.x = 0.25),
+        ("thickness", |_, _, t| *t = 1.25),
+    ];
+    let make_point = |mutate: PointMutation| {
+        let (mut p, mut n, mut t) = (cadcraft_doc::Point { p: Vec3::new(1.0, 2.0, 3.0), angle: 0.5 }, NORMAL, 0.5);
+        mutate(&mut p, &mut n, &mut t);
+        (drawing(EntityKind::Point(p.clone()), n, t), p, n, t)
+    };
+    let base = groups(&dxf(&make_point(|_, _, _| {}).0), "POINT");
+    for (name, mutate) in point_cases {
+        let (d, p, n, t) = make_point(mutate);
+        let out = dxf(&d);
+        let g = groups(&out, "POINT");
+        assert_ne!(g, base, "{name}");
+        assert!(near(point(&g, 10).unwrap(), p.p) && near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t), "{name}");
+        assert!((num(&g, 50).unwrap() - p.angle.to_degrees()).abs() < 1e-9, "{name}");
+        let (_, kind) = cadcraft_io::canonical_curve_from_groups("POINT", &record(&out, "POINT")).unwrap();
+        let EntityKind::Point(read) = kind else { panic!("point") };
+        assert_eq!(read.p, p.p, "{name}");
+        assert!((read.angle - p.angle).abs() < 1e-12, "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Point(x) = e { Some(x) } else { None }).expect("a POINT");
+        assert!(near(v3(s.location), p.p) && near(v3(s.normal), n) && s.thickness == t, "{name}: DWG");
+        assert!((s.x_axis_angle - p.angle).abs() < 1e-9, "{name}: DWG angle {} (radians)", s.x_axis_angle);
+    }
+}
+
+#[test]
+fn each_ellipse_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    type Mutation = fn(&mut cadcraft_doc::Ellipse, &mut Vec3);
+    // The major axis must lie in the plane of NORMAL = (0, 3, 4): (1, 0, 0) and (0, 4, -3) do.
+    let cases: Vec<(&str, Mutation)> = vec![
+        ("center z", |e, _| e.center.z = 3.5),
+        ("major length", |e, _| e.major = Vec3::new(5.0, 0.0, 0.0)),
+        ("major direction", |e, _| e.major = Vec3::new(0.0, 4.0, -3.0)),
+        ("ratio", |e, _| e.ratio = 0.25),
+        ("start", |e, _| e.start = 0.5),
+        ("end", |e, _| e.end = 2.5),
+        ("normal magnitude", |e, n| {
+            *n = Vec3::new(0.0, 6.0, 8.0);
+            e.normal = *n;
+        }),
+    ];
+    let make = |mutate: Mutation| {
+        let (mut e, mut n) = (
+            cadcraft_doc::Ellipse {
+                center: Vec3::new(1.0, 2.0, 3.0),
+                major: Vec3::new(4.0, 0.0, 0.0),
+                normal: NORMAL,
+                ratio: 0.5,
+                start: 0.3,
+                end: 2.0,
+            },
+            NORMAL,
+        );
+        mutate(&mut e, &mut n);
+        (drawing(EntityKind::Ellipse(e.clone()), n, 0.0), e, n)
+    };
+    let base = groups(&dxf(&make(|_, _| {}).0), "ELLIPSE");
+    for (name, mutate) in cases {
+        let (d, e, n) = make(mutate);
+        let out = dxf(&d);
+        let g = groups(&out, "ELLIPSE");
+        assert_ne!(g, base, "{name}");
+        assert!(near(point(&g, 10).unwrap(), e.center) && near(point(&g, 11).unwrap(), e.major) && near(point(&g, 210).unwrap(), n), "{name}");
+        assert_eq!((num(&g, 40), num(&g, 41), num(&g, 42)), (Some(e.ratio), Some(e.start), Some(e.end)), "{name}");
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups("ELLIPSE", &record(&out, "ELLIPSE")).unwrap();
+        assert_eq!((c.extrusion, kind), (n, EntityKind::Ellipse(e.clone())), "{name}");
+        let s = dwg_entities(&d).into_iter().find_map(|x| if let EntityType::Ellipse(x) = x { Some(x) } else { None }).expect("an ELLIPSE");
+        assert!(near(v3(s.center), e.center) && near(v3(s.major_axis), e.major) && near(v3(s.normal), n), "{name}: DWG");
+        assert!(
+            (s.minor_axis_ratio - e.ratio).abs() < 1e-12 && (s.start_parameter - e.start).abs() < 1e-9 && (s.end_parameter - e.end).abs() < 1e-9,
+            "{name}: DWG"
+        );
+    }
+}
+
+#[test]
+fn a_3dface_a_3d_polyline_and_a_mesh_keep_their_wcs_positions() {
+    let face = cadcraft_doc::Face3d {
+        corners: [Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 0.0, 1.5), Vec3::new(2.0, 2.0, 2.0), Vec3::new(0.0, 2.0, 2.5)],
+        hidden_edges: 5,
+    };
+    let out = dxf(&drawing(EntityKind::Face3d(face.clone()), NORMAL, 0.0));
+    let (_, kind) = cadcraft_io::canonical_curve_from_groups("3DFACE", &record(&out, "3DFACE")).unwrap();
+    assert_eq!(kind, EntityKind::Face3d(face.clone()));
+    let stored = dwg_entities(&drawing(EntityKind::Face3d(face.clone()), NORMAL, 0.0))
+        .into_iter()
+        .find_map(|e| if let EntityType::Face3D(x) = e { Some(x) } else { None })
+        .expect("a 3DFACE");
+    assert!(near(v3(stored.third_corner), face.corners[2]) && near(v3(stored.fourth_corner), face.corners[3]));
+
+    let poly = cadcraft_doc::Polyline3d {
+        records: Default::default(),
+        points: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 3.0, 4.0), Vec3::new(5.0, 1.0, -2.0)],
+        closed: true,
+    };
+    let out = dxf(&drawing(EntityKind::Polyline3d(poly.clone()), NORMAL, 0.0));
+    let entities = tags_of(&out, "ENTITIES");
+    let at = entities.iter().position(|(k, _)| k == "POLYLINE").expect("a POLYLINE");
+    let children: Vec<(String, Vec<Tag>)> = entities[at + 1..].iter().take_while(|(k, _)| k == "VERTEX" || k == "SEQEND").cloned().collect();
+    let (c, kind) = cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children).unwrap();
+    assert_eq!(c.extrusion, NORMAL, "the 3D polyline keeps its extrusion");
+    let EntityKind::Polyline3d(read) = kind else { panic!("not a 3D polyline") };
+    assert_eq!((read.points, read.closed), (poly.points, poly.closed));
+}
+
+#[test]
+fn a_ray_a_construction_line_and_an_image_keep_their_wcs_frames() {
+    let ray = cadcraft_doc::RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) };
+    for (kind, canonical) in [("RAY", EntityKind::Ray(ray.clone())), ("XLINE", EntityKind::XLine(ray.clone()))] {
+        let d = drawing(canonical.clone(), NORMAL, 0.0);
+        let out = dxf(&d);
+        let g = groups(&out, kind);
+        assert!(near(point(&g, 10).unwrap(), ray.base) && near(point(&g, 11).unwrap(), ray.dir), "{kind}");
+        let (_, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        assert_eq!(read, canonical, "{kind}");
+        let stored = dwg_entities(&d);
+        let (base, dir) = stored
+            .iter()
+            .find_map(|e| match e {
+                EntityType::Ray(x) => Some((x.base_point, x.direction)),
+                EntityType::XLine(x) => Some((x.base_point, x.direction)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a {kind} in the DWG"));
+        assert!(near(v3(base), ray.base) && near(v3(dir), ray.dir), "{kind}: DWG");
+    }
+    // An image: the insertion point and the pixel vectors keep their Z, the clip stays in pixels.
+    let image = cadcraft_doc::Image {
+        insert: Vec3::new(1.0, 2.0, 3.0),
+        u: Vec3::new(0.5, 0.0, 0.25),
+        v: Vec3::new(0.0, 0.5, 0.25),
+        size: Vec2::new(100.0, 50.0),
+        clip: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)],
+        clipping: true,
+        ..cadcraft_doc::Image::default()
+    };
+    let d = drawing(EntityKind::Image(image.clone()), NORMAL, 0.0);
+    let out = dxf(&d);
+    let (_, read) = cadcraft_io::canonical_curve_from_groups("IMAGE", &record(&out, "IMAGE")).unwrap();
+    let EntityKind::Image(read) = read else { panic!("image") };
+    assert_eq!((read.insert, read.u, read.v, read.size, read.clip), (image.insert, image.u, image.v, image.size, image.clip));
 }

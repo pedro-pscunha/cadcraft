@@ -200,3 +200,92 @@ fn each_canonical_leader_field_alone_changes_the_key() {
     renamed.arrow = false;
     assert_eq!(key(&renamed, &common()), base, "the style and the arrow switch are properties");
 }
+
+#[test]
+fn each_canonical_dimension_field_alone_changes_the_key() {
+    use cadcraft_doc::{DimKind, Dimension};
+    let dimension = || Dimension {
+        kind: DimKind::Linear { rotation: 0.0 },
+        defpt: Vec3::new(10.0, 3.0, 2.0),
+        text_mid: Vec3::new(5.0, 3.0, 2.0),
+        p13: Vec3::new(0.0, 0.0, 2.0),
+        p14: Vec3::new(10.0, 0.0, 2.0),
+        p15: Vec3::new(10.0, 5.0, 2.0),
+        p16: Vec3::new(6.0, 4.0, 2.0),
+        text: String::new(),
+        style: "Standard".into(),
+        measurement: 10.0,
+        text_rotation: 0.0,
+        user_text_pos: false,
+        block: None,
+        overrides: Default::default(),
+        assoc: Vec::new(),
+        marks: Default::default(),
+    };
+    let key = |d: &Dimension, c: &Common| geometry_key(&EntityKind::Dimension(d.clone()), c).unwrap();
+    let base = key(&dimension(), &common());
+    type Mutation = fn(&mut Dimension, &mut Common);
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("definition point z", |d, _| d.defpt.z += 0.5),
+        ("text midpoint z", |d, _| d.text_mid.z += 0.5),
+        ("first point y", |d, _| d.p13.y += 0.5),
+        ("second point z", |d, _| d.p14.z += 0.5),
+        ("third point x", |d, _| d.p15.x += 0.5),
+        ("arc point z", |d, _| d.p16.z += 0.5),
+        ("rotation", |d, _| d.kind = DimKind::Linear { rotation: 0.5 }),
+        ("kind", |d, _| d.kind = DimKind::Aligned),
+        ("text rotation", |d, _| d.text_rotation = 0.5),
+        ("text placement", |d, _| d.user_text_pos = true),
+        ("oblique", |d, _| d.marks.oblique = Some(0.3)),
+        ("normal x", |_, c| c.extrusion.x += 0.5),
+        ("thickness", |_, c| c.thickness = 1.5),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let (mut d, mut c) = (dimension(), common());
+        mutate(&mut d, &mut c);
+        let k = key(&d, &c);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    distinct(&keys);
+    let mut regenerated = dimension();
+    regenerated.measurement = 11.0;
+    regenerated.text = "x".into();
+    regenerated.style = "Other".into();
+    regenerated.block = Some("*D3".into());
+    assert_eq!(key(&regenerated, &common()), base, "the measurement, text, style and block are regenerated, not replayed");
+}
+
+#[test]
+fn each_ellipse_line_and_point_field_alone_changes_the_key() {
+    use cadcraft_doc::{Ellipse, Line, Point};
+    let key = |k: EntityKind, c: &Common| geometry_key(&k, c).unwrap();
+    let ellipse = || Ellipse { center: Vec3::new(1.0, 2.0, 3.0), major: Vec3::new(4.0, 0.0, 0.0), normal: Vec3::Z, ratio: 0.5, start: 0.3, end: 2.0 };
+    let line = || Line { a: Vec3::new(0.0, 0.0, 1.0), b: Vec3::new(4.0, 1.0, 2.0) };
+    let point = || Point { p: Vec3::new(1.0, 2.0, 3.0), angle: 0.5 };
+    let mut keys =
+        vec![key(EntityKind::Ellipse(ellipse()), &common()), key(EntityKind::Line(line()), &common()), key(EntityKind::Point(point()), &common())];
+    let e = |f: fn(&mut Ellipse)| {
+        let mut x = ellipse();
+        f(&mut x);
+        key(EntityKind::Ellipse(x), &common())
+    };
+    keys.extend([
+        e(|x| x.center.z += 0.5),
+        e(|x| x.major.y = 0.5),
+        e(|x| x.ratio = 0.25),
+        e(|x| x.start = 0.4),
+        e(|x| x.end = 2.5),
+        key(EntityKind::Ellipse(ellipse()), &Common { extrusion: Vec3::new(0.0, 3.0, 5.0), ..common() }),
+    ]);
+    keys.extend([
+        key(EntityKind::Line(Line { a: Vec3::new(0.0, 0.0, 1.5), ..line() }), &common()),
+        key(EntityKind::Line(Line { b: Vec3::new(4.0, 1.5, 2.0), ..line() }), &common()),
+        key(EntityKind::Line(line()), &Common { thickness: -0.5, ..common() }),
+        key(EntityKind::Point(Point { p: Vec3::new(1.0, 2.0, 3.5), ..point() }), &common()),
+        key(EntityKind::Point(Point { angle: 0.75, ..point() }), &common()),
+        key(EntityKind::Point(point()), &Common { extrusion: Vec3::new(0.25, 3.0, 4.0), ..common() }),
+    ]);
+    distinct(&keys);
+}

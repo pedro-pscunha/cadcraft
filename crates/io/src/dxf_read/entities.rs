@@ -1,4 +1,4 @@
-use super::common::{T, common, ocs};
+use super::common::{T, common, ocs, ocs_n};
 use super::hatch::hatch;
 use super::text::{attdef, attrib_modes, attrib_props, mtext_from, multiline_attrib, split_embedded, text_from};
 use super::{
@@ -25,7 +25,7 @@ fn arc(c: &Common, t: &T) -> Arc {
     a
 }
 
-fn ellipse(c: &Common, t: &T) -> Ellipse {
+pub(super) fn ellipse(c: &Common, t: &T) -> Ellipse {
     Ellipse { center: t.p(10), major: t.p(11), normal: c.extrusion, ratio: t.fd(40, 1.0), start: t.fd(41, 0.0), end: t.fd(42, std::f64::consts::TAU) }
 }
 
@@ -161,39 +161,7 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
                 row_spacing: t.fd(45, 0.0),
             })
         }
-        "DIMENSION" => {
-            let ty = t.i(70).unwrap_or(0) & 0x0f;
-            let kind = match ty {
-                0 => DimKind::Linear { rotation: t.fd(50, 0.0).to_radians() },
-                1 => DimKind::Aligned,
-                2 => DimKind::Angular,
-                3 => DimKind::Diameter,
-                4 => DimKind::Radius,
-                5 => DimKind::Angular3P,
-                6 => DimKind::Ordinate { x_type: t.i(70).unwrap_or(0) & 64 != 0 },
-                8 => DimKind::ArcLength,
-                _ => DimKind::Aligned,
-            };
-            EntityKind::Dimension(Dimension {
-                kind,
-                defpt: t.p(10),
-                // The text midpoint is the one OCS point of a DIMENSION.
-                text_mid: if c.extrusion.z < 0.0 { ocs(&c, t.p(11)) } else { t.p(11) },
-                p13: t.p(13),
-                p14: t.p(14),
-                p15: t.p(15),
-                p16: t.p(16),
-                text: t.s(1).unwrap_or_default(),
-                style: t.s(3).unwrap_or_else(|| "Standard".into()),
-                measurement: t.fd(42, 0.0),
-                text_rotation: t.fd(53, 0.0).to_radians(),
-                user_text_pos: t.i(70).unwrap_or(0) & 128 != 0,
-                block: t.s(2).filter(|s| !s.is_empty()),
-                overrides: Default::default(),
-                assoc: Vec::new(),
-                marks: Default::default(),
-            })
-        }
+        "DIMENSION" => EntityKind::Dimension(dimension_from(&t, if c.extrusion.z < 0.0 { Some(c.extrusion) } else { None })),
         "LEADER" => EntityKind::Leader(Leader {
             vertices: t.pts(10).into_iter().map(|p| p.to3(0.0)).collect(),
             arrow: t.i(71).unwrap_or(1) != 0,
@@ -260,6 +228,41 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
         }),
     };
     Some((c, k))
+}
+
+/// A DIMENSION from its groups. The text midpoint is the one OCS point of the record the legacy model holds in WCS:
+/// `mirrored` is the normal of a mirrored plane (-Z), whose text midpoint is converted. A canonical read passes `None`.
+pub(super) fn dimension_from(t: &T, mirrored: Option<Vec3>) -> Dimension {
+    let ty = t.i(70).unwrap_or(0) & 0x0f;
+    let kind = match ty {
+        0 => DimKind::Linear { rotation: t.fd(50, 0.0).to_radians() },
+        1 => DimKind::Aligned,
+        2 => DimKind::Angular,
+        3 => DimKind::Diameter,
+        4 => DimKind::Radius,
+        5 => DimKind::Angular3P,
+        6 => DimKind::Ordinate { x_type: t.i(70).unwrap_or(0) & 64 != 0 },
+        8 => DimKind::ArcLength,
+        _ => DimKind::Aligned,
+    };
+    Dimension {
+        kind,
+        defpt: t.p(10),
+        text_mid: mirrored.map_or(t.p(11), |n| ocs_n(n, t.p(11))),
+        p13: t.p(13),
+        p14: t.p(14),
+        p15: t.p(15),
+        p16: t.p(16),
+        text: t.s(1).unwrap_or_default(),
+        style: t.s(3).unwrap_or_else(|| "Standard".into()),
+        measurement: t.fd(42, 0.0),
+        text_rotation: t.fd(53, 0.0).to_radians(),
+        user_text_pos: t.i(70).unwrap_or(0) & 128 != 0,
+        block: t.s(2).filter(|s| !s.is_empty()),
+        overrides: Default::default(),
+        assoc: Vec::new(),
+        marks: Default::default(),
+    }
 }
 
 /// A TOLERANCE from its groups, with the frame direction `dir`.

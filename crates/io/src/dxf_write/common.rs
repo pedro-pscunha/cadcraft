@@ -293,7 +293,7 @@ fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
 }
 
 /// `plane` is the normal of a canonical text's plane (the entity's, or the attribute's own): with it the text also writes
-/// its generation flags (group 71) and its normal (210, 220, 230), which the legacy text does not keep.
+/// its normal (210, 220, 230), which the legacy text does not keep. The generation flags (group 71) are written for both.
 pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_prompt: Option<&str>, plane: Option<Vec3>) {
     w.p(10, text_insert(d, t));
     w.f(40, t.height);
@@ -308,7 +308,7 @@ pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attri
         w.f(51, t.oblique.to_degrees());
     }
     w.s(7, &t.style);
-    if plane.is_some() && (t.backward || t.upside_down) {
+    if t.backward || t.upside_down {
         w.i(71, if t.backward { 2 } else { 0 } | if t.upside_down { 4 } else { 0 });
     }
     let h = match t.halign {
