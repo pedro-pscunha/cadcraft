@@ -95,10 +95,8 @@ fn ang_between(d1: Vec2, d2: Vec2) -> f64 {
 /// Candidate constraints, most important first (coincident, concentric, tangent, horizontal,
 /// vertical, collinear, perpendicular, parallel, equal). Apply them one by one with
 /// [`crate::add`], skipping the ones it refuses as redundant.
-pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Vec<Constraint> {
-    if crate::require_legacy_inputs(d, handles.iter().copied()).is_err() {
-        return Vec::new();
-    }
+pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Result<Vec<Constraint>, crate::SolveError> {
+    crate::require_legacy_inputs(d, handles.iter().copied())?;
     let tol = if o.distance_tolerance.is_finite() { o.distance_tolerance.clamp(0.0, 1e9) } else { 0.05 };
     let atol = if o.angle_tolerance.is_finite() { o.angle_tolerance.clamp(0.0, 45.0).to_radians() } else { 1f64.to_radians() };
     // Resolve the allowed type names into a set once, so membership is O(1) per candidate instead
@@ -192,7 +190,7 @@ pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Vec<Constrain
             push(ConstraintKind::Equal, vec![*ra, *rb]);
         }
     }
-    out
+    Ok(out)
 }
 
 /// Constraint types CONSTRAINTINFER applies.
@@ -211,10 +209,8 @@ pub const INFER_TYPES: [ConstraintKind; 6] = [
 /// lines, and horizontal/vertical lines (ortho, polar). Snapped geometry is exact, so the
 /// tolerances in `o` are expected to be tight. Only [`INFER_TYPES`] (and `o.types`, when set)
 /// are returned, each involving a placed object.
-pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &InferOptions) -> Vec<Constraint> {
-    if crate::require_legacy_inputs(d, placed.iter().chain(others).copied()).is_err() {
-        return Vec::new();
-    }
+pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &InferOptions) -> Result<Vec<Constraint>, crate::SolveError> {
+    crate::require_legacy_inputs(d, placed.iter().chain(others).copied())?;
     let tol = if o.distance_tolerance.is_finite() { o.distance_tolerance.clamp(0.0, 1e9) } else { 0.0 };
     let mut all: Vec<Handle> = placed.iter().take(MAX_OBJECTS).copied().collect();
     for h in others {
@@ -226,11 +222,11 @@ pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &Infer
         }
     }
     let mine = |c: &Constraint| c.refs.iter().any(|r| placed.contains(&r.handle));
-    let mut out: Vec<Constraint> = infer(d, &all, o).into_iter().filter(|c| INFER_TYPES.contains(&c.kind) && mine(c)).collect();
+    let mut out: Vec<Constraint> = infer(d, &all, o)?.into_iter().filter(|c| INFER_TYPES.contains(&c.kind) && mine(c)).collect();
     // Placed end points on other objects' midpoints, centres, or on the objects themselves.
     let allow = o.types.is_empty() || o.types.iter().any(|t| t.eq_ignore_ascii_case(ConstraintKind::Coincident.name()));
     if !allow {
-        return out;
+        return Ok(out);
     }
     let g = collect(d, &all);
     // Point to point (midpoint, centre) first; point on an object last, so a tangent or
@@ -295,7 +291,7 @@ pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &Infer
     let n = out.iter().take_while(|c| c.kind == ConstraintKind::Coincident).count();
     out.splice(n..n, extra);
     out.extend(on);
-    out
+    Ok(out)
 }
 
 /// Does `p` (on the circle) lie within the arc's sweep (always for a circle)?
@@ -308,12 +304,13 @@ fn on_arc(d: &Drawing, h: Handle, c: Vec2, p: Vec2) -> bool {
 
 /// Infer and apply constraints over `handles`; returns the ids added. Redundant or conflicting
 /// candidates are skipped.
-pub fn autoconstrain(d: &mut Drawing, handles: &[Handle], o: &InferOptions) -> Vec<u32> {
+pub fn autoconstrain(d: &mut Drawing, handles: &[Handle], o: &InferOptions) -> Result<Vec<u32>, crate::SolveError> {
+    crate::require_legacy_inputs(d, d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)).chain(handles.iter().copied()))?;
     let mut added = Vec::new();
-    for c in infer(d, handles, o) {
+    for c in infer(d, handles, o)? {
         if let Ok(id) = crate::add(d, c, &crate::SolveOptions::default()) {
             added.push(id);
         }
     }
-    added
+    Ok(added)
 }
