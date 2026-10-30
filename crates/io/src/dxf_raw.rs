@@ -1766,6 +1766,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         .find(|w| w[0].code == 9 && w[0].str() == "$ACADVER")
         .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
         .unwrap_or(0);
+    // The DXF of the DWG bridge says AC1015 but has the fit data count of spline edges (acadrust reads it from there).
+    let version = if dwg_bridge { version.max(1024) } else { version };
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
     let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, target, pages, block_attributes, table_aliases };

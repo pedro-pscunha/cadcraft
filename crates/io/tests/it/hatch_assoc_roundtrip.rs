@@ -243,3 +243,24 @@ fn a_hatch_boundary_keeps_the_reactors_the_file_had() {
     assert!(reactors.contains(&hatch.hex()), "the hatch: {reactors:?}");
     assert_eq!(reactors.len(), 2, "the hatch and the file's own: {reactors:?}");
 }
+
+/// An associative hatch whose loop is a spline edge keeps its source object through a DWG: the bridge's DXF has the fit data count
+/// (97) that acadrust takes the loop's own count for otherwise, and the association was dropped.
+#[test]
+fn a_spline_edge_hatch_keeps_its_source_in_a_dwg() {
+    let spline = "0\nSPLINE\n5\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbSpline\n70\n8\n71\n3\n72\n8\n73\n4\n74\n0\n40\n0\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n40\n1\n\
+        10\n0\n20\n0\n30\n0\n10\n20\n20\n0\n30\n0\n10\n20\n20\n20\n30\n0\n10\n0\n20\n20\n30\n0\n";
+    let knots = "40\n0\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n40\n1\n";
+    let hatch = format!(
+        "0\nHATCH\n5\n41\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\nSOLID\n70\n1\n71\n1\n91\n1\n92\n1\n93\n1\n72\n4\n94\n3\n73\n0\n74\n0\n95\n8\n96\n4\n{knots}\
+         10\n0\n20\n0\n10\n20\n20\n0\n10\n20\n20\n20\n10\n0\n20\n20\n97\n0\n97\n1\n330\n40\n75\n0\n76\n1\n98\n0\n"
+    );
+    let text = format!("0\nSECTION\n2\nENTITIES\n{spline}{hatch}0\nENDSEC\n0\nEOF\n");
+    let d = read_dxf(text.as_bytes()).expect("read");
+    assert_eq!(hatches(&d)[0].loops[0].sources, vec![Handle(0x40)], "read from the DXF");
+    let dwg = cadcraft_io::write(&d, "x.dwg").expect("dwg");
+    let from_dwg = cadcraft_io::read(&dwg, "x.dwg").expect("read dwg");
+    let h = &hatches(&from_dwg)[0];
+    assert!(h.associative, "still associative");
+    assert_eq!(h.loops[0].sources, vec![Handle(0x40)], "read from the DWG");
+}
