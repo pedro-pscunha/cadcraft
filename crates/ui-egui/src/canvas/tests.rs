@@ -8,6 +8,108 @@ fn list(handles: &[u64]) -> DisplayList {
 }
 
 #[test]
+fn raw_records_have_a_persistent_canvas_indicator_and_a_position_placeholder() {
+    use cadcraft_doc::{Block, Entity, EntityKind, GeometryRevision, Insert, RawCompound, RawRecord, RawTag};
+    use cadcraft_geom::Vec3;
+    let mut session = cadcraft_engine::Session::new();
+    session.doc_mut().unwrap().model.push(Entity::from_raw(
+        RawCompound::new(
+            RawRecord::new(
+                "WIDGETX".into(),
+                vec![
+                    RawTag { code: 5, value: "A0".into() },
+                    RawTag { code: 330, value: "1F".into() },
+                    RawTag { code: 10, value: "6".into() },
+                    RawTag { code: 20, value: "3".into() },
+                ],
+            )
+            .unwrap(),
+            Vec::new(),
+            Default::default(),
+            "No exact WIDGETX adapter.".into(),
+        )
+        .unwrap(),
+    ));
+    let mut block = Block::new("RAW");
+    let tag = |code, value: &str| RawTag { code, value: value.into() };
+    let parent =
+        RawRecord::new("INSERT".into(), vec![tag(5, "A1"), tag(330, "1F"), tag(66, "1"), tag(2, "Unsupported"), tag(10, "1"), tag(20, "1")]).unwrap();
+    let attribute = RawRecord::new("ATTRIB".into(), vec![tag(5, "A2"), tag(330, "A1"), tag(2, "TAG"), tag(1, "value")]).unwrap();
+    let end = RawRecord::new("SEQEND".into(), vec![tag(5, "A3"), tag(330, "A1")]).unwrap();
+    block
+        .entities
+        .push(Entity::from_raw(RawCompound::new(parent, vec![attribute, end], Default::default(), "No exact INSERT adapter.".into()).unwrap()));
+    session.doc_mut().unwrap().blocks.insert("RAW".into(), std::sync::Arc::new(block));
+    let handle = session.doc_mut().unwrap().new_handle();
+    let mut instance = Entity::new(
+        handle,
+        EntityKind::Insert(Insert {
+            block: "RAW".into(),
+            insert: Vec3::new(6.0, 3.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        }),
+    );
+    instance.geometry_revision = GeometryRevision::CanonicalV2;
+    session.doc_mut().unwrap().model.push(instance);
+    let mut app = CadApp::new(session, crate::Services::default());
+    let ctx = egui::Context::default();
+    fn text(shape: &egui::Shape, out: &mut String) {
+        match shape {
+            egui::Shape::Text(label) => out.push_str(label.galley.text()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    text(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    for frame in 0..5 {
+        let output = ctx
+            .run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0))), ..Default::default() }, |ui| {
+                app.ui(ui)
+            });
+        let mut painted = String::new();
+        for shape in &output.shapes {
+            text(&shape.shape, &mut painted);
+        }
+        if frame >= 2 {
+            assert!(painted.contains("2 records not displayed exactly"), "{painted}");
+            assert!(painted.contains("excluded from extents"), "{painted}");
+            assert!(painted.contains("A0") && painted.contains("A1"), "{painted}");
+            assert!(app.canvas.list.as_ref().is_some_and(|list| list.unresolved.len() == 2));
+            fn marker(shape: &egui::Shape, point: Pos2) -> bool {
+                match shape {
+                    egui::Shape::Rect(rect) => {
+                        (rect.stroke.width - 1.5).abs() < 0.1 && rect.rect.center().distance(point) < 0.1 && (rect.rect.width() - 12.0).abs() < 0.1
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().any(|shape| marker(shape, point)),
+                    _ => false,
+                }
+            }
+            for location in [Vec2::new(6.0, 3.0), Vec2::new(7.0, 4.0)] {
+                let point = app.canvas.xf.unwrap().to_screen(location);
+                assert!(output.shapes.iter().any(|shape| marker(&shape.shape, point)), "missing raw placeholder at {point:?}");
+            }
+        }
+        output.drop_without_applying_deltas();
+    }
+    if let Some(directory) = std::env::var_os("CRAFT_UI_SUITE_SHOTS").map(std::path::PathBuf::from) {
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut harness =
+            egui_kittest::Harness::builder().with_size(vec2(1400.0, 900.0)).wgpu().build_ui_state(|ui, app: &mut CadApp| app.ui(ui), app);
+        harness.run_steps(6);
+        harness.render().unwrap().save(directory.join("cadcraft-unresolved.png")).unwrap();
+    }
+}
+
+#[test]
 fn cursor_coordinates_keep_a_unique_snap_z_and_reject_a_stale_snap() {
     let mut canvas = CanvasState {
         cursor: Some(Vec2::new(1.0, 2.0)),

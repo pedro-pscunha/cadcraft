@@ -30,6 +30,14 @@ impl Entity {
         Entity { geometry_revision, handle, common, kind }
     }
 
+    /// Raw source units lack exact display geometry. Older Unknown entities retain warning-only export behavior.
+    pub fn unresolved_display(&self) -> Option<UnresolvedDisplay<'_>> {
+        match &self.kind {
+            EntityKind::Raw(raw) => Some(UnresolvedDisplay { reason: raw.reason(), tags: raw.parent().tags() }),
+            _ => None,
+        }
+    }
+
     /// Keep the identity and properties of one opaque source unit.
     pub fn from_raw(raw: RawCompound) -> Self {
         Self::new(raw.parent().handle(), EntityKind::Raw(raw))
@@ -107,6 +115,13 @@ pub use mleader::{
 pub use mline_canonical::MLineLayout;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame};
+/// Borrowed display limitation of an opaque source entity. The source unit owns its reason and tags.
+#[derive(Clone, Copy, Debug)]
+pub struct UnresolvedDisplay<'a> {
+    pub reason: &'a str,
+    pub tags: &'a [RawTag],
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown {
     pub dxf_type: String,

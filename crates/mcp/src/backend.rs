@@ -402,6 +402,7 @@ impl Backend for Headless {
                 let window = render_window(&p);
                 let opts = cadcraft_render::Options { view: window, transparency: s.settings.transparency_display, ..Default::default() };
                 let list = cadcraft_render::build(&st.doc, &st.space, &opts);
+                list.require_complete_geometry().map_err(|error| error.to_string())?;
                 let fit = p.get("fit").and_then(Value::as_bool).unwrap_or(true);
                 let side = |k: &str| p.get(k).and_then(Value::as_f64).map(|x| x as u32);
                 let view = if let Some(win) = &window {
@@ -450,6 +451,25 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::sync::Arc;
+
+    #[test]
+    fn headless_render_refuses_unresolved_raw_records_with_their_handles() {
+        use cadcraft_engine::doc::{Entity, RawCompound, RawRecord, RawTag};
+        let mut backend = Headless::default();
+        backend.session.doc_mut().unwrap().model.push(Entity::from_raw(
+            RawCompound::new(
+                RawRecord::new("WIDGETX".into(), vec![RawTag { code: 5, value: "A0".into() }, RawTag { code: 330, value: "1F".into() }]).unwrap(),
+                Vec::new(),
+                Default::default(),
+                "No exact WIDGETX adapter.".into(),
+            )
+            .unwrap(),
+        ));
+        let result = backend.call("ui.render", json!({"width":64,"height":64}));
+        assert!(result.is_err(), "headless render silently omitted raw geometry");
+        let message = result.unwrap_err();
+        assert!(message.contains("A0") && message.contains("unresolved"), "{message}");
+    }
 
     /// A peer squatting on the control port can't make the client buffer an endless reply line (#1925).
     #[test]

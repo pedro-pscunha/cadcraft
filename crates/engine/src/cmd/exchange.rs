@@ -355,6 +355,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
         ..Default::default()
     };
     let list = cadcraft_render::build_plot(d, &space, &ropts);
+    list.require_complete_geometry().map_err(|error| bad("preview", error.to_string()))?;
     let b = list.bounds;
     // Paper point q shows drawing point (q - to) / k + from.
     let (from, k, to) = if fit || space == Space::Model {

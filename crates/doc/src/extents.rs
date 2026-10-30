@@ -76,6 +76,9 @@ fn mtext_box(t: &crate::MText) -> Bounds2 {
 }
 
 pub fn legacy_entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> crate::Result<Bounds2> {
+    if e.unresolved_display().is_some() {
+        return Ok(Bounds2::EMPTY);
+    }
     require_legacy_tree(d, e, depth, &mut HashSet::new())?;
     // A top-level annotative object measures as it draws at the current annotation scale.
     if depth == 0 {
@@ -89,8 +92,8 @@ pub fn legacy_entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> crate::Res
 }
 
 fn require_legacy_tree<'a>(drawing: &'a Drawing, entity: &Entity, depth: usize, seen: &mut HashSet<(&'a str, usize)>) -> crate::Result<()> {
-    if let EntityKind::Raw(raw) = &entity.kind {
-        return Err(raw.geometry_refusal());
+    if entity.unresolved_display().is_some() {
+        return Ok(());
     }
     entity.require_legacy_geometry().map_err(|_| crate::DocError::CanonicalExtent(entity.handle))?;
     if depth >= MAX_BLOCK_DEPTH {
@@ -119,6 +122,9 @@ fn require_legacy_tree<'a>(drawing: &'a Drawing, entity: &Entity, depth: usize, 
 /// depth). The depth is part of the key because [`MAX_BLOCK_DEPTH`] cuts a deep visit short: its
 /// bounds must not stand in for a shallower reference to the same block (#706).
 fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<(&'a str, usize), Bounds2>) -> Bounds2 {
+    if e.unresolved_display().is_some() {
+        return Bounds2::EMPTY;
+    }
     match &e.kind {
         EntityKind::Table(t) if t.is_broken() => t.bounds(),
         EntityKind::Text(t) if blank(&t.value) => Bounds2::EMPTY,

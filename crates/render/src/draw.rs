@@ -70,8 +70,11 @@ pub(crate) fn try_entity(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc
 }
 
 fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<()> {
-    if let EntityKind::Raw(raw) = &e.kind {
-        return Err(raw.geometry_refusal());
+    if let Some(unresolved) = e.unresolved_display() {
+        if resolve(ctx, e, b.plotting).4 {
+            super::unresolved::record(b, ctx, e, unresolved);
+        }
+        return Ok(());
     }
     // A top-level annotative object draws at the view's annotation scale: a viewport's scale for
     // model space seen through it, else the drawing's (CANNOSCALE in model space, 1:1 on paper).

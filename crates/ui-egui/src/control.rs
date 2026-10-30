@@ -477,6 +477,9 @@ pub fn handle(app: &mut CadApp, ctx: &egui::Context, req: &ControlRequest) -> Ou
             let window = render_window(p);
             let opts = cadcraft_render::Options { view: window, transparency: app.session.settings.transparency_display, ..Default::default() };
             let list = cadcraft_render::build(&st.doc, &st.space, &opts);
+            if let Err(error) = list.require_complete_geometry() {
+                return err(error);
+            }
             let v = st.view();
             let fit = p.get("fit").and_then(Value::as_bool).unwrap_or(true);
             let view = match &window {
@@ -717,6 +720,27 @@ pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>, token: u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_render_refuses_unresolved_raw_records_with_their_handles() {
+        use cadcraft_doc::{Entity, RawCompound, RawRecord, RawTag};
+        let mut session = cadcraft_engine::Session::new();
+        session.doc_mut().unwrap().model.push(Entity::from_raw(
+            RawCompound::new(
+                RawRecord::new("WIDGETX".into(), vec![RawTag { code: 5, value: "A0".into() }, RawTag { code: 330, value: "1F".into() }]).unwrap(),
+                Vec::new(),
+                Default::default(),
+                "No exact WIDGETX adapter.".into(),
+            )
+            .unwrap(),
+        ));
+        let mut app = CadApp::new(session, crate::Services::default());
+        let (request, _) = ControlRequest::new("ui.render", json!({"width":64,"height":64}));
+        let Outcome::Done(response) = handle(&mut app, &egui::Context::default(), &request) else { panic!("unexpected screenshot request") };
+        assert_eq!(response["ok"], false, "{response}");
+        let message = response["error"].as_str().unwrap();
+        assert!(message.contains("A0") && message.contains("unresolved"), "{message}");
+    }
 
     #[test]
     fn render_view_fit_finds_offscreen_drawing() {
