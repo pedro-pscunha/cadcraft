@@ -311,3 +311,37 @@ fn an_unfilled_style_keeps_its_fill_colour() {
         assert_eq!((s.fill, s.fill_off_color), (None, Color::ByBlock), "{what}");
     }
 }
+
+#[test]
+fn area_fill_parameters_of_a_multiline_survive_save_and_reopen() {
+    // Groups 75 and 42: where an element's area fill is cut (MLEDIT crossings), per element at a vertex.
+    let mut d = Drawing::new_imperial();
+    d.mline_styles.push(wall());
+    let pts = [Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 10.0)];
+    let mut m = MLine::new(&wall(), &pts, false, MLineJust::Zero, 2.0);
+    m.vertices[1].fills = vec![vec![0.5, 1.25, 7.0], Vec::new(), vec![3.0, 4.0]];
+    d.add(&Space::Model, Common::default(), EntityKind::MLine(m.clone())).unwrap();
+    let saved = cadcraft_io::write_dxf(&d);
+    // The groups: 74 and 41 per element, then 75 with its 42s.
+    let tags = cadcraft_dxf::parse(saved.as_bytes()).unwrap();
+    let entities = sections(&tags).into_iter().find(|s| s.name == "ENTITIES").unwrap();
+    let record = records(&entities.tags).into_iter().find(|(k, _)| k == "MLINE").unwrap().1;
+    let counts: Vec<i64> = record.iter().filter(|t| t.code == 75).map(Tag::i64).collect();
+    assert_eq!(counts, [0, 0, 0, 3, 0, 2, 0, 0, 0], "per element, vertex by vertex");
+    assert_eq!(record.iter().filter(|t| t.code == 42).map(Tag::f64).collect::<Vec<_>>(), [0.5, 1.25, 7.0, 3.0, 4.0]);
+    let back = mlines(&cadcraft_io::read_dxf(saved.as_bytes()).unwrap());
+    assert_eq!(back[0].vertices[1].fills, m.vertices[1].fills);
+    assert!(back[0].vertices[0].fills.is_empty());
+    // The DWG keeps them too.
+    let through_dwg = mlines(&cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap());
+    assert_eq!(through_dwg[0].vertices[1].fills, m.vertices[1].fills);
+    // And the second save writes the same record.
+    let again = cadcraft_io::write_dxf(&cadcraft_io::read_dxf(saved.as_bytes()).unwrap());
+    let record2 = {
+        let tags = cadcraft_dxf::parse(again.as_bytes()).unwrap();
+        let entities = sections(&tags).into_iter().find(|s| s.name == "ENTITIES").unwrap();
+        records(&entities.tags).into_iter().find(|(k, _)| k == "MLINE").unwrap().1
+    };
+    let pairs = |r: &[Tag]| r.iter().filter(|t| matches!(t.code, 41 | 42 | 74 | 75)).map(|t| (t.code, t.str())).collect::<Vec<_>>();
+    assert_eq!(pairs(&record), pairs(&record2));
+}

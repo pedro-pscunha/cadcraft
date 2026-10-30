@@ -169,6 +169,10 @@ pub struct MLineVertex {
     /// A canonical multiline has it at every vertex, and then `cuts` is empty: the parameters hold the breaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<MLineVertexFrame>,
+    /// For each style element, its area-fill parameters at this vertex (DXF groups 75 and 42: where the fill is cut at a crossing
+    /// made by MLEDIT), as the record held them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fills: Vec<Vec<f64>>,
 }
 
 /// What a canonical MLINE holds at a vertex, as its record does (DXF groups 12, 13, 74 and 41): the direction of the
@@ -184,7 +188,7 @@ pub struct MLineVertexFrame {
 
 impl MLineVertex {
     pub fn new(p: Vec3) -> Self {
-        MLineVertex { p, cuts: Vec::new(), frame: None }
+        MLineVertex { p, cuts: Vec::new(), frame: None, fills: Vec::new() }
     }
 }
 

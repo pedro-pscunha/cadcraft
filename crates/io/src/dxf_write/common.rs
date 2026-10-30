@@ -186,7 +186,8 @@ pub(super) fn attrib_common(d: &Drawing, e: &Entity, ins: &Insert, a: &Attrib) -
         .and_then(|b| b.entities.iter().find(|be| matches!(&be.kind, EntityKind::AttDef(ad) if ad.tag.eq_ignore_ascii_case(&a.tag))));
     let base = def.map(|de| de.common.clone()).unwrap_or_default();
     let mut c = a.props.over(&base);
-    if c.layer == "0" {
+    // A definition on layer 0 puts the attribute on its reference's layer; an attribute's own layer, layer 0 included, stays.
+    if c.layer == "0" && a.props.layer.is_none() {
         c.layer.clone_from(&e.common.layer);
     }
     (c, base)

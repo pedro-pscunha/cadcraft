@@ -82,6 +82,7 @@ fn mtext() -> MText {
 fn wipeout() -> Wipeout {
     Wipeout {
         boundary: Vec::new(),
+        display: Default::default(),
         frame: Some(WipeoutFrame {
             origin: Vec3::new(10.0, 1.0, 2.0),
             u: Vec3::new(4.0, 0.0, 0.5),
@@ -648,7 +649,13 @@ fn a_legacy_payload_keeps_the_legacy_path() {
                 m.block.iter_mut().for_each(|b| b.attribs.clear());
             }
             // The legacy wipeout is a boundary in the XY plane.
-            EntityKind::Wipeout(w) => *w = Wipeout { boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 2.0)], frame: None },
+            EntityKind::Wipeout(w) => {
+                *w = Wipeout {
+                    boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 2.0)],
+                    display: Default::default(),
+                    frame: None,
+                }
+            }
             _ => {}
         }
         if let EntityKind::AttDef(a) = &mut e.kind {
