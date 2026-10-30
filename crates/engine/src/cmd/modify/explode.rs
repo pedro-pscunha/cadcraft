@@ -3,6 +3,13 @@ use super::{Entity, EntityKind, Handle, PolyVertex, Polyline, Result, Segment, S
 // ---------------- explode / array / order / break / join ----------------
 
 fn explode_block_ref(d: &cadcraft_doc::Drawing, e: &Entity, ins: &cadcraft_doc::Insert) -> Result<Option<Vec<Entity>>> {
+    // AutoCAD refuses to explode a MINSERT (a block reference with rows or columns): "the object is minserted".
+    if ins.cols > 1 || ins.rows > 1 {
+        return Err(crate::EngineError::BadParams {
+            cmd: "explode".into(),
+            msg: format!("object {} is a MINSERT ({} columns by {} rows): a block array cannot be exploded", e.handle.hex(), ins.cols, ins.rows),
+        });
+    }
     if let Some(items) = crate::cmd::array::explode_array(d, e)? {
         return Ok(Some(items));
     }
