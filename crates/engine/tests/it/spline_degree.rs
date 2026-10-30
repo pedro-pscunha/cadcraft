@@ -14,7 +14,7 @@ fn programmatic_spline_degree_is_limited() {
         let d = s.doc().unwrap();
         let Some(EntityKind::Spline(sp)) = d.model.iter().last().map(|e| &e.kind) else { panic!("no spline") };
         assert_eq!(sp.degree, want);
-        let ext = cadcraft_render::space_extents(&d, &s.space()).unwrap();
+        let ext = cadcraft_render::space_extents(d, &s.space()).unwrap();
         assert!(ext.min.x <= 0.0 && ext.max.x >= 2999.0, "{ext:?}");
     }
 }
