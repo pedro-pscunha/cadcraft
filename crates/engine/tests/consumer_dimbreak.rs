@@ -28,6 +28,8 @@ fn a_break_by_chosen_objects_refuses_a_canonical_obstruction() {
 
 #[test]
 fn a_spatial_canonical_obstruction_is_refused() {
-    let (d, dimension, line) = drawing_with_dimension_and_line(json!([[4, -1, 0], [4, 6, 4]]));
-    check_refusals(&d, "dimbreak", json!({"handles": [dimension.hex()]}), &[line]);
+    let mut session = Session::new();
+    let dimension = create(&mut session, "dimlinear", json!({"p1": [0, 0], "p2": [10, 0], "at": [5, 3]}));
+    let line = spatial_line(&mut session, [4.0, -1.0, 0.0], [4.0, 6.0, 4.0]);
+    check_refusals(session.doc().unwrap(), "dimbreak", json!({"handles": [dimension.hex()]}), &[line]);
 }
