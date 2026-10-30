@@ -41,7 +41,6 @@ fn native_block_attribute_flag_and_begin_layer_survive_two_dwg_saves() {
 }
 
 #[test]
-#[ignore = "pending acadrust: ENDBLK layer in DWG"]
 fn native_endblock_layer_survives_two_dwg_saves() {
     let mut drawing = cadcraft_io::read_dxf(SOURCE.as_bytes()).unwrap();
     for _ in 0..2 {
