@@ -212,6 +212,65 @@ fn a_plus_z_leader_gives_the_world_arrowhead_the_renderer_draws() {
     assert!(!fills.is_empty() || !outline.is_empty(), "the style draws an arrowhead");
 }
 
+/// A +Z canonical multileader with two vertices and a dogleg to the right, at the elevation 3.
+fn multileader(spline: bool) -> cadcraft_doc::MLeader {
+    use cadcraft_doc::{GeometryRevision, MLeader, MLeaderContext};
+    let mut m = MLeader::single(
+        Vec3::new(14.0, 12.0, 3.0),
+        2.0,
+        false,
+        vec![vec![Vec3::new(5.0, 7.0, 3.0), Vec3::new(9.0, 12.0, 3.0), Vec3::new(11.0, 10.0, 3.0)]],
+        None,
+    );
+    m.arrow_size = 0.5;
+    m.spline = spline;
+    m.context = MLeaderContext { origin: Vec3::new(0.0, 0.0, 3.0), geometry_revision: GeometryRevision::CanonicalV2, ..MLeaderContext::default() };
+    m
+}
+
+#[test]
+fn a_plus_z_multileader_gives_the_world_lines_dogleg_and_arrowhead_the_renderer_draws() {
+    use cadcraft_doc::mleader_primitives;
+    use cadcraft_render::{Arrowhead, arrowhead, mleader_arrow_layout};
+    let d = Drawing::new_metric();
+    for spline in [false, true] {
+        let m = multileader(spline);
+        let world = mleader_primitives(&m, Vec3::ZERO, &mleader_arrow_layout(&d, &m), &Mat4::IDENTITY).unwrap();
+        assert_eq!(world.block, None);
+        let z = 3.0;
+        // The renderer: the leader path (smoothed for a spline leader), the style's arrowhead at its first point, the dogleg.
+        let path = m.leader_paths().remove(0);
+        let style = d.mleader_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&m.style)).map_or("", |s| s.arrow_block.as_str());
+        let drawn = arrowhead(Arrowhead::parse(style), path[0], (path[0] - path[1]).normalized(), m.arrow_size);
+        let segments: Vec<(Vec3, Vec3)> =
+            world.primitives.iter().filter_map(|p| if let WorldPrimitive::Line { a, b } = p { Some((*a, *b)) } else { None }).collect();
+        let outline: Vec<(Vec2, Vec2)> = drawn.lines.iter().flat_map(|l| l.windows(2).map(|w| (w[0], w[1]))).collect();
+        assert_eq!(segments.len(), path.len() - 1 + outline.len() + 1, "spline {spline}");
+        for (i, w) in path.windows(2).enumerate() {
+            assert!(near3(segments[i].0, w[0].to3(z)) && near3(segments[i].1, w[1].to3(z)), "spline {spline}: path segment {i}");
+        }
+        let n = path.len() - 1;
+        for ((p, q), (e0, e1)) in segments[n..].iter().zip(&outline) {
+            assert!(near3(*p, e0.to3(z)) && near3(*q, e1.to3(z)), "spline {spline}: {p:?} {q:?} vs {e0:?} {e1:?}");
+        }
+        let dogleg = segments.last().unwrap();
+        assert!(near3(dogleg.0, Vec3::new(14.0, 12.0, 3.0)) && near3(dogleg.1, Vec3::new(16.0, 12.0, 3.0)), "{dogleg:?}");
+        let fills = world.primitives.iter().filter(|p| matches!(p, WorldPrimitive::Fill(_))).count();
+        assert_eq!(fills, drawn.tris.len() / 3);
+        assert!(fills > 0 || !outline.is_empty(), "the style draws an arrowhead");
+    }
+}
+
+#[test]
+fn a_spline_multileader_off_its_plane_refuses() {
+    use cadcraft_doc::mleader_primitives;
+    let mut m = multileader(true);
+    m.roots[0].branches[0].vertices[1].z = 4.0;
+    assert!(mleader_primitives(&m, Vec3::ZERO, &Default::default(), &Mat4::IDENTITY).is_err());
+    m.spline = false;
+    assert!(mleader_primitives(&m, Vec3::ZERO, &Default::default(), &Mat4::IDENTITY).is_ok(), "straight lines can be 3D");
+}
+
 fn linear_dimension() -> cadcraft_doc::Dimension {
     cadcraft_doc::Dimension {
         kind: cadcraft_doc::DimKind::Linear { rotation: 0.0 },

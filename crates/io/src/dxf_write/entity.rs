@@ -438,6 +438,8 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
             w.f(44, i.col_spacing);
             w.f(45, i.row_spacing);
         }
+        // A canonical reference has the plane of its entity: its insertion point and rotation are OCS values of it.
+        canonical_normal(w, e);
         if !i.attribs.is_empty() {
             for a in &i.attribs {
                 let ah = w.instance_handle(a.handle).hex();
@@ -646,7 +648,8 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
                 block: m.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).cloned()),
                 arrow: cx.arrow(&m.arrow_block),
             };
-            w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs));
+            let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && m.require_canonical().is_ok();
+            w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs, canonical));
         }
         EntityKind::Leader(l) => {
             w.s(0, "LEADER");
@@ -974,13 +977,34 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
 /// A multileader for a file older than 2007 (no MULTILEADER): a LEADER per leader line, ending
 /// at the landing, plus its MTEXT or its block's INSERT, with the multileader's properties.
 fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str, paper: bool, cx: &Ctx) {
+    let style = d.header.str("DIMSTYLE", "Standard");
+    // A canonical multileader splits into parts that each have their own plane.
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+        let base = m.block.as_ref().and_then(|b| d.block(&b.block)).map_or(Vec3::ZERO, |b| b.base);
+        if let Ok(parts) = m.split_canonical(&style, base) {
+            let part = |w: &mut W, kind: EntityKind, normal: Vec3| Entity {
+                geometry_revision: cadcraft_doc::GeometryRevision::CanonicalV2,
+                handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)),
+                common: cadcraft_doc::Common { extrusion: normal, ..e.common.clone() },
+                kind,
+            };
+            let mut kinds: Vec<(EntityKind, Vec3)> =
+                parts.leaders.into_iter().take(64).map(|l| (EntityKind::Leader(l), parts.leader_normal)).collect();
+            kinds.extend(parts.text.map(|(t, n)| (EntityKind::MText(t), n)));
+            kinds.extend(parts.block.map(|(i, n)| (EntityKind::Insert(i), n)));
+            for (kind, normal) in kinds {
+                let pe = part(w, kind, normal);
+                entity(w, d, &pe, owner, paper, cx);
+            }
+            return;
+        }
+    }
     let part = |w: &mut W, kind: EntityKind| Entity {
         geometry_revision: Default::default(),
         handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)),
         common: e.common.clone(),
         kind,
     };
-    let style = d.header.str("DIMSTYLE", "Standard");
     for (root, arm) in m.lines().take(64) {
         let mut vertices = arm.vertices.clone();
         vertices.push(root.landing);
