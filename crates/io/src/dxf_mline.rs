@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cadcraft_color::Color;
 use cadcraft_doc::{
     Drawing, Entity, EntityKind, EntityStore, MAX_MLINE_CUTS, MAX_MLINE_ELEMENTS, MAX_MLINE_VERTICES, MLine, MLineCaps, MLineCut, MLineElement,
-    MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, STANDARD_MLINE_STYLE,
+    MLineJust, MLineStyle, MLineVectors, MLineVertex, MLineVertexFrame, STANDARD_MLINE_STYLE,
 };
 use cadcraft_dxf::{Section, Tag};
 use cadcraft_geom::{Vec2, Vec3};
@@ -177,14 +177,15 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
         .map(|r| {
             if plane.is_some() {
                 let frame = MLineVertexFrame { dir: r.dir, miter: r.miter, params: r.params.clone() };
-                return MLineVertex { p: r.p, cuts: Vec::new(), frame: Some(frame), fills: fills(&r.fills) };
+                return MLineVertex { p: r.p, cuts: Vec::new(), frame: Some(frame), fills: fills(&r.fills), vectors: None };
             }
             let mut cuts = Vec::new();
             for (e, list) in r.params.iter().enumerate() {
                 cuts.extend(gaps(list).into_iter().map(|(start, end)| MLineCut { element: e, start, end }));
             }
             cuts.truncate(MAX_MLINE_CUTS);
-            MLineVertex { p: r.p, cuts, frame: None, fills: fills(&r.fills) }
+            let vectors = (r.dir != Vec3::ZERO && r.miter != Vec3::ZERO).then_some(MLineVectors { p: r.p, dir: r.dir, miter: r.miter });
+            MLineVertex { p: r.p, cuts, frame: None, fills: fills(&r.fills), vectors }
         })
         .collect();
     MLine {
@@ -292,13 +293,26 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
     p(&mut t, 210, Vec3::Z);
     let pts = m.points();
     let n = pts.len();
-    let dirs = m.directions();
-    let miters = m.miters();
+    // The source directions and miters while they describe the multiline, else computed from the points. The miter vector is the
+    // source unit miter scaled so that an element at distance d across the segment lies at d along it.
+    let (dirs, miters) = match m.source_vectors() {
+        Some(source) => {
+            let miters = source
+                .iter()
+                .map(|(dir, miter)| {
+                    let across = miter.dot(dir.perp()).abs();
+                    *miter / if across > 1e-9 { across } else { 1.0 }
+                })
+                .collect();
+            (source.iter().map(|(dir, _)| *dir).collect(), miters)
+        }
+        None => (m.directions(), m.miters()),
+    };
     let offs = m.offsets();
     let nseg = m.segment_count();
     for (k, v) in m.vertices.iter().enumerate() {
         p(&mut t, 11, v.p);
-        let dir = dirs.get(k.min(nseg.saturating_sub(1))).copied().unwrap_or(Vec2::X);
+        let dir = dirs.get(if m.source_vectors().is_some() { k } else { k.min(nseg.saturating_sub(1)) }).copied().unwrap_or(Vec2::X);
         p(&mut t, 12, dir.to3(0.0));
         let mv = miters.get(k).copied().unwrap_or(Vec2::Y);
         let stretch = mv.len();

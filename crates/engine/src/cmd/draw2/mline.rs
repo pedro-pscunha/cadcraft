@@ -689,7 +689,7 @@ fn mledit_vertex(s: &mut Session, tool: Tool, h: Handle, p: Vec2) -> Result<()> 
             let moved = moved.into_iter().map(|c| MLineCut { start: c.start - at, end: c.end - at, ..c }).collect();
             m.vertices.insert(
                 k + 1,
-                MLineVertex { p: q.to3(m.vertices.get(k).map(|v| v.p.z).unwrap_or(0.0)), cuts: moved, frame: None, fills: Vec::new() },
+                MLineVertex { p: q.to3(m.vertices.get(k).map(|v| v.p.z).unwrap_or(0.0)), cuts: moved, frame: None, fills: Vec::new(), vectors: None },
             );
         }
         Tool::DeleteVertex => {

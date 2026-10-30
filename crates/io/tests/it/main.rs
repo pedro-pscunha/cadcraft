@@ -77,6 +77,7 @@ mod mleader_roots;
 mod mleader_roundtrip;
 mod mline_dictionary_names;
 mod mline_roundtrip;
+mod mline_vectors_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_layout_plot_type;
 mod mtext_columns_roundtrip;

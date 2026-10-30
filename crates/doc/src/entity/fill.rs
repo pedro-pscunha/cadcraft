@@ -39,8 +39,7 @@ impl HatchEdge {
     /// reverses the direction of an arc or ellipse, so its angles mirror about the image of the X axis and `ccw` flips.
     pub fn transformed(&self, m: &cadcraft_geom::Mat3) -> Option<HatchEdge> {
         let k = m.scale_factor();
-        let (a, b, c, d) = (m.a, m.b, m.c, m.d);
-        let similar = ((a * c + b * d).abs() <= 1e-9 * k * k) && ((a * a + b * b - c * c - d * d).abs() <= 1e-9 * k * k);
+        let similar = m.is_similarity();
         let mirror = m.is_mirroring();
         let delta = m.rotation();
         let turn = |angle: f64| if mirror { delta - angle } else { angle + delta };

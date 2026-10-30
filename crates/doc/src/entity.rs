@@ -425,7 +425,15 @@ impl EntityKind {
                 d.block = None;
             }
             EntityKind::MLine(ml) => {
+                // The source direction and miter follow a similarity with the vertices; another map leaves them to be computed.
+                let keep = m.is_similarity() && ml.source_vectors().is_some();
                 ml.vertices.iter_mut().for_each(|v| t3(&mut v.p));
+                for v in &mut ml.vertices {
+                    v.vectors = v.vectors.filter(|_| keep).map(|s| {
+                        let vector = |u: Vec3| m.apply_vec(u.xy()).normalized().to3(u.z);
+                        MLineVectors { p: v.p, dir: vector(s.dir), miter: vector(s.miter) }
+                    });
+                }
                 ml.vertices.iter_mut().flat_map(|v| v.cuts.iter_mut()).for_each(|c| (c.start, c.end) = (c.start * s, c.end * s));
                 // Mirrored, the elements change sides.
                 ml.scale *= if mirror { -s } else { s };
