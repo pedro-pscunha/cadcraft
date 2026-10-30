@@ -101,8 +101,8 @@ debug = 0
 # bodies listed in two tables, clockwise hatch arc edges, exact sort keys, owned polyline
 # vertices, TABLESTYLE border linetypes and flags in the bridge, entity material and shadow mode,
 # VERTEX/SEQEND identity and polygon mesh vertex flags, AutoCAD-readable public DXF, no silent
-# record drops, ATTRIB/ATTDEF thickness), until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "0279d2a16606294e3c568d12c1ba5de6fbb0e9a4" }
+# record drops, ATTRIB/ATTDEF thickness; upstream main 2c436ae merged), until upstream.
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "cf342b83b23483feaff3fbdf4b71fbfd399a0079" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
