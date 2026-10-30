@@ -226,7 +226,9 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
 /// `attach` (MTEXT numbering).
 fn place_block(d: &Drawing, content: &cadcraft_doc::TableCellBlock, rotation: f64, at: Vec2, attach: u8) -> cadcraft_doc::Insert {
     let origin = content.insert(d, cadcraft_geom::Vec3::ZERO, rotation);
-    let bounds = cadcraft_doc::entity_bounds(d, &cadcraft_doc::Entity::new(cadcraft_doc::Handle(0), cadcraft_doc::EntityKind::Insert(origin)), 0);
+    // A block whose extents are refused is anchored by its insertion point (TODO fix-acadrust: refuse the cell instead).
+    let reference = cadcraft_doc::Entity::new(cadcraft_doc::Handle(0), cadcraft_doc::EntityKind::Insert(origin));
+    let bounds = crate::extents::entity_extents(d, &reference, 0).unwrap_or(cadcraft_geom::Bounds2::EMPTY);
     let anchor = if bounds.is_empty() {
         Vec2::ZERO
     } else {
