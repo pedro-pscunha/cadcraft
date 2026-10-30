@@ -294,3 +294,35 @@ fn the_reactors_of_a_boundary_keep_the_order_of_the_file() {
     let back = read_dxf(swapped.as_bytes()).unwrap();
     assert_eq!(reactors_of(&write_dxf(&back)), [ours[1].clone(), ours[0].clone()], "the file's order, not ours");
 }
+
+/// AutoCAD drops the association of a hatch it reads before its boundary objects (39 hatches of Citycon): the records go in the order
+/// of their handles, and the draw order that differs from it is the SORTENTSTABLE's.
+#[test]
+fn a_hatch_is_written_after_its_boundary_and_keeps_its_draw_order() {
+    let mut d = Drawing::new_imperial();
+    let (boundary, fill) = (Handle(0x100), Handle(0x500));
+    let k = EntityKind::LwPolyline(LwPolyline {
+        records: Default::default(),
+        vertices: square(0.0, 10.0),
+        closed: true,
+        const_width: 0.0,
+        elevation: 0.0,
+        plinegen: false,
+        heavy: false,
+        fit: None,
+    });
+    let loops = vec![HatchLoop { vertices: square(0.0, 10.0), outer: true, sources: vec![boundary], ..Default::default() }];
+    let mut b = Block::new("Tag");
+    // Drawn first: the hatch, then its boundary.
+    b.entities.push(Entity::new(fill, EntityKind::Hatch(hatch(loops, true))));
+    b.entities.push(Entity::new(boundary, k));
+    d.blocks.insert("Tag".into(), std::sync::Arc::new(b));
+    d.bump_handseed(Handle(0x500));
+    let text = write_dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let at = |h: Handle| tags.iter().position(|t| t.code == 5 && t.str() == h.hex()).unwrap();
+    assert!(at(boundary) < at(fill), "the boundary is written before the hatch");
+    let back = read_dxf(text.as_bytes()).unwrap();
+    let order: Vec<Handle> = back.block("Tag").unwrap().entities.iter().map(|e| e.handle).collect();
+    assert_eq!(order, [fill, boundary], "the hatch is still drawn first");
+}

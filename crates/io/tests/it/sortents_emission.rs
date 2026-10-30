@@ -19,10 +19,9 @@ fn handle(body: &[Tag]) -> Handle {
 
 fn assert_flattened_order(records: &[(String, Vec<Tag>)], cover: Handle, expected_kinds: &[&str]) {
     let entities: Vec<_> = records.iter().filter(|(k, _)| expected_kinds.contains(&k.as_str()) || k == "LINE").collect();
-    let expected: Vec<_> = entities.iter().map(|(_, t)| handle(t)).collect();
-    assert_eq!(expected.last(), Some(&cover));
-    assert_eq!(entities.iter().take(expected_kinds.len()).map(|(k, _)| k.as_str()).collect::<Vec<_>>(), expected_kinds);
-    let live: HashSet<_> = expected.iter().copied().collect();
+    // The records are written in the order of their entities' handles (AutoCAD's database order); the table says how they are drawn.
+    let written: Vec<_> = entities.iter().map(|(_, t)| handle(t)).collect();
+    let live: HashSet<_> = written.iter().copied().collect();
     let table = &records.iter().find(|(k, _)| k == "SORTENTSTABLE").expect("expanded record order needs a table").1;
     let mut keys = HashMap::new();
     for pair in table.windows(2).filter(|p| p[0].code == 331 && p[1].code == 5) {
@@ -30,13 +29,15 @@ fn assert_flattened_order(records: &[(String, Vec<Tag>)], cover: Handle, expecte
         assert!(live.contains(&entity), "dangling 331 entity handle {entity:?}");
         keys.insert(entity, Handle::parse_hex(&pair[1].str()).unwrap());
     }
-    assert_eq!(keys.len(), expected.len(), "every emitted part needs its own key");
-    let mut actual = expected.clone();
-    actual.sort_by_key(|h| keys.get(h).copied().unwrap_or(*h));
-    assert_eq!(actual, expected, "all parts must stay beneath the covering entity");
+    assert_eq!(keys.len(), written.len(), "every emitted part needs its own key");
+    let mut drawn = written.clone();
+    drawn.sort_by_key(|h| keys.get(h).copied().unwrap_or(*h));
+    assert_eq!(drawn.last(), Some(&cover), "all parts must stay beneath the covering entity");
+    let kind_of = |h: &Handle| entities.iter().find(|(_, t)| handle(t) == *h).map(|(k, _)| k.as_str()).unwrap();
+    assert_eq!(drawn.iter().take(expected_kinds.len()).map(kind_of).collect::<Vec<_>>(), expected_kinds);
     let mut sort_keys: Vec<_> = keys.values().copied().collect();
     sort_keys.sort_unstable();
-    let mut entity_handles = expected;
+    let mut entity_handles = written;
     entity_handles.sort_unstable();
     assert_eq!(sort_keys, entity_handles, "sort keys are a permutation of emitted handles");
 }

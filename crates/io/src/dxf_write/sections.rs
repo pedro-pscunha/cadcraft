@@ -4,7 +4,7 @@ use super::common::annotative_xdata;
 use super::ctx::{AssocObj, Ctx};
 use super::entity::{entity, hatch_reactors};
 use super::header::{code_page, header_vars};
-use super::layout::{paper_views, record_head, sheet_first, table_head, vport_table};
+use super::layout::{in_handle_order, paper_views, record_head, sheet_first, table_head, vport_table};
 use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
 use super::{
     Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup,
@@ -389,7 +389,7 @@ fn write_classes(w: &mut W, d: &Drawing, cx: &Ctx, every: &[&Entity]) {
 fn write_entities(w: &mut W, d: &Drawing, ms_br: &str, ps_brs: &[(String, String, &Layout)], cx: &Ctx) {
     w.s(0, "SECTION");
     w.s(2, "ENTITIES");
-    for e in d.model.iter() {
+    for e in in_handle_order(d.model.iter().map(|e| e.as_ref())) {
         entity(w, d, e, ms_br, false, cx);
     }
     if let Some((_, h, l)) = ps_brs.first() {
@@ -1213,7 +1213,15 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             }
             BlockSlot::User(i) => {
                 let (n, h, b) = &user_blocks[i];
-                block(&mut w, (n, &b.description), h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
+                block(
+                    &mut w,
+                    (n, &b.description),
+                    h,
+                    b.base,
+                    if b.anonymous { 1 } else { 0 },
+                    &mut in_handle_order(b.entities.iter().map(|e| e.as_ref())).into_iter(),
+                    false,
+                );
             }
             BlockSlot::Dim(i) => {
                 let (n, h, ents) = &dim_defs[i];
