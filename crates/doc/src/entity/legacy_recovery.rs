@@ -10,7 +10,25 @@
 use cadcraft_geom::{SplineSpace, Vec3};
 
 use super::dim::LeaderFrame;
-use super::{Entity, EntityKind, GeometryRevision};
+use super::{Common, Entity, EntityKind, GeometryRevision, Handle};
+
+#[derive(serde::Deserialize)]
+pub(super) struct SerializedEntity {
+    #[serde(default, rename = "geometryRevision")]
+    geometry_revision: GeometryRevision,
+    handle: Handle,
+    #[serde(default)]
+    common: Common,
+    kind: EntityKind,
+}
+
+impl From<SerializedEntity> for Entity {
+    fn from(value: SerializedEntity) -> Self {
+        let mut entity = Entity { geometry_revision: value.geometry_revision, handle: value.handle, common: value.common, kind: value.kind };
+        promote_legacy_spline_leader(&mut entity);
+        entity
+    }
+}
 
 /// What [`promote_legacy_spline_leader`] did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

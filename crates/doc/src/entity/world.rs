@@ -282,6 +282,14 @@ fn loop_polygon(loop_: &[WorldPrimitive], owner: Handle) -> Result<Vec<Vec2>> {
     Ok(out)
 }
 
+/// Style-dependent graphics in local coordinates. The caller supplies the same layout that it draws.
+#[derive(Clone, Copy, Debug)]
+pub enum WorldLayout<'a> {
+    Leader(&'a super::LeaderArrowLayout),
+    Tolerance { layout: &'a crate::GdtLayout, text_style: &'a str },
+    Table(&'a super::TableLayout),
+}
+
 /// Finite spatial geometry, kept separate from its view projection and the source payload.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldGeometry {
@@ -333,6 +341,11 @@ impl Entity {
 
     /// Resolve canonical geometry in WCS before any display, pick, or spatial-query projection.
     pub fn world_geometry(&self, parent: &Mat4) -> Result<WorldGeometry> {
+        self.world_geometry_with_layout(parent, None)
+    }
+
+    /// Resolve geometry with an explicit style-dependent layout. Missing or mismatched layouts refuse.
+    pub fn world_geometry_with_layout(&self, parent: &Mat4, layout: Option<WorldLayout<'_>>) -> Result<WorldGeometry> {
         if self.geometry_revision == GeometryRevision::LegacyProjectedV1 {
             return Err(DocError::Invalid("The legacy geometry payload needs recovery before world adaptation. Reopen the original DXF/DWG.".into()));
         }
@@ -342,12 +355,23 @@ impl Entity {
         if parent.m[3] != [0.0, 0.0, 0.0, 1.0] {
             return Err(DocError::Invalid("A world geometry parent must be an affine transform.".into()));
         }
+        if let Some(layout) = layout {
+            let primitives = match (&self.kind, layout) {
+                (EntityKind::Leader(leader), WorldLayout::Leader(arrow)) => super::leader_primitives(leader, self.common.extrusion, arrow, parent)?,
+                (EntityKind::Tolerance(tolerance), WorldLayout::Tolerance { layout, text_style }) => {
+                    super::tolerance_primitives(tolerance, self.common.extrusion, layout, text_style, parent)?
+                }
+                (EntityKind::Table(table), WorldLayout::Table(layout)) => super::table_primitives(table, self.common.extrusion, layout, parent)?,
+                _ => return Err(DocError::Invalid(format!("Entity {} has a mismatched world layout.", self.handle.hex()))),
+            };
+            return WorldGeometry::from_primitives(self.handle, primitives);
+        }
         // Each family adds its complete field contract here, not a projected legacy fallback.
-        let primitive = match &self.kind {
-            EntityKind::Line(line) => WorldPrimitive::Line { a: parent.apply(line.a), b: parent.apply(line.b) },
-            EntityKind::Point(point) => WorldPrimitive::Point(parent.apply(point.p)),
-            EntityKind::Circle(circle) => self.ocs_conic(parent, circle.center, circle.radius, 0.0, TAU)?,
-            EntityKind::Arc(arc) => self.ocs_conic(parent, arc.center, arc.radius, arc.start, arc.end)?,
+        let primitives = match &self.kind {
+            EntityKind::Line(line) => vec![WorldPrimitive::Line { a: parent.apply(line.a), b: parent.apply(line.b) }],
+            EntityKind::Point(point) => vec![WorldPrimitive::Point(parent.apply(point.p))],
+            EntityKind::Circle(circle) => vec![self.ocs_conic(parent, circle.center, circle.radius, 0.0, TAU)?],
+            EntityKind::Arc(arc) => vec![self.ocs_conic(parent, arc.center, arc.radius, arc.start, arc.end)?],
             EntityKind::Ellipse(ellipse) => {
                 let normal = self.world_ocs_frame()?.to_world(Vec3::Z);
                 let major_direction = ellipse.major.try_normalized().ok_or_else(|| DocError::Invalid("An ellipse has no major axis.".into()))?;
@@ -358,40 +382,39 @@ impl Entity {
                 let scale = ellipse.major.x.abs().max(ellipse.major.y.abs()).max(ellipse.major.z.abs());
                 let scaled_major = Vec3::new(ellipse.major.x / scale, ellipse.major.y / scale, ellipse.major.z / scale);
                 let minor = minor_direction * (scaled_major.len() * ellipse.ratio) * scale;
-                transformed_conic(parent, ellipse.center, ellipse.major, minor, ellipse.start, ellipse.end)
+                vec![transformed_conic(parent, ellipse.center, ellipse.major, minor, ellipse.start, ellipse.end)]
             }
-            EntityKind::LwPolyline(_)
-            | EntityKind::Polyline3d(_)
+            EntityKind::LwPolyline(polyline) => super::lwpolyline_primitives(polyline, self.common.extrusion, parent)?,
+            EntityKind::Spline(spline) => super::spline_primitives(spline, parent)?,
+            EntityKind::Helix(helix) => super::helix_primitives(helix, parent)?,
+            EntityKind::Text(text) => super::text_primitives(text, self.common.extrusion, parent)?,
+            EntityKind::MText(text) => super::mtext_primitives(text, self.common.extrusion, parent)?,
+            EntityKind::MLine(mline) => super::mline_primitives(mline, self.common.extrusion, parent)?,
+            EntityKind::Hatch(hatch) => super::hatch_primitives(hatch, self.common.extrusion, parent)?,
+            EntityKind::Solid(solid) | EntityKind::Trace(solid) => super::solid_primitives(solid, self.common.extrusion, parent)?,
+            EntityKind::Wipeout(wipeout) => super::wipeout_primitives(wipeout, parent)?,
+            EntityKind::Polyline3d(_)
             | EntityKind::PolylineMesh(_)
-            | EntityKind::Spline(_)
-            | EntityKind::Helix(_)
             | EntityKind::Ray(_)
             | EntityKind::XLine(_)
-            | EntityKind::Text(_)
-            | EntityKind::MText(_)
             | EntityKind::AttDef(_)
             | EntityKind::Insert(_)
             | EntityKind::Dimension(_)
             | EntityKind::Leader(_)
             | EntityKind::MLeader(_)
-            | EntityKind::MLine(_)
-            | EntityKind::Hatch(_)
-            | EntityKind::Solid(_)
-            | EntityKind::Trace(_)
             | EntityKind::Face3d(_)
             | EntityKind::Region(_)
             | EntityKind::Viewport(_)
             | EntityKind::Image(_)
-            | EntityKind::Wipeout(_)
             | EntityKind::Table(_)
             | EntityKind::Tolerance(_)
             | EntityKind::Unknown(_) => {
                 return Err(DocError::Invalid(format!("The canonical {} geometry adapter is not available.", self.kind.type_name())));
             }
         };
-        if primitive.validate().is_err() {
+        if primitives.iter().any(|primitive| primitive.validate().is_err()) {
             return Err(DocError::NonFinite(self.handle));
         }
-        Ok(WorldGeometry { owner: self.handle, primitives: vec![primitive] })
+        Ok(WorldGeometry { owner: self.handle, primitives })
     }
 }
