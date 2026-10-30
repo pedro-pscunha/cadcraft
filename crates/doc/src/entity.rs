@@ -60,7 +60,12 @@ mod mline_canonical;
 mod text;
 mod text_canonical;
 mod world;
-pub use world::{WorldGeometry, WorldPrimitive};
+mod world_families;
+pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
+pub use world_families::{
+    TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives,
+    mline_primitives, mtext_primitives, solid_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
+};
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
