@@ -24,6 +24,7 @@ fn source() -> String {
         (21, "10"),
         (31, "0"),
         (70, "33"),
+        (1, "10 m"),
         (71, "5"),
         (72, "1"),
         (41, "1"),
@@ -58,7 +59,7 @@ fn the_version_group_follows_the_marker_and_the_others_keep_autocads_order() {
         let bytes = cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(version), binary: false }).unwrap();
         let written = codes(&bytes);
         assert_eq!(written.first(), Some(&280), "{version:?}: {written:?}");
-        let rank = |c: i32| [280, 2, 10, 11, 70, 71, 72, 41, 42, 73, 74, 75, 1, 53, 51, 210, 3].iter().position(|x| *x == c);
+        let rank = |c: i32| [280, 2, 10, 11, 70, 1, 71, 72, 41, 42, 73, 74, 75, 53, 51, 210, 3].iter().position(|x| *x == c);
         let ranks: Vec<usize> = written
             .iter()
             .filter_map(|c| match c {
