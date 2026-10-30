@@ -143,6 +143,8 @@ mod writer_dictionary_policy;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_plot_fields;
 #[cfg(not(target_arch = "wasm32"))]
+mod writer_style_fields;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer_symbol_flags;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_view_fields;

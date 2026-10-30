@@ -4,6 +4,36 @@ use std::cell::Cell;
 std::thread_local! { pub(super) static SCANNED: Cell<usize> = const { Cell::new(0) }; }
 
 #[test]
+fn named_shape_style_stays_named_in_the_bridge_reader() {
+    let drawing = crate::read_dxf(include_bytes!("../../tests/data/named_shape_style.dxf")).unwrap();
+    let bytes = dwg_bridge(&drawing, Version::R2018);
+    let tags = cadcraft_dxf::parse(&bytes).unwrap();
+    let styles: Vec<_> = cadcraft_dxf::sections(&tags)
+        .into_iter()
+        .filter(|s| s.name == "TABLES")
+        .flat_map(|s| cadcraft_dxf::records(&s.tags))
+        .filter(|(k, _)| k == "STYLE")
+        .collect();
+    let source = &styles.iter().find(|(_, t)| t.iter().any(|t| t.code == 2 && t.str() == "SourceShapes")).unwrap().1;
+    assert_eq!(source.iter().find(|t| t.code == 70).unwrap().i64() & 5, 5);
+    assert_eq!(source.iter().find(|t| t.code == 42).unwrap().f64(), 12.75);
+    let mut doc = acadrust::DxfReader::from_reader(std::io::Cursor::new(bytes)).unwrap().read().unwrap();
+    assert!(
+        doc.text_styles.iter().any(|s| s.name == "SourceShapes"),
+        "reader styles: {:?}",
+        doc.text_styles.iter().map(|s| &s.name).collect::<Vec<_>>()
+    );
+    doc.version = acadrust::DxfVersion::AC1032;
+    let dwg = acadrust::DwgWriter::write_to_vec(&doc).unwrap();
+    let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+    assert!(
+        doc.text_styles.iter().any(|s| s.name == "SourceShapes"),
+        "DWG reader styles: {:?}",
+        doc.text_styles.iter().map(|s| &s.name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn dimstyle_fidelity_bridge_private_variables_are_plain_groups_only_for_supported_dwg_targets() {
     let mut d = Drawing::new_imperial();
     let fields = serde_json::json!({"DIMMZF": 12.5, "DIMALTMZF": 25.0, "DIMMZS": "m", "DIMALTMZS": "cm"});
