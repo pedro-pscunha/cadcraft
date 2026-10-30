@@ -1,0 +1,211 @@
+# The drawings the reader activation is proved on (plan v3, section 7): a file not listed here is not covered.
+# `families` is the activation families the save holds; write_golden_set refreshes it.
+[[file]]
+path = "crates/io/tests/data/attrib_fields.dxf"
+owner = "repo"
+families = ["AttDef", "Attrib", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/clockwise_arc_edge.dwg"
+owner = "repo"
+families = ["Arc", "Hatch", "Line", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/named_shape_style.dxf"
+owner = "repo"
+families = []
+
+[[file]]
+path = "examples/apartment.dxf"
+owner = "repo"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Hatch", "Leader", "Line", "LwPolyline", "MText", "Table"]
+
+[[file]]
+path = "/tmp/cad/rt7/Citycon-Augusto_Miele.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Image", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Cyrela-Aura_Moema.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Face3d", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/DPInc.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Face3d", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/rt7/Even-Manuel_de_Nobrega.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Image", "Insert", "Leader", "Line", "LwPolyline", "MText", "Point", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Firenze.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLine", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/rt7/Plaenge-Altier.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Line", "MText", "Polyline", "Spline", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/rt7/Planeta-Toulouse.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Rocontec-Vila_Einstein.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Skr-Ayya.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Tear_Incorporadora-Alvorada.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rt7/Toledo_Ferrari-HBR51.dwg"
+owner = "rt7 sweep"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Image", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/mc/Citycon-Augusto_Miele-2010.dxf"
+owner = "save-compare sources"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Image", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/mc/Citycon-Augusto_Miele-2018.dxf"
+owner = "save-compare sources"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Image", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/mc/DPInc-2018.dxf"
+owner = "save-compare sources"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Face3d", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/acad2/Planeta-Toulouse-acad.dxf"
+owner = "save-compare sources"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/cyrela-field.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Face3d", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/cyrela-field-group.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Face3d", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/plaenge-anon.dwg"
+owner = "rc2 copies"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Line", "MText", "Polyline", "Spline", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/rc2/skr-property.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Region", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/tear-native.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/tear-raw.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/tear-autocad-saved.dwg"
+owner = "rc2 copies"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Hatch", "Insert", "Leader", "Line", "LwPolyline", "MLeader", "MText", "Point", "Polyline", "Solid", "Spline", "Text", "Viewport", "Wipeout"]
+
+[[file]]
+path = "/tmp/cad/rc2/group-bridge.dxf"
+owner = "rc2 copies"
+families = []
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-blank.dwg"
+owner = "mateus-lima fixtures"
+families = []
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-mattrib-2018.dwg"
+owner = "mateus-lima fixtures"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-mleader-2004.dwg"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-table90-2018.dwg"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-tablefix-2007.dwg"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-tablefix-2018.dwg"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-native-acad.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Dimension", "Ellipse", "Line", "MText", "Point", "Solid"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-minsert-acad.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Dimension", "Ellipse", "Insert", "Line", "MText", "Point", "Solid"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-mleader-acad.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-mattrib-2018.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "AttDef", "Attrib", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table", "Viewport"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-table90-2007.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-table90-2018.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-tablefix-2007.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-tablefix-2018.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline"]
+
+[[file]]
+path = "/tmp/cad/dim1/dim1-vp68-2018.dxf"
+owner = "mateus-lima fixtures"
+families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table", "Viewport"]
