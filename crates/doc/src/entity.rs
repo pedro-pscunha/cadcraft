@@ -62,7 +62,10 @@ mod text_canonical;
 mod world;
 mod world_families;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
-pub use world_families::{lwpolyline_primitives, solid_primitives, wipeout_primitives};
+pub use world_families::{
+    arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives, mtext_primitives,
+    solid_primitives, text_primitives, wipeout_primitives,
+};
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
