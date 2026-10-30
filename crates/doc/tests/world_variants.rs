@@ -71,6 +71,37 @@ fn a_spline_moves_its_controls_only() {
 }
 
 #[test]
+fn hostile_spline_degree_refuses_without_arithmetic_overflow() {
+    let spline = WorldPrimitive::Spline { degree: usize::MAX, knots: Vec::new(), control: vec![Vec3::ZERO], weights: Vec::new() };
+    assert!(spline.validate().is_err());
+}
+
+#[test]
+fn nonfinite_fill_payloads_and_source_frames_are_refused() {
+    let WorldFillKind::Pattern(mut p) = pattern() else { panic!("not pattern") };
+    p.lines.push(cadcraft_doc::library::PatternLine { angle: 0.0, origin: (0.0, 0.0), delta: (1.0, 1.0), dashes: vec![f64::NAN] });
+    let gradient = WorldGradient {
+        gradient: Gradient {
+            name: "LINEAR".into(),
+            color1: cadcraft_color::Color::Index(1),
+            color2: cadcraft_color::Color::Index(5),
+            angle: f64::NAN,
+            centered: false,
+        },
+        origin: Vec3::ZERO,
+        x_axis: X,
+        y_axis: Y,
+    };
+    for primitive in [fill(WorldFillKind::Pattern(p)), fill(WorldFillKind::Gradient(gradient))] {
+        assert!(primitive.validate().is_err());
+        assert!(WorldGeometry::from_primitives(Handle(0), vec![primitive]).is_err());
+    }
+    let WorldPrimitive::Text(mut text) = text() else { panic!("not text") };
+    text.frame.normal.x = f64::NAN;
+    assert!(WorldPrimitive::Text(text).transformed(&Mat4::IDENTITY).is_err());
+}
+
+#[test]
 fn malformed_primitives_are_refused() {
     let bad_knots = WorldPrimitive::Spline { degree: 2, knots: vec![0.0, 1.0], control: vec![Vec3::ZERO; 3], weights: Vec::new() };
     let bad_weights = WorldPrimitive::Spline { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], control: vec![Vec3::ZERO; 2], weights: vec![1.0] };

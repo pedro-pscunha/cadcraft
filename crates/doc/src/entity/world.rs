@@ -120,7 +120,8 @@ impl WorldPrimitive {
             }
             WorldPrimitive::Spline { degree, knots, control, weights } => {
                 let shaped = *degree >= 1
-                    && knots.len() == control.len() + degree + 1
+                    && *degree < control.len()
+                    && control.len().checked_add(*degree).and_then(|count| count.checked_add(1)) == Some(knots.len())
                     && (weights.is_empty() || weights.len() == control.len())
                     && finite(control)
                     && knots.iter().chain(weights).all(|v| v.is_finite());
@@ -136,8 +137,10 @@ impl WorldPrimitive {
             }
             WorldPrimitive::Fill(fill) => {
                 let placement_ok = match &fill.kind {
-                    WorldFillKind::Pattern(p) => finite(&[p.origin, p.x_axis, p.y_axis]) && p.scale.is_finite() && p.angle.is_finite(),
-                    WorldFillKind::Gradient(g) => finite(&[g.origin, g.x_axis, g.y_axis]),
+                    WorldFillKind::Pattern(p) => {
+                        finite(&[p.origin, p.x_axis, p.y_axis]) && p.scale.is_finite() && p.angle.is_finite() && has_finite_numbers(&p.lines)
+                    }
+                    WorldFillKind::Gradient(g) => finite(&[g.origin, g.x_axis, g.y_axis]) && has_finite_numbers(&g.gradient),
                     _ => true,
                 };
                 if !placement_ok {
@@ -151,6 +154,7 @@ impl WorldPrimitive {
     /// This primitive after the complete affine `parent`. Display bases retain scale, shear and reflection without
     /// imposing the representability limits of persisted entities.
     pub fn transformed(&self, parent: &Mat4) -> Result<WorldPrimitive> {
+        self.validate()?;
         if parent.m[3] != [0.0, 0.0, 0.0, 1.0] || !has_finite_numbers(parent) {
             return Err(invalid("A world geometry parent must be a finite affine transform."));
         }
