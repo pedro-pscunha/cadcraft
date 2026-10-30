@@ -192,6 +192,8 @@ impl ForeignExtra {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SortTable {
     pub entries: Vec<(Handle, u64)>,
+    /// How many entries the extension dictionary listed before ACAD_SORTENTS.
+    pub place: usize,
 }
 
 impl SortTable {

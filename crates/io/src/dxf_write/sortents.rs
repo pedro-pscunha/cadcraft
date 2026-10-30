@@ -13,6 +13,8 @@ pub(super) struct Table {
     handle: String,
     /// Entity and sort handle, in the order the table lists them.
     entries: Vec<(Handle, u64)>,
+    /// How many entries of its dictionary come before it.
+    place: usize,
 }
 
 /// Final records after foreign passthrough: dictionaries can be reused, and unknown entities
@@ -102,6 +104,7 @@ pub(super) fn plan<'a>(
             None => {}
         }
     }
+    let place = source.map_or(usize::MAX, |table| table.place);
     let kept = source.and_then(|table| {
         let members: BTreeSet<Handle> = order.iter().copied().collect();
         let entries = table.restricted(&members);
@@ -122,7 +125,7 @@ pub(super) fn plan<'a>(
     let existing = written.dictionaries.get(&owner).copied();
     let dictionary = existing.map(Handle::hex).unwrap_or_else(|| w.h());
     let Some(dictionary) = Handle::parse_hex(&dictionary) else { return };
-    tables.push(Table { owner, dictionary, new_dictionary: existing.is_none(), handle: w.h(), entries });
+    tables.push(Table { owner, dictionary, new_dictionary: existing.is_none(), handle: w.h(), entries, place });
 }
 
 fn objects(w: &mut W, tables: &[Table]) {
@@ -179,7 +182,9 @@ pub(super) fn attach(w: &mut W, tables: &[Table]) {
         } else if cadcraft_doc::foreign::is_dictionary(&kind)
             && let Some(table) = handle(body).and_then(|h| dictionaries.get(&h))
         {
-            let at = body.iter().position(|t| t.code == 1001).unwrap_or(body.len());
+            // Where the source listed it among the entries, else after them.
+            let end = body.iter().position(|t| t.code == 1001).unwrap_or(body.len());
+            let at = body.iter().take(end).enumerate().filter(|(_, t)| t.code == 3).nth(table.place).map_or(end, |(i, _)| i);
             inserts.entry(start + at + 1).or_default().extend([Tag::s(3, "ACAD_SORTENTS"), Tag::s(360, &table.handle)]);
         } else if kind == "ENDSEC" {
             if section == "CLASSES" && !has_class {

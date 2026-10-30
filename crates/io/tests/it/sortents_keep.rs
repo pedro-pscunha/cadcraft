@@ -23,12 +23,26 @@ fn source(pairs: Option<&str>) -> String {
     match pairs {
         Some(pairs) => {
             s.push_str("3\nACAD_SORTENTS\n360\nB0\n");
-            s.push_str(&format!("0\nSORTENTSTABLE\n5\nB0\n102\n{{ACAD_REACTORS\n330\nB1\n102\n}}\n330\nB1\n100\nAcDbSortentsTable\n330\n1F\n{pairs}"));
+            s.push_str(&format!(
+                "0\nSORTENTSTABLE\n5\nB0\n102\n{{ACAD_REACTORS\n330\nB1\n102\n}}\n330\nB1\n100\nAcDbSortentsTable\n330\n1F\n{pairs}"
+            ));
         }
         None => {}
     }
     s.push_str("0\nENDSEC\n0\nEOF\n");
     s
+}
+
+/// The names of the dictionary that holds ACAD_SORTENTS, in file order.
+fn dictionary_names(text: &str) -> Vec<String> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    sections(&tags)
+        .into_iter()
+        .filter(|s| s.name == "OBJECTS")
+        .flat_map(|s| records(&s.tags))
+        .filter(|(kind, body)| kind == "DICTIONARY" && body.iter().any(|t| t.code == 3 && t.str() == "ACAD_SORTENTS"))
+        .flat_map(|(_, body): (String, Vec<Tag>)| body.iter().filter(|t| t.code == 3).map(Tag::str).collect::<Vec<_>>())
+        .collect()
 }
 
 fn tables(text: &str) -> Vec<Vec<(u64, u64)>> {
@@ -97,4 +111,20 @@ fn a_deleted_entity_leaves_the_rest_of_its_table() {
     d.model.remove(Handle(0xA4));
     let text = cadcraft_io::write_dxf(&d);
     assert_eq!(tables(&text), [vec![(0xA1, 0xA3), (0xA2, 0xA1), (0xA3, 0xA2)]]);
+}
+
+#[test]
+fn the_sort_table_keeps_its_place_among_the_entries_of_its_dictionary() {
+    // A dynamic block's dictionary: AutoCAD lists ACAD_SORTENTS between its neighbours.
+    let text = source(Some("")).replace(
+        "3\nACAD_SORTENTS\n360\nB0\n",
+        "3\nACAD_ENHANCEDBLOCK\n360\nB8\n3\nACAD_SORTENTS\n360\nB0\n3\nAcDbDynamicBlockRoundTripPurgePreventer\n360\nB9\n",
+    );
+    let text = text.replace(
+        "0\nENDSEC\n0\nEOF\n",
+        "0\nXRECORD\n5\nB8\n330\nB1\n100\nAcDbXrecord\n280\n1\n1\nx\n0\nXRECORD\n5\nB9\n330\nB1\n100\nAcDbXrecord\n280\n1\n1\ny\n0\nENDSEC\n0\nEOF\n",
+    );
+    let d = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    let names = dictionary_names(&cadcraft_io::write_dxf(&d));
+    assert_eq!(names, ["ACAD_ENHANCEDBLOCK", "ACAD_SORTENTS", "AcDbDynamicBlockRoundTripPurgePreventer"]);
 }

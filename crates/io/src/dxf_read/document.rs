@@ -370,7 +370,7 @@ pub(super) fn apply_sortents(
         let table = objects.recover_sortents(linked, &members);
         let keys = table.keys(&members);
         let entries = table.valid_entries(&members).into_iter().collect();
-        tables.insert(key, cadcraft_doc::foreign::SortTable { entries });
+        tables.insert(key, cadcraft_doc::foreign::SortTable { entries, place: objects.sortents_place(linked) });
         store.sort_by_key(|entity| keys.get(&entity.handle).copied().unwrap_or(entity.handle.0));
         if linked.handle != table.handle || keys.len() != table.entries.len() {
             notes.push(format!(
