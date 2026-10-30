@@ -1841,7 +1841,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let version = declared_version(tags, dwg_bridge);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
-    let map = Map { f, alive, objects: objs, owners, roles, entities, raw: opaque, geometry, version, target, pages, block_attributes, table_aliases };
+    let map =
+        Map { f, alive, objects: objs, owners, roles, entities, raw: opaque, geometry, version, target, pages, block_attributes, table_aliases };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
