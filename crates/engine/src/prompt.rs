@@ -306,9 +306,42 @@ pub fn parse_point_with(text: &str, last: Vec2, angles: &crate::units::AngleSett
     r.is_finite().then_some(r)
 }
 
+/// The Z a typed point carries: `(z, false)` for an absolute `x,y,z`, and `(dz, true)` for a relative form (`@dx,dy[,dz]`, `@d<a`), whose Z
+/// is the previous point's plus `dz`. `None` for a point with no Z (`x,y`, `d<a`), which is at the current elevation. The point itself
+/// is [`parse_point_with`]'s.
+pub fn typed_z(text: &str) -> Option<(f64, bool)> {
+    let t = text.trim();
+    let t = t.strip_prefix('*').map_or(t, str::trim_start);
+    let (rel, body) = match t.strip_prefix('@') {
+        Some(b) => (true, b.trim().strip_prefix('*').map_or(b.trim(), str::trim_start)),
+        None => (false, t.strip_prefix('#').map_or(t, str::trim)),
+    };
+    if body.contains('<') || body.is_empty() {
+        return rel.then_some((0.0, true));
+    }
+    let parts: Vec<&str> = body.split(',').collect();
+    match parts.get(2) {
+        Some(z) => crate::units::parse_distance(z).map(|z| (z, rel)),
+        None => rel.then_some((0.0, true)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_z_forms() {
+        assert_eq!(typed_z("0,0,0"), Some((0.0, false)));
+        assert_eq!(typed_z("3,0,4"), Some((4.0, false)));
+        assert_eq!(typed_z("#3,0,4"), Some((4.0, false)));
+        assert_eq!(typed_z("@1,2,3"), Some((3.0, true)));
+        assert_eq!(typed_z("@1,2"), Some((0.0, true)));
+        assert_eq!(typed_z("@5<90"), Some((0.0, true)));
+        assert_eq!(typed_z("@"), Some((0.0, true)));
+        assert_eq!(typed_z("3,4"), None);
+        assert_eq!(typed_z("5<0"), None);
+    }
 
     #[test]
     fn points() {

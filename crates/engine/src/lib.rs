@@ -95,6 +95,8 @@ pub struct Session {
     pub last_command: Option<String>,
     /// LASTPOINT.
     pub last_point: Vec2,
+    /// The Z of the typed point being given to the running command (see [`prompt::typed_z`]); `None` for any other point.
+    pub typed_z: Option<(f64, bool)>,
     /// The last segment given at a point prompt (its base point and the point): polar angles
     /// relative to the last segment (POLARMODE bit 1) are measured from it.
     pub last_segment: Option<(Vec2, Vec2)>,
@@ -172,6 +174,7 @@ impl Session {
             log: Vec::new(),
             last_command: None,
             last_point: Vec2::ZERO,
+            typed_z: None,
             last_segment: None,
             last_polar: None,
             point_mods: Vec::new(),
@@ -236,6 +239,21 @@ impl Session {
             let mut seen = std::collections::HashSet::new();
             st.selection = sel.into_iter().filter(|h| seen.insert(*h)).collect();
         }
+    }
+
+    /// The Z of a point a command receives: the typed Z when it has one (relative to `previous`, the Z of the point before it, for an
+    /// `@` form), else the current elevation (ELEVATION), which is `previous` for a relative point without Z.
+    pub fn point_z(&self, previous: Option<f64>) -> f64 {
+        match self.typed_z {
+            Some((z, false)) => z,
+            Some((dz, true)) => previous.unwrap_or_else(|| self.elevation()) + dz,
+            None => self.elevation(),
+        }
+    }
+
+    /// The current elevation (ELEVATION) of new objects.
+    pub fn elevation(&self) -> f64 {
+        self.doc().ok().map(|d| d.header.f64("ELEVATION", 0.0)).filter(|z| z.is_finite()).unwrap_or(0.0)
     }
 
     /// Message on the command line history.
