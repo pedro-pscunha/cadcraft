@@ -406,6 +406,50 @@ fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
     }
 }
 
+/// Remember the order of the persistent reactors of the entities that have more than one.
+fn keep_reactor_order(d: &mut Drawing, blocks: &Recs, entities: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (_, _, t) in blocks.iter().chain(entities).filter(|(kind, _, _)| !matches!(kind.as_str(), "BLOCK" | "ENDBLK")) {
+        let h = head(t);
+        let order: Vec<Handle> = h.reactors.iter().filter_map(|r| handle(r)).collect();
+        if let (Some(own), true) = (h.handle.as_deref().and_then(handle), order.len() >= 2) {
+            source.reactor_order.entry(own).or_insert(order);
+        }
+    }
+}
+
+/// Put the persistent reactors of each entity in the order the file listed them, the ones it did not have after them.
+pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
+    if d.source_symbols.reactor_order.is_empty() {
+        return;
+    }
+    let mut section = String::new();
+    let mut opening = false;
+    let mut i = 0;
+    while i < tags.len() {
+        let t = &tags[i];
+        if t.code == 0 {
+            match t.str().as_str() {
+                "SECTION" => opening = true,
+                "ENDSEC" => section.clear(),
+                _ => {}
+            }
+        } else if opening && t.code == 2 {
+            section = t.str();
+            opening = false;
+        }
+        let entity_section = matches!(section.as_str(), "ENTITIES" | "BLOCKS");
+        if entity_section && t.code == 5 && tags.get(i + 1).is_some_and(|n| n.code == 102 && n.str().trim() == "{ACAD_REACTORS") {
+            if let Some(source) = handle(&t.str()).and_then(|h| d.source_symbols.reactor_order.get(&h)) {
+                let from = i + 2;
+                let len = tags[from..].iter().take_while(|g| g.code == 330).count();
+                tags[from..from + len].sort_by_key(|g| handle(&g.str()).and_then(|h| source.iter().position(|s| *s == h)).unwrap_or(usize::MAX));
+            }
+        }
+        i += 1;
+    }
+}
+
 /// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 280 and 281), in order.
 fn keep_classes(d: &mut Drawing, classes: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -791,6 +835,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     keep_source_handles(d, &ids);
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
+    keep_reactor_order(d, &blocks, &entities);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")

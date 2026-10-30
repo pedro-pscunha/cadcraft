@@ -264,3 +264,33 @@ fn a_spline_edge_hatch_keeps_its_source_in_a_dwg() {
     assert!(h.associative, "still associative");
     assert_eq!(h.loops[0].sources, vec![Handle(0x40)], "read from the DWG");
 }
+
+/// The persistent reactors of an entity keep the order the file listed them in (AutoCAD notifies them in that order and keeps it).
+#[test]
+fn the_reactors_of_a_boundary_keep_the_order_of_the_file() {
+    let mut d = Drawing::new_imperial();
+    let outer = poly(&mut d, square(0.0, 20.0));
+    let mut hatches = Vec::new();
+    for _ in 0..2 {
+        let loops = vec![HatchLoop { vertices: square(0.0, 20.0), outer: true, sources: vec![outer], ..Default::default() }];
+        hatches.push(d.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops, true))).expect("add"));
+    }
+    let reactors_of = |text: &str| -> Vec<String> {
+        let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+        let start = tags.iter().position(|t| t.code == 5 && t.str() == outer.hex()).unwrap();
+        let open = start + tags[start..].iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS").unwrap();
+        tags[open + 1..].iter().take_while(|t| t.code == 330).map(|t| t.str()).collect()
+    };
+    let written = write_dxf(&d);
+    let ours = reactors_of(&written);
+    assert_eq!(ours.len(), 2);
+    // The file lists them the other way round.
+    let mut tags = cadcraft_dxf::parse(written.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 5 && t.str() == outer.hex()).unwrap();
+    let open = start + tags[start..].iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS").unwrap();
+    tags[open + 1..open + 3].reverse();
+    let swapped = cadcraft_dxf::write_ascii(&tags);
+    assert_eq!(reactors_of(&swapped), [ours[1].clone(), ours[0].clone()]);
+    let back = read_dxf(swapped.as_bytes()).unwrap();
+    assert_eq!(reactors_of(&write_dxf(&back)), [ours[1].clone(), ours[0].clone()], "the file's order, not ours");
+}

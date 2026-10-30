@@ -27,6 +27,9 @@ pub struct SourceSymbols {
     /// The CLASS records of the file in its order, with the groups the writer repeats (1 name, 2 C++ name, 3 application, 90 proxy
     /// flags, 280, 281): a save keeps the application and the proxy flags AutoCAD gave each class, and the classes no object uses.
     pub classes: Vec<Vec<RawTag>>,
+    /// The persistent reactors of each entity that had two or more, in the order the file listed them (AutoCAD notifies them in
+    /// that order, and its own save keeps it).
+    pub reactor_order: BTreeMap<Handle, Vec<Handle>>,
 }
 
 impl SourceSymbols {
