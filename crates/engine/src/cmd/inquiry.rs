@@ -248,13 +248,17 @@ pub(crate) fn z_at(s: &Session, p: Vec2) -> f64 {
     let space = s.space();
     crate::select::pick(d, &space, p, ap)
         .and_then(|h| d.entity(h))
-        .and_then(|e| entity_z(e, p))
+        .and_then(|e| entity_z(d, e, p, ap))
         .filter(|z| z.is_finite())
         .unwrap_or(if elevation.is_finite() { elevation } else { 0.0 })
 }
 
-/// The Z of `e` at the point of it nearest `p` (seen from above), when it has one there.
-fn entity_z(e: &Entity, p: Vec2) -> Option<f64> {
+/// The Z of `e` at the point of it nearest `p` (seen from above), when it has one there. A canonical entity gives the Z of its world
+/// geometry within `tol` of `p`, never a field read as a world value.
+fn entity_z(d: &cadcraft_doc::Drawing, e: &Entity, p: Vec2, tol: f64) -> Option<f64> {
+    if let Some(flat) = crate::canonical::flatten(d, e) {
+        return flat.world_points(p, tol).into_iter().min_by(|a, b| a.xy().dist(p).total_cmp(&b.xy().dist(p))).map(|w| w.z);
+    }
     let on_segment = |a: Vec3, b: Vec3| {
         let d = b.xy() - a.xy();
         let l2 = d.dot(d);
@@ -364,7 +368,7 @@ fn list_text(s: &Session, h: Handle) -> String {
                 t.push_str(&format!("\n           length   {}", fmt_d(s, pl.len())));
             }
             // The elevation, in world Z (down Z for a mirrored polyline).
-            let z = entity_z(e, Vec2::ZERO).unwrap_or(p.elevation);
+            let z = entity_z(d, e, Vec2::ZERO, 0.0).unwrap_or(p.elevation);
             t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
             for v in &p.vertices {
                 t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
