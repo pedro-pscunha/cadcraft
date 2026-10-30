@@ -113,22 +113,20 @@ pub fn specs() -> Vec<CommandSpec> {
 /// The solver reads and moves the projected 2D points of the objects it holds, so it never starts on such a drawing.
 fn canonical_input(d: &Drawing, extra: impl IntoIterator<Item = Handle>) -> Option<Handle> {
     let held = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle));
-    held.chain(extra).find(|h| d.entity(*h).is_some_and(|e| e.require_legacy_geometry().is_err()))
+    match cs::require_legacy_inputs(d, held.chain(extra)) {
+        Err(cs::SolveError::CanonicalGeometry { handle }) => Some(handle),
+        _ => None,
+    }
 }
 
 /// Refuse a solver entry point whole when an input has canonical geometry; nothing has changed yet.
 fn require_legacy_solver_inputs(d: &Drawing, extra: impl IntoIterator<Item = Handle>) -> Result<()> {
-    match canonical_input(d, extra) {
-        Some(h) => Err(EngineError::Other(format!(
-            "object {} has canonical geometry, which the constraint solver does not read yet. Nothing was changed",
-            h.hex()
-        ))),
-        None => Ok(()),
-    }
+    let held = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle));
+    cs::require_legacy_inputs(d, held.chain(extra)).map_err(err)
 }
 
 fn err(e: cs::SolveError) -> EngineError {
-    EngineError::Other(e.to_string())
+    EngineError::Constraint(e)
 }
 
 fn h_param(p: &Value, k: &str) -> Option<Handle> {
@@ -330,6 +328,7 @@ fn aperture(s: &Session) -> f64 {
 
 fn build_refs(s: &Session, kind: K, picks: &[(Handle, Hint)]) -> std::result::Result<Vec<GeomRef>, String> {
     let d = s.doc().map_err(|e| e.to_string())?;
+    require_legacy_solver_inputs(d, picks.iter().map(|(h, _)| *h)).map_err(|e| e.to_string())?;
     let want = wants(kind, picks.len());
     if picks.len() < want.len() {
         return Err(format!("{} needs {} object(s)", kind.name(), want.len()));
@@ -421,6 +420,7 @@ fn run_gc(s: &mut Session, p: &Value, kind: K) -> Result<Value> {
     if picks.is_empty() {
         return Err(bad(cmd, "`h1` is required"));
     }
+    require_legacy_solver_inputs(s.doc()?, picks.iter().map(|(h, _)| *h))?;
     let refs = build_refs(s, kind, &picks).map_err(|m| bad(cmd, m))?;
     let id = add_constraint(s, Constraint { id: 0, kind, refs, name: String::new(), expr: String::new() })?;
     Ok(constraint_json(s.doc()?, id))
@@ -604,6 +604,7 @@ fn run_dc(s: &mut Session, p: &Value, dc: Dc) -> Result<Value> {
     let (p1, p2) = (hint_param(cmd, p, "p1")?, hint_param(cmd, p, "p2")?);
     let h2 = h_param(p, "h2");
     let d = s.doc()?;
+    require_legacy_solver_inputs(d, std::iter::once(h1).chain(h2))?;
     let ap = aperture(s);
     let r = |h, hint, w| resolve(d, h, hint, w, ap).map_err(|m| bad(cmd, m));
     let refs = match dc {

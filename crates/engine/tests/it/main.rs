@@ -71,6 +71,7 @@ mod malformed_handles;
 mod matchprop;
 mod measure_distance_snapping;
 mod metric_linetypes;
+mod mixed_block_constraints;
 mod mixed_block_snap;
 mod mleader_content;
 mod mleader_remember;

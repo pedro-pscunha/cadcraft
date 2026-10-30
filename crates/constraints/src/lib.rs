@@ -22,7 +22,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod admission;
 pub mod auto;
+pub use admission::require_legacy_inputs;
 mod curves;
 mod dof;
 pub mod expr;
@@ -61,6 +63,8 @@ pub enum SolveError {
     Conflict { ids: Vec<u32> },
     #[error("constraint would over-constrain the geometry (redundant with {})", ids_text(ids))]
     Redundant { ids: Vec<u32> },
+    #[error("object {handle:?} has canonical geometry, which the constraint solver cannot read")]
+    CanonicalGeometry { handle: Handle },
     #[error("constraint system too large to solve")]
     TooLarge,
     #[error("{0}")]
@@ -422,12 +426,20 @@ pub(crate) fn build_budgeted(
     opts: &SolveOptions,
     members_left: &mut usize,
 ) -> Result<(Vec<Comp>, Vec<(u32, String)>), SolveError> {
+    let mut admission = admission::Admission::new(d);
+    admission.check(
+        cons.iter()
+            .flat_map(|c| c.refs.iter().map(|r| r.handle))
+            .chain(opts.keep.iter().copied())
+            .chain(opts.prefer_move.iter().copied())
+            .chain(opts.hold.iter().map(|r| r.handle)),
+    )?;
     let mut e = env(d);
     let mut skipped = Vec::new();
     let mut comps = Vec::new();
     for group in components(cons) {
         let handles: Vec<Handle> = group.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)).collect();
-        let mut model = Model::build_budgeted(d, &handles, members_left);
+        let mut model = Model::build_budgeted(&mut admission, &handles, members_left)?;
         let mut built = Vec::new();
         for c in group {
             let target = if c.kind.is_dimensional() { constraint_value(&mut e, c)? } else { 0.0 };
@@ -640,6 +652,7 @@ pub fn all_satisfied(d: &Drawing) -> bool {
 
 /// Check that a constraint's references make sense for its type.
 pub fn validate(d: &Drawing, c: &Constraint) -> Result<(), String> {
+    require_legacy_inputs(d, c.refs.iter().map(|r| r.handle)).map_err(|e| e.to_string())?;
     let handles: Vec<Handle> = c.refs.iter().map(|r| r.handle).collect();
     for h in &handles {
         match d.entity(*h) {
@@ -654,6 +667,7 @@ pub fn validate(d: &Drawing, c: &Constraint) -> Result<(), String> {
 
 /// The current measured value of a dimensional constraint over `refs` (degrees for angular).
 pub fn measure(d: &Drawing, kind: ConstraintKind, refs: &[GeomRef]) -> Result<f64, String> {
+    require_legacy_inputs(d, refs.iter().map(|r| r.handle)).map_err(|e| e.to_string())?;
     let c = Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() };
     let handles: Vec<Handle> = refs.iter().map(|r| r.handle).collect();
     let mut model = Model::build(d, &handles);
@@ -665,7 +679,14 @@ pub fn measure(d: &Drawing, kind: ConstraintKind, refs: &[GeomRef]) -> Result<f6
 /// Returns the removed ids.
 pub fn purge_invalid(d: &mut Drawing) -> Vec<u32> {
     let mut gone = Vec::new();
-    let keep: Vec<bool> = d.constraints.iter().map(|c| validate(d, c).is_ok()).collect();
+    let keep: Vec<bool> = d
+        .constraints
+        .iter()
+        .map(|c| {
+            // An unreadable revision does not prove that its persisted constraint is invalid.
+            require_legacy_inputs(d, c.refs.iter().map(|r| r.handle)).is_err() || validate(d, c).is_ok()
+        })
+        .collect();
     let mut i = 0;
     d.constraints.retain(|c| {
         let k = keep.get(i).copied().unwrap_or(true);
@@ -682,6 +703,7 @@ pub fn purge_invalid(d: &mut Drawing) -> Vec<u32> {
 /// empty), refuses redundant or conflicting constraints, solves and writes the geometry back.
 /// On error the drawing is unchanged.
 pub fn add(d: &mut Drawing, mut c: Constraint, opts: &SolveOptions) -> Result<u32, SolveError> {
+    require_legacy_inputs(d, d.constraints.iter().chain(std::iter::once(&c)).flat_map(|c| c.refs.iter().map(|r| r.handle)))?;
     if d.constraints.len() >= MAX_CONSTRAINTS {
         return Err(SolveError::Other("too many constraints".into()));
     }

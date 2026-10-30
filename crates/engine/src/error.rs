@@ -10,6 +10,8 @@ pub enum EngineError {
     NoDocument,
     #[error("{0}")]
     Other(String),
+    #[error(transparent)]
+    Constraint(#[from] cadcraft_constraints::SolveError),
     /// An edit would give an object infinite or undefined coordinates: nothing was changed, and a command typed at
     /// the command line ends instead of asking again.
     #[error("{0}")]
