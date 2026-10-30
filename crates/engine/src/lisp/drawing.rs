@@ -364,7 +364,7 @@ pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     // A block definition is a BLOCK list, its entities, then an ENDBLK list (#1662).
     match list_to_groups(list) {
         Ok((k, tags)) if k == "BLOCK" => return Ok(Flow::Value(begin_block(ctx, list, &tags))),
-        Ok((k, _)) if k == "ENDBLK" => return Ok(Flow::Value(end_block(ctx))),
+        Ok((k, _)) if k == "ENDBLK" => return Ok(Flow::Value(end_block(ctx)?)),
         _ => {}
     }
     let (_, common, kind) = match entity_from_list(ctx, list) {
@@ -428,9 +428,9 @@ const MAX_PENDING_BLOCK_ENTITIES: usize = 1_000_000;
 /// `entmake` of an ENDBLK list: add the block begun to the drawing (redefining one of the same
 /// name) and return its name, generated for an anonymous block. nil without one begun, or when
 /// its entities reference the block itself.
-fn end_block(ctx: &mut Ctx<'_>) -> Value {
-    let Some((mut b, ents)) = ctx.env.pending_block.take() else { return Value::Nil };
-    let Ok(d) = ctx.s.doc_mut() else { return Value::Nil };
+fn end_block(ctx: &mut Ctx<'_>) -> Result<Value, LispError> {
+    let Some((mut b, ents)) = ctx.env.pending_block.take() else { return Ok(Value::Nil) };
+    let Ok(d) = ctx.s.doc_mut() else { return Ok(Value::Nil) };
     if b.anonymous {
         // Its kind letter (`*U`, `*X`…) is kept; a name that isn't one gets `*U`.
         let prefix: String = b.name.chars().take(2).collect();
@@ -443,22 +443,23 @@ fn end_block(ctx: &mut Ctx<'_>) -> Value {
         }
         // As BLOCK: a block being edited in place isn't redefined until REFCLOSE.
         if d.refedit.as_ref().is_some_and(|r| r.block.eq_ignore_ascii_case(&b.name)) {
-            return Value::Nil;
+            return Ok(Value::Nil);
         }
     }
     // Named or anonymous (a routine can know the name an anonymous block will get), a block
     // that inserts itself isn't added.
     if crate::cmd::blocks::references_block(d, &ents, &b.name) {
-        return Value::Nil;
+        return Ok(Value::Nil);
     }
-    for e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
+    let copies = d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing).map_err(|error| LispError::new(error.to_string()))?;
+    for e in copies {
         d.ensure_layer(&e.common.layer);
         b.entities.push(e);
     }
     let name = b.name.clone();
     d.blocks.insert(name.clone(), Arc::new(b));
     ctx.s.touch();
-    Value::str(&name)
+    Ok(Value::str(&name))
 }
 
 pub fn entmod(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {

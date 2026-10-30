@@ -8,6 +8,9 @@ use crate::{DocError, Result, has_finite_numbers};
 impl Entity {
     /// Refuse canonical geometry before an unmigrated routine can inspect or mutate its fields.
     pub fn require_legacy_geometry(&self) -> Result<()> {
+        if let EntityKind::Raw(raw) = &self.kind {
+            return Err(raw.edit_refusal());
+        }
         self.geometry_revision.require_legacy()?;
         match &self.kind {
             EntityKind::AttDef(attribute) => attribute.require_legacy_geometry()?,
@@ -51,13 +54,25 @@ impl Entity {
             | EntityKind::Wipeout(_)
             | EntityKind::Table(_)
             | EntityKind::Tolerance(_)
-            | EntityKind::Unknown(_) => {}
+            | EntityKind::Unknown(_)
+            | EntityKind::Raw(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Raw identity remapping is not supported until its references have a proven copy path.
+    pub fn require_copyable(&self) -> Result<()> {
+        if let EntityKind::Raw(raw) = &self.kind {
+            return Err(raw.edit_refusal());
         }
         Ok(())
     }
 
     /// Refuse a payload that is not canonical, nested payloads included (the inverse of [`Entity::require_legacy_geometry`]).
     pub fn require_canonical_geometry(&self) -> Result<()> {
+        if let EntityKind::Raw(raw) = &self.kind {
+            return Err(raw.geometry_refusal());
+        }
         let refuse = || DocError::Invalid("This geometry payload is not canonical.".into());
         if self.geometry_revision != GeometryRevision::CanonicalV2 {
             return Err(refuse());
@@ -109,6 +124,9 @@ impl Entity {
         let mut candidate = self.clone();
         let result =
             edit(&mut candidate.common).map_err(|e| if matches!(e, DocError::NonFinite(_)) { DocError::NonFinite(self.handle) } else { e })?;
+        if let EntityKind::Raw(raw) = &candidate.kind {
+            raw.validate_common(&candidate.common)?;
+        }
         let plane =
             |common: &Common| [common.extrusion.x.to_bits(), common.extrusion.y.to_bits(), common.extrusion.z.to_bits(), common.thickness.to_bits()];
         let same_snapshot = match (&self.common.geometry, &candidate.common.geometry) {
@@ -133,6 +151,9 @@ impl Entity {
 
     /// The transformed candidate, with source identity and properties, or an explicit refusal.
     pub fn transformed(&self, transform: &Mat4) -> Result<Self> {
+        if let EntityKind::Raw(raw) = &self.kind {
+            return Err(raw.edit_refusal());
+        }
         let mut candidate = self.clone();
         if *transform == Mat4::IDENTITY {
             return Ok(candidate);
@@ -334,6 +355,7 @@ impl Entity {
         // Each canonical family replaces its own arm, never a catch-all legacy fallback.
         match &self.kind {
             EntityKind::Unknown(_) => return Err(DocError::Invalid("This entity has no supported geometry transform.".into())),
+            EntityKind::Raw(raw) => return Err(raw.edit_refusal()),
             EntityKind::Ellipse(ellipse) => {
                 self.geometry_revision.require_legacy()?;
                 let matrix = legacy_matrix(transform)?;

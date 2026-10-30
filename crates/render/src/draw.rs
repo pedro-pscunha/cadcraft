@@ -70,6 +70,9 @@ pub(crate) fn try_entity(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc
 }
 
 fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<()> {
+    if let EntityKind::Raw(raw) = &e.kind {
+        return Err(raw.geometry_refusal());
+    }
     // A top-level annotative object draws at the view's annotation scale: a viewport's scale for
     // model space seen through it, else the drawing's (CANNOSCALE in model space, 1:1 on paper).
     if e.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1 && ctx.depth == 0 && cadcraft_doc::is_annotative(e) {

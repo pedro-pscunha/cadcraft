@@ -42,7 +42,7 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
         .into_iter()
         .map(|m| originals.iter().map(|(_, e)| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m))).collect::<cadcraft_doc::Result<Vec<_>>>())
         .collect::<cadcraft_doc::Result<Vec<_>>>()?;
-    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing)?;
     let mut out = Vec::new();
     for (entity, (space, _)) in copies.into_iter().zip(originals.iter().cycle()) {
         out.push(entity.handle);

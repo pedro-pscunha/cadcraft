@@ -133,7 +133,7 @@ fn payload_frame(kind: &EntityKind) -> PayloadFrame {
         ]),
         // The image frame in WCS, the clip in pixels.
         EntityKind::Wipeout(_) => PayloadFrame::Mixed(&[("frame.origin", "wcs"), ("frame.u", "wcs"), ("frame.v", "wcs"), ("frame.clip", "pixels")]),
-        EntityKind::Region(_) | EntityKind::Viewport(_) | EntityKind::Unknown(_) => PayloadFrame::Unspecified,
+        EntityKind::Region(_) | EntityKind::Viewport(_) | EntityKind::Unknown(_) | EntityKind::Raw(_) => PayloadFrame::Unspecified,
     }
 }
 

@@ -38,6 +38,9 @@ pub struct ClipSource {
 
 /// Put copies of `ents` from the active drawing on the clipboard, with `base` as base point.
 pub(crate) fn copy(s: &mut Session, ents: Vec<Entity>, base: Vec2) -> Result<()> {
+    for entity in &ents {
+        entity.require_copyable()?;
+    }
     let uid = s.state()?.uid;
     let defs = defs_for(s.doc()?, &ents);
     set(s, ents, base, defs, Some(uid));
@@ -76,14 +79,17 @@ pub fn from_active(s: &Session) -> bool {
 /// returns the new objects.
 pub(crate) fn paste(s: &mut Session, m: &Mat3) -> Result<Vec<Handle>> {
     let ents = s.clipboard.clone();
+    for entity in &ents {
+        entity.require_copyable()?;
+    }
     let defs = s.clipboard_source.as_ref().map(|c| c.defs.clone());
     let source = if from_active(s) { cadcraft_doc::DuplicationSource::SameDrawing } else { cadcraft_doc::DuplicationSource::OtherDrawing };
     let space = s.space();
     let d = s.doc_mut()?;
-    let renames = defs.map(|x| merge(d, &x, source)).unwrap_or_default();
+    let renames = defs.map(|x| merge(d, &x, source)).transpose()?.unwrap_or_default();
     let mut out = Vec::new();
     let entities = ents.iter().map(|e| adopt(e, &renames)).collect();
-    for mut e in d.duplicate_entities(vec![entities], source) {
+    for mut e in d.duplicate_entities(vec![entities], source)? {
         e.try_transform(&cadcraft_geom::Mat4::from_mat3(m))?;
         d.ensure_layer(&e.common.layer);
         out.push(e.handle);
@@ -99,6 +105,9 @@ pub(crate) fn paste(s: &mut Session, m: &Mat3) -> Result<Vec<Handle>> {
 /// a reference to it is inserted at `at`. Returns the block reference.
 pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
     let ents = s.clipboard.clone();
+    for entity in &ents {
+        entity.require_copyable()?;
+    }
     if ents.is_empty() {
         return Err(bad("pasteblock", "the clipboard is empty"));
     }
@@ -106,7 +115,7 @@ pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
     let source = if from_active(s) { cadcraft_doc::DuplicationSource::SameDrawing } else { cadcraft_doc::DuplicationSource::OtherDrawing };
     let base = s.clipboard_base;
     let d = s.doc_mut()?;
-    let renames = defs.map(|x| merge(d, &x, source)).unwrap_or_default();
+    let renames = defs.map(|x| merge(d, &x, source)).transpose()?.unwrap_or_default();
     let seed = d.handseed;
     let name = (0..1_000_000u64)
         .map(|i| format!("A$C{:08X}", seed.wrapping_add(i) & 0xFFFF_FFFF))
@@ -115,7 +124,7 @@ pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
     let mut b = Block::new(&name);
     b.base = base.to3(0.0);
     let entities = ents.iter().map(|e| adopt(e, &renames)).collect();
-    for e in d.duplicate_entities(vec![entities], source) {
+    for e in d.duplicate_entities(vec![entities], source)? {
         d.ensure_layer(&e.common.layer);
         b.entities.push(e);
     }
@@ -126,28 +135,31 @@ pub(crate) fn paste_block(s: &mut Session, at: Vec2) -> Result<Handle> {
 }
 
 /// The clipboard as DXF text (base point in `$INSBASE`), for the system clipboard. `None` when
-/// it is empty, very large, or this build has no DXF writer.
-pub fn system_text(s: &Session) -> Option<String> {
+/// it is empty, very large, or this build has no DXF writer. A refused copy returns an error, never partial text.
+pub fn system_text(s: &Session) -> Result<Option<String>> {
     if s.clipboard.is_empty() || s.clipboard.len() > MAX_SYSTEM_OBJECTS {
-        return None;
+        return Ok(None);
     }
-    let hooks = super::file::io()?;
+    for entity in &s.clipboard {
+        entity.require_copyable()?;
+    }
+    let Some(hooks) = super::file::io() else { return Ok(None) };
     let mut d = Drawing::new_imperial();
     let renames = match &s.clipboard_source {
         Some(c) => {
             d.header = c.defs.header.clone();
-            merge(&mut d, &c.defs, cadcraft_doc::DuplicationSource::OtherDrawing)
+            merge(&mut d, &c.defs, cadcraft_doc::DuplicationSource::OtherDrawing)?
         }
         None => BTreeMap::new(),
     };
     d.header.set("INSBASE", HVal::Point(s.clipboard_base.to3(0.0)));
     let entities = s.clipboard.iter().map(|e| adopt(e, &renames)).collect();
-    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
         d.ensure_layer(&e.common.layer);
         d.model.push(e);
     }
-    let bytes = (hooks.write)(&d, "clipboard.dxf").ok()?;
-    String::from_utf8(bytes).ok()
+    let bytes = (hooks.write)(&d, "clipboard.dxf").map_err(|error| bad("copyclip", error))?;
+    String::from_utf8(bytes).map(Some).map_err(|error| bad("copyclip", error.to_string()))
 }
 
 /// Make DXF text (from the system clipboard) the clipboard: its model space objects with what
@@ -334,7 +346,15 @@ pub(super) fn defs_for(src: &Drawing, ents: &[Entity]) -> Drawing {
 
 /// Add `defs`' table records and blocks that `d` doesn't have. Returns the blocks copied, from
 /// their name in `defs` to their name in `d`.
-pub(super) fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSource) -> BTreeMap<String, String> {
+pub(super) fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::DuplicationSource) -> Result<BTreeMap<String, String>> {
+    let renames = block_names(d, defs);
+    for from in renames.keys() {
+        if let Some(block) = defs.block(from) {
+            for entity in block.entities.iter() {
+                entity.require_copyable()?;
+            }
+        }
+    }
     fn add<T: Clone>(ours: &mut Vec<T>, theirs: &[T], name: fn(&T) -> &str) {
         for t in theirs {
             if !ours.iter().any(|o| name(o).eq_ignore_ascii_case(name(t))) {
@@ -350,20 +370,19 @@ pub(super) fn merge(d: &mut Drawing, defs: &Drawing, source: cadcraft_doc::Dupli
     add(&mut d.mline_styles, &defs.mline_styles, |t| &t.name);
     add(&mut d.image_definitions, &defs.image_definitions, |i| &i.name);
     add(&mut d.table_styles, &defs.table_styles, |t| &t.name);
-    let renames = block_names(d, defs);
     for (from, to) in &renames {
         let Some(b) = defs.blocks.get(from) else { continue };
         let mut nb = (**b).clone();
         nb.name = to.clone();
         nb.entities = Default::default();
         let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
-        for e in d.duplicate_entities(vec![entities], source) {
+        for e in d.duplicate_entities(vec![entities], source)? {
             d.ensure_layer(&e.common.layer);
             nb.entities.push(e);
         }
         d.blocks.insert(to.clone(), Arc::new(nb));
     }
-    renames
+    Ok(renames)
 }
 
 /// Which blocks of `defs` to copy, and under which name: a new name keeps its own, a generated

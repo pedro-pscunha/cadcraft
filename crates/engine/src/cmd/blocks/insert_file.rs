@@ -109,7 +109,7 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
         nb.name = to.clone();
         nb.entities = Default::default();
         let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
-        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
             nb.entities.push(e);
         }
         d.blocks.insert(to.clone(), Arc::new(nb));
@@ -117,7 +117,7 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
     let mut b = Block::new(&name);
     b.base = src.header.point("INSBASE").filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).unwrap_or_default();
     let entities = src.model.iter().map(|e| adopt(e, &renames)).collect();
-    let ents = d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing);
+    let ents = d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)?;
     for e in &ents {
         d.ensure_layer(&e.common.layer);
     }
@@ -210,7 +210,7 @@ pub(super) fn explode_insert(s: &mut Session, h: Handle) -> Result<Vec<Handle>> 
     let d = s.doc_mut()?;
     d.remove_entity(h);
     let mut out = Vec::new();
-    for p in d.duplicate_entities(vec![parts], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for p in d.duplicate_entities(vec![parts], cadcraft_doc::DuplicationSource::SameDrawing)? {
         out.push(p.handle);
         if let Some(st) = d.space_mut(&space) {
             st.push(p);

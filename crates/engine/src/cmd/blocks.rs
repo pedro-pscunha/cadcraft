@@ -179,7 +179,7 @@ pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle],
     b.base = v3(base);
     b.description = description.to_string();
     let doc = s.doc_mut()?;
-    for e in doc.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for e in doc.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing)? {
         b.entities.push(e);
     }
     doc.blocks.insert(name.to_string(), Arc::new(b));
@@ -397,7 +397,7 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
         d.rename_block_foreign_records(name, "*Model_Space");
     }
     // New databases keep their standard symbols, without importing unused source definitions.
-    let _ = super::clipboard::merge(&mut d, &defaults, cadcraft_doc::DuplicationSource::OtherDrawing);
+    let _ = super::clipboard::merge(&mut d, &defaults, cadcraft_doc::DuplicationSource::OtherDrawing)?;
     let (bytes, notes) = super::file::write_document(&d, "wblock", &path, &super::file::SaveAs::default())?;
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;

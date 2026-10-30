@@ -917,7 +917,10 @@ fn link_suns(f: &mut Foreign, viewports: &HashSet<String>, ids: &HashMap<String,
 fn entity_types(drawing: &Drawing) -> HashMap<String, bool> {
     let mut types = HashMap::new();
     for entity in all_entities(drawing) {
-        types.entry(entity.handle.hex()).or_insert(matches!(entity.kind, EntityKind::Unknown(_)));
+        types.entry(entity.handle.hex()).or_insert(matches!(entity.kind, EntityKind::Unknown(_) | EntityKind::Raw(_)));
+        if let EntityKind::Raw(raw) = &entity.kind {
+            types.extend(raw.followers().iter().map(|record| (record.handle().hex(), true)));
+        }
         for h in entity.kind.attributes().iter().filter_map(|a| a.handle).chain(entity.kind.polyline_records().filter_map(|r| r.handle)) {
             types.entry(h.hex()).or_insert(false);
         }
@@ -1202,6 +1205,8 @@ struct Map<'a> {
     roles: HashMap<ForeignKey, String>,
     /// Entities in the written file.
     entities: HashSet<String>,
+    /// Parent and follower records that belong to opaque source units.
+    raw: HashSet<String>,
     /// The snapshots of the source geometry that are written back, by entity or attribute handle.
     geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
     /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
@@ -1214,6 +1219,24 @@ struct Map<'a> {
 }
 
 impl Map<'_> {
+    fn write_record(
+        &self,
+        record_info: &Rec,
+        body: &[Tag],
+        extra: Option<&ForeignExtra>,
+        geometry: Option<&cadcraft_doc::GeometryRecord>,
+        root: bool,
+        out: &mut Vec<Tag>,
+    ) {
+        if head(body).handle.is_some_and(|handle| self.raw.contains(&handle)) {
+            crate::dxf_write::remap_raw_references(body, |handle| self.get(handle), out);
+        } else if extra.is_none() && geometry.is_none() && !root {
+            out.extend(body.iter().cloned());
+        } else {
+            record(self, record_info, body, extra, geometry, false, root, out);
+        }
+    }
+
     fn replayed_record(&self, rec: &Rec, body: &[Tag], dictionaries: &HashMap<String, &ForeignObject>) -> Option<Vec<Tag>> {
         match (rec.sec.as_str(), rec.kind.as_str()) {
             ("TABLES", "STYLE") => head(body).handle.and_then(|handle| self.table_aliases.get(&handle)).map(|source| {
@@ -1473,6 +1496,13 @@ fn entity_extra<'a>(f: &'a Foreign, xd: &XdataOf, h: Handle) -> Option<Cow<'a, F
     }
 }
 
+fn raw_handles(d: &Drawing) -> HashSet<String> {
+    all_entities(d)
+        .filter_map(|e| if let EntityKind::Raw(raw) = &e.kind { Some(raw) } else { None })
+        .flat_map(|raw| raw.records().map(|record| record.handle().hex()))
+        .collect()
+}
+
 /// Every Unknown entity's handle (upper case).
 fn unknown_handles(d: &Drawing) -> HashSet<String> {
     all_entities(d).filter(|e| matches!(e.kind, EntityKind::Unknown(_))).map(|e| e.handle.hex()).collect()
@@ -1662,7 +1692,9 @@ fn declared_version(tags: &[Tag], dwg_bridge: bool) -> u32 {
 pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
     let f = public.as_ref().unwrap_or(&d.foreign);
-    let unknown = unknown_handles(d);
+    let opaque = raw_handles(d);
+    let mut unknown = unknown_handles(d);
+    unknown.extend(opaque.iter().cloned());
     let geometry = crate::dxf_geometry::eligible(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() && geometry.is_empty() {
@@ -1809,7 +1841,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let version = declared_version(tags, dwg_bridge);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, target, pages, block_attributes, table_aliases };
+    let map = Map { f, alive, objects: objs, owners, roles, entities, raw: opaque, geometry, version, target, pages, block_attributes, table_aliases };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1852,11 +1884,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         out.extend(tags.get(r.start).cloned());
         let x = extras.of(r, b);
         let geometry = record_geometry(&map, &recs, n, b, &mut family);
-        if x.is_none() && Some(r.start) != root && geometry.is_none() {
-            out.extend(b.iter().cloned());
-        } else {
-            record(&map, r, b, x.as_deref(), geometry, false, Some(r.start) == root, &mut out);
-        }
+        map.write_record(r, b, x.as_deref(), geometry, Some(r.start) == root, &mut out);
         if added > 0
             && let Some(count) = out.get_mut(start..).and_then(|t| t.iter_mut().find(|t| t.code == 70))
         {

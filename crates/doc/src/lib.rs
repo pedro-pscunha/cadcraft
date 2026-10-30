@@ -62,6 +62,10 @@ pub enum DocError {
     Invalid(String),
     #[error("Canonical geometry of object {0:?} requires a revision-aware extent query.")]
     CanonicalExtent(Handle),
+    #[error("Raw {family} object {handle} is read-only: {reason}")]
+    RawReadOnly { handle: Handle, family: String, reason: String },
+    #[error("Raw {family} object {handle} has unresolved geometry: {reason}")]
+    RawGeometry { handle: Handle, family: String, reason: String },
     /// An edit would give the entity (its handle; 0 for a copy not yet in a drawing) infinite or undefined coordinates.
     #[error("The geometry result of {0:?} has infinite or undefined coordinates.")]
     NonFinite(Handle),

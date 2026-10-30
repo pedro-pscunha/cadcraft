@@ -103,7 +103,7 @@ pub(crate) fn push_derived_entities(s: &mut Session, space: &Space, source: &Ent
     let d = s.doc_mut()?;
     d.ensure_layer(&source.common.layer);
     let sets = kinds.into_iter().map(|kind| vec![Entity { kind, ..source.clone() }]).collect();
-    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing)?;
     let st = d.space_mut(space).ok_or_else(|| other("no such space"))?;
     let mut handles = Vec::with_capacity(copies.len());
     for copy in copies {

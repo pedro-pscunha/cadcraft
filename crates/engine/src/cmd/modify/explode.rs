@@ -216,7 +216,7 @@ pub(crate) fn explode_with(
         removed.push(*h);
     }
     let d = s.doc_mut()?;
-    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing)?;
     for h in removed {
         d.remove_entity(h);
     }

@@ -99,7 +99,7 @@ fn the_clipboard_keeps_the_source_geometry() {
     s.execute("pasteorig", &json!({})).unwrap();
     assert_planes(&s, "PASTEORIG");
     // Through the system clipboard: DXF text, loaded by another session.
-    let text = system_text(&s).expect("clipboard text");
+    let text = system_text(&s).unwrap().expect("clipboard text");
     let mut other = Session::new();
     assert!(load_system_text(&mut other, &text));
     other.open_drawing(cadcraft_doc::Drawing::new_imperial(), "target.dxf", None);

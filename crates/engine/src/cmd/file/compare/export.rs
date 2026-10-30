@@ -68,7 +68,7 @@ fn run(s: &mut Session, _p: &Value) -> Result<Value> {
     let c = s.compare.as_ref().filter(|c| c.uid == uid).ok_or_else(|| bad("compareexport", "no comparison: run COMPARE first"))?;
     let name = format!("compare_{} vs {}.dwg", stem(&title), stem(&c.other_name));
     let folders = Folders { here: cur_folder, there: folder_of(c.other_path.as_deref()) };
-    let Snapshot { drawing, current, compared, counts, truncated, blocks_left_out, uncolored } = snapshot(&cur, c, &folders);
+    let Snapshot { drawing, current, compared, counts, truncated, blocks_left_out, uncolored } = snapshot(&cur, c, &folders)?;
     let i = s.open_drawing(drawing, &name, None);
     // Not saved yet: closing it asks to save it under a name.
     let st = s.state_mut()?;
@@ -173,7 +173,7 @@ fn stem(title: &str) -> String {
     std::path::Path::new(title).file_stem().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| title.to_string())
 }
 
-fn snapshot(cur: &Drawing, c: &Comparison, folders: &Folders) -> Snapshot {
+fn snapshot(cur: &Drawing, c: &Comparison, folders: &Folders) -> Result<Snapshot> {
     let other: &Drawing = &c.other;
     let mut d = cur.clone();
     if folders.here.is_some() {
@@ -226,13 +226,13 @@ fn snapshot(cur: &Drawing, c: &Comparison, folders: &Folders) -> Snapshot {
         .map(|e| (e.as_ref(), OTHER))
         .collect();
     let mut tinted = Tinted::default();
-    let (renames, blocks_left_out) = copy_blocks(&mut d, other, there.iter().map(|(e, _)| *e), folders.there.as_deref(), &mut tinted);
+    let (renames, blocks_left_out) = copy_blocks(&mut d, other, there.iter().map(|(e, _)| *e), folders.there.as_deref(), &mut tinted)?;
 
     // The other drawing's objects first, so this drawing's are drawn over them.
-    let compared = add_group(&mut d, "COMPARE_COMPARED", &there, &renames, folders.there.as_deref(), &mut tinted);
-    let current = add_group(&mut d, "COMPARE_CURRENT", &here, &Renames::new(), folders.here.as_deref(), &mut tinted);
+    let compared = add_group(&mut d, "COMPARE_COMPARED", &there, &renames, folders.there.as_deref(), &mut tinted)?;
+    let current = add_group(&mut d, "COMPARE_CURRENT", &here, &Renames::new(), folders.here.as_deref(), &mut tinted)?;
     let uncolored = tinted.uncolored;
-    Snapshot { drawing: d, current, compared, counts: (here.len(), there.len()), truncated: diff.truncated, blocks_left_out, uncolored }
+    Ok(Snapshot { drawing: d, current, compared, counts: (here.len(), there.len()), truncated: diff.truncated, blocks_left_out, uncolored })
 }
 
 /// Add the entries of `from` whose names `to` lacks (compared without letter case).
@@ -247,16 +247,23 @@ fn merge<T: Clone>(to: &mut Vec<T>, from: &[T], name: impl Fn(&T) -> &String) {
 /// Add copies of `objs` to model space with new handles, their block references renamed by
 /// `renames` and their files rebased on `folder`, each painted in its comparison color, and
 /// group them as `name` (or `name_2`… when that group name is taken). Returns the group's name.
-fn add_group(d: &mut Drawing, name: &str, objs: &[(&Entity, Color)], renames: &Renames, folder: Option<&Path>, tinted: &mut Tinted) -> String {
+fn add_group(
+    d: &mut Drawing,
+    name: &str,
+    objs: &[(&Entity, Color)],
+    renames: &Renames,
+    folder: Option<&Path>,
+    tinted: &mut Tinted,
+) -> Result<String> {
     let mut members = Vec::new();
     let entities = objs.iter().map(|(e, _)| (*e).clone()).collect();
-    for (mut copy, (_, color)) in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing).into_iter().zip(objs) {
+    for (mut copy, (_, color)) in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)?.into_iter().zip(objs) {
         d.ensure_layer(&copy.common.layer);
         let h = copy.handle;
         detach(&mut copy.kind);
         rebase(&mut copy.kind, folder);
-        rename_refs(&mut copy.kind, renames);
-        paint(d, &mut copy, *color, tinted, 0);
+        rename_refs(&mut copy.kind, renames)?;
+        paint(d, &mut copy, *color, tinted, 0)?;
         d.model.push(copy);
         members.push(h);
     }
@@ -264,7 +271,7 @@ fn add_group(d: &mut Drawing, name: &str, objs: &[(&Entity, Color)], renames: &R
     if !members.is_empty() {
         d.groups.push(Group { name: name.clone(), description: String::new(), selectable: true, members });
     }
-    name
+    Ok(name)
 }
 
 /// Drop the links of an associative dimension or hatch to the objects it follows: the copies
@@ -291,30 +298,32 @@ fn block_refs(k: &EntityKind) -> Vec<String> {
 }
 
 /// Call `f` on each block name an object refers to.
-fn each_ref(k: &mut EntityKind, mut f: impl FnMut(&mut String)) {
+fn each_ref(k: &mut EntityKind, mut f: impl FnMut(&mut String) -> Result<()>) -> Result<()> {
     match k {
-        EntityKind::Insert(i) => f(&mut i.block),
+        EntityKind::Insert(i) => f(&mut i.block)?,
         EntityKind::Dimension(dm) => {
             if let Some(n) = dm.block.as_mut() {
-                f(n);
+                f(n)?;
             }
         }
         EntityKind::MLeader(m) => {
             if let Some(b) = m.block.as_mut() {
-                f(&mut b.block);
+                f(&mut b.block)?;
             }
         }
         _ => {}
     }
+    Ok(())
 }
 
 /// Point the block references of an object at the names its blocks were copied under.
-fn rename_refs(k: &mut EntityKind, renames: &Renames) {
+fn rename_refs(k: &mut EntityKind, renames: &Renames) -> Result<()> {
     each_ref(k, |n| {
         if let Some(new) = renames.get(&n.to_ascii_uppercase()) {
             n.clone_from(new);
         }
-    });
+        Ok(())
+    })
 }
 
 /// Recolored copies of blocks and styles made so far, and whether a block was left in its own
@@ -375,7 +384,7 @@ fn free_name(base: &str, n: usize, taken: impl Fn(&str) -> bool) -> String {
 
 /// Give an object its comparison color: its own color, its attributes' colors, and, through
 /// recolored copies of the blocks and styles it refers to, the color of everything they draw.
-fn paint(d: &mut Drawing, e: &mut Entity, color: Color, tinted: &mut Tinted, depth: usize) {
+fn paint(d: &mut Drawing, e: &mut Entity, color: Color, tinted: &mut Tinted, depth: usize) -> Result<()> {
     e.common.color = color;
     let attribs = match &mut e.kind {
         EntityKind::Insert(i) => Some(&mut i.attribs),
@@ -442,14 +451,15 @@ fn paint(d: &mut Drawing, e: &mut Entity, color: Color, tinted: &mut Tinted, dep
     if let EntityKind::Dimension(dm) = &mut e.kind {
         // A dimension whose block can't be copied (past the limits) is drawn again from its
         // geometry: its DIMCLR* overrides are ByBlock, so the original block would keep its colors.
-        dm.block = dm.block.take().and_then(|n| tinted_block(d, &n, color, tinted, depth));
-        return;
+        dm.block = dm.block.take().map(|n| tinted_block(d, &n, color, tinted, depth)).transpose()?.flatten();
+        return Ok(());
     }
     each_ref(&mut e.kind, |n| {
-        if let Some(copy) = tinted_block(d, n, color, tinted, depth) {
+        if let Some(copy) = tinted_block(d, n, color, tinted, depth)? {
             *n = copy;
         }
-    });
+        Ok(())
+    })
 }
 
 /// The name of a copy of dimension style `name` that draws lines and text in the object's
@@ -549,18 +559,18 @@ fn without_color_codes(s: &str) -> String {
 /// The name of a copy of block `name` whose objects all have `color`, made on first use. `None`
 /// (the reference keeps the original block) for an xref, a missing block, or past the nesting
 /// and copy limits.
-fn tinted_block(d: &mut Drawing, name: &str, color: Color, tinted: &mut Tinted, depth: usize) -> Option<String> {
+fn tinted_block(d: &mut Drawing, name: &str, color: Color, tinted: &mut Tinted, depth: usize) -> Result<Option<String>> {
     let key = (tag(color), "block", name.to_ascii_uppercase());
     if let Some(n) = tinted.names.get(&key) {
-        return Some(n.clone());
+        return Ok(Some(n.clone()));
     }
-    let b = d.block(name)?.clone();
+    let Some(b) = d.block(name).cloned() else { return Ok(None) };
     if b.xref_path.is_some() {
-        return None;
+        return Ok(None);
     }
     if depth >= MAX_BLOCK_DEPTH || tinted.names.len() >= MAX_BLOCKS || tinted.copied.saturating_add(b.entities.len()) > MAX_COPIED {
         tinted.uncolored = true;
-        return None;
+        return Ok(None);
     }
     tinted.copied += b.entities.len();
     // A dimension's block copy stays a `*D` block, so saving keeps its geometry instead of
@@ -581,13 +591,13 @@ fn tinted_block(d: &mut Drawing, name: &str, color: Color, tinted: &mut Tinted, 
     d.blocks.insert(new.clone(), Arc::new(Block::new(&new)));
     let mut copy = Block { name: new.clone(), anonymous: dim_block, entities: EntityStore::new(), ..(*b).clone() };
     let entities = b.entities.iter().map(|e| (**e).clone()).collect();
-    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
         detach(&mut e.kind);
-        paint(d, &mut e, color, tinted, depth + 1);
+        paint(d, &mut e, color, tinted, depth + 1)?;
         copy.entities.push(e);
     }
     d.blocks.insert(new.clone(), Arc::new(copy));
-    Some(new)
+    Ok(Some(new))
 }
 
 /// The name each block copied from the other drawing has in the snapshot, by its upper-case
@@ -609,7 +619,7 @@ fn copy_blocks<'a>(
     objs: impl Iterator<Item = &'a Entity>,
     folder: Option<&Path>,
     tinted: &mut Tinted,
-) -> (Renames, bool) {
+) -> Result<(Renames, bool)> {
     let mut frontier: Vec<String> = objs.flat_map(|e| block_refs(&e.kind)).collect();
     let mut seen = HashSet::new();
     let mut needed: Vec<Arc<Block>> = Vec::new();
@@ -670,13 +680,13 @@ fn copy_blocks<'a>(
         let Some(name) = renames.get(&b.name.to_ascii_uppercase()).cloned() else { continue };
         let mut copy = Block { name: name.clone(), entities: EntityStore::new(), ..(*b).clone() };
         let entities = b.entities.iter().map(|e| (**e).clone()).collect();
-        for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+        for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
             detach(&mut e.kind);
-            rename_refs(&mut e.kind, &renames);
+            rename_refs(&mut e.kind, &renames)?;
             copy.entities.push(e);
         }
         rebase_block(&mut copy, folder);
         d.blocks.insert(name, Arc::new(copy));
     }
-    (renames, left_out)
+    Ok((renames, left_out))
 }

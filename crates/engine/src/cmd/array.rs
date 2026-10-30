@@ -126,7 +126,7 @@ pub(crate) fn make_assoc(s: &mut Session, objs: &[Handle], base: Vec2, mut p: Ar
     let src_name = d.anonymous_block_name("*U");
     let mut src = Block::new(&src_name);
     let to_local = Mat3::translate(-base);
-    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing)? {
         e.try_transform(&cadcraft_geom::Mat4::from_mat3(&to_local))?;
         src.entities.push(e);
     }
