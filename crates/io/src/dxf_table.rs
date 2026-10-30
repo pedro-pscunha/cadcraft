@@ -112,6 +112,10 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
         title: head.iter().find(|t| t.code == 280).map(Tag::i64).unwrap_or(0) == 0,
         header: head.iter().find(|t| t.code == 281).map(Tag::i64).unwrap_or(0) == 0,
         cell_styles: Vec::new(),
+        description: head.iter().find(|t| t.code == 3).map(Tag::str).unwrap_or_default(),
+        flow_up: head.iter().find(|t| t.code == 70).map(Tag::i64).unwrap_or(0) != 0,
+        // The title and header bits (1 and 2) follow `title` and `header`.
+        flags: head.iter().find(|t| t.code == 71).and_then(|t| i16::try_from(t.i64()).ok()).unwrap_or(0) & !3,
     };
     let margin_v = first(41, head).filter(|m| *m >= 0.0);
     for (kind, block) in CELL_TYPES.iter().zip(&blocks) {
@@ -283,7 +287,7 @@ mod tests {
     fn dashed_borders() -> Drawing {
         let mut d = Drawing::new_imperial();
         d.linetypes.push(Linetype::simple("DASHED", "Dashed", &[0.5, -0.25]));
-        let mut st = TableStyle { name: "Plan".into(), ..TableStyle::default() };
+        let mut st = TableStyle { name: "Plan".into(), description: "Plan".into(), ..TableStyle::default() };
         let mut data = st.cell_style(CellStyle::DATA);
         data.borders.top.linetype = Some("Dashed".into());
         data.borders.top.overrides = 2 | 4;
@@ -293,7 +297,7 @@ mod tests {
         d
     }
 
-    /// The groups of the TABLESTYLE named `Plan` (group 3, which only a bridge writes) in `text`,
+    /// The groups of the TABLESTYLE described `Plan` (group 3) in `text`,
     /// and the handle of its DASHED linetype.
     fn plan_style(text: &[u8]) -> (Vec<Tag>, String) {
         let tags = cadcraft_dxf::parse(text).unwrap();

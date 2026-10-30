@@ -57,7 +57,7 @@ fn sample() -> Drawing {
 }
 
 fn sched() -> TableStyle {
-    TableStyle { name: "Sched".into(), text_height: 2.5, margin: 1.0, title: false, header: false, cell_styles: Default::default() }
+    TableStyle { name: "Sched".into(), text_height: 2.5, margin: 1.0, title: false, header: false, ..TableStyle::default() }
 }
 
 fn opts(version: Version, binary: bool) -> SaveOptions {
