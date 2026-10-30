@@ -158,6 +158,7 @@ impl Entity {
                 | EntityKind::Ray(_)
                 | EntityKind::XLine(_)
                 | EntityKind::Image(_)
+                | EntityKind::MLeader(_)
         )
     }
 
@@ -284,6 +285,11 @@ impl Entity {
             }
             EntityKind::Image(i) => {
                 *i = i.transformed_canonical(transform)?;
+                None
+            }
+            // WCS positions and directions only: a multileader has no plane or thickness of its own.
+            EntityKind::MLeader(m) => {
+                *m = m.transformed_canonical(transform)?;
                 None
             }
             _ => return Err(DocError::Invalid("This canonical entity has no supported geometry transform.".into())),

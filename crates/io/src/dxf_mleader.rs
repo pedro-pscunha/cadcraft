@@ -12,9 +12,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{Attrib, Drawing, Entity, EntityKind, Handle, Insert, MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot, MLeaderStyle, MText};
+use cadcraft_doc::{
+    Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot, MLeaderStyle, MText,
+};
 use cadcraft_dxf::Tag;
-use cadcraft_geom::Vec3;
+use cadcraft_geom::{OcsFrame, Vec3};
 
 /// Most leader roots (landings) read per multileader.
 const MAX_ROOTS: usize = 256;
@@ -307,8 +309,35 @@ fn parse(tags: &[Tag]) -> Parsed {
 /// A MULTILEADER record as a multileader. Names that come from handles (style, text style,
 /// block) are filled in by [`resolve`] and [`apply`].
 pub(crate) fn read(tags: &[Tag]) -> MLeader {
+    read_as(tags, false).0
+}
+
+/// A MULTILEADER record as a canonical multileader: every point and direction as the record gives it (WCS), the text
+/// direction in full, the block scale as it is, with a context of the canonical revision. `None` when the text or the
+/// block has no plane (a normal without direction) or the text direction has no length.
+pub(crate) fn read_canonical(tags: &[Tag]) -> Option<MLeader> {
+    let (leader, valid) = read_as(tags, true);
+    valid.then_some(leader)
+}
+
+/// The multileader of the record, read as legacy (projected, as always) or as canonical; and whether a canonical reading
+/// found the planes it needs.
+fn read_as(tags: &[Tag], canonical: bool) -> (MLeader, bool) {
     let p = parse(tags);
     let def = MLeaderStyle::default();
+    let ctx = MLeaderContext::default();
+    // The planes of the content: the text direction and rotation of a canonical multileader are read in its text plane.
+    let text_normal = p.text_normal.get().unwrap_or(ctx.text_normal);
+    let block_normal = p.block_normal.get().unwrap_or(ctx.block_normal);
+    let text_frame = OcsFrame::new(text_normal);
+    let text_dir = text_frame.and_then(|f| {
+        let d = p.text_direction.get().unwrap_or_else(|| {
+            let a = p.text_rotation.unwrap_or(0.0);
+            f.to_world(Vec3::new(a.cos(), a.sin(), 0.0))
+        });
+        d.try_normalized().map(|_| d)
+    });
+    let valid = text_dir.is_some() && OcsFrame::new(block_normal).is_some();
     let pos = |v: Option<f64>| v.filter(|x| *x > 0.0);
     let none = p.leader_type == Some(0);
     let text_location = p.text_location.get();
@@ -354,9 +383,15 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
     let has_block = p.has_block.unwrap_or(p.content == Some(1));
     let has_text = !has_block && p.has_text.unwrap_or(p.content == Some(2));
     let text = has_text.then(|| {
-        let rotation = match p.text_direction.get() {
-            Some(d) if d.x != 0.0 || d.y != 0.0 => d.y.atan2(d.x),
-            _ => p.text_rotation.unwrap_or(0.0),
+        let rotation = match (canonical, text_frame.zip(text_dir)) {
+            (true, Some((f, d))) => {
+                let local = f.to_ocs(d);
+                local.y.atan2(local.x)
+            }
+            _ => match p.text_direction.get() {
+                Some(d) if d.x != 0.0 || d.y != 0.0 => d.y.atan2(d.x),
+                _ => p.text_rotation.unwrap_or(0.0),
+            },
         };
         MText {
             insert: text_location.unwrap_or(landing),
@@ -369,12 +404,13 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             line_spacing: pos(p.line_spacing).unwrap_or(1.0),
             line_spacing_exact: p.line_spacing_style == Some(2),
             columns: None,
-            direction: None,
+            direction: if canonical { text_dir } else { None },
         }
     });
     let block = has_block.then(|| {
         let scale = p.block_scale_ctx.get().or(p.block_scale.get()).unwrap_or(Vec3::new(1.0, 1.0, 1.0));
-        let nz = |v: f64| if v != 0.0 { v } else { 1.0 };
+        // A legacy block cannot be scaled to nothing; a canonical one keeps the scale it has.
+        let nz = |v: f64| if v != 0.0 || canonical { v } else { 1.0 };
         Insert {
             block: String::new(),
             insert: block_location.unwrap_or(landing),
@@ -387,20 +423,19 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             row_spacing: 0.0,
         }
     });
-    let ctx = MLeaderContext::default();
     let context = MLeaderContext {
         origin: p.origin.get().unwrap_or(Vec3::new(0.0, 0.0, landing.z)),
         x_axis: p.x_axis.get().unwrap_or(ctx.x_axis),
         y_axis: p.y_axis.get().unwrap_or(ctx.y_axis),
-        text_normal: p.text_normal.get().unwrap_or(ctx.text_normal),
-        text_dir: p.text_direction.get().unwrap_or_else(|| {
+        text_normal,
+        text_dir: text_dir.filter(|_| canonical).or(p.text_direction.get()).unwrap_or_else(|| {
             let a = p.text_rotation.unwrap_or(0.0);
             Vec3::new(a.cos(), a.sin(), 0.0)
         }),
-        block_normal: p.block_normal.get().unwrap_or(ctx.block_normal),
-        ..ctx
+        block_normal,
+        geometry_revision: if canonical { GeometryRevision::CanonicalV2 } else { ctx.geometry_revision },
     };
-    MLeader {
+    let leader = MLeader {
         roots,
         text,
         style: def.name,
@@ -409,7 +444,8 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
         block,
         arrow_block: String::new(),
         context,
-    }
+    };
+    (leader, valid)
 }
 
 /// The MText attachment point (1..=9) of the text: its column from the text side (171), its
@@ -483,7 +519,7 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
         if !pend.attribs.is_empty()
             && let Some(ins) = &m.block
         {
-            let a = attribs(d, ins, &pend.attribs)?;
+            let a = attribs(d, ins, &pend.attribs, m.context.geometry_revision == GeometryRevision::CanonicalV2)?;
             if let Some(ins) = &mut m.block {
                 ins.attribs = a;
             }
@@ -506,14 +542,25 @@ pub(crate) fn apply(d: &mut Drawing, fixes: &[(Handle, Pending)], names: &HashMa
     Ok(())
 }
 
-/// The attributes of a multileader's block content: each value placed like its ATTDEF.
-fn attribs(d: &Drawing, ins: &Insert, values: &[(String, String)]) -> crate::Result<Vec<Attrib>> {
+/// The attributes of a multileader's block content: each value placed like its ATTDEF. A canonical multileader keeps
+/// each one in the coordinates of the block definition, exactly as its ATTDEF is (the block matrix places it).
+fn attribs(d: &Drawing, ins: &Insert, values: &[(String, String)], canonical: bool) -> crate::Result<Vec<Attrib>> {
     let Some(blk) = d.block(&ins.block) else { return Ok(Vec::new()) };
     let m = ins.transform(blk.base.xy());
     let mut out = Vec::new();
     for (h, value) in values {
         let def = Handle::parse_hex(h).and_then(|h| blk.entities.get(h));
         let Some(EntityKind::AttDef(ad)) = def.map(|e| &e.kind) else { continue };
+        if canonical {
+            let text = cadcraft_doc::Text { value: value.clone(), ..ad.text.clone() };
+            out.push(Attrib {
+                invisible: ad.invisible,
+                plane: ad.plane,
+                geometry_revision: GeometryRevision::CanonicalV2,
+                ..Attrib::new(ad.tag.clone(), text)
+            });
+            continue;
+        }
         let mut entity = Entity::new(Handle(0), EntityKind::Text(ad.text.clone()));
         entity.try_transform(&cadcraft_geom::Mat4::from_mat3(&m)).map_err(|error| crate::IoError::Format(error.to_string()))?;
         let EntityKind::Text(mut text) = entity.kind else { continue };
@@ -536,7 +583,10 @@ pub(crate) struct Refs {
 }
 
 /// The groups of a MULTILEADER record after its `AcDbMLeader` marker.
-pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
+///
+/// A `canonical` multileader (its entity and context canonical, with a block matrix and text frame that exist) writes the text
+/// direction and rotation it holds and the block's complete matrix in WCS; the legacy one writes the projected 2D values.
+pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -> Vec<Tag> {
     let mut t: Vec<Tag> = Vec::new();
     let s = |t: &mut Vec<Tag>, c: i32, v: &str| t.push(Tag::s(c, v));
     let f = |t: &mut Vec<Tag>, c: i32, v: f64| t.push(Tag::f(c, v));
@@ -585,8 +635,20 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
         // The direction as read, while the text's rotation is still the one it gives.
         let dir = m.context.text_dir;
         let turned = (dir.y.atan2(dir.x) - x.rotation).abs() > 1e-12;
-        p(&mut t, 13, if turned { Vec3::new(x.rotation.cos(), x.rotation.sin(), 0.0) } else { dir });
-        f(&mut t, 42, x.rotation);
+        let written = if canonical {
+            x.direction.unwrap_or(dir)
+        } else if turned {
+            Vec3::new(x.rotation.cos(), x.rotation.sin(), 0.0)
+        } else {
+            dir
+        };
+        p(&mut t, 13, written);
+        // A canonical text's rotation is its direction's angle in the text plane, whatever the field holds.
+        let rotation = OcsFrame::new(m.context.text_normal).filter(|_| canonical).map_or(x.rotation, |frame| {
+            let local = frame.to_ocs(written);
+            local.y.atan2(local.x)
+        });
+        f(&mut t, 42, rotation);
         f(&mut t, 43, x.width);
         f(&mut t, 44, 0.0);
         f(&mut t, 45, x.line_spacing);
@@ -616,9 +678,16 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
         i(&mut t, 93, BYBLOCK);
         // Block → world, row by row.
         let base = d.block(&b.block).map_or(Vec3::ZERO, |x| x.base);
-        let mx = b.transform(base.xy());
-        let z = b.insert.z - b.scale.z * base.z;
-        for v in [mx.a, mx.c, 0.0, mx.e, mx.b, mx.d, 0.0, mx.f, 0.0, 0.0, b.scale.z, z, 0.0, 0.0, 0.0, 1.0] {
+        let exact = if canonical { m.block_world_transform(base).ok().flatten() } else { None };
+        let rows = match exact {
+            Some(w) => [w.m[0], w.m[1], w.m[2], w.m[3]].concat(),
+            None => {
+                let mx = b.transform(base.xy());
+                let z = b.insert.z - b.scale.z * base.z;
+                vec![mx.a, mx.c, 0.0, mx.e, mx.b, mx.d, 0.0, mx.f, 0.0, 0.0, b.scale.z, z, 0.0, 0.0, 0.0, 1.0]
+            }
+        };
+        for v in rows {
             f(&mut t, 47, v);
         }
     }
