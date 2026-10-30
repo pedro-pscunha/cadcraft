@@ -608,6 +608,8 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
     if matches!(kind, "BLOCK" | "ENDBLK") && t.code == 8 {
         return extra.and_then(|extra| first_group(&extra.props, 8)).map_or_else(|| t.clone(), tag);
     }
+    let source =
+        extra.filter(|_| t.code == 70 && mask != 0).and_then(|extra| first_group(&extra.subclass, 70)).and_then(|tag| tag.value.parse::<i64>().ok());
     if t.code == 70
         && mask == 2
         && let Some((old, current)) = extra.and_then(|extra| extra.block_attributes).zip(attributes)
@@ -615,9 +617,9 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
     {
         return Tag::i(70, (t.i64() & !2) | if current { 2 } else { 0 });
     }
-    let source =
-        extra.filter(|_| t.code == 70 && mask != 0).and_then(|extra| first_group(&extra.subclass, 70)).and_then(|tag| tag.value.parse::<i64>().ok());
-    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !mask) | (source & mask)))
+    // A block keeps the anonymous bit (1) the file gave it, even when its name says otherwise (a `*U…` block AutoCAD does not call anonymous).
+    let anonymous_bit = if mask == 2 { 1 } else { 0 };
+    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !(mask | anonymous_bit)) | (source & (mask | anonymous_bit))))
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as

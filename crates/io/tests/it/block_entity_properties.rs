@@ -66,3 +66,41 @@ fn the_text_of_group_1_of_a_block_comes_back() {
     let (_, block) = section(&text, "BLOCKS").into_iter().find(|(k, t)| k == "BLOCK" && val(t, 2) == "G$C1").unwrap();
     assert_eq!(block.iter().filter(|t| t.code == 1).map(|t| t.str()).collect::<Vec<_>>(), ["Acad:XRef"]);
 }
+
+#[test]
+fn a_block_keeps_the_anonymous_bit_the_file_gave_it() {
+    let block = |name: &str, flags: &'static str| -> Vec<(i32, &'static str)> {
+        let name: &'static str = Box::leak(name.to_string().into_boxed_str());
+        vec![
+            (0, "BLOCK"),
+            (5, "A0"),
+            (330, "A1"),
+            (100, "AcDbEntity"),
+            (8, "0"),
+            (100, "AcDbBlockBegin"),
+            (2, name),
+            (70, flags),
+            (10, "0"),
+            (20, "0"),
+            (30, "0"),
+            (3, name),
+            (1, ""),
+            (0, "ENDBLK"),
+            (5, "A2"),
+            (330, "A1"),
+            (100, "AcDbEntity"),
+            (8, "0"),
+            (100, "AcDbBlockEnd"),
+        ]
+    };
+    let mut groups = vec![(0, "SECTION"), (2, "BLOCKS")];
+    // AutoCAD files have `*U` blocks without the anonymous bit, and anonymous ones with it.
+    groups.extend(block("*U9221108", "0"));
+    groups.extend(block("*U7", "1"));
+    groups.extend([(0, "ENDSEC"), (0, "EOF")]);
+    let d = cadcraft_io::read_dxf(dxf(&groups).as_bytes()).unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    let flags = |name: &str| section(&text, "BLOCKS").into_iter().find(|(k, t)| k == "BLOCK" && val(t, 2) == name).map(|(_, t)| val(&t, 70));
+    assert_eq!(flags("*U9221108").as_deref(), Some("0"));
+    assert_eq!(flags("*U7").as_deref(), Some("1"));
+}
