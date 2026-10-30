@@ -31,7 +31,7 @@ fn drawing(block: bool) -> Drawing {
     );
     if block {
         let mut definition = Block::new("B");
-        definition.entities.push(Entity::new(Handle(0x100), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })));
+        definition.entities.push(Entity::new(Handle(0x7000), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })));
         d.blocks.insert("B".into(), std::sync::Arc::new(definition));
         m.block = Some(Insert {
             block: "B".into(),
@@ -179,7 +179,7 @@ fn the_codes_survive_a_dwg_save() {
     // And reading the DWG back gives the same codes in the model and in the next save.
     let back = read(&bytes, "x.dwg").unwrap();
     let EntityKind::MLeader(m) = &back.model.iter().next().unwrap().kind else { panic!("a multileader") };
-    let c = m.context.codes;
+    let c = &m.context.codes;
     assert_eq!((c.ctx_left, c.ctx_right, c.ctx_alignment, c.ctx_connection), (Some(3), Some(5), Some(2), Some(0)), "{c:?}");
     let style = back.mleader_styles.iter().find(|s| s.name == "Callout").expect("the style");
     assert_eq!(
@@ -330,4 +330,161 @@ fn every_field_of_a_multileader_style_survives_a_dwg_save() {
     let read_back = read(&bytes, "x.dwg").unwrap();
     assert_eq!(style_of(&read_back), want);
     assert_eq!(read_back.mleader_styles.iter().filter(|s| s.name == "Full").count(), 1);
+}
+
+/// The text of `dxf(&drawing(block))` with every numeric group the model keeps as read set to a value that is not the writer's
+/// default, in the content context, the entity and its root.
+fn source_all(block: bool) -> String {
+    // A colour value: the method in the top byte, 0xC2 for a true colour.
+    let color = |rgb: u32| (0xC200_0000u32 | rgb) as i32;
+    let context: Vec<(&str, String)> = vec![
+        ("40", "2.5".into()),
+        ("145", "0.7".into()),
+        ("44", "1.25".into()),
+        ("172", "2".into()),
+        ("90", color(0x112233).to_string()),
+        ("91", color(0x445566).to_string()),
+        ("141", "2.0".into()),
+        ("92", "30".into()),
+        ("291", "1".into()),
+        ("292", "1".into()),
+        ("173", "1".into()),
+        ("293", "1".into()),
+        ("142", "5.5".into()),
+        ("143", "0.5".into()),
+        ("294", "1".into()),
+        ("295", "1".into()),
+        ("93", color(0x778899).to_string()),
+        ("297", "1".into()),
+        ("272", "3".into()),
+        ("273", "4".into()),
+    ];
+    let root: Vec<(&str, String)> = vec![("290", "0".into()), ("291", "0".into()), ("271", "1".into())];
+    let entity: Vec<(&str, String)> = vec![
+        ("90", "305397779".into()),
+        ("91", color(0xAABBCC).to_string()),
+        ("171", "25".into()),
+        ("290", "0".into()),
+        ("291", "1".into()),
+        ("92", color(0xDDEEFF).to_string()),
+        ("292", "1".into()),
+        ("93", color(0x102030).to_string()),
+        ("293", "1".into()),
+        ("294", "1".into()),
+        ("178", "1".into()),
+        ("179", "2".into()),
+        ("45", "1.5".into()),
+        ("271", "1".into()),
+        ("272", "2".into()),
+        ("273", "3".into()),
+    ];
+    let out = dxf(&drawing(block));
+    let mut lines: Vec<String> = out.lines().map(str::to_string).collect();
+    let (mut in_ml, mut level, mut i) = (false, "entity", 0);
+    while i + 1 < lines.len() {
+        let (code, value) = (lines[i].trim().to_string(), lines[i + 1].trim().to_string());
+        if code == "0" {
+            (in_ml, level) = (value == "MULTILEADER", "entity");
+        } else if in_ml {
+            match (code.as_str(), value.as_str()) {
+                ("300", v) if v.starts_with("CONTEXT_DATA") => level = "context",
+                ("301", _) => level = "entity",
+                ("302", v) if v.starts_with("LEADER{") => level = "root",
+                ("303", _) => level = "context",
+                ("304", v) if v.starts_with("LEADER_LINE{") => level = "line",
+                ("305", _) => level = "root",
+                _ => {}
+            }
+            let table = match level {
+                "context" => &context,
+                "root" => &root,
+                "entity" => &entity,
+                _ => &Vec::new(),
+            };
+            // The openers and closers are not values to change.
+            let opener_or_closer = matches!(code.as_str(), "300" | "301" | "302" | "303" | "304" | "305");
+            if let Some((_, new)) = table.iter().find(|(c, _)| *c == code).filter(|_| !opener_or_closer) {
+                lines[i + 1] = new.clone();
+            }
+        }
+        i += 2;
+    }
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn every_numeric_group_of_a_multileader_survives_a_dxf_save() {
+    for block in [false, true] {
+        let src = source_all(block);
+        // The source really has the non-default values: the numeric groups changed from what the writer emits.
+        let plain = dxf(&drawing(block));
+        let changed = src.lines().zip(plain.lines()).filter(|(a, b)| a != b).count();
+        assert!(changed >= if block { 20 } else { 30 }, "block={block}: {changed} groups changed");
+        let saved = dxf(&read_dxf(src.as_bytes()).unwrap());
+        let strip = |g: Vec<(i32, String)>| g.into_iter().filter(|(c, _)| !matches!(*c, 5 | 330 | 340 | 341 | 342 | 343 | 344)).collect::<Vec<_>>();
+        let (before, after) = (strip(groups(&src, "MULTILEADER")), strip(groups(&saved, "MULTILEADER")));
+        assert_eq!(before.len(), after.len(), "block={block}");
+        for (a, b) in before.iter().zip(&after) {
+            assert_eq!(a, b, "block={block}");
+        }
+        // And the second save writes the same record.
+        let again = dxf(&read_dxf(saved.as_bytes()).unwrap());
+        assert_eq!(strip(groups(&again, "MULTILEADER")), after, "block={block}");
+    }
+}
+
+/// The paths (`groups.ctx.scale`) of the numeric groups of two sets of codes that differ, for the ones `want` has.
+fn differing_codes(got: &cadcraft_doc::MLeaderCodes, want: &cadcraft_doc::MLeaderCodes) -> Vec<String> {
+    fn walk(path: &str, got: Option<&serde_json::Value>, want: &serde_json::Value, out: &mut Vec<String>) {
+        match want {
+            serde_json::Value::Null => {}
+            serde_json::Value::Object(fields) => {
+                for (key, w) in fields {
+                    let inner = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                    walk(&inner, got.and_then(|g| g.get(key)), w, out);
+                }
+            }
+            w if got != Some(w) => out.push(path.to_string()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk("", serde_json::to_value(got).ok().as_ref(), &serde_json::to_value(want).unwrap(), &mut out);
+    out.sort();
+    out
+}
+
+/// What a DWG save loses today of the groups `source_all` sets: the text flow direction (172 of the context), which acadrust does not
+/// carry (the root fix is in acadrust; this list empties then and the test fails until it does).
+const MULTILEADER_LOST_IN_DWG_TODAY: &[&str] = &["groups.ctx.flowDirection"];
+
+#[test]
+fn every_numeric_group_of_a_multileader_survives_a_dwg_save() {
+    for block in [false, true] {
+        let src = read_dxf(source_all(block).as_bytes()).unwrap();
+        let bytes = write(&src, "x.dwg").unwrap();
+        let codes = |d: &Drawing| {
+            let m = d.model.iter().find_map(|e| if let EntityKind::MLeader(m) = &e.kind { Some(m) } else { None }).expect("a multileader");
+            m.context.codes.clone()
+        };
+        let lost = differing_codes(&codes(&read(&bytes, "x.dwg").unwrap()), &codes(&src));
+        let known: Vec<&str> = if block { Vec::new() } else { MULTILEADER_LOST_IN_DWG_TODAY.to_vec() };
+        assert_eq!(lost, known, "block={block}");
+    }
+}
+
+#[test]
+fn the_numeric_groups_are_in_the_dwg_as_acadrust_reads_them() {
+    let src = read_dxf(source_all(false).as_bytes()).unwrap();
+    let stored = acadrust::DwgReader::from_stream(std::io::Cursor::new(write(&src, "x.dwg").unwrap())).read().unwrap();
+    let leader = stored
+        .entities()
+        .find_map(|e| if let acadrust::entities::EntityType::MultiLeader(m) = e { Some((**m).clone()) } else { None })
+        .expect("a MULTILEADER in the DWG");
+    let c = &leader.context;
+    assert!(c.background_fill_enabled && c.background_mask_fill_on && c.column_flow_reversed && c.word_break);
+    assert_eq!((c.background_scale_factor, c.background_transparency), (2.0, 30));
+    assert_eq!((c.column_width, c.column_gutter), (5.5, 0.5));
+    assert_eq!((leader.scale_factor, leader.property_override_flags.bits()), (1.5, 305_397_779));
+    assert!(leader.text_frame && leader.enable_annotation_scale && leader.text_direction_negative);
 }
