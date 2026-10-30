@@ -11,8 +11,8 @@
 use super::{Builder, Ctx, Ink, fill, ink, max_scale};
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::library::{PatternLine, pattern_for};
-use cadcraft_doc::{Drawing, Entity, Gradient, Hatch};
-use cadcraft_geom::{Bounds2, Polyline, Vec2, point_in_polygon};
+use cadcraft_doc::{DocError, Drawing, Entity, Gradient, Hatch, Prim, WorldGeometry, WorldPrimitive};
+use cadcraft_geom::{Bounds2, Mat4, PolyVertex, Polyline, Vec2, Vec3, point_in_polygon};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Draw a hatch entity: `rgb` is its resolved colour, `tol` the chord tolerance.
@@ -60,6 +60,40 @@ pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, h: &Hatch, rgb: Ink, 
             b.polyline(ctx, rgb, lw, &seg);
         }
     }
+}
+
+/// Sample the exact canonical edges in the hatch's own plane for the shared paint layout. The source remains unchanged.
+pub(super) fn local_layout(owner: cadcraft_doc::Handle, hatch: &Hatch, tolerance: f64) -> cadcraft_doc::Result<Hatch> {
+    let mut local = hatch.clone();
+    local.elevation = 0.0;
+    let primitives = cadcraft_doc::hatch_primitives(&local, Vec3::Z, &Mat4::IDENTITY)?;
+    let [WorldPrimitive::Fill(fill)] = primitives.as_slice() else {
+        return Err(DocError::Invalid("The canonical hatch has no shared boundary layout.".into()));
+    };
+    for (boundary, edges) in local.loops.iter_mut().zip(&fill.loops) {
+        let mut points = Vec::new();
+        for edge in edges {
+            for primitive in WorldGeometry::from_primitives(owner, vec![edge.clone()])?.project_xy()? {
+                let mut segment = Vec::new();
+                match primitive {
+                    Prim::Seg(curve) => curve.tessellate(tolerance, &mut segment),
+                    Prim::Circle(circle) => circle.tessellate(tolerance, &mut segment),
+                    Prim::Ellipse(ellipse) => ellipse.tessellate(tolerance, &mut segment),
+                    Prim::Spline(spline) => segment = spline.tessellate(tolerance),
+                    Prim::Point(point) => segment.push(point),
+                    Prim::Fill(_) | Prim::Infinite { .. } => return Err(DocError::Invalid("The canonical hatch has a non-curve boundary.".into())),
+                }
+                let joined = points.last().zip(segment.first()).is_some_and(|(a, b)| a == b);
+                points.extend(segment.into_iter().skip(usize::from(joined)));
+            }
+        }
+        if points.first() == points.last() {
+            points.pop();
+        }
+        boundary.vertices = points.into_iter().map(PolyVertex::new).collect();
+        boundary.edges.clear();
+    }
+    Ok(local)
 }
 
 /// Upper bound on loop count × vertex count for island detection (the nesting test compares

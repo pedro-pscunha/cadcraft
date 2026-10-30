@@ -71,6 +71,14 @@ fn draw_flat(
         }
         return Ok(());
     }
+    if let EntityKind::Hatch(hatch) = &entity.kind {
+        super::entity_world_geometry(context.d, entity, &context.world)?;
+        let local = super::world_roles::local_context(context, entity, hatch.elevation)?;
+        let tolerance = builder.opts.tolerance / super::max_scale(&local.xf).max(1e-12);
+        let layout = super::hatch::local_layout(entity.handle, hatch, tolerance)?;
+        super::hatch::draw(builder, &local, entity, &layout, color, lineweight, tolerance);
+        return Ok(());
+    }
     if matches!(entity.kind, EntityKind::MLine(_)) {
         return Err(unsupported("multiline element paint roles"));
     }

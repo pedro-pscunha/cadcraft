@@ -141,7 +141,7 @@ pub(crate) fn dashed(
 
 /// The matrix from the local 2D coordinates of an entity's plane (OCS at the height `z`) to WCS after the parent, and the context
 /// that draws local points through it.
-fn local_context<'a>(context: &Ctx<'a>, entity: &Entity, z: f64) -> cadcraft_doc::Result<Ctx<'a>> {
+pub(crate) fn local_context<'a>(context: &Ctx<'a>, entity: &Entity, z: f64) -> cadcraft_doc::Result<Ctx<'a>> {
     let frame = OcsFrame::new(entity.common.extrusion)
         .ok_or_else(|| DocError::Invalid(format!("Entity {} has no valid source plane.", entity.handle.hex())))?;
     let lift = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z], [0.0, 0.0, 0.0, 1.0]] };
