@@ -1293,7 +1293,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         let release = |v: Version| v.code().trim_start_matches("AC").parse().unwrap_or(0);
         let source = Version::for_acadver(&d.header.str("ACADVER", "")).unwrap_or(version);
         crate::dxf_raw::reform_for_version(&mut w.t, release(source), release(version));
-        remove_embedded_layouts(&mut w.t);
+        remove_bridge_metadata(&mut w.t);
     }
     // Every entity now has its final emitted records, including raw passthrough. Flatten lowered
     // multileaders and region loops into their source entity's position, and reuse restored xdicts.
@@ -1366,11 +1366,17 @@ fn add_class_instance_counts(tags: &mut Vec<Tag>) {
     }
 }
 
-/// The DWG layout version (group 455) the bridge records after the bytes of an embedded entity, in SOLID history
-/// steps and in surfaces. It is the bridge's own group: a user DXF holds only the groups of the DXF Reference.
-fn remove_embedded_layouts(tags: &mut Vec<Tag>) {
+/// Embedded layout versions and the native surface cache belong only to the private DWG bridge.
+fn remove_bridge_metadata(tags: &mut Vec<Tag>) {
     let mut in_record = false;
+    let mut private_cache = false;
     tags.retain(|t| {
+        if t.code == 0 || t.code >= 1000 {
+            private_cache = false;
+        }
+        if t.code == 100 {
+            private_cache = t.str() == "AcDbAcadrustSurfaceCache";
+        }
         if t.code == 0 {
             in_record = matches!(
                 t.str().as_str(),
@@ -1384,7 +1390,7 @@ fn remove_embedded_layouts(tags: &mut Vec<Tag>) {
                     | "SWEPTSURFACE"
             );
         }
-        !(in_record && t.code == 455)
+        !(private_cache || in_record && t.code == 455)
     });
 }
 

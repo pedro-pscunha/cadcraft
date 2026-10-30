@@ -85,6 +85,27 @@ fn templates_report_what_dwg_does_not_keep() {
 }
 
 #[test]
+fn surface_family_save_warnings_follow_the_native_data_store() {
+    use cadcraft_engine::cmd::file::{Version, not_saved_as};
+    for kind in ["SURFACE", "PLANESURFACE", "EXTRUDEDSURFACE", "LOFTEDSURFACE", "REVOLVEDSURFACE", "SWEPTSURFACE", "NURBSURFACE"] {
+        let mut drawing = Drawing::new_metric();
+        let handle = drawing.add(&Space::Model, Common::default(), unknown(kind)).unwrap();
+        std::sync::Arc::make_mut(&mut drawing.foreign).data_store = vec![
+            RawTag { code: 0, value: "ACDSRECORD".into() },
+            RawTag { code: 320, value: handle.hex() },
+            RawTag { code: 2, value: "ASM_Data".into() },
+            RawTag { code: 310, value: "00".into() },
+        ];
+        for version in [Version::R2013, Version::R2018] {
+            assert!(not_saved_as(&drawing, version).is_empty(), "{kind} {version:?}: stored geometry is not omitted");
+        }
+        assert_eq!(not_saved_as(&drawing, Version::R2010).get(kind), Some(&1));
+        std::sync::Arc::make_mut(&mut drawing.foreign).data_store.clear();
+        assert_eq!(not_saved_as(&drawing, Version::R2018).get(kind), Some(&1));
+    }
+}
+
+#[test]
 fn solids_whose_geometry_the_data_store_keeps_are_not_reported_from_2013() {
     use cadcraft_engine::cmd::file::{Version, not_saved_as};
     use cadcraft_engine::doc::Handle;
