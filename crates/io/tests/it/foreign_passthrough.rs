@@ -195,7 +195,7 @@ fn annotative_style_is_written_once_and_annotative_block_keeps_its_flag() {
 
 /// A file with a layout, a multileader style, a table style and a scale as AutoCAD writes them:
 /// each has an extension dictionary holding an XRECORD, and xdata CADCraft has no field for.
-fn styled_objects() -> String {
+pub(super) fn styled_objects() -> String {
     let dictionary = |h: &'static str, owner: &'static str, entries: &[(&'static str, &'static str)]| -> Vec<(i32, &'static str)> {
         let mut g = vec![(0, "DICTIONARY"), (5, h), (330, owner), (100, "AcDbDictionary"), (281, "1")];
         for (key, target) in entries {

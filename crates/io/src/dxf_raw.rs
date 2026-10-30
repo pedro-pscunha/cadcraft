@@ -1636,6 +1636,7 @@ fn allocate_table_records<'a>(
     roles: &HashMap<ForeignKey, String>,
     tables: &Recs<'_>,
     alive: &mut HashMap<String, String>,
+    taken: &mut HashSet<String>,
     next: &mut u64,
 ) -> HashMap<String, &'a ForeignObject> {
     let mut generated: HashMap<_, _> = tables
@@ -1657,8 +1658,13 @@ fn allocate_table_records<'a>(
             alive.insert(object.handle.hex(), handle.clone());
             aliases.insert(handle, object);
         } else {
-            alive.insert(object.handle.hex(), format!("{next:X}"));
-            *next = next.saturating_add(1);
+            let own = object.handle.hex();
+            if taken.insert(own.clone()) {
+                alive.insert(own.clone(), own);
+            } else {
+                alive.insert(own, format!("{next:X}"));
+                *next = next.saturating_add(1);
+            }
         }
     }
     aliases
@@ -1950,18 +1956,25 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
             alive_memo.insert(p, verdict);
         }
     }
-    // New handles for the written kept objects, above every written handle and the seed.
-    let mut next = seed(tags).max(max_handle(tags).saturating_add(1));
+    // A written kept object keeps its file's handle unless a written record holds it; then it gets a new handle, above every
+    // written handle, every kept one and the seed.
+    let mut taken = written.clone();
+    taken.extend(merged.values().cloned());
+    let kept_top = f.objects.iter().chain(&f.table_records).map(|o| o.handle.0).max().unwrap_or(0);
+    let mut next = seed(tags).max(max_handle(tags).saturating_add(1)).max(kept_top.saturating_add(1));
     let mut alive: HashMap<String, String> = HashMap::new();
     for o in f.objects.iter().filter(|o| alive_memo.get(&o.handle.hex()) == Some(&true)) {
-        if let Some(written) = merged.get(&o.handle.hex()) {
-            alive.insert(o.handle.hex(), written.clone());
+        let own = o.handle.hex();
+        if let Some(written) = merged.get(&own) {
+            alive.insert(own, written.clone());
+        } else if taken.insert(own.clone()) {
+            alive.insert(own.clone(), own);
         } else {
-            alive.insert(o.handle.hex(), format!("{next:X}"));
+            alive.insert(own, format!("{next:X}"));
             next = next.saturating_add(1);
         }
     }
-    let table_aliases = allocate_table_records(f, &roles, &tables, &mut alive, &mut next);
+    let table_aliases = allocate_table_records(f, &roles, &tables, &mut alive, &mut taken, &mut next);
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
