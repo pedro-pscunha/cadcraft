@@ -49,7 +49,6 @@ fn shape_name_survives_user_dxf() {
 }
 
 #[test]
-#[ignore = "pending: does AutoCAD write a name for a shape STYLE"]
 fn shape_name_survives_dwg_dxf_emission() {
     let drawing = cadcraft_io::read_dxf(SOURCE.as_bytes()).unwrap();
     let saved = cadcraft_io::write(&drawing, "saved.dwg").unwrap();
