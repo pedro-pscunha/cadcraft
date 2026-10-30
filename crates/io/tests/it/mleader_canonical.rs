@@ -53,6 +53,7 @@ fn leader(block: bool) -> MLeader {
         text_dir: if block { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.6, 0.8, 0.0) },
         block_normal: if block { BLOCK_NORMAL } else { Vec3::Z },
         geometry_revision: GeometryRevision::CanonicalV2,
+        codes: Default::default(),
     };
     if block {
         m.block = Some(Insert {
@@ -231,7 +232,7 @@ fn each_field_alone_reaches_the_dxf_and_the_reader_returns_it() {
             let back = read_back(&out);
             // The names come from the file's objects; the geometry is the model's.
             assert_eq!(back.roots, m.roots, "{name}: roots");
-            assert_eq!(back.context, m.context, "{name}: context");
+            assert_eq!(back.context, cadcraft_doc::MLeaderContext { codes: back.context.codes, ..m.context }, "{name}: context");
             assert_eq!(back.arrow_size, m.arrow_size, "{name}: arrow size");
             let (a, b) = (back.text.as_ref(), m.text.as_ref());
             assert_eq!(

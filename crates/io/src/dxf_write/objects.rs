@@ -101,10 +101,10 @@ pub(super) fn mleader_style_obj(
     if let Some(ts) = text_style {
         w.s(342, ts);
     }
-    w.i(174, 1);
-    w.i(178, 1);
-    w.i(175, 1);
-    w.i(176, 0);
+    w.i(174, s.text_left_attachment);
+    w.i(178, s.text_right_attachment);
+    w.i(175, s.text_angle_type);
+    w.i(176, s.text_alignment);
     w.i(93, BYBLOCK);
     w.f(45, s.text_height);
     w.i(292, 0);
@@ -117,7 +117,7 @@ pub(super) fn mleader_style_obj(
     w.i(293, 1);
     w.f(141, 0.0);
     w.i(294, 1);
-    w.i(177, 0);
+    w.i(177, s.block_connection);
     w.f(142, 1.0);
     w.i(295, 0);
     w.i(296, i64::from(s.annotative));

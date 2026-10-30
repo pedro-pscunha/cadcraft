@@ -90,7 +90,7 @@ pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, Wipe
 pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
-pub use mleader::{MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot};
+pub use mleader::{MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderRoot};
 pub use mleader_canonical::MLeaderParts;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame};

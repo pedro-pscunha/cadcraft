@@ -1739,7 +1739,8 @@ fn mleader_is_written_as_multileader() {
     let back =
         crate::read(&crate::write_with(&d, "x.dxf", &crate::SaveOptions { version: Some(crate::Version::R2007), binary: false }).unwrap(), "x.dxf")
             .unwrap();
-    assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == m)));
+    // A file's attachment and connection codes are read with the multileader; the one the writer made has the derived ones.
+    assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::MLeader(x) if cadcraft_doc::MLeader { context: m.context, ..x.clone() } == m)));
     assert!(!back.model.iter().any(|e| matches!(e.kind, EntityKind::Leader(_) | EntityKind::MText(_))));
 }
 

@@ -675,6 +675,13 @@ pub struct MLeaderStyle {
     pub arrow_block: String,
     /// New multileaders of this style are annotative.
     pub annotative: bool,
+    /// How content attaches and connects (DXF 174 left attachment, 178 right attachment, 175 text angle type, 176 text alignment,
+    /// 177 block connection type: 0 centre extents, 1 insertion point).
+    pub text_left_attachment: i64,
+    pub text_right_attachment: i64,
+    pub text_angle_type: i64,
+    pub text_alignment: i64,
+    pub block_connection: i64,
 }
 
 impl Default for MLeaderStyle {
@@ -688,6 +695,11 @@ impl Default for MLeaderStyle {
             text_style: "Standard".into(),
             arrow_block: String::new(),
             annotative: false,
+            text_left_attachment: 1,
+            text_right_attachment: 1,
+            text_angle_type: 1,
+            text_alignment: 0,
+            block_connection: 0,
         }
     }
 }

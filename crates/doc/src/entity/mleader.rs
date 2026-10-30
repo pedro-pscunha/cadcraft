@@ -48,6 +48,31 @@ impl MLeaderRoot {
     }
 }
 
+/// The attachment and connection codes of a multileader's content as its file gave them (DXF groups 174 to 177 of the content
+/// context, and 173, 95, 174, 175 and 176 of the entity). They say how AutoCAD attached the text to the landing and connected the
+/// block; the writer derives what a code is `None` for from the text's attachment point. The codes of the context and of the entity
+/// that depend on the text's attachment apply while the text still has the attachment point they were read with
+/// (`derived_attach`); the block connection codes always apply.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MLeaderCodes {
+    /// The text's attachment point (1..=9) when the codes were read.
+    pub derived_attach: Option<u8>,
+    /// Text left attachment, right attachment and alignment of the context (174, 175, 176).
+    pub ctx_left: Option<i64>,
+    pub ctx_right: Option<i64>,
+    pub ctx_alignment: Option<i64>,
+    /// Block content connection type of the context (177): 0 centre extents, 1 insertion point.
+    pub ctx_connection: Option<i64>,
+    /// Text left and right attachment (173, 95), text angle type (174) and alignment (175) of the entity.
+    pub left: Option<i64>,
+    pub right: Option<i64>,
+    pub angle_type: Option<i64>,
+    pub alignment: Option<i64>,
+    /// Block attachment type of the entity (176): 0 centre extents, 1 insertion point.
+    pub block_attachment: Option<i64>,
+}
+
 /// The frame of a multileader's content (the `CONTEXT_DATA{` groups): the basis of the context and the
 /// directions of its text and block.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -67,6 +92,9 @@ pub struct MLeaderContext {
     /// What the content's placement (text and block) means: the projected 2D one of earlier drawings, or the plane's.
     #[serde(default)]
     pub geometry_revision: super::GeometryRevision,
+    /// How the content attaches and connects, as the file gave it.
+    #[serde(default)]
+    pub codes: MLeaderCodes,
 }
 
 impl Default for MLeaderContext {
@@ -79,6 +107,7 @@ impl Default for MLeaderContext {
             text_dir: Vec3::new(1.0, 0.0, 0.0),
             block_normal: Vec3::Z,
             geometry_revision: super::GeometryRevision::LegacyProjectedV1,
+            codes: MLeaderCodes::default(),
         }
     }
 }
