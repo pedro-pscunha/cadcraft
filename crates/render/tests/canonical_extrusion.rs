@@ -181,3 +181,40 @@ fn a_thickness_in_the_xy_plane_is_edge_on_and_adds_nothing_visible() {
     let lines = build_lines(&d);
     assert_eq!(lines.len(), 2, "the line and its far copy on top of it: {lines:?}");
 }
+
+#[test]
+fn a_text_in_an_outline_font_has_no_thickness_as_in_autocad() {
+    // A text style set in an installed TrueType face: AutoCAD extrudes SHX text only, so the text is drawn flat.
+    let Some(face) = ["Arial", "Helvetica", "DejaVu Sans", "Liberation Sans"]
+        .into_iter()
+        .find(|f| matches!(cadcraft_fonts::TextFont::resolve(f), cadcraft_fonts::TextFont::Outline(_)))
+    else {
+        return;
+    };
+    let text = |thickness| {
+        let mut d = drawing(
+            EntityKind::Text(Text {
+                insert: Vec3::new(1.0, 1.0, 0.0),
+                align_pt: None,
+                height: 1.0,
+                value: "AB".into(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Outline".into(),
+                halign: cadcraft_doc::HAlign::Left,
+                valign: cadcraft_doc::VAlign::Baseline,
+                backward: false,
+                upside_down: false,
+            }),
+            thickness,
+            true,
+        );
+        d.text_styles.push(cadcraft_doc::TextStyle { name: "Outline".into(), font: face.into(), ..cadcraft_doc::TextStyle::default() });
+        build(&d, &Space::Model, &fine())
+    };
+    let (flat, thick) = (text(0.0), text(5.0));
+    assert_eq!(flat.prims.len(), thick.prims.len());
+    assert_eq!(flat.tris.len(), thick.tris.len());
+    assert_eq!(flat.verts, thick.verts);
+}

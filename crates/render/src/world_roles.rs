@@ -210,22 +210,18 @@ pub(crate) fn translation(v: Vec3) -> Mat4 {
     Mat4 { m: [[1.0, 0.0, 0.0, v.x], [0.0, 1.0, 0.0, v.y], [0.0, 0.0, 1.0, v.z], [0.0, 0.0, 0.0, 1.0]] }
 }
 
-/// Whether the kind is swept along its normal by its thickness (the kinds with an extrusion).
-pub(crate) fn swept(kind: &cadcraft_doc::EntityKind) -> bool {
+/// Whether the entity is swept along its normal by its thickness: the kinds with an extrusion. A text is swept only in a stroke
+/// (SHX-like) font; AutoCAD gives TrueType text no thickness, so an outline font draws flat.
+pub(crate) fn swept(d: &cadcraft_doc::Drawing, entity: &Entity) -> bool {
     use cadcraft_doc::EntityKind as K;
-    matches!(
-        kind,
-        K::Line(_)
-            | K::Point(_)
-            | K::Circle(_)
-            | K::Arc(_)
-            | K::Ellipse(_)
-            | K::LwPolyline(_)
-            | K::Text(_)
-            | K::AttDef(_)
-            | K::Solid(_)
-            | K::Trace(_)
-    )
+    let text_font = |style: &str| super::text_entity::text_style(d, style).font;
+    let stroke = |style: &str| matches!(cadcraft_fonts::TextFont::resolve(&text_font(style)), cadcraft_fonts::TextFont::Stroke);
+    match &entity.kind {
+        K::Text(t) => stroke(&t.style),
+        K::AttDef(a) => stroke(&a.text.style),
+        K::Line(_) | K::Point(_) | K::Circle(_) | K::Arc(_) | K::Ellipse(_) | K::LwPolyline(_) | K::Solid(_) | K::Trace(_) => true,
+        _ => false,
+    }
 }
 
 /// The vector from an outline to its far copy: the thickness along the normal of the entity's plane, carried by the parent.
@@ -236,12 +232,9 @@ pub(crate) fn extrusion_offset(context: &Ctx, entity: &Entity) -> cadcraft_doc::
     if offset.is_finite() { Ok(offset) } else { Err(DocError::NonFinite(entity.handle)) }
 }
 
-/// At most this many side edges of one extruded entity (text strokes have many vertices).
-const MAX_SIDE_EDGES: usize = 20_000;
-
 /// The side edges of an extrusion: a line from each vertex of the outline to its far copy at `offset`. A line has its two ends, a
 /// full circle its four quadrants, an arc its ends, a polyline its vertices, a point itself, a SOLID or TRACE its corners and a text
-/// every vertex of its strokes. Edges seen end-on (a normal along the view) have no length and are left out.
+/// every vertex of its strokes (every vertex the flat painter draws). Edges seen end-on (a normal along the view) have no length and are left out.
 pub(crate) fn side_edges(
     builder: &mut Builder,
     context: &Ctx,
@@ -287,7 +280,7 @@ pub(crate) fn side_edges(
     }
     let mut seen = std::collections::HashSet::new();
     let flat = Ctx { xf: Mat3::IDENTITY, ..context.clone() };
-    for v in vertices.into_iter().filter(|v| seen.insert((v.x.to_bits(), v.y.to_bits(), v.z.to_bits()))).take(MAX_SIDE_EDGES) {
+    for v in vertices.into_iter().filter(|v| seen.insert((v.x.to_bits(), v.y.to_bits(), v.z.to_bits()))) {
         builder.polyline(&flat, color, lineweight, &[v.xy(), (v + offset).xy()]);
     }
     Ok(())

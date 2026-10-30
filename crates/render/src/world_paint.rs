@@ -15,7 +15,7 @@ pub(crate) fn draw(
     linetype_scale: f64,
 ) -> cadcraft_doc::Result<()> {
     // An extrusion sweeps the outline along the normal: the outline, its far copy and the side edges.
-    if entity.common.thickness != 0.0 && super::world_roles::swept(&entity.kind) {
+    if entity.common.thickness != 0.0 && super::world_roles::swept(context.d, entity) {
         let far = super::world_roles::extrusion_offset(context, entity)?;
         draw_flat(builder, context, entity, color, lineweight, linetype, linetype_scale)?;
         let moved = Ctx { world: super::world_roles::translation(far).mul(&context.world), ..context.clone() };
