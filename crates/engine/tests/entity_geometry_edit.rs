@@ -122,6 +122,7 @@ fn appearance_properties_keep_canonical_geometry_and_the_source_snapshot() {
         records: Vec::new(),
         model: cadcraft_doc::geometry_key(&entity.kind, &entity.common).unwrap(),
         text: None,
+        dimension: None,
     }));
     session.doc_mut().unwrap().model.push(entity);
     let before = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();

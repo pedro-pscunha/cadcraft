@@ -61,6 +61,9 @@ pub struct Dimension {
     /// User moved the text (text_mid is authoritative).
     #[serde(default)]
     pub user_text_pos: bool,
+    /// The leader length of a radius or diameter dimension (DXF 40) as a file gave it; 0 for one made here.
+    #[serde(default)]
+    pub leader_length: f64,
     /// Anonymous block with the rendered geometry (from files); regenerated when edited.
     #[serde(default)]
     pub block: Option<String>,

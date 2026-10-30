@@ -8,8 +8,12 @@ fn drawing() -> (Drawing, Handle) {
     let handle = drawing.new_handle();
     let mut entity = Entity::new(handle, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(5.0, 0.0, 3.0) }));
     entity.geometry_revision = GeometryRevision::CanonicalV2;
-    entity.common.geometry =
-        Some(Arc::new(GeometrySnapshot { records: Vec::new(), model: geometry_key(&entity.kind, &entity.common).unwrap(), text: None }));
+    entity.common.geometry = Some(Arc::new(GeometrySnapshot {
+        records: Vec::new(),
+        model: geometry_key(&entity.kind, &entity.common).unwrap(),
+        text: None,
+        dimension: None,
+    }));
     drawing.model.push(entity);
     (drawing, handle)
 }

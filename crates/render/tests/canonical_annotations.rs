@@ -111,6 +111,7 @@ fn canonical_dimension_preserves_line_roles_under_a_full_spatial_parent() {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     };
     let mut actual = reference.clone();
     reference.model.push(entity(EntityKind::Dimension(dimension.clone()), GeometryRevision::LegacyProjectedV1, Vec3::Z));

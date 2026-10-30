@@ -15,7 +15,7 @@ use std::fmt::Write;
 
 use cadcraft_geom::Vec3;
 
-use super::{Attrib, Common, EntityKind, HAlign, RawTag, Text, VAlign};
+use super::{Attrib, Common, Dimension, EntityKind, HAlign, RawTag, Text, VAlign};
 
 /// The geometry groups of one source record (see [`GeometrySnapshot::records`]).
 #[derive(Clone, Debug, PartialEq)]
@@ -34,6 +34,29 @@ pub struct GeometrySnapshot {
     pub model: String,
     /// A justified text as it was read, to place its baseline start again after the text moved.
     pub text: Option<TextAsRead>,
+    /// A dimension as it was read, to keep its text position after the dimension moved.
+    pub dimension: Option<DimensionAsRead>,
+}
+
+/// The definition points of a dimension when it was read (the four that share one frame in a legacy and a canonical
+/// dimension: the dimension line point and the first, second and arc or centre points).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DimensionAsRead {
+    points: [Vec3; 4],
+}
+
+impl DimensionAsRead {
+    pub fn of(dm: &Dimension) -> DimensionAsRead {
+        DimensionAsRead { points: [dm.defpt, dm.p13, dm.p14, dm.p15] }
+    }
+
+    /// Whether `dm` is the dimension as it was read, moved, turned or mirrored as a whole: every distance between its
+    /// definition points is the one it had. Its text position then moved with it, and is still the file's.
+    pub fn is_rigid_image(&self, dm: &Dimension) -> bool {
+        let now = [dm.defpt, dm.p13, dm.p14, dm.p15];
+        let gap = |p: &[Vec3; 4], i: usize, j: usize| (p[i] - p[j]).len();
+        (0..4).all(|i| (i + 1..4).all(|j| (gap(&self.points, i, j) - gap(&now, i, j)).abs() <= 1e-9 * (1.0 + gap(&self.points, i, j))))
+    }
 }
 
 /// A justified text's placement when it was read: the baseline start (group 10), the alignment point (group 11) and the

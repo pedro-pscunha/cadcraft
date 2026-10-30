@@ -497,7 +497,10 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         let plane = canonical_plane(e);
         let Some(drawn) = plane.map_or(Some(dm.clone()), |n| dm.localized(n).ok()) else { return };
         let g = cadcraft_render::dimension_geometry(&drawn, &style, d.header.f64("DIMSCALE", 1.0));
-        w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(if plane.is_some() { dm.text_mid.z } else { 0.0 }) });
+        // The text position is the file's while the dimension only moved, turned or mirrored since it was read (its text moved with it):
+        // else AutoCAD's default position for the text, which depends on the dimension's lines, is laid out again.
+        let as_moved = e.common.geometry.as_deref().and_then(|g| g.dimension.as_ref()).is_some_and(|r| r.is_rigid_image(dm));
+        w.p(11, if dm.user_text_pos || as_moved { dm.text_mid } else { g.text_pos.to3(if plane.is_some() { dm.text_mid.z } else { 0.0 }) });
         let ty: i64 = match dm.kind {
             DimKind::Linear { .. } => 0,
             DimKind::Aligned => 1,
@@ -540,12 +543,12 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
             DimKind::Radius => {
                 w.s(100, "AcDbRadialDimension");
                 w.p(15, dm.p15);
-                w.f(40, 0.0);
+                w.f(40, dm.leader_length);
             }
             DimKind::Diameter => {
                 w.s(100, "AcDbDiametricDimension");
                 w.p(15, dm.p15);
-                w.f(40, 0.0);
+                w.f(40, dm.leader_length);
             }
             DimKind::Angular => {
                 w.s(100, "AcDb2LineAngularDimension");

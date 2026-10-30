@@ -81,6 +81,7 @@ impl Dimension {
         if !matches!(self.kind, DimKind::Angular | DimKind::Angular3P) {
             d.measurement *= k;
         }
+        d.leader_length *= k;
         // The graphics block is regenerated from the moved definition points.
         d.block = None;
         if !crate::has_finite_numbers(&d) {
@@ -119,6 +120,7 @@ mod tests {
                 breaks: vec![DimBreak { at: Vec3::new(3.0, 0.0, 3.0), size: 0.5, auto: false }],
                 inspect: None,
             },
+            leader_length: 0.0,
         }
     }
 

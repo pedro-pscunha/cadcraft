@@ -32,6 +32,7 @@ fn dim(kind: DimKind, p13: Vec2, p14: Vec2, defpt: Vec2) -> EntityKind {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     })
 }
 
@@ -184,6 +185,7 @@ pub fn bracket() -> Drawing {
             overrides: Default::default(),
             assoc: Vec::new(),
             marks: Default::default(),
+            leader_length: 0.0,
         }),
     );
     add(
@@ -205,6 +207,7 @@ pub fn bracket() -> Drawing {
             overrides: Default::default(),
             assoc: Vec::new(),
             marks: Default::default(),
+            leader_length: 0.0,
         }),
     );
 

@@ -221,6 +221,7 @@ fn each_canonical_dimension_field_alone_changes_the_key() {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     };
     let key = |d: &Dimension, c: &Common| geometry_key(&EntityKind::Dimension(d.clone()), c).unwrap();
     let base = key(&dimension(), &common());

@@ -27,6 +27,7 @@ fn linear(a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Dimension {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     }
 }
 

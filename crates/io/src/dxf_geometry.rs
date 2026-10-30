@@ -10,7 +10,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, Entity, EntityKind, GeometryRecord, GeometrySnapshot, Handle, RawTag, TextAsRead, attrib_geometry_key, geometry_key};
+use cadcraft_doc::{
+    DimensionAsRead, Drawing, Entity, EntityKind, GeometryRecord, GeometrySnapshot, Handle, RawTag, TextAsRead, attrib_geometry_key, geometry_key,
+};
 use cadcraft_dxf::Tag;
 
 type Spec = &'static [(&'static str, &'static [i32])];
@@ -470,6 +472,11 @@ fn texts_as_read(d: &Drawing) -> HashMap<Handle, TextAsRead> {
     out
 }
 
+/// The dimensions of the drawing as they were read.
+fn dimensions_as_read(d: &Drawing) -> HashMap<Handle, DimensionAsRead> {
+    all_entities(d).filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some((e.handle, DimensionAsRead::of(dm))) } else { None }).collect()
+}
+
 /// Every entity of the drawing (model space, layouts, blocks).
 fn all_entities(d: &Drawing) -> impl Iterator<Item = &Entity> {
     let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
@@ -489,7 +496,7 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
         *seen.entry(h).or_default() += 1;
     }
     let keys = keys(d, |h| seen.get(&h) == Some(&1));
-    let texts = texts_as_read(d);
+    let (texts, dimensions) = (texts_as_read(d), dimensions_as_read(d));
     let mut snapshots: HashMap<Handle, Arc<GeometrySnapshot>> = HashMap::new();
     for (i, (kind, tags, h)) in records.iter().enumerate() {
         let Some(h) = h else { continue };
@@ -505,7 +512,15 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
                 let Some(children) = children else { continue };
                 parts.extend(children);
             }
-            snapshots.insert(*h, Arc::new(GeometrySnapshot { records: parts, model: model.clone(), text: texts.get(h).copied() }));
+            snapshots.insert(
+                *h,
+                Arc::new(GeometrySnapshot {
+                    records: parts,
+                    model: model.clone(),
+                    text: texts.get(h).copied(),
+                    dimension: dimensions.get(h).copied(),
+                }),
+            );
         }
     }
     if snapshots.is_empty() {

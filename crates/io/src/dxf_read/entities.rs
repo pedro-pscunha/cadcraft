@@ -270,6 +270,7 @@ pub(super) fn dimension_from(t: &T, mirrored: Option<Vec3>) -> Dimension {
         measurement: t.fd(42, 0.0),
         text_rotation: t.fd(53, 0.0).to_radians(),
         user_text_pos: t.i(70).unwrap_or(0) & 128 != 0,
+        leader_length: if matches!(ty, 3 | 4) { t.fd(40, 0.0) } else { 0.0 },
         block: t.s(2).filter(|s| !s.is_empty()),
         overrides: Default::default(),
         assoc: Vec::new(),

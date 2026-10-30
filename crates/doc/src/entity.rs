@@ -87,7 +87,7 @@ pub use curves::{
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
 pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
-pub use geometry::{GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
+pub use geometry::{DimensionAsRead, GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
 pub use mleader::{
@@ -420,6 +420,7 @@ impl EntityKind {
                 if let DimKind::Linear { rotation } = &mut d.kind {
                     *rotation = cadcraft_geom::norm_angle(*rotation + rot);
                 }
+                d.leader_length *= s;
                 d.marks.transform(&t3, rot, s, mirror);
                 d.block = None;
             }
