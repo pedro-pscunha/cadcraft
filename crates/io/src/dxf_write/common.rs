@@ -16,7 +16,7 @@ pub(super) fn annotative_xdata(w: &mut W) {
 
 /// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
 pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
-    let mut ov = W::default();
+    let mut entries: Vec<(i64, Vec<cadcraft_dxf::Tag>)> = Vec::new();
     let mut sah = false;
     for (k, v) in &dm.overrides {
         let Some(field) = DimStyle::field_name(k) else { continue };
@@ -29,18 +29,25 @@ pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
             enc
         };
         sah |= matches!(code, 343 | 344);
-        ov.i(1070, i64::from(code));
-        ov.dimval(code, enc, true);
+        let mut one = W::default();
+        one.i(1070, i64::from(code));
+        one.dimval(code, enc, true);
+        entries.push((i64::from(code), one.t));
     }
     if sah && !dm.overrides.keys().any(|k| DimStyle::field_name(k) == Some("separateArrows")) {
-        ov.i(1070, i64::from(dxf_ext::DIMSAH));
-        ov.i(1070, 1);
+        let mut one = W::default();
+        one.i(1070, i64::from(dxf_ext::DIMSAH));
+        one.i(1070, 1);
+        entries.push((i64::from(dxf_ext::DIMSAH), one.t));
     }
-    if !ov.t.is_empty() {
+    // AutoCAD writes the overrides in ascending group code.
+    entries.sort_by_key(|(code, _)| *code);
+    let overrides: Vec<cadcraft_dxf::Tag> = entries.into_iter().flat_map(|(_, tags)| tags).collect();
+    if !overrides.is_empty() {
         w.s(1001, "ACAD");
         w.s(1000, "DSTYLE");
         w.s(1002, "{");
-        w.xdata(ov.t);
+        w.xdata(overrides);
         w.s(1002, "}");
     }
     let mut ours = Vec::new();

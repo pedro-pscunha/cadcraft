@@ -28,6 +28,7 @@ mod dimstyle_fidelity;
 mod dimstyle_vars_roundtrip;
 mod dimtfill_roundtrip;
 mod drafting_spacing;
+mod dstyle_order;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
 #[cfg(not(target_arch = "wasm32"))]
