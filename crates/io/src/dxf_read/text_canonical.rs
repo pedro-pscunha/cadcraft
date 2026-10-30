@@ -91,7 +91,7 @@ pub fn canonical_text_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, E
 
 /// An ATTRIB instance from its groups, read canonically with its own plane. `None` when its normal (or its embedded
 /// text's) has no direction.
-pub fn canonical_attrib_from_groups(tags: &[Tag], insert_layer: &str, plot_style: Option<String>) -> Option<Attrib> {
+pub fn canonical_attrib_from_groups(tags: &[Tag], plot_style: Option<String>) -> Option<Attrib> {
     let tt = T(tags);
     let c = common(&tt);
     let (own, embedded) = split_embedded(tags);
@@ -110,7 +110,7 @@ pub fn canonical_attrib_from_groups(tags: &[Tag], insert_layer: &str, plot_style
         geometry_revision: GeometryRevision::CanonicalV2,
         handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
         invisible: own_t.i(70).unwrap_or(0) & 1 != 0,
-        props: attrib_props(&tt, insert_layer, plot_style),
+        props: attrib_props(&tt, plot_style),
         multiline,
         modes,
         plane: AttribPlane { normal, thickness: own_t.fd(39, 0.0) },

@@ -148,7 +148,7 @@ fn world_of_parts(d: &Drawing) -> (Vec<WorldPrimitive>, Option<Mat4>) {
     let arrow = LeaderArrowLayout::default();
     let id = Mat4::IDENTITY;
     let mut out = Vec::new();
-    let (mut matrix, mut insert_layer) = (None, "0".to_string());
+    let mut matrix = None;
     for (kind, tags) in entities(d) {
         match kind.as_str() {
             "LEADER" => {
@@ -176,10 +176,9 @@ fn world_of_parts(d: &Drawing) -> (Vec<WorldPrimitive>, Option<Mat4>) {
                     row_spacing: 0.0,
                 };
                 matrix = Some(insert.world_transform(point(&tags, 210), BASE, 0, 0).unwrap());
-                insert_layer = "0".into();
             }
             "ATTRIB" => {
-                let a = cadcraft_io::canonical_attrib_from_groups(&tags, &insert_layer, None).expect("a canonical ATTRIB");
+                let a = cadcraft_io::canonical_attrib_from_groups(&tags, None).expect("a canonical ATTRIB");
                 out.extend(attrib_primitives(&a, &id).unwrap());
             }
             _ => {}
