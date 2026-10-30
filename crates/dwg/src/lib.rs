@@ -355,19 +355,28 @@ mod native {
         }
     }
 
-    /// How AutoCAD stores the height of a dynamic column of an R2018 MTEXT: the negative of the text's extents height when the column has
-    /// no height of its own. AutoCAD's DXF of the same text writes 0 there (group 46 of the embedded object), which is what the DXF text
-    /// holds; measured on the 2,102 dynamic-column MTEXTs of DPInc-2018, whose DWG fields equal the negated extents height in 2,100 and
-    /// 1 of 2 columns, and carry a positive height only where one was set (366), without an exception. The DWG written from the DXF's 0
-    /// reads back as 0 where AutoCAD's reads as -0.40327 (DXF group 46: 2,100 of DPInc-2018's findings).
+    /// How AutoCAD stores the height of a dynamic column of an R2018 MTEXT that is an entity of model space: the negative of the text's
+    /// extents height when the column has no height of its own. AutoCAD's DXF of the same text writes 0 there (group 46 of the embedded
+    /// object), which is what the DXF text holds. The owner decides, nothing else: AutoCAD made a DWG from Citycon-2018's DXF and gave
+    /// the negated extents height to its 63 model space texts, and kept 0 on the 6 paper space texts and the 2 texts inside block
+    /// definitions; in a second run of that DXF with the attachment point, the gutter, the layer and the box width of 9 texts changed one
+    /// at a time and together (model space texts moved to the paper space texts' values and the reverse) every model space text stayed
+    /// negated and every paper space text stayed 0. DPInc-2018, a DWG source, holds the negated value on 2,100 of 2,102 texts wherever
+    /// they are, and that value reaches the DXF text as it is, so only a 0 the DXF gave needs the rule.
     fn mtext_column_heights(doc: &mut acadrust::CadDocument) {
         if doc.version < acadrust::DxfVersion::AC1032 {
             return;
         }
+        let in_model: std::collections::HashSet<acadrust::Handle> = doc
+            .block_records
+            .iter()
+            .filter(|record| record.name.starts_with("*Model_Space"))
+            .flat_map(|record| record.entity_handles.iter().copied())
+            .collect();
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::MText(m) = e else { continue };
             let columns = &mut m.column_data;
-            if columns.column_type == 2 && !columns.auto_height && m.extents_height > 0.0 {
+            if columns.column_type == 2 && !columns.auto_height && m.extents_height > 0.0 && in_model.contains(&m.common.handle) {
                 for height in columns.heights.iter_mut().filter(|height| **height == 0.0) {
                     *height = -m.extents_height;
                 }
@@ -866,6 +875,19 @@ mod tests {
             .collect()
     }
 
+    /// `column_mtext` with the same text also inside the block definition B1 (handle E76F5): the BLOCKS section comes before ENTITIES.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn column_mtext_in_block(version: &str) -> String {
+        let plain = column_mtext(version, "0", "2.5");
+        let start = plain.find("  0\nMTEXT").unwrap();
+        let end = plain.find("  0\nENDSEC\n  0\nEOF").unwrap();
+        let record = plain[start..end].replace("E76F4", "E76F5");
+        let block = format!(
+            "  0\nSECTION\n  2\nBLOCKS\n  0\nBLOCK\n  8\n0\n  2\nB1\n 70\n0\n 10\n0\n 20\n0\n 30\n0\n  3\nB1\n  1\n\n{record}  0\nENDBLK\n  8\n0\n  0\nENDSEC\n"
+        );
+        plain.replacen("  0\nSECTION\n  2\nENTITIES", &format!("{block}  0\nSECTION\n  2\nENTITIES"), 1)
+    }
+
     /// A dynamic column without a height of its own is stored as -extents height in an R2018 DWG, as AutoCAD stores it (DPInc-2018: 2,100
     /// of 2,102 texts read back 0 before); a height that was set stays; before R2018 the DWG has no column heights at all.
     #[cfg(not(target_arch = "wasm32"))]
@@ -876,6 +898,13 @@ mod tests {
         // No extents height: nothing to negate.
         let none = column_mtext("AC1032", "0", "2.5").replace(" 43\n0.4\n", " 43\n0\n");
         assert_eq!(column_heights_of(&dxf_to_dwg(none.as_bytes()).unwrap()), vec![vec![0.0, 2.5]]);
+        // A text inside a block definition keeps what the DXF gave it, as AutoCAD does (Citycon-2018: 2 of 2; paper space 6 of 6).
+        let mut heights = column_heights_of(&dxf_to_dwg(column_mtext_in_block("AC1032").as_bytes()).unwrap());
+        heights.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(heights, vec![vec![-0.4, 2.5], vec![0.0, 2.5]]);
+        // So does a text of paper space (group 67 = 1).
+        let paper = column_mtext("AC1032", "0", "2.5").replace("100\nAcDbEntity\n  8\n0", "100\nAcDbEntity\n 67\n1\n  8\n0");
+        assert_eq!(column_heights_of(&dxf_to_dwg(paper.as_bytes()).unwrap()), vec![vec![0.0, 2.5]]);
     }
 
     #[test]

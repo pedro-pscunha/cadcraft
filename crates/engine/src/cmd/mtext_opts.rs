@@ -452,5 +452,6 @@ pub(super) fn json_columns(p: &serde_json::Value, text_height: f64, width: f64) 
         heights: if kind == MTextColumnType::Dynamic { heights } else { Vec::new() },
         flow_reversed: c.get("reversed").and_then(serde_json::Value::as_bool).unwrap_or(false),
         extents: None,
+        negated_heights: Vec::new(),
     }))
 }
