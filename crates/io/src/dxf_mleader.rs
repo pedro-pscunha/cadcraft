@@ -16,7 +16,7 @@ use cadcraft_doc::{
     Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext,
     MLeaderContextGroups, MLeaderEntityGroups, MLeaderGroups, MLeaderRoot, MLeaderRootGroups, MLeaderStyle, MText,
 };
-use cadcraft_dxf::Tag;
+use cadcraft_dxf::{Tag, Version};
 use cadcraft_geom::{OcsFrame, Vec3};
 
 /// Most leader roots (landings) read per multileader.
@@ -633,7 +633,7 @@ pub(crate) struct Refs {
 ///
 /// A `canonical` multileader (its entity and context canonical, with a block matrix and text frame that exist) writes the text
 /// direction and rotation it holds and the block's complete matrix in WCS; the legacy one writes the projected 2D values.
-pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -> Vec<Tag> {
+pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool, target: Version) -> Vec<Tag> {
     let mut t: Vec<Tag> = Vec::new();
     let s = |t: &mut Vec<Tag>, c: i32, v: &str| t.push(Tag::s(c, v));
     let f = |t: &mut Vec<Tag>, c: i32, v: f64| t.push(Tag::f(c, v));
@@ -824,12 +824,16 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     i(&mut t, 175, pick(codes.alignment, align));
     inum(&mut t, 92, eg.text_color, BYBLOCK);
     inum(&mut t, 292, eg.text_frame, 0);
-    if let Some((b, h)) = block {
+    // The block groups end the entity's content part for every content type (AutoCAD writes them for text too, with their defaults).
+    if let Some((_, h)) = block {
         s(&mut t, 344, h);
-        inum(&mut t, 93, eg.block_color, BYBLOCK);
-        p(&mut t, 10, b.scale);
-        f(&mut t, 43, b.rotation);
-        i(&mut t, 176, codes.block_attachment.unwrap_or(1));
+    }
+    inum(&mut t, 93, eg.block_color, BYBLOCK);
+    p(&mut t, 10, block.map_or(Vec3::new(1.0, 1.0, 1.0), |(b, _)| b.scale));
+    // The entity's own rotation is not the context's (46): a rotated multileader keeps the first.
+    f(&mut t, 43, eg.block_rotation.unwrap_or_else(|| block.map_or(0.0, |(b, _)| b.rotation)));
+    i(&mut t, 176, codes.block_attachment.unwrap_or(i64::from(block.is_some())));
+    if let Some((b, _)) = block {
         // Attribute values by their ATTDEF in the block.
         let defs: Vec<(Handle, &str)> = d
             .block(&b.block)
@@ -858,6 +862,10 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     inum(&mut t, 271, eg.attach_direction, 0);
     inum(&mut t, 272, eg.attach_top, 9);
     inum(&mut t, 273, eg.attach_bottom, 9);
+    // Measured (AutoCAD LT 2025): the entity ends with 295 in an AC1032 file and not in an AC1024 one.
+    if target >= Version::R2018 {
+        inum(&mut t, 295, eg.trailer, 0);
+    }
     t
 }
 
