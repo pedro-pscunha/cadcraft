@@ -11,6 +11,7 @@ mod mline;
 pub use mline::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "legacy_recovery::SerializedEntity")]
 pub struct Entity {
     #[serde(default, rename = "geometryRevision")]
     pub geometry_revision: GeometryRevision,

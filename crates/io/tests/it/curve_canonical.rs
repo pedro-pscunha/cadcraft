@@ -517,15 +517,14 @@ fn the_canonical_leader_reader_keeps_z_and_the_legacy_one_drops_it() {
 use cadcraft_doc::{Promotion, promote_legacy_spline_leader};
 
 /// An entity as an old document stored it: the JSON of a legacy payload, with no revision and no spatial fields.
-fn old_entity(kind: EntityKind, normal: Vec3) -> Entity {
+fn old_entity(kind: EntityKind, normal: Vec3) -> (Entity, Entity) {
     let mut e = Entity::new(cadcraft_doc::Handle(0x100), kind);
     e.common = Common { extrusion: normal, ..Common::default() };
     let mut json = serde_json::to_value(&e).unwrap();
     let object = json.as_object_mut().unwrap();
     assert!(object.remove("geometryRevision").is_some() || e.geometry_revision == GeometryRevision::LegacyProjectedV1);
     let back: Entity = serde_json::from_value(json).unwrap();
-    assert_eq!(back, e, "an old payload opens as the legacy entity it was");
-    back
+    (e, back)
 }
 
 fn legacy_spline() -> cadcraft_geom::Spline {
@@ -550,9 +549,8 @@ fn without_plane(g: Vec<(i32, String)>) -> Vec<(i32, String)> {
 #[test]
 fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_resave() {
     for normal in [Vec3::Z, Vec3::new(0.0, 0.0, 2.0)] {
-        let mut e = old_entity(EntityKind::Spline(legacy_spline()), normal);
-        let before = without_plane(groups(&dxf(&drawing_of(&e)), "SPLINE"));
-        assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
+        let (legacy, e) = old_entity(EntityKind::Spline(legacy_spline()), normal);
+        let before = without_plane(groups(&dxf(&drawing_of(&legacy)), "SPLINE"));
         assert_eq!(e.geometry_revision, GeometryRevision::CanonicalV2);
         let EntityKind::Spline(s) = &e.kind else { panic!("spline") };
         assert_eq!(s.space.as_ref().unwrap().control, vec![0.0; 3], "promoted at Z = 0");
@@ -570,9 +568,9 @@ fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_res
 
 #[test]
 fn an_old_plus_z_leader_keeps_its_vertices_bit_for_bit_after_promotion_and_resave() {
-    let mut e = old_entity(EntityKind::Leader(legacy_leader()), Vec3::Z);
-    let before = groups(&dxf(&drawing_of(&e)), "LEADER");
-    assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::Promoted);
+    let (legacy, e) = old_entity(EntityKind::Leader(legacy_leader()), Vec3::Z);
+    let before = groups(&dxf(&drawing_of(&legacy)), "LEADER");
+    assert_eq!(e.geometry_revision, GeometryRevision::CanonicalV2);
     let after = groups(&dxf(&drawing_of(&e)), "LEADER");
     let vertex_groups = |g: &[(i32, String)]| g.iter().filter(|(c, _)| matches!(c, 10 | 20 | 30 | 3 | 71 | 72 | 76)).cloned().collect::<Vec<_>>();
     assert_eq!(vertex_groups(&after), vertex_groups(&before), "identical vertices and flags after promotion and resave");
@@ -586,8 +584,8 @@ fn an_old_non_plus_z_payload_stays_legacy_opens_saves_unchanged_and_a_refused_ed
     for (kind, normal) in
         [(EntityKind::Spline(legacy_spline()), Vec3::new(0.0, 0.0, -1.0)), (EntityKind::Leader(legacy_leader()), Vec3::new(0.0, 3.0, 4.0))]
     {
-        let mut e = old_entity(kind, normal);
-        let original = e.clone();
+        let (original, mut e) = old_entity(kind, normal);
+        assert_eq!(e, original, "a lossy serialized payload keeps its legacy representation");
         let saved = dxf(&drawing_of(&e));
         assert_eq!(promote_legacy_spline_leader(&mut e), Promotion::KeptLegacy);
         assert_eq!(e, original, "nothing changed");
