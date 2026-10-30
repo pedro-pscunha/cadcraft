@@ -68,3 +68,39 @@ fn links_it_cannot_give_back_keep_the_xdata() {
     let EntityKind::Dimension(dm) = &back.entity(dim).unwrap().kind else { panic!("dimension") };
     assert_eq!(dm.assoc, links);
 }
+
+/// The handles in the `ACAD_REACTORS` group of the record with handle `h` in a DXF text.
+fn reactors_of(text: &str, h: cadcraft_doc::Handle) -> Vec<String> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 5 && t.str() == h.hex()).unwrap();
+    let body: Vec<_> = tags[start..].iter().take_while(|t| t.code != 0).collect();
+    let open = body.iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS");
+    open.map(|i| body[i + 1..].iter().take_while(|t| t.code == 330).map(|t| t.str()).collect()).unwrap_or_default()
+}
+
+#[test]
+fn the_linked_geometry_lists_the_dimassoc_as_a_reactor() {
+    let mut d = cadcraft_doc::Drawing::new_metric();
+    let c = Common::default;
+    let l1 = d.add(&Space::Model, c(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(0.0, 5.0, 0.0) })).unwrap();
+    let l2 = d.add(&Space::Model, c(), EntityKind::Line(Line { a: Vec3::new(10.0, 0.0, 0.0), b: Vec3::new(10.0, 5.0, 0.0) })).unwrap();
+    let unlinked = d.add(&Space::Model, c(), EntityKind::Line(Line { a: Vec3::new(20.0, 0.0, 0.0), b: Vec3::new(20.0, 5.0, 0.0) })).unwrap();
+    let links = vec![
+        DimAssoc { point: "p13".into(), handle: l1, snap: AssocSnap::Start },
+        DimAssoc { point: "p14".into(), handle: l2, snap: AssocSnap::Start },
+    ];
+    let dim = d
+        .add(
+            &Space::Model,
+            c(),
+            EntityKind::Dimension(dimension(DimKind::Linear { rotation: 0.0 }, Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), links)),
+        )
+        .unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    // The one DIMASSOC of the dimension is its own reactor, and the two lines have it too.
+    let assoc = reactors_of(&text, dim);
+    assert_eq!(assoc.len(), 1, "{assoc:?}");
+    assert_eq!(reactors_of(&text, l1), assoc);
+    assert_eq!(reactors_of(&text, l2), assoc);
+    assert!(reactors_of(&text, unlinked).is_empty());
+}

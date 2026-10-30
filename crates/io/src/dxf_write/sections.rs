@@ -878,7 +878,15 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
             if let EntityKind::Dimension(dm) = &e.kind {
                 let (flags, refs) = std_assoc_refs(d, dm, Some(st));
                 if !refs.is_empty() {
-                    cx.assoc.insert(e.handle, AssocObj { xdict: w.h(), handle: w.h(), flags, refs });
+                    let object = AssocObj { xdict: w.h(), handle: w.h(), flags, refs };
+                    // The geometry a dimension is linked to lists the DIMASSOC among its persistent reactors, as AutoCAD writes it.
+                    for r in &object.refs {
+                        let reactors = w.reactors.entry(r.main).or_default();
+                        if !reactors.contains(&object.handle) {
+                            reactors.push(object.handle.clone());
+                        }
+                    }
+                    cx.assoc.insert(e.handle, object);
                 }
             }
         }
