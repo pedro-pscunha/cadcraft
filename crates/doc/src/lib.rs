@@ -522,19 +522,6 @@ impl Drawing {
         !self.hidden_objects.is_empty() && self.hidden_objects.contains(&h)
     }
 
-    /// Bounds of all visible entities in a space.
-    pub fn legacy_extents(&self, space: &Space) -> Result<cadcraft_geom::Bounds2> {
-        let mut b = cadcraft_geom::Bounds2::EMPTY;
-        if let Some(store) = self.space(space) {
-            for e in store.iter() {
-                if self.is_visible(e) {
-                    b = b.union(&legacy_entity_bounds(self, e, 0)?);
-                }
-            }
-        }
-        Ok(b)
-    }
-
     /// Total entity count across model and paper space.
     pub fn entity_count(&self) -> usize {
         self.model.len() + self.layouts.iter().map(|l| l.entities.len()).sum::<usize>()

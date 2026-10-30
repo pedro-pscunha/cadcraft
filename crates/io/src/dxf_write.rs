@@ -180,7 +180,7 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 struct SaveExtents {
     min: Option<Vec3>,
     max: Option<Vec3>,
-    refusal: Option<(Handle, cadcraft_doc::DocError)>,
+    refusal: Option<cadcraft_render::ExtentsRefusal>,
 }
 
 fn save_extents(d: &Drawing) -> SaveExtents {
@@ -190,26 +190,25 @@ fn save_extents(d: &Drawing) -> SaveExtents {
         (None, None) => false,
         _ => return result,
     };
-    let mut bounds = Bounds2::EMPTY;
-    for entity in d.model.iter() {
-        if saved
-            && let Some(source) = &entity.common.geometry
-            && cadcraft_doc::geometry_key(&entity.kind, &entity.common).as_deref() == Some(source.model.as_str())
-        {
-            continue;
+    let changed = d.model.iter().filter(|entity| {
+        !saved
+            || entity
+                .common
+                .geometry
+                .as_ref()
+                .is_none_or(|source| cadcraft_doc::geometry_key(&entity.kind, &entity.common).as_deref() != Some(source.model.as_str()))
+    });
+    let bounds = match cadcraft_render::entities_extents(d, changed.map(|entity| entity.as_ref()), 0) {
+        Ok(bounds) => bounds,
+        Err(refused) => {
+            let bounds = refused.bounds;
+            result.refusal = Some(refused);
+            bounds
         }
-        match cadcraft_doc::legacy_entity_bounds(d, entity, 0) {
-            Ok(entity_bounds) => bounds = bounds.union(&entity_bounds),
-            Err(error) if result.refusal.is_none() => {
-                let handle = if let cadcraft_doc::DocError::CanonicalExtent(handle) = &error { *handle } else { entity.handle };
-                result.refusal = Some((handle, error));
-            }
-            Err(_) => {}
-        }
-    }
+    };
     if !bounds.is_empty() {
         if let (Some(min), Some(max)) = (&mut result.min, &mut result.max) {
-            // Legacy bounds are XY only. Keep the source Z and grow only beyond its saved limits.
+            // Extent queries return XY bounds. Keep the source Z and grow only beyond its saved limits.
             if bounds.min.x < min.x {
                 min.x = bounds.min.x;
             }
@@ -252,9 +251,9 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
         })
         .collect();
     let extents = save_extents(d);
-    if let Some((handle, error)) = extents.refusal {
+    if let Some(refused) = extents.refusal {
         let action = if extents.min.is_some() { "growth incomplete" } else { "omitted" };
-        notes.push(format!("EXTMIN/EXTMAX {action}: the legacy extent query refused object {} ({error}).", handle.hex()));
+        notes.push(format!("EXTMIN/EXTMAX {action}: {refused}."));
     }
     let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
     for entity in spaces.flat_map(|space| space.iter()).filter(|e| matches!(e.kind, EntityKind::MLeader(_))) {
