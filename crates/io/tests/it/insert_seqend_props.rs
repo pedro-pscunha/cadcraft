@@ -37,6 +37,8 @@ fn the_seqend_of_an_insert_keeps_its_own_layer_colour_and_linetype() {
     assert_eq!(value(&groups, 6), Some("DASHED"));
     assert_eq!(value(&groups, 62), Some("3"));
     assert_eq!(value(&groups, 48), Some("0.5"));
+    // Its handle is the file's, whichever way the save gives it back.
+    assert_eq!(value(&groups, 5), Some("22"));
 }
 
 #[test]
@@ -59,4 +61,35 @@ fn a_seqend_the_save_makes_takes_the_layer_of_the_insert() {
     let groups = seqend(&cadcraft_io::write_dxf(&d));
     assert_eq!(value(&groups, 8), Some("OTHER"));
     assert_eq!(value(&groups, 62), None);
+}
+
+#[test]
+fn the_reactors_of_the_insert_are_kept_beside_its_seqend() {
+    // The INSERT lists the LINE 30 as a persistent reactor; its SEQEND has properties of its own.
+    let text = source().replacen(
+        "0\nINSERT\n5\n20\n8\nINS\n",
+        "0\nLINE\n5\n30\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n0\nINSERT\n5\n20\n102\n{ACAD_REACTORS\n330\n30\n102\n}\n8\nINS\n",
+        1,
+    );
+    let d = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    let written = cadcraft_io::write_dxf(&d);
+    let tags = cadcraft_dxf::parse(written.as_bytes()).unwrap();
+    let insert = sections(&tags)
+        .into_iter()
+        .filter(|s| s.name == "ENTITIES")
+        .flat_map(|s| records(&s.tags))
+        .find(|(k, _)| k == "INSERT")
+        .expect("an INSERT record")
+        .1;
+    let mut inside = false;
+    let mut reactors = Vec::new();
+    for t in &insert {
+        if t.code == 102 {
+            inside = t.str().starts_with("{ACAD_REACTORS");
+        } else if inside && t.code == 330 {
+            reactors.push(t.str());
+        }
+    }
+    assert_eq!(reactors, ["30"]);
+    assert_eq!(value(&seqend(&written), 8), Some("_PTOS"));
 }

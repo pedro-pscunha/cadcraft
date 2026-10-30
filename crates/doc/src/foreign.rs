@@ -159,9 +159,9 @@ pub struct ForeignExtra {
     pub color_index: Option<(String, i64)>,
     /// Whether the source block had nonconstant attribute definitions.
     pub block_attributes: Option<bool>,
-    /// The SEQEND that closes the ATTRIBs of an INSERT, as the file had it: its handle and its own layer,
-    /// colour and the rest of its common properties (the INSERT's SEQEND of a new INSERT takes the INSERT's layer).
-    pub insert_seqend: Option<crate::PolylineRecord>,
+    /// The own layer, colour and the rest of the common properties of the SEQEND that closes the ATTRIBs of an INSERT, as the
+    /// file had them (the SEQEND of a new INSERT takes the INSERT's layer). Its handle follows its owner, as a role.
+    pub insert_seqend: Option<crate::Common>,
     /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
     /// A MULTILEADER's opaque source graphics. A geometry or display edit invalidates replay.

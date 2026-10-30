@@ -501,14 +501,16 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                     multiline_tags(w, a, false);
                 }
             }
-            // The SEQEND the file had keeps its handle, layer and colour; a new one takes the INSERT's layer.
-            let record = d.foreign.entities.get(&e.handle).and_then(|x| x.insert_seqend.as_ref());
-            let handle = w.instance_handle(record.and_then(|r| r.handle));
-            let common_props =
-                record.map_or_else(|| cadcraft_doc::Common { layer: e.common.layer.clone(), ..Default::default() }, |r| r.common.clone());
+            // The SEQEND the file had keeps its layer and colour; a new one takes the INSERT's layer. Its handle is a role.
+            let common_props = d
+                .foreign
+                .entities
+                .get(&e.handle)
+                .and_then(|x| x.insert_seqend.clone())
+                .unwrap_or_else(|| cadcraft_doc::Common { layer: e.common.layer.clone(), ..Default::default() });
             let child = Entity {
                 geometry_revision: Default::default(),
-                handle,
+                handle: w.allocate_handle(),
                 common: common_props,
                 kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
             };
