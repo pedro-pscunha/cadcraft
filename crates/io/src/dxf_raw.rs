@@ -562,6 +562,19 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
+/// Whether the group `t` the writer wrote for a record of `kind` is replaced by one the file had: the fields of a table record (not
+/// its marker, handle and owner), and the empty text (group 1) of a BLOCK that the file gave a text of its own.
+fn replaced_by_kept(kind: &str, entity: bool, t: &Tag, x: Option<&ForeignExtra>, replay: &dyn Fn(&RawTag) -> bool) -> bool {
+    let Some(x) = x else { return false };
+    if kind == "BLOCK" {
+        return t.code == 1 && x.subclass.iter().any(|p| p.code == 1);
+    }
+    !entity
+        && matches!(kind, "VPORT" | "VIEW" | "UCS" | "STYLE")
+        && x.props.iter().chain(&x.subclass).any(|p| p.code == t.code && replay(p))
+        && !matches!(t.code, 0 | 5 | 100 | 330)
+}
+
 fn nonconstant_attributes(block: &cadcraft_doc::Block) -> bool {
     block.entities.iter().any(|entity| matches!(&entity.kind, EntityKind::AttDef(attribute) if !attribute.constant))
 }
@@ -2036,17 +2049,8 @@ fn record(
         {
             xdata(map, x, &own_apps, out);
         }
-        // The kept text of a block replaces the empty one the writer wrote.
-        if r.kind == "BLOCK" && t.code == 1 && i < xdata_at && x.is_some_and(|x| x.subclass.iter().any(|p| p.code == 1)) {
-            continue;
-        }
-        // Kept table fields replace the defaults the writer wrote.
-        if !entity
-            && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS" | "STYLE")
-            && i < xdata_at
-            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code && replay(p)))
-            && !matches!(t.code, 0 | 5 | 100 | 330)
-        {
+        // Kept fields replace the defaults the writer wrote.
+        if i < xdata_at && replaced_by_kept(&r.kind, entity, t, x, &replay) {
             continue;
         }
         let mut t = source_record_group(t, x, &r.kind, attributes);
