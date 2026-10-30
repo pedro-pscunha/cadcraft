@@ -86,7 +86,7 @@ pub use curves::{
     Solid,
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
-pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
+pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
 pub use geometry::{DimensionAsRead, GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
@@ -468,6 +468,7 @@ impl EntityKind {
                 h.scale *= s;
                 h.angle = cadcraft_geom::norm_angle(h.angle + rot);
                 h.origin = m.apply(h.origin);
+                h.seed_points.iter_mut().for_each(|p| *p = m.apply(*p));
             }
             EntityKind::Solid(so) | EntityKind::Trace(so) => so.corners.iter_mut().for_each(t3),
             EntityKind::Face3d(f) => f.corners.iter_mut().for_each(t3),

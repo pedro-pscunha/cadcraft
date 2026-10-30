@@ -827,11 +827,11 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
             }
         }
         w.i(75, i64::from(h.style));
-        w.i(76, 1);
+        w.i(76, i64::from(h.pattern_type));
         if !h.solid {
             w.f(52, h.angle.to_degrees());
             w.f(41, h.scale);
-            w.i(77, 0);
+            w.i(77, i64::from(h.pattern_double));
             // The lines read from the file, else the library's pattern of that name.
             let lines = if h.pattern_lines.is_empty() {
                 cadcraft_doc::library::pattern_for(d, &h.pattern).map(|p| p.lines).unwrap_or_default()
@@ -854,7 +854,12 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
                 }
             }
         }
-        w.i(98, 0);
+        // The seed points that are still in the hatched area.
+        let seeds = h.kept_seed_points();
+        w.i(98, seeds.len() as i64);
+        for p in seeds {
+            w.p2(10, p);
+        }
         // Gradient fills (450 to 470) exist from AutoCAD 2004; AutoCAD 2000 ends the hatch at the seed points
         // and the fill stays in CADCraft's xdata below.
         if let Some(g) = &h.gradient {
@@ -1050,15 +1055,21 @@ fn gradient_groups(w: &mut W, g: &Gradient) {
     w.i(450, 1);
     w.i(451, 0);
     w.f(460, g.angle);
-    w.f(461, if g.centered { 0.0 } else { 1.0 });
-    w.i(452, 0);
-    w.f(462, 0.0);
+    // The shift as the file gave it while it still says what `centered` does (0 centred, else shifted).
+    let shift = g.source.shift.filter(|s| (*s == 0.0) == g.centered);
+    w.f(461, shift.unwrap_or(if g.centered { 0.0 } else { 1.0 }));
+    w.i(452, g.source.color_mode);
+    w.f(462, g.source.tint);
     w.i(453, 2);
-    for (k, c) in [(0.0, g.color1), (1.0, g.color2)] {
+    for (i, (k, c)) in [(0.0, g.color1), (1.0, g.color2)].into_iter().enumerate() {
         w.f(463, k);
         match c {
             Color::True(rgb) => {
-                w.i(63, i64::from(cadcraft_color::nearest_aci(rgb)));
+                // The indexed colour the file gave this true colour, else the nearest.
+                let aci = g.source.aci[i]
+                    .filter(|(_, source)| *source == rgb)
+                    .map_or_else(|| i64::from(cadcraft_color::nearest_aci(rgb)), |(a, _)| i64::from(a));
+                w.i(63, aci);
                 w.i(421, i64::from(rgb.to_u32()));
             }
             c => w.i(63, i64::from(c.to_aci())),

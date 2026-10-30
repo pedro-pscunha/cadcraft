@@ -51,6 +51,7 @@ mod geometry_snapshot;
 mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
+mod hatch_groups_roundtrip;
 mod hatch_pattern_def;
 mod header_fidelity;
 mod header_pointers;

@@ -181,6 +181,9 @@ fn hatch() -> Hatch {
         origin: Vec2::ZERO,
         background: None,
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 

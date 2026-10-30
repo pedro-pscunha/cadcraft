@@ -33,6 +33,9 @@ pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
     // of some patterns (AR-CONC) only approximate AutoCAD's, and drawing them at the file's scale
     // could be hundreds of times denser than the hatch the author saw.
     let pattern_lines = if solid { Vec::new() } else { pattern_definition(tags, scale, angle, origin) };
+    // The pattern groups after the style (75): the type (76) and the double flag (77).
+    let after_style = tags.iter().position(|x| x.code == 75).map_or(&[][..], |i| tags.get(i..).unwrap_or_default());
+    let pattern_group = |code: i32| after_style.iter().find(|x| x.code == code).map(Tag::i64);
     Some(EntityKind::Hatch(Hatch {
         pattern: pattern.to_ascii_uppercase(),
         solid,
@@ -47,7 +50,22 @@ pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
         origin,
         background,
         pattern_lines,
+        pattern_type: pattern_group(76).and_then(|v| u8::try_from(v).ok()).unwrap_or(1),
+        pattern_double: pattern_group(77).unwrap_or(0) != 0,
+        seed_points: seed_points(tags),
     }))
+}
+
+/// The seed points (DXF 98, then that many 10 and 20 pairs) after the pattern.
+fn seed_points(tags: &[Tag]) -> Vec<Vec2> {
+    let Some(at) = tags.iter().position(|x| x.code == 98) else { return Vec::new() };
+    let count = tags.get(at).map_or(0, Tag::i64).clamp(0, 100_000) as usize;
+    let rest = tags.get(at + 1..).unwrap_or_default();
+    let xs = rest.iter().take_while(|x| matches!(x.code, 10 | 20)).collect::<Vec<_>>();
+    xs.chunks(2)
+        .take(count)
+        .filter_map(|c| if let [x, y] = c { (x.code == 10 && y.code == 20).then(|| Vec2::new(x.f64(), y.f64())) } else { None })
+        .collect()
 }
 
 /// A HATCH whose loops keep their exact edges (see `HatchLoop::edges`): the hatch the legacy reader makes, with each
@@ -427,7 +445,7 @@ fn hatch_xdata(tags: &[Tag]) -> (Vec2, Option<Color>) {
 
 /// Gradient values missing from a file fall back to the GRADIENT command's defaults.
 fn default_gradient() -> Gradient {
-    Gradient { name: "LINEAR".into(), color1: Color::Index(5), color2: Color::Index(7), angle: 0.0, centered: true }
+    Gradient { name: "LINEAR".into(), color1: Color::Index(5), color2: Color::Index(7), angle: 0.0, centered: true, source: Default::default() }
 }
 
 /// A hatch's gradient fill: the native groups when present (another program may have edited
@@ -450,6 +468,7 @@ fn xdata_gradient(tags: &[Tag]) -> Option<Gradient> {
         color2: color(2, d.color2),
         angle: o.iter().find(|t| t.code == 1040).map(Tag::f64).filter(|a| a.is_finite()).unwrap_or(d.angle),
         centered: o.iter().find(|t| t.code == 1070).map_or(d.centered, |t| t.i64() != 0),
+        source: Default::default(),
     })
 }
 
@@ -468,7 +487,12 @@ fn native_gradient(tags: &[Tag]) -> Option<Gradient> {
         let rec = slot.and_then(|s| colors.get_mut(s));
         match x.code {
             460 => g.angle = Some(x.f64()).filter(|a| a.is_finite()).unwrap_or(0.0),
-            461 => g.centered = x.f64().abs() < 1e-9,
+            461 => {
+                g.centered = x.f64().abs() < 1e-9;
+                g.source.shift = Some(x.f64()).filter(|v| v.is_finite());
+            }
+            452 => g.source.color_mode = x.i64(),
+            462 => g.source.tint = Some(x.f64()).filter(|v| v.is_finite()).unwrap_or(0.0),
             463 => slot = Some(slot.map_or(0, |s| s.saturating_add(1))),
             63 => {
                 if let Some(r) = rec {
@@ -486,6 +510,8 @@ fn native_gradient(tags: &[Tag]) -> Option<Gradient> {
     }
     let [c1, c2] = colors;
     let pick = |(aci, rgb): (Option<Color>, Option<Rgb>), d: Color| rgb.map(Color::True).or(aci).unwrap_or(d);
+    // The indexed colour of a true colour stays with it.
+    g.source.aci = [c1, c2].map(|(aci, rgb)| aci.zip(rgb).map(|(a, rgb)| (a.to_aci(), rgb)));
     g.color1 = pick(c1, g.color1);
     g.color2 = pick(c2, g.color2);
     Some(g)

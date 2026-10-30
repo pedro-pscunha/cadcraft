@@ -189,6 +189,7 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
                     v.bulge = -v.bulge;
                 }
                 h.angle = cadcraft_geom::norm_angle(std::f64::consts::PI - h.angle);
+                h.seed_points.iter_mut().for_each(|p| p.x = -p.x);
             }
             k
         }

@@ -25,6 +25,9 @@ fn hatch(pattern: &str, scale: f64, angle: f64, origin: Vec2, lines: Vec<Pattern
         origin,
         background: None,
         pattern_lines: lines,
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 

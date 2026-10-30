@@ -187,6 +187,7 @@ impl GradientEdit {
             color2: Color::Index(7),
             angle: 0.0,
             centered: true,
+            source: Default::default(),
         });
         if let Some(n) = self.name {
             g.name = n.into();

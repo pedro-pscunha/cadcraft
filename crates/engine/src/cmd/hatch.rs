@@ -320,6 +320,7 @@ impl HatchSettings {
             color2: str_param(p, "color2").and_then(Color::parse).unwrap_or(Color::Index(7)),
             angle: f64_or(p, "angle", 0.0).to_radians(),
             centered: bool_or(p, "centered", true),
+            source: Default::default(),
         });
         HatchSettings {
             pattern,
@@ -361,6 +362,9 @@ impl HatchSettings {
             gradient: self.gradient.clone(),
             background: None,
             pattern_lines: patfile::lines_for(&self.pattern),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         })
     }
 }

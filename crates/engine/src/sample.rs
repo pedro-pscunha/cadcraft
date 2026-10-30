@@ -151,6 +151,9 @@ pub fn bracket() -> Drawing {
             origin: Vec2::ZERO,
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         })
     };
     add(on("Hatch"), hatch(Vec2::new(sx, c.y + 0.875), Vec2::new(sx + 0.5, y0 + h)));
