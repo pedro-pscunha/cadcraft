@@ -81,6 +81,8 @@ struct Fixture {
     drawing: Drawing,
     params: Value,
     operands: Vec<Handle>,
+    /// A `zoom` window that sets the pick radius: it is a world length that follows the view, so a spline's candidate spans depend on it.
+    view: Option<Value>,
 }
 
 struct Row {
@@ -104,8 +106,14 @@ fn run_row(row: &Row) -> Result<(), String> {
     let fixture = (row.fixture)();
     // The control: the same command and parameters on the legacy drawing must succeed, so a row never passes on a malformed call.
     let mut control = session_of(&fixture.drawing);
+    if let Some(view) = &fixture.view {
+        control.execute("zoom", view).map_err(|error| format!("the view fails: {error}"))?;
+    }
     control.execute(row.command, &fixture.params).map_err(|error| format!("the legacy control fails: {error}"))?;
     let mut session = session_of(&fixture.drawing);
+    if let Some(view) = &fixture.view {
+        session.execute("zoom", view).map_err(|error| format!("the view fails: {error}"))?;
+    }
     for (index, handle) in fixture.operands.iter().enumerate() {
         let canonical = match row.revision {
             Revision::Legacy => false,
@@ -155,14 +163,14 @@ fn model_of(session: &Session) -> Drawing {
 fn circle() -> Fixture {
     let mut s = Session::new();
     let circle = create(&mut s, "circle", json!({"center": [0, 0], "radius": 2}));
-    Fixture { drawing: model_of(&s), params: json!({"handle": circle.hex()}), operands: vec![circle] }
+    Fixture { drawing: model_of(&s), params: json!({"handle": circle.hex()}), operands: vec![circle], view: None }
 }
 
 fn two_lines() -> Fixture {
     let mut s = Session::new();
     let a = spatial_line(&mut s, [10.0, 0.0, 0.0], [13.0, 0.0, 4.0]);
     let b = create(&mut s, "line", json!({"points": [[20, 4], [10, 4]]}));
-    Fixture { drawing: model_of(&s), params: json!({"h1": a.hex(), "h2": b.hex()}), operands: vec![a, b] }
+    Fixture { drawing: model_of(&s), params: json!({"h1": a.hex(), "h2": b.hex()}), operands: vec![a, b], view: None }
 }
 
 fn closed_polyline() -> Fixture {
@@ -170,7 +178,7 @@ fn closed_polyline() -> Fixture {
     let vertices =
         json!([{"p": [0.0, 0.0], "bulge": 0.0}, {"p": [10.0, 0.0], "bulge": 0.0}, {"p": [10.0, 5.0], "bulge": 0.0}, {"p": [0.0, 5.0], "bulge": 0.0}]);
     let polyline = create(&mut s, "pline", json!({"vertices": vertices, "closed": true}));
-    Fixture { drawing: model_of(&s), params: json!({"handle": polyline.hex(), "erase": false}), operands: vec![polyline] }
+    Fixture { drawing: model_of(&s), params: json!({"handle": polyline.hex(), "erase": false}), operands: vec![polyline], view: None }
 }
 
 fn wipeout_erasing() -> Fixture {
@@ -188,13 +196,13 @@ fn revcloud() -> Fixture {
 fn arc_continue() -> Fixture {
     let mut s = Session::new();
     let line = create(&mut s, "line", json!({"points": [[0, 0], [1, 0]]}));
-    Fixture { drawing: model_of(&s), params: json!({"end": [2, 1]}), operands: vec![line] }
+    Fixture { drawing: model_of(&s), params: json!({"end": [2, 1]}), operands: vec![line], view: None }
 }
 
 fn xline_offset() -> Fixture {
     let mut s = Session::new();
     let line = create(&mut s, "line", json!({"points": [[0, 0], [10, 0]]}));
-    Fixture { drawing: model_of(&s), params: json!({"handle": line.hex(), "distance": 2, "side": [5, -1]}), operands: vec![line] }
+    Fixture { drawing: model_of(&s), params: json!({"handle": line.hex(), "distance": 2, "side": [5, -1]}), operands: vec![line], view: None }
 }
 
 fn xline_through() -> Fixture {
@@ -207,14 +215,14 @@ fn dimjogged() -> Fixture {
     let mut s = Session::new();
     let circle = create(&mut s, "circle", json!({"center": [0, 0], "radius": 50}));
     let params = json!({"handle": circle.hex(), "centerOverride": [20, -10], "at": [40, 40], "jog": [30, 15]});
-    Fixture { drawing: model_of(&s), params, operands: vec![circle] }
+    Fixture { drawing: model_of(&s), params, operands: vec![circle], view: None }
 }
 
 fn dimbreak_automatic() -> Fixture {
     let mut s = Session::new();
     let dimension = create(&mut s, "dimlinear", json!({"p1": [0, 0], "p2": [10, 0], "at": [5, 3]}));
     let line = create(&mut s, "line", json!({"points": [[4, -1], [4, 6]]}));
-    Fixture { drawing: model_of(&s), params: json!({"handles": [dimension.hex()]}), operands: vec![line] }
+    Fixture { drawing: model_of(&s), params: json!({"handles": [dimension.hex()]}), operands: vec![line], view: None }
 }
 
 fn dimbreak_chosen() -> Fixture {
@@ -231,19 +239,19 @@ fn mleader_pair() -> Fixture {
     let a = create(&mut s, "mleader", json!({"points": [[10, 0], [10, 5]], "block": "B"}));
     let b = create(&mut s, "mleader", json!({"points": [[20, 0], [20, 5]], "block": "B"}));
     let params = json!({"handles": [a.hex(), b.hex()], "at": [0, 20], "mode": "horizontal", "spacing": 1});
-    Fixture { drawing: model_of(&s), params, operands: vec![a, b] }
+    Fixture { drawing: model_of(&s), params, operands: vec![a, b], view: None }
 }
 
 fn id_on_spatial_line() -> Fixture {
     let mut s = Session::new();
     let line = spatial_line(&mut s, [0.0, 0.0, 0.0], [3.0, 0.0, 4.0]);
-    Fixture { drawing: model_of(&s), params: json!({"at": [1.5, 0.0]}), operands: vec![line] }
+    Fixture { drawing: model_of(&s), params: json!({"at": [1.5, 0.0]}), operands: vec![line], view: None }
 }
 
 fn id_on_text() -> Fixture {
     let mut s = Session::new();
     let text = create(&mut s, "text", json!({"at": [2, 1], "height": 1, "text": "A"}));
-    Fixture { drawing: model_of(&s), params: json!({"at": [2.3, 1.4]}), operands: vec![text] }
+    Fixture { drawing: model_of(&s), params: json!({"at": [2.3, 1.4]}), operands: vec![text], view: None }
 }
 
 fn vertical_spline() -> Fixture {
@@ -252,13 +260,38 @@ fn vertical_spline() -> Fixture {
     spline.space = Some(cadcraft_geom::SplineSpace { control: vec![0.0, 10.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 });
     let mut s = Session::new();
     let handle = s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Spline(spline)).unwrap();
-    Fixture { drawing: model_of(&s), params: json!({"at": [0.0, 0.0]}), operands: vec![handle] }
+    Fixture { drawing: model_of(&s), params: json!({"at": [0.0, 0.0]}), operands: vec![handle], view: None }
+}
+
+fn long_spline() -> Fixture {
+    // Cubic, clamped, uniform knots: the plan view runs along y = 0 at one unit per control and the Z of control i is i / 1000.
+    let n = 100_000usize;
+    let mut knots = vec![0.0; 4];
+    knots.extend((1..=n - 4).map(|k| k as f64));
+    knots.extend([(n - 3) as f64; 4]);
+    let mut spline =
+        cadcraft_geom::Spline { degree: 3, knots, control: (0..n).map(|i| cadcraft_geom::Vec2::new(i as f64, 0.0)).collect(), ..Default::default() };
+    spline.space = Some(cadcraft_geom::SplineSpace {
+        control: (0..n).map(|i| i as f64 / 1000.0).collect(),
+        fit: Vec::new(),
+        start_tangent: 0.0,
+        end_tangent: 0.0,
+    });
+    let mut s = Session::new();
+    let handle = s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Spline(spline)).unwrap();
+    // The pick radius follows the view: zoomed to 2,000 units it is a few world units, so only a few spans of the spline reach the point.
+    let view = json!({"mode": "window", "p1": [49000.0, -500.0], "p2": [51000.0, 500.0]});
+    Fixture { drawing: model_of(&s), params: json!({"at": [50000.5, 0.0]}), operands: vec![handle], view: Some(view) }
+}
+
+fn long_spline_zoomed_out() -> Fixture {
+    Fixture { view: None, ..long_spline() }
 }
 
 fn list_circle() -> Fixture {
     let mut s = Session::new();
     let circle = create(&mut s, "circle", json!({"center": [10, 5], "radius": 2}));
-    Fixture { drawing: model_of(&s), params: json!({"handles": [circle.hex()]}), operands: vec![circle] }
+    Fixture { drawing: model_of(&s), params: json!({"handles": [circle.hex()]}), operands: vec![circle], view: None }
 }
 
 fn area_ellipse() -> Fixture {
@@ -267,20 +300,20 @@ fn area_ellipse() -> Fixture {
     let ellipse =
         Ellipse { center: Vec3::ZERO, major: Vec3::new(3.0, 0.0, 4.0), normal: Vec3::Z, ratio: 0.5, start: 0.0, end: std::f64::consts::TAU };
     let handle = s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Ellipse(ellipse)).unwrap();
-    Fixture { drawing: model_of(&s), params: json!({"handle": handle.hex()}), operands: vec![handle] }
+    Fixture { drawing: model_of(&s), params: json!({"handle": handle.hex()}), operands: vec![handle], view: None }
 }
 
 fn angle_between_spatial_lines() -> Fixture {
     let mut s = Session::new();
     let a = spatial_line(&mut s, [0.0; 3], [1.0, 0.0, 1.0]);
     let b = spatial_line(&mut s, [0.0; 3], [0.0, 1.0, 1.0]);
-    Fixture { drawing: model_of(&s), params: json!({"h1": a.hex(), "h2": b.hex()}), operands: vec![a, b] }
+    Fixture { drawing: model_of(&s), params: json!({"h1": a.hex(), "h2": b.hex()}), operands: vec![a, b], view: None }
 }
 
 fn properties_of_circle() -> Fixture {
     let mut s = Session::new();
     let circle = create(&mut s, "circle", json!({"center": [10, 5], "radius": 2}));
-    Fixture { drawing: model_of(&s), params: json!({"handles": [circle.hex()]}), operands: vec![circle] }
+    Fixture { drawing: model_of(&s), params: json!({"handles": [circle.hex()]}), operands: vec![circle], view: None }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -448,6 +481,27 @@ fn live_rows() -> Vec<Row> {
         plane: PlusZ,
         fixture: vertical_spline,
         expect: Expect::Refuses("no single Z"),
+    });
+    out.push(Row {
+        command: "id",
+        role: Role::PickedPoint,
+        branch: "spline of 100,000 controls (i, 0, i/1000), zoomed in: the Z along it",
+        revision: Canonical,
+        plane: PlusZ,
+        fixture: long_spline,
+        // The controls reproduce the line z = x / 1000, so the Z at x = 50000.5 is 50.0005. The work bound itself (evaluations, not time)
+        // is checked by the sampler's own tests; a run() row can only prove that the long spline is answered.
+        expect: Expect::Ok(|v| near(number(v, "z")?, 50.0005)),
+    });
+    out.push(Row {
+        command: "id",
+        role: Role::PickedPoint,
+        branch: "the same spline at the fit-all view: the pick radius reaches over 500 spans",
+        revision: Canonical,
+        plane: PlusZ,
+        fixture: long_spline_zoomed_out,
+        // Past the work budget the sample is refused, with the remedy in the text: never an arbitrary Z and never a long search.
+        expect: Expect::Refuses("zoom in"),
     });
     out.push(Row {
         command: "list",
