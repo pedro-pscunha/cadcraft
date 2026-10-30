@@ -36,6 +36,22 @@ impl WorldPrimitive {
                 if !has_finite_numbers(&ellipse) {
                     return Err(DocError::NonFinite(owner));
                 }
+                if ellipse.ratio == 0.0 {
+                    let mut lo = ellipse.start.cos().min(ellipse.end.cos());
+                    let mut hi = ellipse.start.cos().max(ellipse.end.cos());
+                    if cadcraft_geom::angle_in_sweep(0.0, ellipse.start, ellipse.end) {
+                        hi = 1.0;
+                    }
+                    if cadcraft_geom::angle_in_sweep(cadcraft_geom::PI, ellipse.start, ellipse.end) {
+                        lo = -1.0;
+                    }
+                    let a = ellipse.center + ellipse.major * lo;
+                    let b = ellipse.center + ellipse.major * hi;
+                    if !a.is_finite() || !b.is_finite() {
+                        return Err(DocError::NonFinite(owner));
+                    }
+                    return Ok(Prim::Seg(Segment::Line(GLine::new(a, b))));
+                }
                 Prim::Ellipse(ellipse)
             }
         })

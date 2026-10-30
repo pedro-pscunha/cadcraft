@@ -60,7 +60,11 @@ fn canonical_circles_use_ocs_before_the_full_spatial_parent() {
     assert_ne!(*axis_u, Vec3::ZERO);
     assert_ne!(*axis_v, Vec3::ZERO);
     let projected = geometry.project_xy().unwrap();
-    assert!(matches!(projected.as_slice(), [Prim::Ellipse(ellipse)] if ellipse.ratio == 0.0));
+    let [Prim::Seg(Segment::Line(segment))] = projected.as_slice() else { panic!("edge-on segment") };
+    assert_eq!(segment.a.y, 3.0);
+    assert_eq!(segment.b.y, 3.0);
+    assert_eq!(segment.a.x.min(segment.b.x), -3.0);
+    assert_eq!(segment.a.x.max(segment.b.x), 1.0);
 }
 
 #[test]
@@ -123,6 +127,19 @@ fn zero_conic_projection_is_a_point_and_projection_overflow_is_explicit() {
     let huge = Mat4 { m: [[1.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
     let geometry = entity.world_geometry(&huge).unwrap();
     assert!(matches!(geometry.project_xy(), Err(DocError::NonFinite(Handle(0x105)))));
+}
+
+#[test]
+fn an_edge_on_partial_conic_keeps_interior_parameter_extrema() {
+    let mut entity = Entity::new(Handle(0x106), EntityKind::Arc(cadcraft_doc::Arc { center: Vec3::ZERO, radius: 2.0, start: -0.5, end: 0.5 }));
+    entity.geometry_revision = GeometryRevision::CanonicalV2;
+    entity.common.extrusion = Vec3::new(0.0, 1.0, 0.0);
+    let projected = entity.world_geometry(&Mat4::IDENTITY).unwrap().project_xy().unwrap();
+    let [Prim::Seg(Segment::Line(segment))] = projected.as_slice() else { panic!("partial segment") };
+    assert!((segment.a.x.min(segment.b.x) + 2.0).abs() < 1e-12);
+    assert!((segment.a.x.max(segment.b.x) + 2.0 * 0.5_f64.cos()).abs() < 1e-12);
+    assert_eq!(segment.a.y, 0.0);
+    assert_eq!(segment.b.y, 0.0);
 }
 
 #[test]
