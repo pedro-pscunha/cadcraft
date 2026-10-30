@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 use crate::{Entity, Handle};
 
+mod revision;
+#[cfg(test)]
+mod revision_tests;
+use revision::RevisionSummary;
+
 const CHUNK_MAX: usize = 1024;
 const SHARDS: usize = 64;
 
@@ -24,11 +29,18 @@ pub struct EntityStore {
     shards: Vec<Arc<HashMap<Handle, u32>>>,
     len: usize,
     next_chunk: u32,
+    revisions: RevisionSummary,
 }
 
 impl Default for EntityStore {
     fn default() -> Self {
-        EntityStore { chunks: Vec::new(), shards: (0..SHARDS).map(|_| Arc::new(HashMap::new())).collect(), len: 0, next_chunk: 0 }
+        EntityStore {
+            chunks: Vec::new(),
+            shards: (0..SHARDS).map(|_| Arc::new(HashMap::new())).collect(),
+            len: 0,
+            next_chunk: 0,
+            revisions: RevisionSummary::default(),
+        }
     }
 }
 
@@ -52,6 +64,14 @@ impl EntityStore {
     }
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+    /// A non-legacy entity, including nested attribute payloads, without scanning geometry.
+    pub fn first_non_legacy_geometry(&self) -> Option<Handle> {
+        self.revisions.first_non_legacy()
+    }
+    /// Direct block dependencies maintained at load and mutation. A name can occur more than once.
+    pub fn referenced_blocks(&self) -> impl Iterator<Item = &str> {
+        self.revisions.blocks()
     }
     /// Iterate in draw order.
     pub fn iter(&self) -> impl Iterator<Item = &Arc<Entity>> + '_ {
@@ -105,6 +125,7 @@ impl EntityStore {
         let h = e.handle;
         let Some(last) = self.chunks.last_mut() else { return };
         let chunk = Arc::make_mut(last);
+        self.revisions.record(&e);
         chunk.items.push(Arc::new(e));
         let id = chunk.id;
         self.set_index(h, Some(id));
@@ -124,6 +145,7 @@ impl EntityStore {
         let h = e.handle;
         let Some(first) = self.chunks.first_mut() else { return };
         let chunk = Arc::make_mut(first);
+        self.revisions.record(&e);
         chunk.items.insert(0, Arc::new(e));
         let id = chunk.id;
         self.set_index(h, Some(id));
@@ -136,6 +158,8 @@ impl EntityStore {
         let Some(c) = self.chunks.get_mut(pos) else { return false };
         let chunk = Arc::make_mut(c);
         if let Some(slot) = chunk.items.iter_mut().find(|x| x.handle == e.handle) {
+            self.revisions.remove(slot);
+            self.revisions.record(&e);
             *slot = Arc::new(e);
             true
         } else {
@@ -149,6 +173,7 @@ impl EntityStore {
         let chunk = Arc::make_mut(c);
         let i = chunk.items.iter().position(|x| x.handle == h)?;
         let e = chunk.items.remove(i);
+        self.revisions.remove(&e);
         let empty = chunk.items.is_empty();
         if empty {
             self.chunks.remove(pos);
@@ -215,6 +240,7 @@ impl EntityStore {
         let chunk = Arc::make_mut(c);
         let i = chunk.items.iter().position(|x| x.handle == anchor).unwrap_or(chunk.items.len());
         let i = if above { (i + 1).min(chunk.items.len()) } else { i };
+        self.revisions.record(&e);
         chunk.items.insert(i, e);
         let split = chunk.items.len() > 2 * CHUNK_MAX;
         self.set_index(h, Some(id));
@@ -242,7 +268,9 @@ impl EntityStore {
     pub fn sort_by_key<K: Ord>(&mut self, mut key: impl FnMut(&Entity) -> K) {
         let mut items: Vec<Arc<Entity>> = self.iter().cloned().collect();
         items.sort_by_cached_key(|e| key(e));
+        let revisions = self.revisions.clone();
         *self = EntityStore::default();
+        self.revisions = revisions;
         for e in items {
             let needs_new = self.chunks.last().is_none_or(|c| c.items.len() >= CHUNK_MAX);
             if needs_new {
