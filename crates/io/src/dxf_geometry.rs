@@ -269,9 +269,9 @@ fn with_fit_counts(groups: Vec<RawTag>) -> Vec<RawTag> {
     out
 }
 
-/// The boundary groups of a hatch for a file before 2010: its spline edges have no fit data count (97). Edges with
-/// fit points cannot be written so; `None` then.
-fn without_fit_counts(groups: Vec<RawTag>) -> Option<Vec<RawTag>> {
+/// The boundary groups of a hatch for a file before 2010: its spline edges have no fit data count (97), and the fit points
+/// and tangents that follow it are left out (the control points and knots define the spline).
+fn without_fit_counts(groups: Vec<RawTag>) -> Vec<RawTag> {
     let code = |i: usize| groups.get(i).map(|g| g.code);
     let int = |i: usize| groups.get(i).and_then(|g| g.value.trim().parse::<usize>().ok()).unwrap_or(0);
     let mut out = Vec::with_capacity(groups.len());
@@ -287,13 +287,18 @@ fn without_fit_counts(groups: Vec<RawTag>) -> Option<Vec<RawTag>> {
         out.extend(groups[i..end].iter().cloned());
         i = end;
         if code(i) == Some(97) && matches!(code(i + 1), Some(11 | 97 | 72)) {
-            if int(i) != 0 {
-                return None;
-            }
+            // The count, its fit points (11, 21) and the start and end tangents (12, 22, 13, 23) that come with them.
+            let fit = int(i);
             i += 1;
+            if fit != 0 {
+                i += 2 * fit;
+                while matches!(code(i), Some(12 | 22 | 13 | 23)) {
+                    i += 1;
+                }
+            }
         }
     }
-    Some(out)
+    out
 }
 
 fn hatch_capture(tags: &[Tag]) -> Option<Vec<RawTag>> {
@@ -314,7 +319,7 @@ fn hatch_restore(generated: &[Tag], kept: &[RawTag], version: u32, convert: impl
     let groups = generated.get(range.clone())?;
     let kept: Vec<RawTag> = kept.iter().skip(1).cloned().collect();
     // The fit data count of a spline edge exists from AutoCAD 2010 (AC1024) on.
-    let kept = if version < 1024 { without_fit_counts(kept)? } else { kept };
+    let kept = if version < 1024 { without_fit_counts(kept) } else { kept };
     let codes: Vec<i32> = groups.iter().map(|t| t.code).collect();
     let kept_codes: Vec<i32> = kept.iter().map(|t| t.code).collect();
     let ((loops, tail), (k_loops, k_tail)) = (hatch_parts(&codes)?, hatch_parts(&kept_codes)?);

@@ -170,6 +170,34 @@ fn a_hatch_spline_edge_has_its_fit_count_from_2010_only() {
     }
 }
 
+/// A hatch of AutoCAD 2010 whose spline edge has fit points, and the pixel size (47) AutoCAD wrote after the pattern.
+fn fit_data_hatch() -> String {
+    let spline = "72 4\n94 3\n73 0\n74 0\n95 8\n96 4\n40 0\n40 0\n40 0\n40 0\n40 1\n40 1\n40 1\n40 1\n10 5\n20 0\n10 6\n20 2\n10 7\n20 2\n10 8\n20 0\n\
+                  97 2\n11 5\n21 0\n11 8\n21 0\n12 0\n22 1\n13 0\n23 -1\n";
+    dxf(&format!(
+        "0 HATCH\n5 51\n100 AcDbEntity\n8 0\n100 AcDbHatch\n10 0\n20 0\n30 2.5\n210 0\n220 0\n230 -1\n2 ANSI31\n70 0\n71 0\n91 1\n92 1\n93 3\n\
+         72 1\n10 0\n20 0\n11 5\n21 0\n{spline}72 1\n10 8\n20 0\n11 0\n21 0\n97 0\n75 0\n76 1\n52 0\n41 1\n77 0\n78 1\n53 45\n43 0\n44 0\n45 1\n46 1\n79 0\n47 0.5\n98 0"
+    ))
+}
+
+/// AutoCAD refuses a pattern hatch of a DXF before 2010 that lost its pixel size (47) because its spline edge had fit points:
+/// the hatch is kept as the file had it, without the fit data a file of that version cannot hold.
+#[test]
+fn a_hatch_with_spline_fit_points_keeps_its_pixel_size_before_2010() {
+    let d = read_dxf(fit_data_hatch().as_bytes()).unwrap();
+    for version in Version::ALL {
+        let text = save(&d, version);
+        let hatch = section(&text, "ENTITIES").into_iter().find(|(k, _)| k == "HATCH").unwrap().1;
+        let start = hatch.iter().position(|t| t.code == 91).unwrap();
+        let end = hatch.iter().position(|t| t.code == 75).unwrap();
+        let loops = boundary_len(&hatch[start..], version >= Version::R2010);
+        assert_eq!(loops.map(|n| start + n), Some(end), "{version:?}: {:?}", &hatch[start..end]);
+        let pixel = hatch.iter().position(|t| t.code == 47).unwrap_or_else(|| panic!("{version:?}: no pixel size {hatch:?}"));
+        assert_eq!(hatch.get(pixel + 1).map(|t| t.code), Some(98), "{version:?}: the pixel size comes before the seed points");
+        assert_eq!(hatch.iter().any(|t| t.code == 12), version >= Version::R2010, "{version:?}: the fit data stays from 2010 on");
+    }
+}
+
 /// AutoCAD writes no oblique angle (52) for extension lines perpendicular to the dimension line and refuses a
 /// DXF that has one, also when the source file had it (a DWG's -270 degrees).
 #[test]
