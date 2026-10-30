@@ -118,10 +118,32 @@ pub struct Gradient {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wipeout {
     pub boundary: Vec<Vec2>,
+    /// The image display settings of the record (groups 70, 280, 281, 282, 283), as read.
+    #[serde(default)]
+    pub display: WipeoutDisplay,
     /// The source image frame and clip of a canonical wipeout (see [`WipeoutFrame`]). When it is set the wipeout is
     /// `CanonicalV2`, `boundary` is empty and [`Wipeout::world_boundary`] gives the outline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<WipeoutFrame>,
+}
+
+/// The display settings a WIPEOUT record keeps like an image: the display flags (70: 1 show image, 2 show when not aligned with the
+/// screen, 4 use the clipping boundary, 8 transparency on), whether clipping is on (280), and the brightness, contrast and fade
+/// (281, 282, 283). The defaults are what a wipeout made in CADCraft has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WipeoutDisplay {
+    pub flags: i64,
+    pub clipping: i64,
+    pub brightness: i64,
+    pub contrast: i64,
+    pub fade: i64,
+}
+
+impl Default for WipeoutDisplay {
+    fn default() -> Self {
+        WipeoutDisplay { flags: 7, clipping: 1, brightness: 50, contrast: 50, fade: 0 }
+    }
 }
 
 /// The image frame of a canonical WIPEOUT as its record holds it: the origin and the per-pixel U and V vectors in WCS

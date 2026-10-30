@@ -895,7 +895,7 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
 }
 
 /// A canonical wipeout: the image frame and the clip as its record held them, with no closing vertex added.
-fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &cadcraft_doc::WipeoutFrame) {
+fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &cadcraft_doc::WipeoutFrame, display: &cadcraft_doc::WipeoutDisplay) {
     w.s(0, "WIPEOUT");
     common(w, e, owner, paper, "AcDbWipeout");
     w.i(90, 0);
@@ -903,11 +903,7 @@ fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &
     w.p(11, f.u);
     w.p(12, f.v);
     w.p2(13, f.size);
-    w.i(70, 7);
-    w.i(280, 1);
-    w.i(281, 50);
-    w.i(282, 50);
-    w.i(283, 0);
+    wipeout_display(w, display);
     w.i(71, i64::from(f.clip_type));
     w.i(91, f.clip.len() as i64);
     for q in &f.clip {
@@ -915,10 +911,19 @@ fn write_canonical_wipeout(w: &mut W, e: &Entity, owner: &str, paper: bool, f: &
     }
 }
 
+/// Groups 70, 280, 281, 282 and 283 of a WIPEOUT.
+fn wipeout_display(w: &mut W, d: &cadcraft_doc::WipeoutDisplay) {
+    w.i(70, d.flags);
+    w.i(280, d.clipping);
+    w.i(281, d.brightness);
+    w.i(282, d.contrast);
+    w.i(283, d.fade);
+}
+
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
         if let Some(frame) = &wo.frame {
-            write_canonical_wipeout(w, e, owner, paper, frame);
+            write_canonical_wipeout(w, e, owner, paper, frame, &wo.display);
             return;
         }
         // A 1x1 image spanning the boundary's extents. Clip vertices are in pixel space, whose origin is
@@ -935,12 +940,9 @@ fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper:
         w.p(11, Vec3::new(sx, 0.0, 0.0));
         w.p(12, Vec3::new(0.0, sy, 0.0));
         w.p2(13, Vec2::new(1.0, 1.0));
-        // Display flags 7 = show image, show unaligned, use clipping boundary; clipping on; default brightness/contrast/fade.
-        w.i(70, 7);
-        w.i(280, 1);
-        w.i(281, 50);
-        w.i(282, 50);
-        w.i(283, 0);
+        // The display settings as read; a new wipeout shows the image unaligned, with its clipping boundary, clipping on, default
+        // brightness, contrast and fade.
+        wipeout_display(w, &wo.display);
         w.i(71, 2);
         let mut pts = wo.boundary.clone();
         if let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied())

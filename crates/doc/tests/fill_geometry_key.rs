@@ -9,6 +9,7 @@ use cadcraft_geom::{Vec2, Vec3};
 fn wipeout() -> Wipeout {
     Wipeout {
         boundary: Vec::new(),
+        display: Default::default(),
         frame: Some(WipeoutFrame {
             origin: Vec3::new(10.0, 1.0, 2.0),
             u: Vec3::new(4.0, 0.0, 0.5),
