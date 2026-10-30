@@ -42,6 +42,19 @@ pub fn dimension_layout(
     })
 }
 
+/// The arrowhead of a multileader in the local coordinates of its first segment, for the world builders: laid out as the
+/// renderer draws it (its own arrowhead, else its style's, at the multileader's arrow size) with its tip at the origin,
+/// pointing along +X.
+pub fn mleader_arrow_layout(d: &Drawing, m: &cadcraft_doc::MLeader) -> cadcraft_doc::LeaderArrowLayout {
+    let name = if m.arrow_block.trim().is_empty() {
+        d.mleader_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&m.style)).map_or("", |s| s.arrow_block.as_str())
+    } else {
+        m.arrow_block.as_str()
+    };
+    let g = dim::arrowhead(dim::Arrowhead::parse(name), Vec2::ZERO, Vec2::X, m.arrow_size);
+    cadcraft_doc::LeaderArrowLayout { lines: g.lines, tris: g.tris }
+}
+
 /// `lw` / `lt` are the dimension's own lineweight and linetype (ByBlock in DIMLWD, DIMLWE,
 /// DIMLTYPE, DIMLTEX1 and DIMLTEX2).
 pub(crate) fn dimension(

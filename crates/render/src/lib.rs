@@ -313,7 +313,7 @@ mod props;
 mod text_entity;
 mod viewports;
 
-pub use dim_draw::{dim_text, dimension_in, dimension_layout};
+pub use dim_draw::{dim_text, dimension_in, dimension_layout, mleader_arrow_layout};
 pub use display::{DPrim, DisplayList, Kind, MAX_TRANSPARENCY, NO_LAYER, PlotText, VIEWPORT_CONTENT, alpha};
 pub use pipeline::{Options, build, build_entities, build_plot};
 use props::{default_lineweight, resolve_common};

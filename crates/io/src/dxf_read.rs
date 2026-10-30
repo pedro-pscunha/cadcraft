@@ -22,6 +22,7 @@ mod document;
 mod entities;
 mod fill_canonical;
 mod hatch;
+mod mleader_canonical;
 mod objects;
 mod tables;
 mod text;
@@ -29,6 +30,7 @@ mod text_canonical;
 
 pub use curve_canonical::{canonical_curve_from_groups, canonical_polyline_from_groups};
 pub use fill_canonical::canonical_fill_from_groups;
+pub use mleader_canonical::canonical_mleader_from_groups;
 pub use text_canonical::{canonical_attrib_from_groups, canonical_layout_from_groups, canonical_text_from_groups};
 
 use document::{

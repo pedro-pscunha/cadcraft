@@ -146,6 +146,10 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
                 .map(|r| (r.id, r.landing, r.dogleg_dir, r.dogleg, r.branches.iter().map(|b| (b.id, &b.vertices)).collect::<Vec<_>>()))
                 .collect();
             let _ = write!(s, "MLEADER{:?}{plane:?}", (roots, m.context, m.spline, text, block));
+            // A canonical text also holds its full direction, and the arrowhead size is part of what an edit scales.
+            if m.context.geometry_revision == crate::GeometryRevision::CanonicalV2 {
+                let _ = write!(s, "{:?}", (m.text.as_ref().and_then(|t| t.direction), m.arrow_size));
+            }
         }
         EntityKind::Table(t) => {
             // The layout geometry: direction, sizes, the merged spans and the cells' own text heights; not the cell text.

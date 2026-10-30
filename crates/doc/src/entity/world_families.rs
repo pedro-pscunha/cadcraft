@@ -13,6 +13,7 @@ use super::dim::{Dimension, Leader};
 use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop, Wipeout};
 use super::helix::Helix;
 use super::layout::Table;
+use super::mleader::MLeader;
 use super::mline::MLine;
 use super::text::{MText, Text};
 use super::text_canonical::TextFrame;
@@ -234,6 +235,16 @@ pub struct LeaderArrowLayout {
     pub tris: Vec<Vec2>,
 }
 
+/// The arrowhead of `arrow` placed on `frame`: its outlines as lines and its triangles as solid fills.
+fn arrow_primitives(frame: &TextFrame, arrow: &LeaderArrowLayout, out: &mut Vec<WorldPrimitive>) {
+    for line in &arrow.lines {
+        out.extend(line.windows(2).map(|w| WorldPrimitive::Line { a: local(frame, w[0]), b: local(frame, w[1]) }));
+    }
+    for tri in arrow.tris.as_chunks::<3>().0 {
+        out.push(WorldPrimitive::Fill(WorldFill { loops: vec![local_loop(frame, tri)], kind: WorldFillKind::Solid, style: 0 }));
+    }
+}
+
 /// A canonical leader: the segments through its WCS vertices (as the renderer draws them today, whatever its path type)
 /// and, when it has an arrow and two distinct first vertices, its arrowhead placed at the first vertex.
 pub fn leader_primitives(leader: &Leader, normal: Vec3, arrow: &LeaderArrowLayout, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
@@ -246,12 +257,7 @@ pub fn leader_primitives(leader: &Leader, normal: Vec3, arrow: &LeaderArrowLayou
         if out_of_leader.len() > 1e-12 {
             let x_axis = out_of_leader.normalized();
             let arrow_frame = TextFrame { origin: tip, x_axis, y_axis: unit_normal.cross(x_axis), normal: unit_normal };
-            for line in &arrow.lines {
-                out.extend(line.windows(2).map(|w| WorldPrimitive::Line { a: local(&arrow_frame, w[0]), b: local(&arrow_frame, w[1]) }));
-            }
-            for tri in arrow.tris.as_chunks::<3>().0 {
-                out.push(WorldPrimitive::Fill(WorldFill { loops: vec![local_loop(&arrow_frame, tri)], kind: WorldFillKind::Solid, style: 0 }));
-            }
+            arrow_primitives(&arrow_frame, arrow, &mut out);
         }
     }
     finish(out, parent)
@@ -1124,4 +1130,73 @@ mod tests {
         assert_eq!(leader_primitives(&no_arrow, normal, &arrow, &parent()).unwrap().len(), 2);
         assert!(leader_primitives(&Leader { frame: None, ..leader }, normal, &arrow, &parent()).is_err());
     }
+}
+
+/// A canonical multileader in WCS: `primitives` are its leader lines, doglegs, arrowheads, text and the text of its block's
+/// attributes; `block` is the matrix from the block definition's coordinates to WCS (parent included) for the caller that
+/// expands the block content, `None` without block content.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MLeaderWorld {
+    pub primitives: Vec<WorldPrimitive>,
+    pub block: Option<Mat4>,
+}
+
+/// One leader line of a canonical multileader: through its vertices to its landing, smoothed when the leader type is
+/// spline. A spline leader lives in its plane (the context's X and Y axes through the line's first point): its fit is
+/// drawn there, and points off the plane refuse.
+fn leader_path(m: &MLeader, points: Vec<Vec3>) -> Result<Vec<Vec3>> {
+    if !m.spline || points.len() <= 2 {
+        return Ok(points);
+    }
+    let refuse = || DocError::Invalid("A spline multileader needs its points in the plane of its X and Y axes.".into());
+    let (x, y) = (m.context.x_axis.try_normalized().ok_or_else(refuse)?, m.context.y_axis.try_normalized().ok_or_else(refuse)?);
+    let normal = x.cross(y);
+    if x.dot(y).abs() > 1e-9 || normal.len() < 1e-9 {
+        return Err(refuse());
+    }
+    let origin = points[0];
+    let flat = points
+        .iter()
+        .map(|p| {
+            let d = *p - origin;
+            if d.dot(normal).abs() > 1e-9 * d.len().max(1.0) { Err(refuse()) } else { Ok(Vec2::new(d.dot(x), d.dot(y))) }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Spline::from_fit_points(&flat).tessellate(1e-3).into_iter().map(|q| origin + x * q.x + y * q.y).collect())
+}
+
+/// A canonical multileader, from the arrowhead `arrow` of its style and the base point `block_base` of its content block
+/// (the origin when there is none). The leader lines run to their roots' landings, each root draws its dogleg when it has
+/// lines, and each line carries an arrowhead in the plane of the context's axes.
+pub fn mleader_primitives(m: &MLeader, block_base: Vec3, arrow: &LeaderArrowLayout, parent: &Mat4) -> Result<MLeaderWorld> {
+    affine(parent)?;
+    m.require_canonical()?;
+    let mut out = Vec::new();
+    if m.line_count() > 0 {
+        let normal = m.leader_plane_normal()?;
+        for (root, branch) in m.lines() {
+            let points = branch.vertices.iter().copied().chain(std::iter::once(root.landing)).collect();
+            let path = leader_path(m, points)?;
+            out.extend(path.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }));
+            if let (Some(&tip), Some(&next)) = (path.first(), path.get(1))
+                && (tip - next).len() > 1e-12
+            {
+                let x_axis = (tip - next).normalized();
+                arrow_primitives(&TextFrame { origin: tip, x_axis, y_axis: normal.cross(x_axis), normal }, arrow, &mut out);
+            }
+        }
+    }
+    for root in m.roots.iter().filter(|r| r.dogleg > 0.0 && !r.branches.is_empty()) {
+        out.push(WorldPrimitive::Line { a: root.landing, b: root.dogleg_end() });
+    }
+    if let Some(text) = &m.text {
+        out.extend(mtext_primitives(text, m.context.text_normal, &Mat4::IDENTITY)?);
+    }
+    let block = m.block_world_transform(block_base)?;
+    if let (Some(block), Some(matrix)) = (&m.block, &block) {
+        for attrib in &block.attribs {
+            out.extend(attrib_primitives(attrib, matrix)?);
+        }
+    }
+    Ok(MLeaderWorld { primitives: finish(out, parent)?, block: block.map(|b| parent.mul(&b)) })
 }

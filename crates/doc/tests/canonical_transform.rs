@@ -9,10 +9,10 @@ use cadcraft_doc::{
     HatchLoop, Helix, HelixConstrain, HelixFrame, Leader, LeaderArrowLayout, LeaderFrame, Line, LwPolyline, MLine, MLineJust, MLineStyle,
     MLineVertex, MLineVertexFrame, MText, MeshKind, MeshVertex, Point, Polyline3d, PolylineFitVertex, PolylineMesh, Solid, Table, TableCell,
     TableLayout, TableLayoutText, Text, Tolerance, VAlign, Wipeout, WipeoutFrame, WorldPrimitive, arc_primitives, circle_primitives,
-    hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives, solid_primitives,
-    spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
+    hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mleader_primitives, mline_primitives, mtext_primitives,
+    solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
 };
-use cadcraft_doc::{Image, RayLine};
+use cadcraft_doc::{Image, Insert, MLeader, MLeaderContext, RayLine};
 use cadcraft_geom::{FitOptions, Mat4, PolyVertex, Spline, SplineSpace, Vec2, Vec3};
 
 fn near(a: Vec3, b: Vec3) -> bool {
@@ -256,6 +256,40 @@ fn table() -> Table {
     }
 }
 
+/// A multileader with two roots: its text in the tilted plane of NORMAL, or a block with an attribute in block space.
+fn mleader(block: bool) -> MLeader {
+    let mut m =
+        MLeader::single(Vec3::new(10.0, 20.0, 3.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 3.0), Vec3::new(4.0, 6.0, 3.0)]], (!block).then(mtext));
+    let mut second = cadcraft_doc::MLeaderRoot::new(Vec3::new(-10.0, 18.0, 3.0), 3.0, true, vec![vec![Vec3::new(-2.0, 0.0, 3.0)]]);
+    second.id = 1;
+    m.roots.push(second);
+    m.arrow_size = 0.18;
+    m.context = MLeaderContext {
+        origin: Vec3::new(0.0, 0.0, 3.0),
+        text_normal: NORMAL,
+        text_dir: Vec3::new(0.6, 0.64, -0.48),
+        block_normal: Vec3::new(1.0, 0.0, 2.0),
+        geometry_revision: GeometryRevision::CanonicalV2,
+        ..MLeaderContext::default()
+    };
+    if block {
+        let mut attrib = Attrib::new("TAG", text(Vec3::new(1.0, 2.0, 3.0)));
+        attrib.geometry_revision = GeometryRevision::CanonicalV2;
+        m.block = Some(Insert {
+            block: "B".into(),
+            insert: Vec3::new(7.0, -3.0, 2.0),
+            scale: Vec3::new(1.5, -2.0, 0.5),
+            rotation: 0.4,
+            attribs: vec![attrib],
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        });
+    }
+    m
+}
+
 /// Every family's fixture, with its normal.
 fn fixtures() -> Vec<(&'static str, Entity)> {
     let attdef = {
@@ -319,6 +353,8 @@ fn fixtures() -> Vec<(&'static str, Entity)> {
             ),
         ),
         ("3DFACE", entity(EntityKind::Face3d(Face3d { corners, hidden_edges: 2 }), NORMAL)),
+        ("MLEADER", entity(EntityKind::MLeader(mleader(false)), NORMAL)),
+        ("MLEADER block", entity(EntityKind::MLeader(mleader(true)), NORMAL)),
         ("MESH", entity(EntityKind::PolylineMesh(mesh()), NORMAL)),
         ("RAY", entity(EntityKind::Ray(RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) }), NORMAL)),
         ("XLINE", entity(EntityKind::XLine(RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) }), NORMAL)),
@@ -374,6 +410,7 @@ fn primitives(e: &Entity) -> Option<Vec<WorldPrimitive>> {
         EntityKind::Solid(s) | EntityKind::Trace(s) => solid_primitives(s, n, id).unwrap(),
         EntityKind::Spline(s) => spline_primitives(s, id).unwrap(),
         EntityKind::Leader(l) => leader_primitives(l, n, &LeaderArrowLayout::default(), id).unwrap(),
+        EntityKind::MLeader(m) => mleader_primitives(m, Vec3::new(1.0, 2.0, 3.0), &LeaderArrowLayout::default(), id).unwrap().primitives,
         EntityKind::Ellipse(_) | EntityKind::Line(_) | EntityKind::Point(_) => e.world_geometry(id).unwrap().primitives().to_vec(),
         EntityKind::Polyline3d(p) => p.points.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }).collect(),
         EntityKind::Face3d(f) => f.corners.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }).collect(),
@@ -476,6 +513,7 @@ fn a_canonical_move_and_a_tilted_rotation_give_the_hooks_result_for_every_family
                     | EntityKind::Ray(_)
                     | EntityKind::XLine(_)
                     | EntityKind::Image(_)
+                    | EntityKind::MLeader(_)
             ) {
                 assert!(near(moved.common.extrusion, m.apply_vec(e.common.extrusion)), "{name} {what}: normal {:?}", moved.common.extrusion);
             }
@@ -513,6 +551,7 @@ fn a_scale_scales_the_thickness_with_the_similarity_families() {
                 | EntityKind::Ray(_)
                 | EntityKind::XLine(_)
                 | EntityKind::Image(_)
+                | EntityKind::MLeader(_)
         );
         let expected = if unscaled { 0.5 } else { 1.0 };
         assert_eq!(moved.common.thickness, expected, "{name}");
@@ -576,6 +615,11 @@ fn a_legacy_payload_keeps_the_legacy_path() {
         e.common.extrusion = Vec3::Z;
         match &mut e.kind {
             EntityKind::AttDef(a) => a.multiline = None,
+            // A legacy multileader has a legacy context and legacy attributes.
+            EntityKind::MLeader(m) => {
+                m.context.geometry_revision = GeometryRevision::LegacyProjectedV1;
+                m.block.iter_mut().for_each(|b| b.attribs.clear());
+            }
             // The legacy wipeout is a boundary in the XY plane.
             EntityKind::Wipeout(w) => *w = Wipeout { boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 2.0)], frame: None },
             _ => {}

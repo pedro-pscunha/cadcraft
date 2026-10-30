@@ -646,7 +646,8 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
                 block: m.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).cloned()),
                 arrow: cx.arrow(&m.arrow_block),
             };
-            w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs));
+            let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && m.require_canonical().is_ok();
+            w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs, canonical));
         }
         EntityKind::Leader(l) => {
             w.s(0, "LEADER");
