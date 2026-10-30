@@ -115,6 +115,7 @@ mod tablestyle_true_colors;
 mod text_canonical;
 mod text_direction_roundtrip;
 mod text_generation_flags;
+mod text_insert_moved;
 mod text_left_justify;
 mod tolerance_roundtrip;
 mod unknown_entity_block;

@@ -1,6 +1,6 @@
 use super::{Deserialize, Serialize, Vec2, Vec3, one, standard};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HAlign {
     #[default]
@@ -12,7 +12,7 @@ pub enum HAlign {
     Fit,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VAlign {
     #[default]
@@ -52,6 +52,20 @@ pub struct Text {
 }
 
 impl Text {
+    /// A key of what fixes the baseline start of justified text relative to its alignment point: the value, style, size, slant,
+    /// width factor, justification and reflection, and not the place or the rotation.
+    pub fn layout_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.value.hash(&mut h);
+        self.style.hash(&mut h);
+        for v in [self.height, self.width_factor, self.oblique] {
+            v.to_bits().hash(&mut h);
+        }
+        (self.halign, self.valign, self.backward, self.upside_down).hash(&mut h);
+        h.finish()
+    }
+
     /// The point the text is placed by, as the Insertion snap and the grip show it: the alignment
     /// point (DXF group 11) of justified text, the start point (group 10) of left-baseline,
     /// aligned and fit text.

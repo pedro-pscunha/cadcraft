@@ -330,7 +330,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.s(0, "TEXT");
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
-            text_tags(w, d, t, None, None, canonical_plane(e));
+            text_tags(w, d, t, None, None, canonical_plane(e), e.common.geometry.as_deref().and_then(|g| g.text.as_ref()));
         }
         // Closed polylines, one per loop (`dxf_region`): REGION's own data is ACIS.
         EntityKind::Region(r) => {
@@ -356,7 +356,15 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.s(0, "ATTDEF");
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
-            text_tags(w, d, &a.text, Some((a, cx.target)), Some(&a.prompt), canonical_plane(e));
+            text_tags(
+                w,
+                d,
+                &a.text,
+                Some((a, cx.target)),
+                Some(&a.prompt),
+                canonical_plane(e),
+                e.common.geometry.as_deref().and_then(|g| g.text.as_ref()),
+            );
             if cx.target >= Version::R2007 {
                 multiline_tags(w, a, true);
             }
@@ -461,7 +469,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 if a.plane.thickness != 0.0 {
                     w.f(39, a.plane.thickness);
                 }
-                text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane);
+                text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane, a.geometry.as_deref().and_then(|g| g.text.as_ref()));
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }

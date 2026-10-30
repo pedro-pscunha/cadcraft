@@ -13,7 +13,9 @@
 
 use std::fmt::Write;
 
-use super::{Attrib, Common, EntityKind, RawTag, Text};
+use cadcraft_geom::Vec3;
+
+use super::{Attrib, Common, EntityKind, HAlign, RawTag, Text, VAlign};
 
 /// The geometry groups of one source record (see [`GeometrySnapshot::records`]).
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +32,38 @@ pub struct GeometrySnapshot {
     pub records: Vec<GeometryRecord>,
     /// The entity's [`geometry_key`] when it was read.
     pub model: String,
+    /// A justified text as it was read, to place its baseline start again after the text moved.
+    pub text: Option<TextAsRead>,
+}
+
+/// A justified text's placement when it was read: the baseline start (group 10), the alignment point (group 11) and the
+/// baseline angle, with the [`Text::layout_key`] they were measured for. While the text's layout is the same, a move or a
+/// rotation keeps the baseline start where it was relative to the alignment point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextAsRead {
+    pub insert: Vec3,
+    pub align_pt: Vec3,
+    pub rotation: f64,
+    pub layout: u64,
+}
+
+impl TextAsRead {
+    /// `t` as read, or `None` for text that is not justified (left on the baseline, aligned or fit text are placed by their
+    /// start point) or has no alignment point.
+    pub fn of(t: &Text) -> Option<TextAsRead> {
+        if matches!((t.halign, t.valign), (HAlign::Left, VAlign::Baseline) | (HAlign::Aligned | HAlign::Fit, _)) {
+            return None;
+        }
+        Some(TextAsRead { insert: t.insert, align_pt: t.align_pt?, rotation: t.rotation, layout: t.layout_key() })
+    }
+
+    /// The baseline start of `t` after a move or rotation since it was read: its alignment point plus the offset it had,
+    /// turned by the rotation since. `None` when the text's layout changed (another value, size, style or justification).
+    pub fn insert_after(&self, t: &Text) -> Option<Vec3> {
+        let align = t.align_pt.filter(|_| t.layout_key() == self.layout)?;
+        let offset = (self.insert.xy() - self.align_pt.xy()).rotate(t.rotation - self.rotation);
+        Some(Vec3::new(align.x + offset.x, align.y + offset.y, align.z + self.insert.z - self.align_pt.z))
+    }
 }
 
 /// The placement of a multiline attribute's embedded MTEXT: its place, size and attachment, its full direction and its

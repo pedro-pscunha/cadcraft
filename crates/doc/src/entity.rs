@@ -87,7 +87,7 @@ pub use curves::{
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
 pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
-pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
+pub use geometry::{GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
 pub use mleader::{
