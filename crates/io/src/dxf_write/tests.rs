@@ -7,7 +7,7 @@ std::thread_local! { pub(super) static SCANNED: Cell<usize> = const { Cell::new(
 fn inactive_gradient_replay_uses_the_dwg_target_not_the_bridge_declaration() {
     let drawing = crate::read_dxf(b"0\nSECTION\n2\nENTITIES\n0\nHATCH\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n2\nSOLID\n70\n1\n71\n0\n91\n0\n75\n0\n76\n1\n98\n0\n450\n0\n453\n2\n421\n66051\n421\n263430\n470\nSPHERICAL\n0\nENDSEC\n0\nEOF\n").unwrap();
     for target in [Version::R2000, Version::R2018] {
-        let tags = cadcraft_dxf::parse(&dwg_bridge(&drawing, target)).unwrap();
+        let tags = cadcraft_dxf::parse(&dwg_bridge(&drawing, target).bytes).unwrap();
         let record = cadcraft_dxf::sections(&tags)
             .into_iter()
             .filter(|s| s.name == "ENTITIES")
@@ -28,7 +28,7 @@ fn inactive_gradient_replay_uses_the_dwg_target_not_the_bridge_declaration() {
 #[test]
 fn named_shape_style_stays_named_in_the_bridge_reader() {
     let drawing = crate::read_dxf(include_bytes!("../../tests/data/named_shape_style.dxf")).unwrap();
-    let bytes = dwg_bridge(&drawing, Version::R2018);
+    let bytes = dwg_bridge(&drawing, Version::R2018).bytes;
     let tags = cadcraft_dxf::parse(&bytes).unwrap();
     let styles: Vec<_> = cadcraft_dxf::sections(&tags)
         .into_iter()
@@ -63,7 +63,7 @@ fn dimstyle_fidelity_bridge_private_variables_are_plain_groups_only_for_supporte
     for target in [Version::R2000, Version::R2007, Version::R2010, Version::R2018] {
         let tags = tags(&d, target);
         // The public tag writer is not the bridge, even when its version is 2018.
-        let bytes = dwg_bridge(&d, target);
+        let bytes = dwg_bridge(&d, target).bytes;
         let bridge = cadcraft_dxf::parse(&bytes).unwrap();
         let has_private = |tags: &[Tag]| tags.iter().any(|t| t.code == 51 && t.f64() == 12.5);
         assert!(!has_private(&tags), "public DXF {target:?}");
@@ -87,7 +87,7 @@ fn dimstyle_fidelity_bridge_true_colors_keep_all_24_bits() {
     st.text_fill = 2;
     st.text_fill_color = rgb;
     for version in [Version::R2000, Version::R2004, Version::R2007, Version::R2018] {
-        let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, version)).unwrap();
+        let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, version).bytes).unwrap();
         let public = tags(&d, version);
         for code in 421..=424 {
             assert!(!public.iter().any(|t| t.code == code && t.i64() == 0xbb829d), "public DXF {version:?}/{code}");
@@ -121,7 +121,7 @@ fn private_header_variables_stay_in_the_dwg_bridge() {
         d.header.dxf_codes.insert(name.into(), vec![code]);
     }
     let public = tags(&d, Version::R2018);
-    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap();
+    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018).bytes).unwrap();
     // The drawing properties are not DXF header variables: AutoCAD reports `$LASTSAVEDBY` as an
     // unknown variable, and its own DXFOUT writes none of them.
     for name in [
@@ -278,7 +278,7 @@ fn purge_preventer_block_pointer_stays_in_the_dwg_bridge() {
     let public = purge_preventer(&tags(&d, Version::R2018));
     assert!(public.iter().any(|t| t.code == 70 && t.i64() == 1), "public preventer keeps its flags: {public:?}");
     assert!(!public.iter().any(|t| t.code == 340), "public preventer has no block pointer: {public:?}");
-    let bridge = purge_preventer(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap());
+    let bridge = purge_preventer(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018).bytes).unwrap());
     assert!(bridge.iter().any(|t| t.code == 340 && t.str() != "0"), "bridge preventer keeps its block: {bridge:?}");
 }
 
@@ -290,7 +290,7 @@ fn the_surface_modeler_cache_stays_in_the_private_bridge_without_dropping_xdata(
     assert!(!public.iter().any(|tag| tag.str() == "AcDbAcadrustSurfaceCache"));
     assert!(!public.iter().any(|tag| tag.code == 310 && tag.str() == "AABBCC"));
     assert!(public.iter().any(|tag| tag.code == 1000 && tag.str() == "surface-user-data"));
-    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018)).unwrap();
+    let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018).bytes).unwrap();
     assert!(bridge.iter().any(|tag| tag.str() == "AcDbAcadrustSurfaceCache"));
     assert!(bridge.iter().any(|tag| tag.code == 310 && tag.str() == "AABBCC"));
     assert!(bridge.iter().any(|tag| tag.code == 1000 && tag.str() == "surface-user-data"));
@@ -325,7 +325,7 @@ fn the_embedded_layout_group_stays_in_the_dwg_bridge_only() {
             assert!(public.iter().any(|t| t.code == 310 && t.str() == "AABBCC"), "the surface bytes stay: {target:?}");
             assert!(public.iter().any(|t| t.code == 310 && t.str() == "DDEE"), "the history bytes stay: {target:?}");
         }
-        let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, target)).unwrap();
+        let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, target).bytes).unwrap();
         assert_eq!(kept(&bridge), 2, "DWG bridge {target:?}");
     }
 }

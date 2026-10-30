@@ -38,7 +38,7 @@ pub(crate) use blocks::is_generated_arrow;
 pub(crate) use blocks::table_block_entities;
 use ctx::Ctx;
 use entity::entity;
-pub(crate) use raw::remap_raw_references;
+pub(crate) use raw::{changed_properties as raw_changed_properties, raw_reference, remap_raw_references};
 use sections::tags_for;
 
 #[derive(Default)]
@@ -174,7 +174,7 @@ pub fn write(d: &Drawing) -> String {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`.
 pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
-    tags_for(d, version, version, false)
+    tags_for(d, version, version, false).0
 }
 
 struct SaveExtents {
@@ -269,11 +269,16 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's. Its text is in the Windows single-byte page it declares,
 /// so the bridge stores representable characters rather than their literal Unicode escapes.
-pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
-    let mut tags = tags_for(d, Version::R2000, dwg, true);
+pub(crate) struct DwgBridge {
+    pub bytes: Vec<u8>,
+    pub references: crate::dxf_raw::WrittenReferences,
+}
+
+pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> DwgBridge {
+    let (mut tags, references) = tags_for(d, Version::R2000, dwg, true);
     let page = cadcraft_dxf::single_byte_code_page(&d.header.str("DWGCODEPAGE", "ANSI_1252"));
     bridge_code_page(&mut tags, page);
-    cadcraft_dxf::ascii_to_code_page(&cadcraft_dxf::write_ascii(&tags), page)
+    DwgBridge { bytes: cadcraft_dxf::ascii_to_code_page(&cadcraft_dxf::write_ascii(&tags), page), references }
 }
 
 /// Declare the page used for the bridge bytes, including the explicit 1252 fallback when the

@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn the_bridge_carries_border_linetypes_and_overrides_and_a_user_dxf_does_not() {
         let d = dashed_borders();
-        let (style, dashed) = plan_style(&crate::dxf_write::dwg_bridge(&d, crate::Version::R2018));
+        let (style, dashed) = plan_style(&crate::dxf_write::dwg_bridge(&d, crate::Version::R2018).bytes);
         let at = |code: i32| style.iter().filter(|t| t.code == code).map(|t| t.str().trim().to_string()).collect::<Vec<_>>();
         assert_eq!(at(340), [dashed], "the top border's linetype handle, once");
         assert_eq!((at(94), at(99)), (["6".to_string()].to_vec(), ["8".to_string()].to_vec()), "override flags of the top and right borders");

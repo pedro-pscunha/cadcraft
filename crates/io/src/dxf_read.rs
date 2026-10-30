@@ -28,6 +28,11 @@ mod tables;
 mod text;
 mod text_canonical;
 
+/// Interpret only common properties, without building or projecting a geometry payload.
+pub(crate) fn common_from_groups(tags: &[Tag]) -> Common {
+    common::common(&common::T(tags))
+}
+
 pub use curve_canonical::{canonical_curve_from_groups, canonical_polyline_from_groups};
 pub use fill_canonical::canonical_fill_from_groups;
 pub use mleader_canonical::canonical_mleader_from_groups;
