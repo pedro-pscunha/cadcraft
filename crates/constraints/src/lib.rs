@@ -63,7 +63,7 @@ pub enum SolveError {
     Conflict { ids: Vec<u32> },
     #[error("constraint would over-constrain the geometry (redundant with {})", ids_text(ids))]
     Redundant { ids: Vec<u32> },
-    #[error("object {handle:?} has canonical geometry, which the constraint solver cannot read")]
+    #[error("object {} has canonical geometry, which the constraint solver does not read yet. Nothing was changed", handle.hex())]
     CanonicalGeometry { handle: Handle },
     #[error("constraint system too large to solve")]
     TooLarge,
