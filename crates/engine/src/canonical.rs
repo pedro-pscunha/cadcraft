@@ -112,6 +112,66 @@ fn loop_points(loop_: &[WorldPrimitive]) -> Vec<Vec2> {
     out
 }
 
+/// The WCS center of a canonical circle, arc or ellipse (the center of its conic), when the resolver gives it.
+pub(crate) fn world_center(d: &Drawing, e: &Entity) -> Option<Vec3> {
+    if e.geometry_revision != GeometryRevision::CanonicalV2 {
+        return None;
+    }
+    let geometry = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY).ok()?;
+    match geometry.primitives() {
+        [WorldPrimitive::Conic { center, .. }] => Some(*center),
+        _ => None,
+    }
+}
+
+/// The read-only geometry rows of a canonical LINE, CIRCLE or ARC for a property palette: WCS coordinates with their frame named, and
+/// the lengths and angles that the world geometry gives. `None` for a legacy entity and for kinds whose rows hold no coordinates.
+pub fn canonical_geometry_rows(d: &Drawing, e: &Entity) -> Option<Vec<(&'static str, String)>> {
+    use cadcraft_doc::EntityKind;
+    if e.geometry_revision != GeometryRevision::CanonicalV2 || !matches!(e.kind, EntityKind::Line(_) | EntityKind::Circle(_) | EntityKind::Arc(_)) {
+        return None;
+    }
+    let real = |v: f64| format!("{v:.4}");
+    let xyz = |v: Vec3, labels: [&'static str; 3]| [(labels[0], real(v.x)), (labels[1], real(v.y)), (labels[2], real(v.z))];
+    let geometry = match cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) {
+        Ok(geometry) => geometry,
+        Err(error) => return Some(vec![("Geometry", error.to_string())]),
+    };
+    let mut rows = Vec::new();
+    match (&e.kind, geometry.primitives()) {
+        (EntityKind::Line(_), [WorldPrimitive::Line { a, b }]) => {
+            let delta = *b - *a;
+            rows.extend(xyz(*a, ["Start X (WCS)", "Start Y (WCS)", "Start Z (WCS)"]));
+            rows.extend(xyz(*b, ["End X (WCS)", "End Y (WCS)", "End Z (WCS)"]));
+            rows.extend(xyz(delta, ["Delta X", "Delta Y", "Delta Z"]));
+            rows.push(("Length", real(delta.len())));
+            rows.push(("Angle", real(delta.xy().angle().to_degrees())));
+        }
+        (EntityKind::Circle(_) | EntityKind::Arc(_), [WorldPrimitive::Conic { center, axis_u, axis_v, .. }]) => {
+            rows.extend(xyz(*center, ["Center X (WCS)", "Center Y (WCS)", "Center Z (WCS)"]));
+            if let Some(normal) = axis_u.cross(*axis_v).try_normalized() {
+                rows.extend(xyz(normal, ["Normal X", "Normal Y", "Normal Z"]));
+            }
+            let radius = axis_u.len();
+            rows.push(("Radius", real(radius)));
+            match &e.kind {
+                EntityKind::Circle(_) => {
+                    rows.push(("Diameter", real(radius * 2.0)));
+                    rows.push(("Circumference", real(radius * cadcraft_geom::TAU)));
+                    rows.push(("Area", real(radius * radius * cadcraft_geom::PI)));
+                }
+                EntityKind::Arc(a) => {
+                    rows.push(("Start angle (in plane)", real(a.start.to_degrees())));
+                    rows.push(("End angle (in plane)", real(a.end.to_degrees())));
+                }
+                _ => {}
+            }
+        }
+        _ => return Some(vec![("Geometry", "no world geometry".into())]),
+    }
+    Some(rows)
+}
+
 impl Flat {
     /// The tessellated outlines of the primitives (and the words' boxes) for hit tests at `tol`.
     pub fn polylines(&self, tol: f64) -> Vec<Vec<Vec2>> {

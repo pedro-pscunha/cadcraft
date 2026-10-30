@@ -120,7 +120,24 @@ pub(super) fn entity_props(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) 
                 );
             }
         }
+        // A canonical entity reports its world values: the geometry above is in its own frame (the OCS of the extrusion, WCS for a
+        // LINE), so a LINE measures in space and a circle or arc also gives its WCS center.
+        let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
+        if canonical {
+            o.insert("geometryRevision".into(), json!("canonical"));
+            o.insert("geometryFrame".into(), json!(if matches!(e.kind, EntityKind::Line(_)) { "wcs" } else { "ocs" }));
+            o.insert("extrusion".into(), json!([e.common.extrusion.x, e.common.extrusion.y, e.common.extrusion.z]));
+            if let Some(center) = crate::canonical::world_center(d, e) {
+                o.insert("worldCenter".into(), json!([center.x, center.y, center.z]));
+            }
+        }
         match &e.kind {
+            EntityKind::Line(l) if canonical => {
+                let delta = l.b - l.a;
+                o.insert("length".into(), json!(delta.len()));
+                o.insert("angle".into(), json!(delta.xy().angle().to_degrees()));
+                o.insert("deltaZ".into(), json!(delta.z));
+            }
             EntityKind::Line(l) => {
                 o.insert("length".into(), json!(l.a.xy().dist(l.b.xy())));
                 o.insert("angle".into(), json!(l.a.xy().angle_to(l.b.xy()).to_degrees()));

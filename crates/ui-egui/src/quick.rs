@@ -296,6 +296,7 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
     let layers: Vec<String> = d.layers.iter().map(|l| l.name.clone()).collect();
     let linetypes: Vec<String> = d.linetypes.iter().map(|l| l.name.clone()).collect();
     let kind = if ents.len() == 1 { Some(first.kind.clone()) } else { None };
+    let canonical_rows = if ents.len() == 1 { cadcraft_engine::canonical_geometry_rows(d, first) } else { None };
     let ids: Vec<String> = sel.iter().map(|h| h.hex()).collect();
     let mut set: Option<(String, Value)> = None;
     // Rotations show as the drawing measures directions (ANGBASE, ANGDIR).
@@ -339,6 +340,12 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
                 ui.end_row();
                 let id = |k: &str| egui::Id::unique(("qp", k, &ids));
                 match &kind {
+                    // A canonical LINE, CIRCLE or ARC shows its world values, read-only (its fields are not legacy 2D coordinates).
+                    Some(_) if canonical_rows.is_some() => {
+                        for (label, value) in canonical_rows.iter().flatten() {
+                            ro_row(ui, label, value.clone());
+                        }
+                    }
                     Some(EntityKind::Line(l)) => {
                         let dl = l.b.xy() - l.a.xy();
                         num_row(ui, "Length", id("len"), dl.len(), &mut set, "length");
