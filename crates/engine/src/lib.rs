@@ -14,6 +14,7 @@ pub mod atomic_write;
 pub mod audit;
 pub mod autosave;
 pub mod blockedit;
+mod canonical;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capped_read;
 pub mod cmd;

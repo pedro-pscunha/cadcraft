@@ -8,6 +8,10 @@ use crate::{Accept, Prompt};
 
 /// Polylines approximating an entity for hit testing, tessellated at `tol`.
 pub fn hit_polylines(d: &Drawing, e: &Entity, tol: f64) -> Vec<Vec<Vec2>> {
+    // A canonical object is hit on its WCS geometry seen along Z; a legacy one on its 2D reading below.
+    if let Some(flat) = crate::canonical::flatten(d, e) {
+        return flat.polylines(tol);
+    }
     match &e.kind {
         EntityKind::Text(_)
         | EntityKind::MText(_)
@@ -86,6 +90,10 @@ fn dist_to_polyline(pts: &[Vec2], p: Vec2) -> f64 {
 
 /// Distance from `p` to the entity (0 inside text boxes and solid fills).
 pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
+    if let Some(flat) = crate::canonical::flatten(d, e) {
+        let best = flat.polylines(tol).iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
+        return if flat.covers(p) { 0.0 } else { best };
+    }
     let polys = hit_polylines(d, e, tol);
     let mut best = polys.iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
     let filled = matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Table(_))
@@ -149,7 +157,14 @@ fn selectable(d: &Drawing, e: &Entity) -> bool {
 pub(crate) type Cands<'a> = Box<dyn Iterator<Item = (&'a Entity, Option<Bounds2>)> + 'a>;
 
 pub(crate) fn bounds_of(d: &Drawing, e: &Entity, known: Option<Bounds2>) -> Bounds2 {
-    known.unwrap_or_else(|| entity_bounds(d, e, 0))
+    known.unwrap_or_else(|| {
+        // A canonical entity's bounds are those of its WCS geometry; one the resolver refuses has none.
+        if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+            cadcraft_render::entity_world_bounds(d, e, &cadcraft_geom::Mat4::IDENTITY).unwrap_or(Bounds2::EMPTY)
+        } else {
+            entity_bounds(d, e, 0)
+        }
+    })
 }
 
 pub(crate) fn is_infinite(e: &Entity) -> bool {
@@ -289,6 +304,9 @@ pub(crate) fn in_window(d: &Drawing, e: &Entity, known: Option<Bounds2>, bx: &Bo
     // the polygon, not just its bounding rectangle (which can cover empty
     // space around triangular solids).
     if matches!(e.kind, EntityKind::Solid(_) | EntityKind::Trace(_)) && eb.contains_box(bx) {
+        if let Some(flat) = crate::canonical::flatten(d, e) {
+            return bx.corners().iter().all(|c| flat.covers(*c));
+        }
         return e.kind.prims().iter().any(|prim| match prim {
             Prim::Fill(poly) => bx.corners().iter().all(|p| cadcraft_geom::point_in_polygon(poly, *p)),
             _ => false,

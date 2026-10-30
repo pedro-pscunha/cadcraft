@@ -1,4 +1,4 @@
-use cadcraft_doc::{Drawing, GeometryRevision, Handle};
+use cadcraft_doc::{Drawing, EntityKind, GeometryRevision, Handle};
 use cadcraft_engine::Session;
 use serde_json::{Value, json};
 
@@ -10,6 +10,15 @@ fn create(session: &mut Session, command: &str, params: Value) -> Handle {
 fn install_canonical_fixture(session: &mut Session, handle: Handle) {
     let mut entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
     entity.geometry_revision = GeometryRevision::CanonicalV2;
+    // A canonical spline is spatial: the legacy planar one gets the Z values its recovery gives (all zero).
+    if let EntityKind::Spline(spline) = &mut entity.kind {
+        spline.space = Some(cadcraft_geom::SplineSpace {
+            control: vec![0.0; spline.control.len()],
+            fit: vec![0.0; spline.fit.len()],
+            start_tangent: 0.0,
+            end_tangent: 0.0,
+        });
+    }
     session.doc_mut().unwrap().model.push(entity);
 }
 
