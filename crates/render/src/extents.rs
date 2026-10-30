@@ -33,6 +33,9 @@ impl From<ExtentsRefusal> for DocError {
 
 /// Extents of one entity in its source space. The legacy depth remains part of its existing bounds contract.
 pub fn entity_extents(drawing: &Drawing, entity: &Entity, depth: usize) -> Result<Bounds2, ExtentsRefusal> {
+    if entity.unresolved_display().is_some() {
+        return Ok(Bounds2::EMPTY);
+    }
     let result = if entity.geometry_revision == GeometryRevision::CanonicalV2 {
         if matches!(entity.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             Ok(Bounds2::EMPTY)

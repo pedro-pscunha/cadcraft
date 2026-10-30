@@ -57,6 +57,10 @@ impl VpContent {
         if self.key.is_some() { &self.list.geometry_refusals } else { &[] }
     }
 
+    pub(super) fn unresolved(&self) -> &[cadcraft_render::UnresolvedRecord] {
+        if self.key.is_some() { &self.list.unresolved } else { &[] }
+    }
+
     /// Where the contents are on paper at the viewport's current view.
     pub(super) fn paper_bounds(&self) -> Option<Bounds2> {
         let (k, b) = self.motion?;
@@ -164,6 +168,7 @@ pub(super) fn draw_vp_content(c: &mut VpContent, gpu: bool, p: &egui::Painter, f
     let xf = &f.xf;
     if !gpu {
         draw_list(p, xf, &c.list, bg, lwdisplay);
+        super::unresolved::markers(p, xf, &c.list.unresolved);
         return;
     }
     let mut stencil = crate::gpu::Stencil::Off;
@@ -201,6 +206,7 @@ pub(super) fn draw_vp_content(c: &mut VpContent, gpu: bool, p: &egui::Painter, f
             stencil,
         },
     ));
+    super::unresolved::markers(p, xf, &c.list.unresolved);
 }
 
 /// Mask a clipped viewport's `outline` (paper units) in the stencil buffer: a triangle fan from

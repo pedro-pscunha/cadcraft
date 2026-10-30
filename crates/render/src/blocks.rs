@@ -134,7 +134,7 @@ fn canonical_block_cell(
         if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || !resolve(&sub, child, b.plotting).4 {
             continue;
         }
-        if child.geometry_revision != GeometryRevision::CanonicalV2 {
+        if child.geometry_revision != GeometryRevision::CanonicalV2 && child.unresolved_display().is_none() {
             return Err(DocError::Invalid("A canonical block cannot use a legacy child geometry payload.".into()));
         }
         if !b.expand() {

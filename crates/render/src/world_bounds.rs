@@ -9,6 +9,9 @@ use crate::{WorldShaped, WorldTextLayout, layout_world_text};
 
 /// Bounds in the XY view after the complete spatial parent, or an explicit geometry refusal.
 pub fn entity_world_bounds(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<Bounds2> {
+    if entity.unresolved_display().is_some() {
+        return Ok(Bounds2::EMPTY);
+    }
     let mut envelopes = Bounds2::EMPTY;
     let geometry = crate::world_geometry::entity_world_geometry_visiting(drawing, entity, parent, &mut |source, complete_parent| {
         if source.geometry_revision == GeometryRevision::CanonicalV2
