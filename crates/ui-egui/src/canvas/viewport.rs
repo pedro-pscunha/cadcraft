@@ -53,6 +53,10 @@ pub(super) struct VpContent {
 }
 
 impl VpContent {
+    pub(super) fn geometry_refusals(&self) -> &[cadcraft_render::GeometryRefusal] {
+        if self.key.is_some() { &self.list.geometry_refusals } else { &[] }
+    }
+
     /// Where the contents are on paper at the viewport's current view.
     pub(super) fn paper_bounds(&self) -> Option<Bounds2> {
         let (k, b) = self.motion?;

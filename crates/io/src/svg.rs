@@ -8,19 +8,19 @@ use cadcraft_geom::Bounds2;
 use cadcraft_render::Kind;
 
 /// Export with a white background (colour 7 prints black), fitted to the extents.
-pub fn export(d: &Drawing, space: &Space) -> String {
+pub fn export(d: &Drawing, space: &Space) -> crate::Result<String> {
     export_window(d, space, None)
 }
 
 /// Export showing exactly `window` (the `viewBox`; geometry outside it is clipped by the viewer),
 /// or the extents with a 2% margin when `window` is `None`. Objects are drawn with their
 /// transparency, as on screen.
-pub fn export_window(d: &Drawing, space: &Space, window: Option<Bounds2>) -> String {
+pub fn export_window(d: &Drawing, space: &Space, window: Option<Bounds2>) -> crate::Result<String> {
     export_window_with(d, space, window, true)
 }
 
 /// [`export_window`], drawing transparency only when `transparency` is on (plots).
-pub fn export_window_with(d: &Drawing, space: &Space, window: Option<Bounds2>, transparency: bool) -> String {
+pub fn export_window_with(d: &Drawing, space: &Space, window: Option<Bounds2>, transparency: bool) -> crate::Result<String> {
     let list = cadcraft_render::build(d, space, &cadcraft_render::Options { transparency, ..cadcraft_render::Options::default() });
     export_list(&list, window)
 }
@@ -34,7 +34,8 @@ fn opacity(p: &cadcraft_render::DPrim) -> String {
 }
 
 /// Write a display list (as [`export_window`] does for a space's own).
-pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>) -> String {
+pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>) -> crate::Result<String> {
+    list.require_complete_geometry().map_err(|error| crate::IoError::Format(error.to_string()))?;
     let window = window.filter(|w| !w.is_empty());
     let b = window.unwrap_or(list.bounds);
     // A single point (or a zero-size window) has no extent: show a unit box centred on it.
@@ -120,5 +121,5 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
         }
     }
     s.push_str("</svg>");
-    s
+    Ok(s)
 }

@@ -23,6 +23,7 @@ pub(crate) fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     Ctx {
         d: ctx.d,
         xf: ctx.xf.then_before(m),
+        world: ctx.world.mul(&cadcraft_geom::Mat4::from_mat3(&m)),
         block_color: color,
         block_layer: layer,
         block_lw: lw,
@@ -80,19 +81,7 @@ pub(crate) fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc:
             // A multiline attribute is drawn as its multiline text.
             let multiline = a.multiline_text();
             let sh = if multiline.is_none() { Some(place_text_entity(ctx.d, &a.text, &a.text.value).0) } else { None };
-            // Properties of the attribute's definition (as AutoCAD copies them to the attribute
-            // on insertion), except those set on the attribute itself: ByBlock = the reference's,
-            // layer 0 = the reference's layer.
-            let def = ctx.d.block(&ins.block).and_then(|blk| blk.entities.iter().find(|be| attdef_tag(be, &a.tag)));
-            let (ink, lw, shown, t) = match (def, a.props.is_empty()) {
-                (None, true) => (rgb, resolve(ctx, e, b.plotting).1, true, reference),
-                (def, _) => {
-                    let c = a.props.over(&def.map(|d| d.common.clone()).unwrap_or_else(by_block));
-                    let (ink, lw, _, _, shown, layer_t) = resolve_common(&sub_ctx(ctx, e, Mat3::IDENTITY), &c, b.plotting);
-                    let t = if b.opts.transparency { transparency(c.transparency, layer_t, reference) } else { 0 };
-                    (ink, lw, shown, t)
-                }
-            };
+            let (ink, lw, shown, t) = attribute_appearance(b, ctx, e, ins, a, rgb, reference);
             if shown {
                 b.transparency = t;
                 let lw = if b.opts.lineweights { lw } else { 0.0 };
@@ -105,6 +94,91 @@ pub(crate) fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc:
         }
         b.transparency = reference;
     }
+}
+
+fn attribute_appearance(
+    b: &Builder,
+    ctx: &Ctx,
+    e: &Entity,
+    ins: &cadcraft_doc::Insert,
+    attribute: &cadcraft_doc::Attrib,
+    rgb: Ink,
+    reference: u8,
+) -> (Ink, f32, bool, u8) {
+    let definition = ctx.d.block(&ins.block).and_then(|block| block.entities.iter().find(|entity| attdef_tag(entity, &attribute.tag)));
+    match (definition, attribute.props.is_empty()) {
+        (None, true) => (rgb, resolve(ctx, e, b.plotting).1, true, reference),
+        (definition, _) => {
+            let common = attribute.props.over(&definition.map(|entity| entity.common.clone()).unwrap_or_else(by_block));
+            let (ink, lw, _, _, shown, layer_t) = resolve_common(&sub_ctx(ctx, e, Mat3::IDENTITY), &common, b.plotting);
+            let t = if b.opts.transparency { transparency(common.transparency, layer_t, reference) } else { 0 };
+            (ink, lw, shown, t)
+        }
+    }
+}
+
+pub(crate) fn canonical_insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) -> cadcraft_doc::Result<()> {
+    use cadcraft_doc::{DocError, GeometryRevision, WorldGeometry, attrib_primitives};
+    if ctx.depth > cadcraft_doc::MAX_BLOCK_DEPTH {
+        return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
+    }
+    if let Some(block) = ctx.d.block(&ins.block) {
+        if ins.cols == 0 || ins.rows == 0 || u64::from(ins.cols) * u64::from(ins.rows) > super::MAX_BLOCK_EXPANSION as u64 {
+            return Err(DocError::Invalid("The canonical INSERT array exceeds the display limits.".into()));
+        }
+        for row in 0..ins.rows {
+            for column in 0..ins.cols {
+                if !b.expand() {
+                    return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
+                }
+                let matrix = ins.world_transform(e.common.extrusion, block.base, column, row)?;
+                let xy = Mat3 { a: matrix.m[0][0], b: matrix.m[1][0], c: matrix.m[0][1], d: matrix.m[1][1], e: matrix.m[0][3], f: matrix.m[1][3] };
+                let sub = Ctx { world: ctx.world.mul(&matrix), block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, xy) };
+                for child in block.entities.iter() {
+                    if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || !resolve(&sub, child, b.plotting).4 {
+                        continue;
+                    }
+                    if child.geometry_revision != GeometryRevision::CanonicalV2 {
+                        return Err(DocError::Invalid("A canonical block cannot use a legacy child geometry payload.".into()));
+                    }
+                    if !b.expand() {
+                        return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
+                    }
+                    super::draw::try_entity(b, &sub, child)?;
+                }
+            }
+        }
+    }
+    if !b.opts.text {
+        return Ok(());
+    }
+    let mode = ctx.d.header.i64("ATTMODE", 1);
+    let reference = b.transparency;
+    for attribute in &ins.attribs {
+        if mode == 0 || (attribute.invisible && mode != 2) {
+            continue;
+        }
+        let (ink, lineweight, shown, transparency) = attribute_appearance(b, ctx, e, ins, attribute, rgb, reference);
+        if !shown {
+            continue;
+        }
+        if attribute.geometry_revision != GeometryRevision::CanonicalV2
+            || attribute.multiline.as_ref().is_some_and(|text| text.geometry_revision != GeometryRevision::CanonicalV2)
+        {
+            return Err(DocError::Invalid("A canonical INSERT cannot display a legacy attribute payload.".into()));
+        }
+        if attribute.plane.thickness != 0.0 {
+            return Err(DocError::Invalid("Canonical attribute extrusion display is not available yet.".into()));
+        }
+        let owner = attribute.handle.unwrap_or(e.handle);
+        let geometry = WorldGeometry::from_primitives(owner, attrib_primitives(attribute, &ctx.world)?)?;
+        let projected = Ctx { xf: Mat3::IDENTITY, ..ctx.clone() };
+        b.transparency = transparency;
+        let lineweight = if b.opts.lineweights { lineweight } else { 0.0 };
+        super::world_paint::paint_geometry(b, &projected, &geometry, owner, ink, lineweight)?;
+    }
+    b.transparency = reference;
+    Ok(())
 }
 
 /// Properties that follow the block reference's (an attribute without a definition).

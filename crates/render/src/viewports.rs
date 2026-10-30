@@ -104,6 +104,10 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             return true;
         }
+        // shortcut: Skip the legacy prefilter for canonical payloads until the shared world-bounds switch.
+        if me.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+            return true;
+        }
         let eb = cadcraft_doc::entity_bounds(d, me, 0);
         eb.is_empty() || eb.intersects(&win)
     };
@@ -196,6 +200,7 @@ enum Clip<'a> {
 
 /// Append `src` to `dst`, clipped to `clip`.
 fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
+    dst.geometry_refusals.extend_from_slice(&src.geometry_refusals);
     for p in &src.prims {
         let pts = src.points(p);
         match (p.kind, clip) {

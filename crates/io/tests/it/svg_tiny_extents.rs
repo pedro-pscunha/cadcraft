@@ -16,7 +16,7 @@ fn attr(s: &str, name: &str) -> Vec<f64> {
 fn export(kind: EntityKind) -> String {
     let mut d = Drawing::new_metric();
     d.add(&Space::Model, Common::default(), kind).unwrap();
-    svg::export(&d, &Space::Model)
+    svg::export(&d, &Space::Model).unwrap()
 }
 
 #[test]

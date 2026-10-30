@@ -16,18 +16,43 @@ fn entity_layer(ctx: &Ctx, e: &Entity) -> u32 {
 }
 
 pub(crate) fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
+    let mark =
+        (b.list.prims.len(), b.list.verts.len(), b.list.tris.len(), b.list.prim_layers.len(), b.list.texts.len(), b.list.pens.len(), b.list.bounds);
+    if let Err(error) = try_entity(b, ctx, e) {
+        b.list.prims.truncate(mark.0);
+        b.list.verts.truncate(mark.1);
+        b.list.tris.truncate(mark.2);
+        b.list.prim_layers.truncate(mark.3);
+        b.list.texts.truncate(mark.4);
+        b.list.pens.truncate(mark.5);
+        b.list.bounds = mark.6;
+        b.list.geometry_refusals.push(super::GeometryRefusal { handle: e.handle, reason: error.to_string() });
+    }
+}
+
+pub(crate) fn try_entity(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<()> {
     // Hidden by ISOLATEOBJECTS / HIDEOBJECTS (and so in viewports and plots too). A cancelled
     // build stops here (block contents come through here too).
     if ctx.d.is_hidden_object(e.handle) || b.opts.cancelled() {
-        return;
+        return Ok(());
     }
     // The entity's named plot style and transparency (set by `entity_parts`), for everything it
     // draws (block contents set their own).
     let (saved, saved_transparency) = (b.named, b.transparency);
     b.named = b.styles.and_then(|s| s.named_index(ctx, &e.common));
-    entity_parts(b, ctx, e);
+    let start = (b.list.verts.len(), b.list.tris.len(), b.list.texts.len());
+    let mut result = entity_parts(b, ctx, e);
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && result.is_ok() {
+        let points_are_finite = b.list.verts.iter().skip(start.0).chain(b.list.tris.iter().skip(start.1)).all(|point| point.is_finite());
+        let glyphs_are_finite =
+            b.list.texts.iter().skip(start.2).all(|text| text.glyph.origin.is_finite() && text.glyph.x.is_finite() && text.glyph.y.is_finite());
+        if !points_are_finite || !glyphs_are_finite {
+            result = Err(cadcraft_doc::DocError::NonFinite(e.handle));
+        }
+    }
     b.named = saved;
     b.transparency = saved_transparency;
+    result?;
     if b.plotting && b.list.prim_layers.len() < b.list.prims.len() {
         // What it drew that its block contents didn't claim is on its own layer.
         let layer = entity_layer(ctx, e);
@@ -41,19 +66,20 @@ pub(crate) fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             }
         }
     }
+    Ok(())
 }
 
-fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
+fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<()> {
     // A top-level annotative object draws at the view's annotation scale: a viewport's scale for
     // model space seen through it, else the drawing's (CANNOSCALE in model space, 1:1 on paper).
-    if ctx.depth == 0 && cadcraft_doc::is_annotative(e) {
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1 && ctx.depth == 0 && cadcraft_doc::is_annotative(e) {
         let mode = if ctx.top == VIEWPORT_CONTENT {
             cadcraft_doc::anno_draw(e, 1.0 / ctx.xf.scale_factor().max(1e-12), ctx.d.anno_all_visible())
         } else {
             ctx.d.anno_draw(e)
         };
         match mode {
-            cadcraft_doc::AnnoDraw::Hidden => return,
+            cadcraft_doc::AnnoDraw::Hidden => return Ok(()),
             cadcraft_doc::AnnoDraw::Scaled(f) => {
                 let mut scaled = cadcraft_doc::anno_scaled(e, f);
                 scaled.common.anno_scales.clear();
@@ -64,7 +90,13 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
     let (rgb, lw, lt, ltscale, visible, layer_transparency) = resolve(ctx, e, b.plotting);
     if !visible {
-        return;
+        return Ok(());
+    }
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2
+        && cadcraft_doc::is_annotative(e)
+        && (b.opts.text || !matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)))
+    {
+        return Err(cadcraft_doc::DocError::Invalid("Canonical annotation-scale display is not available yet.".into()));
     }
     if b.opts.transparency {
         b.transparency = transparency(e.common.transparency, layer_transparency, ctx.block_transparency);
@@ -76,6 +108,9 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     };
     let tol = b.opts.tolerance / ctx.xf.scale_factor().max(1e-12);
     let lw = if b.opts.lineweights { lw } else { 0.0 };
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+        return super::world_paint::draw(b, ctx, e, rgb, lw, lt.as_ref());
+    }
     // Stroke a polyline with the entity's linetype.
     let stroke = |b: &mut Builder, pts: &[Vec2]| match &lt {
         Some(lt) => {
@@ -101,7 +136,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     match &e.kind {
         EntityKind::Text(t) => {
             if !b.opts.text {
-                return;
+                return Ok(());
             }
             let (sh, _) = place_text_entity(ctx.d, t, &t.value);
             b.shaped(ctx, rgb, lw, &sh);
@@ -112,7 +147,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
         }
         EntityKind::MText(t) => {
             if !b.opts.text {
-                return;
+                return Ok(());
             }
             mtext(b, ctx, t, rgb, lw);
         }
@@ -252,6 +287,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             }
         }
     }
+    Ok(())
 }
 
 fn draw_mleader(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &cadcraft_doc::MLeader, rgb: Ink, lw: f32) {

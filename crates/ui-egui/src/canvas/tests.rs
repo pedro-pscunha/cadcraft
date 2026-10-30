@@ -7,6 +7,23 @@ fn list(handles: &[u64]) -> DisplayList {
     DisplayList { prims: handles.iter().map(|&h| prim(h)).collect(), ..Default::default() }
 }
 
+#[test]
+fn geometry_refusals_report_once_until_the_diagnostics_or_document_change() {
+    let refusal = cadcraft_render::GeometryRefusal { handle: Handle(0x180), reason: "invalid plane".into() };
+    let mut canvas =
+        CanvasState { list: Some(DisplayList { geometry_refusals: vec![refusal.clone()], ..DisplayList::default() }), ..CanvasState::default() };
+    assert_eq!(canvas.new_geometry_refusals(), vec![refusal.clone()]);
+    assert!(canvas.new_geometry_refusals().is_empty());
+    canvas.key.0 += 1;
+    assert_eq!(canvas.new_geometry_refusals(), vec![refusal.clone()]);
+    canvas.list.as_mut().unwrap().geometry_refusals.clear();
+    canvas.list_gen += 1;
+    assert!(canvas.new_geometry_refusals().is_empty());
+    canvas.list.as_mut().unwrap().geometry_refusals.push(refusal.clone());
+    canvas.list_gen += 1;
+    assert_eq!(canvas.new_geometry_refusals(), vec![refusal]);
+}
+
 fn hs(v: &[u64]) -> Vec<Handle> {
     v.iter().map(|&h| Handle(h)).collect()
 }

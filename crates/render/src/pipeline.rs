@@ -79,6 +79,7 @@ pub(crate) fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [St
     Ctx {
         d,
         xf,
+        world: cadcraft_geom::Mat4::from_mat3(&xf),
         block_color: Color::Index(7),
         block_layer: None,
         block_lw: Lineweight::Default,

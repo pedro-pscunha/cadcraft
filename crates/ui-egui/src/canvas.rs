@@ -84,6 +84,8 @@ pub struct CanvasState {
     job: Option<rebuild::Job>,
     /// Bumped whenever `list` is rebuilt (identifies it for [`PrimIndex`]).
     list_gen: u64,
+    reported_geometry_refusals: Option<(u64, Vec<cadcraft_render::GeometryRefusal>)>,
+    geometry_refusal_generation: Option<(u64, u64, u64)>,
     prim_index: PrimIndex,
     /// Set when the app runs on wgpu: entities are drawn by [`crate::gpu`]; otherwise on the CPU.
     pub gpu: Option<crate::gpu::GpuTarget>,
@@ -172,6 +174,24 @@ pub struct CanvasState {
 type CycleKey = (Option<String>, Option<String>, u64, u64, Vec2, f64);
 
 impl CanvasState {
+    fn new_geometry_refusals(&mut self) -> Vec<cadcraft_render::GeometryRefusal> {
+        let generation = (self.key.0, self.list_gen, self.vp.builds);
+        if self.geometry_refusal_generation == Some(generation) {
+            return Vec::new();
+        }
+        self.geometry_refusal_generation = Some(generation);
+        let mut refusals = self.list.as_ref().map(|list| list.geometry_refusals.clone()).unwrap_or_default();
+        refusals.extend_from_slice(self.vp.geometry_refusals());
+        refusals.sort_by(|a, b| a.handle.cmp(&b.handle).then(a.reason.cmp(&b.reason)));
+        refusals.dedup();
+        let current = (self.key.0, refusals.clone());
+        if self.reported_geometry_refusals.as_ref() == Some(&current) {
+            return Vec::new();
+        }
+        self.reported_geometry_refusals = Some(current);
+        refusals
+    }
+
     /// The active MSPACE viewport's contents when they are drawn apart from the layout's list
     /// (see [`VpContent`]): where they are on paper at the viewport's current view, and how many
     /// times they have been built.
@@ -367,6 +387,9 @@ fn paint_content_highlights(frame: &mut CanvasPaint<'_>, bg: Rgb, sel: &[Handle]
         let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
         draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
         masked = gpu && f.outline.is_some();
+    }
+    for refusal in app.canvas.new_geometry_refusals() {
+        app.session.echo(format!("Display refused for object {}: {}", refusal.handle.hex(), refusal.reason));
     }
     if app.canvas.gpu.is_some() {
         draw_list_gpu(&mut app.canvas, painter, &xf_paper, bg, app.session.settings.lwdisplay);
