@@ -51,7 +51,7 @@ pub(super) struct Ctx {
     /// Raster images' IMAGEDEF, IMAGEDEF_REACTOR and dictionary handles.
     pub(super) images: crate::dxf_image::Plan,
     /// The version the file ends up in (the DWG version for a DWG save): it decides which
-    /// entity types exist (MULTILEADER from 2007).
+    /// entity fields are written.
     pub(super) target: Version,
     /// This DXF is internal transport to acadrust, not a file to open in AutoCAD.
     pub(super) dwg_bridge: bool,
@@ -61,11 +61,6 @@ pub(super) struct Ctx {
 }
 
 impl Ctx {
-    /// Whether multileaders are written as MULTILEADER (AutoCAD 2007 / AC1021 and later);
-    /// older files get LEADER + MTEXT/INSERT.
-    pub(super) fn native_mleader(&self) -> bool {
-        self.target >= Version::R2007
-    }
     pub(super) fn style(&self, name: &str) -> Option<String> {
         self.styles.get(&name.to_ascii_uppercase()).cloned()
     }

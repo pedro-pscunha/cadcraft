@@ -131,6 +131,15 @@ pub struct ForeignObject {
     pub tags: Vec<RawTag>,
 }
 
+/// Source proxy graphics, guarded by the parsed geometry and its display dependencies.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProxyGraphics {
+    pub geometry: String,
+    /// No display proof when cache bytes are invalid or dependencies exceed the bounded inspection budget.
+    pub display: Option<u64>,
+    pub tags: Vec<RawTag>,
+}
+
 /// What an entity, table record, block or attribute carries beyond what CADCraft models.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForeignExtra {
@@ -150,6 +159,8 @@ pub struct ForeignExtra {
     pub block_attributes: Option<bool>,
     /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
+    /// A MULTILEADER's opaque source graphics. A geometry or display edit invalidates replay.
+    pub proxy_graphics: Option<ProxyGraphics>,
     /// The groups of the record's own subclass the model has no field for (a viewport's view, UCS
     /// and sun link, a leader's annotation link, a VPORT record's view), as read.
     pub subclass: Vec<RawTag>,
@@ -167,6 +178,7 @@ impl ForeignExtra {
             && self.color_index.is_none()
             && self.block_attributes.is_none()
             && self.props.is_empty()
+            && self.proxy_graphics.is_none()
             && self.subclass.is_empty()
             && self.layout.is_empty()
     }

@@ -11,6 +11,7 @@ mod dxf_ext;
 mod dxf_geometry;
 mod dxf_image;
 mod dxf_mleader;
+mod dxf_mleader_proxy;
 mod dxf_read;
 mod dxf_table;
 mod dxf_write;

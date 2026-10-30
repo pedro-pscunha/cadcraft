@@ -2,9 +2,7 @@ use super::blocks::table_size;
 use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
 use super::ctx::Ctx;
 use super::layout::paper_view;
-use super::{
-    Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Hatch, Leader, MLeader, Point, Vec2, Vec3, Version, W, dxf_ext,
-};
+use super::{Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Hatch, Point, Vec2, Vec3, Version, W, dxf_ext};
 
 /// The persistent reactors of boundary objects: each source object of an associative hatch in
 /// the same space or block → the hatches it bounds (AutoCAD links the two both ways; without the
@@ -700,9 +698,9 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
 
 fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     match &e.kind {
-        EntityKind::MLeader(m) if !cx.native_mleader() => mleader_fallback(w, d, e, m, owner, paper, cx),
         EntityKind::MLeader(m) => {
             w.s(0, "MULTILEADER");
+            let start = w.t.len();
             common(w, e, owner, paper, "AcDbMLeader");
             let refs = crate::dxf_mleader::Refs {
                 style: cx.mleader_style(&m.style),
@@ -713,6 +711,18 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             };
             let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && m.require_canonical().is_ok();
             w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs, canonical, cx.target));
+            let proxy = crate::dxf_mleader_proxy::tags(d, e, cx.target);
+            let anchor = if proxy.iter().any(|tag| tag.code == 160) { 270 } else { 8 };
+            if !proxy.is_empty()
+                && let Some(position) = w.t.iter().skip(start).position(|tag| tag.code == anchor)
+            {
+                let at = start + position + 1;
+                w.t.splice(at..at, proxy);
+            }
+            if cx.target < Version::R2007 {
+                w.s(1001, "ACAD_MLEADERVER");
+                w.i(1070, 2);
+            }
         }
         EntityKind::Leader(l) => {
             w.s(0, "LEADER");
@@ -1067,56 +1077,6 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         // Entity types CADCraft doesn't model aren't written; the save command reports them.
         EntityKind::Unknown(_) => {}
         _ => {}
-    }
-}
-
-/// A multileader for a file older than 2007 (no MULTILEADER): a LEADER per leader line, ending
-/// at the landing, plus its MTEXT or its block's INSERT, with the multileader's properties.
-fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str, paper: bool, cx: &Ctx) {
-    let style = d.header.str("DIMSTYLE", "Standard");
-    // A canonical multileader splits into parts that each have their own plane.
-    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
-        let base = m.block.as_ref().and_then(|b| d.block(&b.block)).map_or(Vec3::ZERO, |b| b.base);
-        if let Ok(parts) = m.split_canonical(&style, base) {
-            let part = |w: &mut W, kind: EntityKind, normal: Vec3| Entity {
-                geometry_revision: cadcraft_doc::GeometryRevision::CanonicalV2,
-                handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)),
-                common: cadcraft_doc::Common { extrusion: normal, ..e.common.clone() },
-                kind,
-            };
-            let mut kinds: Vec<(EntityKind, Vec3)> =
-                parts.leaders.into_iter().take(64).map(|l| (EntityKind::Leader(l), parts.leader_normal)).collect();
-            kinds.extend(parts.text.map(|(t, n)| (EntityKind::MText(t), n)));
-            kinds.extend(parts.block.map(|(i, n)| (EntityKind::Insert(i), n)));
-            for (kind, normal) in kinds {
-                let pe = part(w, kind, normal);
-                entity(w, d, &pe, owner, paper, cx);
-            }
-            return;
-        }
-    }
-    let part = |w: &mut W, kind: EntityKind| Entity {
-        geometry_revision: Default::default(),
-        handle: Handle::parse_hex(&w.h()).unwrap_or(Handle(0)),
-        common: e.common.clone(),
-        kind,
-    };
-    for (root, arm) in m.lines().take(64) {
-        let mut vertices = arm.vertices.clone();
-        vertices.push(root.landing);
-        let le = part(
-            w,
-            EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), frame: None, links: Default::default() }),
-        );
-        entity(w, d, &le, owner, paper, cx);
-    }
-    if let Some(t) = &m.text {
-        let te = part(w, EntityKind::MText(t.clone()));
-        entity(w, d, &te, owner, paper, cx);
-    }
-    if let Some(ins) = &m.block {
-        let ie = part(w, EntityKind::Insert(ins.clone()));
-        entity(w, d, &ie, owner, paper, cx);
     }
 }
 

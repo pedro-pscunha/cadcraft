@@ -42,7 +42,7 @@ fn assert_flattened_order(records: &[(String, Vec<Tag>)], cover: Handle, expecte
 }
 
 #[test]
-fn legacy_multileader_parts_sent_to_back_all_sort_below_the_cover() {
+fn a_native_old_target_multileader_sorts_below_the_cover() {
     let mut drawing = Drawing::new_metric();
     let cover = drawing.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) })).unwrap();
     let leader = drawing
@@ -75,7 +75,7 @@ fn legacy_multileader_parts_sent_to_back_all_sort_below_the_cover() {
         )
         .unwrap();
     drawing.model.send_to_back(leader);
-    assert_flattened_order(&write(&drawing), cover, &["LEADER", "MTEXT"]);
+    assert_flattened_order(&write(&drawing), cover, &["MULTILEADER"]);
 }
 
 #[test]

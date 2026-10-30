@@ -1,7 +1,4 @@
-//! File-format follow-ups (#626): MULTILEADER only from 2007 (older files get LEADER + MTEXT /
-//! INSERT, DXF and DWG), post-R2000 DIMSTYLE variables as table groups from 2004, `$DWGCODEPAGE`
-//! kept as read in pre-2007 files, and named-dictionary entries the writer writes itself not
-//! kept a second time.
+//! File-format follow-ups: native old-target MULTILEADER, versioned DIMSTYLE fields, code pages and dictionaries.
 
 use cadcraft_doc::*;
 use cadcraft_geom::{Vec2, Vec3};
@@ -63,22 +60,16 @@ fn mleader_drawing() -> (Drawing, MLeader) {
 }
 
 #[test]
-fn multileader_before_2007_is_leader_and_mtext() {
+fn multileader_before_2007_stays_native_with_the_autocad_version_marker() {
     let (d, _) = mleader_drawing();
     for v in [Version::R2000, Version::R2004] {
         let text = dxf(&d, v);
-        assert_eq!(records(&text, "MULTILEADER"), 0, "{v:?}: no MULTILEADER entity");
-        assert!(!text.contains("AcDbMLeader\n"), "{v:?}: no MULTILEADER class");
-        assert_eq!(records(&text, "LEADER"), 2, "{v:?}: one LEADER per leader line");
+        assert_eq!(records(&text, "MULTILEADER"), 1, "{v:?}");
+        assert_eq!(records(&text, "LEADER"), 0, "{v:?}");
+        assert_eq!(records(&text, "MTEXT"), 0, "{v:?}");
+        assert!(lines(&text).windows(4).any(|g| g == ["1001", "ACAD_MLEADERVER", "1070", "2"]), "{v:?}");
         let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
-        assert_eq!(count(&back, |k| matches!(k, EntityKind::MLeader(_))), 0);
-        assert_eq!(count(&back, |k| matches!(k, EntityKind::Leader(_))), 2);
-        assert_eq!(count(&back, |k| matches!(k, EntityKind::MText(t) if t.contents == "NOTE")), 1);
-        // The leader lines end at the landing.
-        assert!(back.model.iter().all(|e| match &e.kind {
-            EntityKind::Leader(l) => l.vertices.last() == Some(&Vec3::new(5.0, 4.0, 0.0)),
-            _ => true,
-        }));
+        assert_eq!(count(&back, |k| matches!(k, EntityKind::MLeader(m) if m.text.as_ref().is_some_and(|t|t.contents=="NOTE"))), 1);
     }
 }
 
@@ -98,10 +89,12 @@ fn multileader_from_2007_is_native() {
 #[test]
 fn multileader_in_dwg_follows_the_dwg_version() {
     let (d, _) = mleader_drawing();
-    let old = cadcraft_io::read(&save(&d, "x.dwg", Version::R2004), "x.dwg").unwrap();
-    assert_eq!(count(&old, |k| matches!(k, EntityKind::MLeader(_))), 0, "2004 DWG has no MULTILEADER");
-    assert_eq!(count(&old, |k| matches!(k, EntityKind::Leader(_))), 2);
-    assert_eq!(count(&old, |k| matches!(k, EntityKind::MText(_))), 1);
+    for version in [Version::R2000, Version::R2004] {
+        let old = cadcraft_io::read(&save(&d, "x.dwg", version), "x.dwg").unwrap();
+        assert_eq!(count(&old, |k| matches!(k, EntityKind::MLeader(_))), 1, "{version:?} DWG keeps MULTILEADER");
+        assert_eq!(count(&old, |k| matches!(k, EntityKind::Leader(_))), 0);
+        assert_eq!(count(&old, |k| matches!(k, EntityKind::MText(_))), 0);
+    }
     let new = cadcraft_io::read(&save(&d, "x.dwg", Version::R2018), "x.dwg").unwrap();
     assert_eq!(count(&new, |k| matches!(k, EntityKind::Leader(_))), 0, "2018 DWG keeps the multileader whole");
 }
