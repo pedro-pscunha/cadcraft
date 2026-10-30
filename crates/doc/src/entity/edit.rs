@@ -155,6 +155,9 @@ impl Entity {
                 | EntityKind::Polyline3d(_)
                 | EntityKind::PolylineMesh(_)
                 | EntityKind::Face3d(_)
+                | EntityKind::Ray(_)
+                | EntityKind::XLine(_)
+                | EntityKind::Image(_)
         )
     }
 
@@ -273,6 +276,14 @@ impl Entity {
             }
             EntityKind::Face3d(f) => {
                 *f = f.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::Ray(r) | EntityKind::XLine(r) => {
+                *r = r.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::Image(i) => {
+                *i = i.transformed_canonical(transform)?;
                 None
             }
             _ => return Err(DocError::Invalid("This canonical entity has no supported geometry transform.".into())),

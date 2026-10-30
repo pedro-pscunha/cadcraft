@@ -10,7 +10,7 @@ use cadcraft_geom::OcsFrame;
 
 use super::common::{T, common};
 
-/// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER, DIMENSION, LINE, POINT, ELLIPSE, 3DFACE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
+/// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER, DIMENSION, LINE, POINT, ELLIPSE, 3DFACE, RAY, XLINE, IMAGE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
 /// another kind, a normal without direction, a radius that is not a positive finite number, or an LWPOLYLINE that is a
 /// CADCraft region.
 pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
@@ -29,6 +29,12 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
         "LINE" => EntityKind::Line(cadcraft_doc::Line { a: t.p(10), b: t.p(11) }),
         "POINT" => EntityKind::Point(cadcraft_doc::Point { p: t.p(10), angle: t.fd(50, 0.0).to_radians() }),
         "ELLIPSE" => EntityKind::Ellipse(super::entities::ellipse(&c, &t)),
+        name @ ("RAY" | "XLINE") => {
+            let ray = cadcraft_doc::RayLine { base: t.p(10), dir: t.p(11) };
+            if name == "RAY" { EntityKind::Ray(ray) } else { EntityKind::XLine(ray) }
+        }
+        // The file path comes from the IMAGEDEF object, as for the legacy reader.
+        "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
         "3DFACE" => {
             EntityKind::Face3d(cadcraft_doc::Face3d { corners: [t.p(10), t.p(11), t.p(12), t.p(13)], hidden_edges: t.i(70).unwrap_or(0) as u8 })
         }
