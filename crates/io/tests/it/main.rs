@@ -76,6 +76,7 @@ mod layout_canonical;
 mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;
+mod layout_without_sheet;
 mod leader_default_flags;
 mod leader_links;
 mod leader_links_roundtrip;

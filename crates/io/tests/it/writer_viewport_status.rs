@@ -7,7 +7,10 @@ fn fixture(status: i64) -> Drawing {
     let text = format!(
         "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$MAXACTVP\n70\n64\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nVIEWPORT\n5\n100\n100\nAcDbEntity\n67\n1\n8\n0\n100\nAcDbViewport\n10\n20\n20\n30\n30\n0\n40\n50\n41\n40\n68\n{status}\n69\n2\n12\n5\n22\n6\n45\n20\n90\n{FLAGS}\n0\nENDSEC\n0\nEOF\n"
     );
-    cadcraft_io::read_dxf(text.as_bytes()).unwrap()
+    let mut drawing = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    // The layout is taken as made here: its paper-space viewport is generated (a file's layout without one gets none).
+    std::sync::Arc::make_mut(&mut drawing.source_symbols).layouts_without_sheet.clear();
+    drawing
 }
 
 fn status(bytes: &[u8]) -> (i64, i64) {

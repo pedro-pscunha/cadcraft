@@ -88,6 +88,28 @@ struct Rx {
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
     dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
+    /// Upper-case names of the layout blocks that hold a paper-space viewport CADCraft wrote (see `dxf_write::paper_view`).
+    marked_sheets: HashSet<String>,
+}
+
+/// Remember the layouts that have viewports but no paper-space viewport (id 1) in the file: AutoCAD files have some (31 viewports
+/// in 9 such layouts of one Citycon drawing), and a save does not add one to them. A layout CADCraft made has its sheet written
+/// (`dxf_write::paper_view`); the one it wrote is read implicit, so a layout with that mark is not in this set.
+fn note_layouts_without_sheet(d: &mut Drawing, rx: &Rx, paper_block_for: &HashMap<String, String>) {
+    let marked: HashSet<&String> = paper_block_for.iter().filter(|(block, _)| rx.marked_sheets.contains(*block)).map(|(_, layout)| layout).collect();
+    let names: Vec<String> = d
+        .layouts
+        .iter()
+        .filter(|l| !marked.contains(&l.name))
+        .filter(|l| {
+            let mut viewports = l.entities.iter().filter_map(|e| if let EntityKind::Viewport(v) = &e.kind { Some(v.id) } else { None }).peekable();
+            viewports.peek().is_some() && viewports.all(|id| id != 1)
+        })
+        .map(|l| l.name.to_ascii_uppercase())
+        .collect();
+    if !names.is_empty() {
+        std::sync::Arc::make_mut(&mut d.source_symbols).layouts_without_sheet.extend(names);
+    }
 }
 
 /// Upper-case names of the blocks whose BLOCK_RECORD xdata handles (1005) point at, outside
@@ -174,6 +196,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool) -> R
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
     shift_dimension_blocks(&mut d, &rx)?;
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
+    note_layouts_without_sheet(&mut d, &rx, &paper_block_for);
     apply_sortents(&mut d, &objs, &rx, &paper_block_for, &first_layout);
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);

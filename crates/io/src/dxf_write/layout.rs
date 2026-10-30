@@ -8,6 +8,10 @@ use super::{Bounds2, Drawing, Entity, EntityKind, Handle, HashMap, Layout, Vec2,
 pub(super) fn paper_views(d: &Drawing) -> HashMap<Handle, usize> {
     let mut out = HashMap::new();
     'layouts: for (i, l) in d.layouts.iter().enumerate() {
+        // A layout the file gave no paper-space viewport stays as it was (AutoCAD does not add one when it saves).
+        if d.source_symbols.layouts_without_sheet.contains(&l.name.to_ascii_uppercase()) {
+            continue;
+        }
         let mut first = None;
         for e in l.entities.iter() {
             if let EntityKind::Viewport(v) = &e.kind {
