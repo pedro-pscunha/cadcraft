@@ -711,10 +711,16 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.state()?;
     let Some(store) = st.doc.space(&st.space) else { return Ok(json!({ "count": 0, "returned": 0, "offset": offset, "texts": [] })) };
     let mut found: Vec<Value> = Vec::new();
+    let mut refused: Vec<Value> = Vec::new();
     for e in store.iter() {
         if layer.as_ref().is_some_and(|l| e.common.layer.to_lowercase() != *l) {
             continue;
         }
+        // A canonical TEXT or ATTRIB keeps its insertion point in its own plane (an MTEXT, in the world already): report the world point.
+        let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
+        let world = |t: &cadcraft_doc::Text, normal: cadcraft_geom::Vec3| -> std::result::Result<cadcraft_geom::Vec3, String> {
+            if canonical { t.world_frame(normal).map(|frame| frame.origin).map_err(|error| error.to_string()) } else { Ok(t.insert) }
+        };
         let mut push = |ty: &str, value: String, at: cadcraft_geom::Vec3, height: f64, rotation: f64, style: &str, tag: Option<&str>| {
             let value = value.trim().to_string();
             if value.is_empty()
@@ -733,11 +739,17 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
             found.push(v);
         };
         match &e.kind {
-            EntityKind::Text(t) => push("Text", t.value.clone(), t.insert, t.height, t.rotation, &t.style, None),
+            EntityKind::Text(t) => match world(t, e.common.extrusion) {
+                Ok(at) => push("Text", t.value.clone(), at, t.height, t.rotation, &t.style, None),
+                Err(reason) => refused.push(json!({ "handle": e.handle.hex(), "reason": reason })),
+            },
             EntityKind::MText(t) => push("MText", cadcraft_fonts::plain_mtext(&t.contents), t.insert, t.height, t.rotation, &t.style, None),
             EntityKind::Insert(i) => {
                 for a in i.attribs.iter().filter(|a| !a.invisible) {
-                    push("Attribute", a.text.value.clone(), a.text.insert, a.text.height, a.text.rotation, &a.text.style, Some(&a.tag));
+                    match world(&a.text, a.plane.normal) {
+                        Ok(at) => push("Attribute", a.text.value.clone(), at, a.text.height, a.text.rotation, &a.text.style, Some(&a.tag)),
+                        Err(reason) => refused.push(json!({ "handle": e.handle.hex(), "reason": reason })),
+                    }
                 }
             }
             EntityKind::MLeader(m) => {
@@ -750,7 +762,11 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let n = found.len();
     let page: Vec<Value> = found.into_iter().skip(offset).take(limit).collect();
-    Ok(json!({ "count": n, "returned": page.len(), "offset": offset, "texts": page }))
+    let mut report = json!({ "count": n, "returned": page.len(), "offset": offset, "texts": page });
+    if let (false, Some(o)) = (refused.is_empty(), report.as_object_mut()) {
+        o.insert("refused".into(), json!(refused));
+    }
+    Ok(report)
 }
 
 mod count;
