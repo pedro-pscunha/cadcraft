@@ -49,6 +49,7 @@ mod followups_626;
 mod foreign_passthrough;
 mod geometry_snapshot;
 mod groups_roundtrip;
+mod handle_collision;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
 mod hatch_groups_roundtrip;
@@ -111,6 +112,7 @@ mod style_typeface;
 mod svg_arc_budget;
 mod svg_tiny_extents;
 mod table_cell_blocks;
+mod table_cell_fields;
 mod table_cellstyle_roundtrip;
 mod table_codes;
 mod table_style_codes;
@@ -133,9 +135,13 @@ mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
 #[cfg(not(target_arch = "wasm32"))]
+mod writer_aci_fallback;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer_dictionary_policy;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_plot_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_symbol_flags;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_view_fields;
 #[cfg(not(target_arch = "wasm32"))]

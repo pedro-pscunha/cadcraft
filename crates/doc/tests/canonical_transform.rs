@@ -357,6 +357,7 @@ fn fixtures() -> Vec<(&'static str, Entity)> {
                     records: Default::default(),
                     points: vec![Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0), Vec3::new(5.0, 1.0, -2.0)],
                     closed: false,
+                    fit: None,
                 }),
                 NORMAL,
             ),

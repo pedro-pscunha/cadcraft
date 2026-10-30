@@ -472,6 +472,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
         let rgb = props.iter().find(|t| t.code == 420).map(Tag::str);
+        if let (Some(rgb), Some(index)) = (rgb.as_ref(), props.iter().find(|t| t.code == 62)) {
+            x.color_index = Some((rgb.clone(), index.i64()));
+        }
         if let (Some(book), Some(rgb)) = (book, rgb)
             && !book.trim().is_empty()
         {
@@ -480,17 +483,26 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
     }
+    if !entity && symbol_flag_mask(kind) != 0 {
+        x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
+    }
     if !entity && is_dictionary(kind) {
         x.subclass.extend(tags.iter().find(|t| t.code == 281).map(raw));
     }
     x
 }
 
-fn source_dictionary_group(t: &Tag, extra: Option<&ForeignExtra>, dictionary: bool) -> Tag {
-    if dictionary && t.code == 281 {
+fn symbol_flag_mask(kind: &str) -> i64 {
+    if matches!(kind, "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID") { 16 | 32 } else { 0 }
+}
+
+fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str) -> Tag {
+    if is_dictionary(kind) && t.code == 281 {
         return extra.and_then(|extra| first_group(&extra.subclass, 281)).map_or_else(|| t.clone(), tag);
     }
-    t.clone()
+    let mask = symbol_flag_mask(kind);
+    let source = extra.filter(|_| t.code == 70 && mask != 0).and_then(|x| first_group(&x.subclass, 70)).and_then(|t| t.value.parse::<i64>().ok());
+    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !mask) | (source & mask)))
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
@@ -610,6 +622,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
     let viewports: HashSet<String> =
         blocks.iter().chain(&entities).filter(|(k, _, _)| k == "VIEWPORT").filter_map(|(_, _, t)| head(t).handle).collect();
+    let table_entities: HashSet<String> = all_entities(d).filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle.hex()).collect();
     let scan = Scan {
         objects: &objects,
         entities: &ents,
@@ -619,6 +632,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         xdict_of: &xdict_of,
         modelled_assoc: &modelled_assoc,
         viewports: &viewports,
+        tables: &table_entities,
     };
     let memo = retained_objects(&scan);
     let mut f = Foreign::default();
@@ -801,6 +815,8 @@ struct Scan<'a> {
     modelled_assoc: &'a HashSet<String>,
     /// The viewport entities of the file.
     viewports: &'a HashSet<String>,
+    /// The table entities of the file, which hard-own the FIELD objects of their cells.
+    tables: &'a HashSet<String>,
 }
 
 impl Scan<'_> {
@@ -865,7 +881,9 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 current = parent;
                 continue;
             }
-            break entities.get(&owner) == Some(&true) || (kind == "SUN" && scan.sun_owner(&owner));
+            break entities.get(&owner) == Some(&true)
+                || (kind == "SUN" && scan.sun_owner(&owner))
+                || (up(kind) == "FIELD" && scan.tables.contains(&owner));
         };
         for visited in path {
             retained.insert(visited, keep);
@@ -1426,6 +1444,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() && geometry.is_empty() {
         // No kept object a header pointer could name.
         remap_header_pointers(tags, |_| "0".into());
+        remap_table_fields(tags, |_| None);
         return;
     }
     // APPID roles must exist before handle remapping, not only after foreign xdata is emitted.
@@ -1508,6 +1527,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     // Which kept objects are written: those whose owner chain ends at a written owner.
     let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
     let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
+    let table_handles: HashSet<String> = all_entities(d).filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle.hex()).collect();
     let mut alive_memo: HashMap<String, bool> = HashMap::new();
     for o in f.objects.iter().filter(|o| is_proxy(&o.kind) && renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str())))).is_none()) {
         alive_memo.insert(o.handle.hex(), false);
@@ -1539,7 +1559,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
             let sun = o.kind.eq_ignore_ascii_case("SUN")
                 && (viewports.contains(&owner)
                     || handle(&owner).and_then(|h| f.targets.get(&h)).is_some_and(|key| key.0 == "VPORT" && roles.contains_key(key)));
-            break (unknown.contains(&owner) && written.contains(&owner)) || sun;
+            let field = objs.get(&cur).is_some_and(|c| up(&c.kind) == "FIELD") && table_handles.contains(&owner);
+            break (unknown.contains(&owner) && written.contains(&owner)) || (field && written.contains(&owner)) || sun;
         };
         for p in path {
             alive_memo.insert(p, verdict);
@@ -1631,6 +1652,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         *t = Tag::s(5, format!("{top:X}"));
     }
     remap_header_pointers(&mut out, |h| map.get(h).unwrap_or_else(|| "0".into()));
+    remap_table_fields(&mut out, |h| map.get(h).filter(|n| n != "0"));
     *tags = out;
 }
 
@@ -1719,6 +1741,25 @@ fn record_geometry<'a>(
     g.and_then(|g| g.records.first())
 }
 
+/// Keep source indexed fallbacks only while their corresponding RGB color is unchanged.
+fn patch_color_index(kind: &str, body: &[Tag], source: &(String, i64)) -> Vec<Tag> {
+    let start = body.iter().position(|t| t.code == 100 && t.str() == "AcDbEntity").map_or(body.len(), |i| i + 1);
+    let end = body.get(start..).unwrap_or(&[]).iter().position(|t| t.code == 100 || t.code >= 1000).map_or(body.len(), |i| start + i);
+    let common = if kind == "LAYER" { body } else { body.get(start..end).unwrap_or(&[]) };
+    let same_rgb = common.iter().find(|t| t.code == 420).is_some_and(|t| t.str() == source.0);
+    body.iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if same_rgb && t.code == 62 && (kind == "LAYER" || (start..end).contains(&i)) {
+                let aci = if kind == "LAYER" { if t.i64() < 0 { -source.1.saturating_abs() } else { source.1.saturating_abs() } } else { source.1 };
+                Tag::i(62, aci)
+            } else {
+                t.clone()
+            }
+        })
+        .collect()
+}
+
 /// A written record with its kept extras, remapped references (unknown entities) and kept
 /// dictionary entries (the named object dictionary).
 #[allow(clippy::too_many_arguments)]
@@ -1751,11 +1792,21 @@ fn record(
         }
         None => b,
     };
+    let colors;
+    let b = if let Some(source) = x.and_then(|x| x.color_index.as_ref()) {
+        colors = patch_color_index(&r.kind, b, source);
+        colors.as_slice()
+    } else {
+        b
+    };
     let h = head(b);
     // Header snap/grid edits belong only to the first active VPORT tile.
     let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
+    let flag_mask = symbol_flag_mask(&r.kind);
     let dictionary = is_dictionary(&r.kind);
-    let replay = |p: &RawTag| (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50));
+    let replay = |p: &RawTag| {
+        (flag_mask == 0 || p.code != 70) && (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
+    };
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
@@ -1802,7 +1853,7 @@ fn record(
         {
             continue;
         }
-        let mut t = source_dictionary_group(t, x, dictionary);
+        let mut t = source_record_group(t, x, &r.kind);
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
@@ -1857,6 +1908,25 @@ fn record(
 /// the handle read (see `header::preserved_header_vars`): point them at the saved object, or at
 /// the null handle when it is gone (`saved`). The writer generates no pointer-valued header
 /// variable.
+/// The FIELD handle (344) of each table cell, as the written FIELD object has it; a cell whose FIELD is not written shows its
+/// cached text.
+fn remap_table_fields(tags: &mut Vec<Tag>, saved: impl Fn(&str) -> Option<String>) {
+    let mut table = false;
+    let mut out = Vec::with_capacity(tags.len());
+    for t in tags.drain(..) {
+        if t.code == 0 {
+            table = t.str().trim().eq_ignore_ascii_case("ACAD_TABLE");
+        } else if table && t.code == 344 {
+            if let Some(new) = saved(&norm(&t.str())) {
+                out.push(Tag::s(344, new));
+            }
+            continue;
+        }
+        out.push(t);
+    }
+    *tags = out;
+}
+
 fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
     let Some(start) = out.windows(2).position(|w| w[0].code == 0 && w[1].code == 2 && w[1].str() == "HEADER") else { return };
     let mut variable = String::new();

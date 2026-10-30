@@ -392,7 +392,7 @@ fn the_canonical_reader_keeps_an_attribs_own_plane_and_its_embedded_planes() {
         type_72: None,
     });
     let out = dxf(&insert_with(a.clone(), Vec3::new(1.0, 0.0, 0.0)));
-    let read = cadcraft_io::canonical_attrib_from_groups(&record(&out, "ATTRIB"), "0", None).unwrap();
+    let read = cadcraft_io::canonical_attrib_from_groups(&record(&out, "ATTRIB"), None).unwrap();
     assert_eq!(read.geometry_revision, GeometryRevision::CanonicalV2);
     assert_eq!(read.plane, a.plane);
     let mut text = read.text.clone();

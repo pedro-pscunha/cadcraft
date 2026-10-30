@@ -309,7 +309,8 @@ impl Builder<'_> {
 
 mod table;
 pub use table::{
-    MAX_LAYOUT_CELLS, TableBlock, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_layout, table_style_of,
+    MAX_LAYOUT_CELLS, TableBlock, TableBlockRefusal, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_layout,
+    table_style_of,
 };
 
 mod blocks;

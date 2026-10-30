@@ -27,8 +27,7 @@ pub(super) fn parse_entities(
         match kind.as_str() {
             "POLYLINE" => kindent = Some(polyline_entity(recs, &mut i, &t, d, rx)),
             "INSERT" if t.i(66) == Some(1) => {
-                let ins_layer = kindent.as_ref().map(|(c, _)| c.layer.clone()).unwrap_or_default();
-                let attribs = insert_attribs(recs, &mut i, &ins_layer, rx);
+                let attribs = insert_attribs(recs, &mut i, rx);
                 if let Some((_, EntityKind::Insert(ins))) = kindent.as_mut() {
                     ins.attribs = attribs;
                 }

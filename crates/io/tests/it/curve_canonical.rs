@@ -945,6 +945,7 @@ fn a_3dface_a_3d_polyline_and_a_mesh_keep_their_wcs_positions() {
         records: Default::default(),
         points: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 3.0, 4.0), Vec3::new(5.0, 1.0, -2.0)],
         closed: true,
+        fit: None,
     };
     let out = dxf(&drawing(EntityKind::Polyline3d(poly.clone()), NORMAL, 0.0));
     let entities = tags_of(&out, "ENTITIES");
