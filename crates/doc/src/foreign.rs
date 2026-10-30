@@ -159,6 +159,9 @@ pub struct ForeignExtra {
     pub color_index: Option<(String, i64)>,
     /// Whether the source block had nonconstant attribute definitions.
     pub block_attributes: Option<bool>,
+    /// The SEQEND that closes the ATTRIBs of an INSERT, as the file had it: its handle and its own layer,
+    /// colour and the rest of its common properties (the INSERT's SEQEND of a new INSERT takes the INSERT's layer).
+    pub insert_seqend: Option<crate::PolylineRecord>,
     /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
     /// A MULTILEADER's opaque source graphics. A geometry or display edit invalidates replay.
@@ -179,6 +182,7 @@ impl ForeignExtra {
             && self.color_book.is_none()
             && self.color_index.is_none()
             && self.block_attributes.is_none()
+            && self.insert_seqend.is_none()
             && self.props.is_empty()
             && self.proxy_graphics.is_none()
             && self.subclass.is_empty()

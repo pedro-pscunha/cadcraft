@@ -397,8 +397,9 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
 
 /// The roles of the records CADCraft writes itself under a handle that follows the record it belongs to: the SEQEND of an INSERT or
 /// a polyline by its owner, the reactor object of an image's definition by the image, and a DIMASSOC and the extension dictionary
-/// that holds it by the dimension. A file and its save name the same owner, so the save can give the record the handle the file gave it.
-fn owned_roles(entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
+/// that holds it by the dimension, and the sort table of a block and the extension dictionary that holds it by the block's name. A
+/// file and its save name the same owner, so the save can give the record the handle the file gave it.
+fn owned_roles(tables: &Recs, entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
     let mut out: HashMap<String, ForeignKey> = HashMap::new();
     let mut put = |h: Option<String>, kind: &str, owner: String| {
         if let Some(h) = h {
@@ -410,9 +411,19 @@ fn owned_roles(entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String
             put(head(t).handle, "SEQEND", owner);
         }
     }
+    let block_names: HashMap<String, String> =
+        tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD").filter_map(|(_, _, t)| Some((head(t).handle?, up(&val(t, 2)?)))).collect();
     for (kind, _, t) in objects {
         let header = head(t);
         match kind.as_str() {
+            "SORTENTSTABLE" => {
+                // The block record is the last owner: after the AcDbSortentsTable marker the table names it (group 330).
+                let block = t.iter().rev().find(|g| g.code == 330).and_then(|g| block_names.get(&norm(&g.str())));
+                if let Some(name) = block {
+                    put(header.owner, "SORTENTS/XDICT", name.clone());
+                    put(header.handle, "SORTENTS", name.clone());
+                }
+            }
             "IMAGEDEF_REACTOR" => {
                 if let Some(owner) = header.owner {
                     put(header.handle, "IMAGEDEF_REACTOR", owner);
@@ -581,7 +592,7 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
         recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
     };
     let mut ids = identities(&by_sec("TABLES"), &by_sec("BLOCKS"), &by_sec("OBJECTS"));
-    ids.extend(owned_roles(&by_sec("ENTITIES"), &by_sec("BLOCKS"), &by_sec("OBJECTS")));
+    ids.extend(owned_roles(&by_sec("TABLES"), &by_sec("ENTITIES"), &by_sec("BLOCKS"), &by_sec("OBJECTS")));
     let used: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
     let renamed: HashMap<String, String> = ids
         .iter()
@@ -892,7 +903,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &objects);
-    keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&entities, &blocks, &objects)).collect());
+    keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&tables, &entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities);
@@ -956,7 +967,19 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // that name kept objects or other entities of the file (a hatch that lists its boundary).
     let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
+    let mut insert_of: Option<Handle> = None;
     for (kind, _, t) in blocks.iter().chain(&entities) {
+        // The SEQEND after the ATTRIBs of an INSERT is the INSERT's.
+        match kind.as_str() {
+            "INSERT" => insert_of = head(t).handle.and_then(|h| handle(&h)),
+            "ATTRIB" => {}
+            "SEQEND" => {
+                if let Some(parent) = insert_of.take() {
+                    f.entities.entry(parent).or_default().insert_seqend = Some(crate::dxf_read::seqend_record(t));
+                }
+            }
+            _ => insert_of = None,
+        }
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
             continue;
         }
