@@ -1,7 +1,7 @@
 //! Utilities: CAL (expression calculator), FIND (find and replace text), MASSPROP, MEASUREGEOM.
 
 use cadcraft_doc::{EntityKind, Handle};
-use cadcraft_geom::{Segment, Vec2};
+use cadcraft_geom::{Segment, Vec2, Vec3};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, bool_or, point_param, points_param, str_param, targets};
@@ -298,6 +298,8 @@ fn run_radius(s: &mut Session, p: &Value) -> Result<Value> {
         Some(EntityKind::Circle(c)) => c.radius,
         Some(EntityKind::Arc(a)) => a.radius,
         Some(EntityKind::LwPolyline(_)) => {
+            // The arc nearest `point` is chosen among the polyline's plan-view segments: a canonical polyline has none.
+            super::annotate::require_legacy_source(s, h)?;
             let at = point_param(p, "point").ok_or_else(|| bad("radius.measure", "`point` on the polyline's arc segment is required"))?;
             match super::annotate::segment_at(s, h, at) {
                 Some(Segment::Arc { arc, .. }) => arc.radius,
@@ -368,13 +370,19 @@ fn run_angle(s: &mut Session, p: &Value) -> Result<Value> {
         let hp = |k: &str| p.get(k).and_then(Value::as_str).and_then(Handle::parse_hex);
         let (Some(h1), Some(h2)) = (hp("h1"), hp("h2")) else { return Err(bad("angle.measure", "give {vertex,p1,p2} or {h1,h2}")) };
         let d = s.doc()?;
-        let line = |h: Handle| match d.entity(h).map(|e| e.kind.clone()) {
-            Some(EntityKind::Line(l)) => Some((l.a.xy(), l.b.xy())),
+        let line = |h: Handle| match d.entity(h).map(|e| (e.geometry_revision, e.kind.clone())) {
+            Some((revision, EntityKind::Line(l))) => Some((revision, l)),
             _ => None,
         };
         let (l1, l2) =
             (line(h1).ok_or_else(|| bad("angle.measure", "h1 is not a line"))?, line(h2).ok_or_else(|| bad("angle.measure", "h2 is not a line"))?);
-        lines_vertex(l1, l2).ok_or_else(|| bad("angle.measure", "lines are parallel"))?
+        // A canonical line is a segment in space: the angle between two of them is the angle between their directions at the point
+        // where they meet, not the angle of their plan views.
+        if l1.0 == cadcraft_doc::GeometryRevision::CanonicalV2 || l2.0 == cadcraft_doc::GeometryRevision::CanonicalV2 {
+            let ang = spatial_line_angle((l1.1.a, l1.1.b), (l2.1.a, l2.1.b))?;
+            return Ok(json!({ "angle": ang, "message": angle_text(ang) }));
+        }
+        lines_vertex((l1.1.a.xy(), l1.1.b.xy()), (l2.1.a.xy(), l2.1.b.xy())).ok_or_else(|| bad("angle.measure", "lines are parallel"))?
     };
     let ang = vertex_angle(v, a, b);
     Ok(json!({ "angle": ang, "message": angle_text(ang) }))
@@ -385,6 +393,26 @@ fn lines_vertex((a1, a2): (Vec2, Vec2), (b1, b2): (Vec2, Vec2)) -> Option<(Vec2,
     let (x, _, _) = cadcraft_geom::line_line_infinite(a1, a2, b1, b2)?;
     let far = |p: Vec2, q: Vec2| if p.dist(x) > q.dist(x) { p } else { q };
     Some((x, far(a1, a2), far(b1, b2)))
+}
+
+/// The angle in degrees between two lines in space at the point where they meet, each taken toward its end farther from that point.
+/// Parallel lines and lines that do not meet have no such angle.
+fn spatial_line_angle((a1, a2): (Vec3, Vec3), (b1, b2): (Vec3, Vec3)) -> Result<f64> {
+    let (d1, d2, w) = (a2 - a1, b2 - b1, a1 - b1);
+    let (a, b, c, d, e) = (d1.dot(d1), d1.dot(d2), d2.dot(d2), d1.dot(w), d2.dot(w));
+    let denom = a * c - b * b;
+    if a <= 0.0 || c <= 0.0 || denom <= 1e-12 * a * c {
+        return Err(bad("angle.measure", "lines are parallel"));
+    }
+    let (t, u) = ((b * e - c * d) / denom, (a * e - b * d) / denom);
+    let (p1, p2) = (a1 + d1 * t, b1 + d2 * u);
+    let scale = a1.len().max(a2.len()).max(b1.len()).max(b2.len()).max(1.0);
+    if (p1 - p2).len() > 1e-9 * scale {
+        return Err(bad("angle.measure", "the lines do not meet"));
+    }
+    let far = |p: Vec3, q: Vec3| if (p - p1).len() > (q - p1).len() { p } else { q };
+    let (u1, u2) = (far(a1, a2) - p1, far(b1, b2) - p1);
+    Ok((u1.dot(u2) / (u1.len() * u2.len())).clamp(-1.0, 1.0).acos().to_degrees())
 }
 
 /// The angle at `v` between the directions to `a` and `b`, in degrees from 0 to 180.
@@ -513,6 +541,8 @@ impl Interactive for AngleM {
             s.echo("*Invalid selection*");
             return Ok(Step::Continue);
         };
+        // The circle, arc and line below are read as plan-view geometry: a canonical one is refused, as DIMANGULAR refuses it.
+        super::annotate::require_legacy_source(s, h)?;
         let circle = s
             .doc()?
             .entity(h)
