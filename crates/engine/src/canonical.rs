@@ -33,11 +33,15 @@ pub(crate) struct Flat {
 /// The XY view of `e` when it is canonical (`None` for a legacy payload). A canonical entity whose geometry the resolver
 /// refuses has no geometry here: it is neither picked nor snapped, never read as its 2D fields.
 pub(crate) fn flatten(d: &Drawing, e: &Entity) -> Option<Flat> {
+    flatten_in(d, e, &Mat4::IDENTITY)
+}
+
+pub(crate) fn flatten_in(d: &Drawing, e: &Entity, parent: &Mat4) -> Option<Flat> {
     if e.geometry_revision != GeometryRevision::CanonicalV2 {
         return None;
     }
     let refused = || Some(Flat { refused: true, ..Flat::default() });
-    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) else { return refused() };
+    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, parent) else { return refused() };
     let Ok(prims) = geometry.project_xy() else { return refused() };
     let mut flat = Flat { prims, world: geometry.primitives().to_vec(), ..Flat::default() };
     // A canonical SOLID or TRACE is a closed loop of lines: its polygon is the filled area.
@@ -269,28 +273,13 @@ fn world_point(w: &WorldPrimitive, p: Vec2, tol: f64) -> Option<Vec3> {
 
 /// `hit` with the WCS point of the canonical geometry under it: the single point the nearby canonical objects pass through
 /// at its 2D position, or none when there is not one (legacy geometry, or several Z values).
-pub(crate) fn with_world(
-    d: &Drawing,
-    space: &cadcraft_doc::Space,
-    ix: &Option<std::sync::Arc<crate::spatial::SpatialIndex>>,
-    mut hit: crate::snap::SnapHit,
-    frozen: &[String],
-) -> crate::snap::SnapHit {
+pub(crate) fn with_world(world: Vec<WorldPrimitive>, mut hit: crate::snap::SnapHit) -> crate::snap::SnapHit {
     if hit.deferred.is_some() {
         return hit;
     }
     let tol = 1e-6 * hit.point.x.abs().max(hit.point.y.abs()).max(1.0);
-    let probe = cadcraft_geom::Bounds2::new(hit.point, hit.point).expand(tol);
-    let Some(cands) = crate::select::candidates(d, space, ix, &probe, true, false) else { return hit };
-    let mut points: Vec<Vec3> = Vec::new();
-    for (e, _) in cands {
-        if !d.is_visible(e) || frozen.iter().any(|l| l.eq_ignore_ascii_case(&e.common.layer)) {
-            continue;
-        }
-        if let Some(flat) = flatten(d, e) {
-            points.extend(flat.world_points(hit.point, tol));
-        }
-    }
+    let flat = Flat { world, ..Flat::default() };
+    let points = flat.world_points(hit.point, tol);
     if let Some(first) = points.first()
         && points.iter().all(|p| (p.z - first.z).abs() <= tol)
     {
