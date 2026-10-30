@@ -62,6 +62,10 @@ pub struct SnapHit {
     /// curve) until the other end of the line is known. See [`resolve_deferred`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<Deferred>,
+    /// The WCS point of this hit on canonical geometry, when the 2D point has exactly one (a 3D line's end, a tilted circle's
+    /// center); `None` for legacy geometry and where several WCS points share the 2D point.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub world: Option<cadcraft_geom::Vec3>,
 }
 
 impl SnapHit {
@@ -345,7 +349,8 @@ fn osnap_in_with_prims(
             }
         }
     }
-    let hit = finish(cands, &near_prims, cursor, aperture, osmode, base, deferred, clip);
+    let hit =
+        finish(cands, &near_prims, cursor, aperture, osmode, base, deferred, clip).map(|h| crate::canonical::with_world(d, space, ix, h, frozen));
     Some((hit, near_prims))
 }
 
@@ -426,6 +431,15 @@ fn gather_in(
         count += 1;
         if count > 2000 {
             break;
+        }
+        // A canonical object snaps to its WCS geometry seen along Z, not to the 2D reading of its fields.
+        if let Some(flat) = crate::canonical::flatten(d, e) {
+            if osmode & mode::INS != 0 {
+                cands.extend(flat.inserts.iter().map(|p| (mode::INS, *p)));
+            }
+            let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims };
+            sink.canonical(&e.kind, &flat);
+            continue;
         }
         if osmode & mode::INS != 0 {
             match &e.kind {
@@ -514,7 +528,7 @@ fn finish(
         da.total_cmp(&db)
     });
     if let Some((m, p)) = best {
-        return Some(SnapHit { point: *p, mode: *m, name: name_of(*m), viewport: None, deferred: None });
+        return Some(SnapHit { point: *p, mode: *m, name: name_of(*m), viewport: None, deferred: None, world: None });
     }
     if base.is_none()
         && deferred
@@ -540,7 +554,7 @@ fn finish(
             }
         }
         if let Some((_, p)) = nb {
-            return Some(SnapHit { point: p, mode: mode::NEA, name: "Nearest", viewport: None, deferred: None });
+            return Some(SnapHit { point: p, mode: mode::NEA, name: "Nearest", viewport: None, deferred: None, world: None });
         }
     }
     None
@@ -592,6 +606,26 @@ impl Sink<'_> {
         }
         if osmode & mode::GCEN != 0 {
             self.closed_centroid(kind, &at);
+        }
+    }
+
+    /// The snap points of a canonical object: its primitives in the XY view, with the corners of a SOLID or TRACE.
+    fn canonical(&mut self, kind: &EntityKind, flat: &crate::canonical::Flat) {
+        // OSNAPHATCH = 0: hatches are left out.
+        if self.osmode & mode::HATCH == 0 && matches!(kind, EntityKind::Hatch(_)) {
+            return;
+        }
+        for p in &flat.prims {
+            if !prim_near(p, &self.probe, self.aperture) {
+                continue;
+            }
+            if self.osmode & mode::END != 0
+                && matches!(kind, EntityKind::Solid(_) | EntityKind::Trace(_))
+                && let Prim::Fill(poly) = p
+            {
+                self.cands.extend(poly.iter().map(|c| (mode::END, *c)));
+            }
+            self.primitive(kind, p.clone());
         }
     }
 
@@ -896,7 +930,7 @@ fn deferred_hit(prims: &[Prim], cursor: Vec2, aperture: f64, osmode: u32, clip: 
         };
         let dd = at.dist(cursor);
         if at.is_finite() && clip.is_none_or(|c| c.contains(at)) && dd <= aperture && best.is_none_or(|(bd, _)| dd < bd) {
-            best = Some((dd, SnapHit { point: at, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }) }));
+            best = Some((dd, SnapHit { point: at, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }), world: None }));
         }
     }
     best.map(|(_, h)| h)
