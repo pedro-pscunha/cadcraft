@@ -501,15 +501,19 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                     multiline_tags(w, a, false);
                 }
             }
-            let sh = w.h();
+            // The SEQEND the file had keeps its handle, layer and colour; a new one takes the INSERT's layer.
+            let record = d.foreign.entities.get(&e.handle).and_then(|x| x.insert_seqend.as_ref());
+            let handle = w.instance_handle(record.and_then(|r| r.handle));
+            let common_props =
+                record.map_or_else(|| cadcraft_doc::Common { layer: e.common.layer.clone(), ..Default::default() }, |r| r.common.clone());
+            let child = Entity {
+                geometry_revision: Default::default(),
+                handle,
+                common: common_props,
+                kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
+            };
             w.s(0, "SEQEND");
-            w.s(5, sh);
-            w.s(330, e.handle.hex());
-            w.s(100, "AcDbEntity");
-            if paper {
-                w.i(67, 1);
-            }
-            w.s(8, &e.common.layer);
+            common(w, &child, &e.handle.hex(), paper, "");
         }
     }
 }

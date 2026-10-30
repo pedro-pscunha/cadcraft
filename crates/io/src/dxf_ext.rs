@@ -926,7 +926,10 @@ pub(crate) fn apply_anno(d: &mut cadcraft_doc::Drawing, p: AnnoPayload) {
 pub(crate) fn read_scale(tags: &[Tag]) -> Option<cadcraft_doc::AnnoScale> {
     let name = tags.iter().find(|t| t.code == 300).map(Tag::str)?;
     let num = |c: i32| tags.iter().find(|t| t.code == c).map(Tag::f64);
-    let s = cadcraft_doc::AnnoScale::new(name.trim(), num(140)?, num(141)?);
+    let s = cadcraft_doc::AnnoScale {
+        unit: tags.iter().find(|t| t.code == 290).map(|t| t.i64() != 0),
+        ..cadcraft_doc::AnnoScale::new(name.trim(), num(140)?, num(141)?)
+    };
     (s.is_valid() && !s.name.is_empty() && s.name.len() <= 255).then_some(s)
 }
 

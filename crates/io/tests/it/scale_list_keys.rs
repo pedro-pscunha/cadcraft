@@ -5,8 +5,12 @@ use cadcraft_doc::{AnnoScale, Drawing};
 use cadcraft_dxf::{Tag, records, sections};
 
 fn scale(handle: &str, name: &str, paper: f64, drawing: f64) -> String {
+    unit_scale(handle, name, paper, drawing, 0)
+}
+
+fn unit_scale(handle: &str, name: &str, paper: f64, drawing: f64, unit: i32) -> String {
     format!(
-        "0\nSCALE\n5\n{handle}\n102\n{{ACAD_REACTORS\n330\nB7\n102\n}}\n330\nB7\n100\nAcDbScale\n70\n0\n300\n{name}\n140\n{paper}\n141\n{drawing}\n290\n0\n"
+        "0\nSCALE\n5\n{handle}\n102\n{{ACAD_REACTORS\n330\nB7\n102\n}}\n330\nB7\n100\nAcDbScale\n70\n0\n300\n{name}\n140\n{paper}\n141\n{drawing}\n290\n{unit}\n"
     )
 }
 
@@ -53,6 +57,7 @@ fn a_scale_keeps_the_key_of_its_file() {
 
 #[test]
 fn a_new_scale_takes_the_next_free_key_of_the_series() {
+    // Measured in AutoCAD LT 2025 (-SCALELISTEDIT on a drawing with A0..B6): four added scales got B7, B8, B9 and C0.
     let mut d = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
     d.scales.push(AnnoScale::new("1:7", 1.0, 7.0));
     d.scales.push(AnnoScale::new("1:9", 1.0, 9.0));
@@ -66,18 +71,42 @@ fn a_drawing_never_read_from_a_file_numbers_its_scales_from_a0() {
     assert_eq!(written_keys(&cadcraft_io::write_dxf(&d)), pairs(&[("A0", "1:5"), ("A1", "1:10")]));
 }
 
-/// The unit scale flag (290) is on AutoCAD's scale "1:1" only, not on another scale of factor 1.
-#[test]
-fn only_the_scale_named_one_to_one_is_the_unit_scale() {
-    let mut d = Drawing::new_metric();
-    d.scales = vec![AnnoScale::new("1:1", 1.0, 1.0), AnnoScale::new("1'-0\" = 1'-0\"", 12.0, 12.0), AnnoScale::new("1:50", 1.0, 50.0)];
-    let tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
-    let flags: Vec<(String, i64)> = sections(&tags)
+/// The unit scale flag (group 290) of each SCALE object of a written drawing, by name.
+fn written_flags(text: &str) -> Vec<(String, String)> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    sections(&tags)
         .into_iter()
         .filter(|s| s.name == "OBJECTS")
         .flat_map(|s| records(&s.tags))
-        .filter(|(k, _)| k == "SCALE")
-        .map(|(_, body)| (body.iter().find(|t| t.code == 300).unwrap().str(), body.iter().find(|t| t.code == 290).unwrap().i64()))
-        .collect();
-    assert_eq!(flags, vec![("1:1".to_string(), 1), ("1'-0\" = 1'-0\"".to_string(), 0), ("1:50".to_string(), 0)]);
+        .filter(|(kind, _)| kind == "SCALE")
+        .map(|(_, body): (String, Vec<Tag>)| {
+            let get = |code: i32| body.iter().find(|t| t.code == code).unwrap().str();
+            (get(300), get(290))
+        })
+        .collect()
+}
+
+#[test]
+fn the_unit_scale_flag_of_a_scale_is_the_files() {
+    // AutoCAD flags the built-in 1:1 only: a scale with the same ratio under another name has none.
+    let mut text = String::from("0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n3\nACAD_SCALELIST\n350\nB7\n");
+    text.push_str("0\nDICTIONARY\n5\nB7\n330\nC\n100\nAcDbDictionary\n281\n1\n3\nA0\n350\nA1\n3\nA1\n350\nA2\n");
+    text.push_str(&unit_scale("A1", "1:1", 1.0, 1.0, 1));
+    text.push_str(&unit_scale("A2", "1\" = 1'", 1.0, 1.0, 0));
+    text.push_str("0\nENDSEC\n0\nEOF\n");
+    let d = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(written_flags(&cadcraft_io::write_dxf(&d)), pairs(&[("1:1", "1"), ("1\" = 1'", "0")]));
+}
+
+#[test]
+fn a_new_scale_is_flagged_only_when_it_is_the_unit_scale_1_to_1() {
+    // Measured in AutoCAD LT 2025 (-SCALELISTEDIT): "dim1 d" 1:1 and "dim1 c" 2:2 get 290 = 0; the built-in 1:1 has 1.
+    let mut d = Drawing::new_metric();
+    d.scales = vec![
+        AnnoScale::new("1:1", 1.0, 1.0),
+        AnnoScale::new("dim1 d", 1.0, 1.0),
+        AnnoScale::new("dim1 c", 2.0, 2.0),
+        AnnoScale::new("1:37", 1.0, 37.0),
+    ];
+    assert_eq!(written_flags(&cadcraft_io::write_dxf(&d)), pairs(&[("1:1", "1"), ("dim1 d", "0"), ("dim1 c", "0"), ("1:37", "0")]));
 }

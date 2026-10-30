@@ -397,8 +397,9 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
 
 /// The roles of the records CADCraft writes itself under a handle that follows the record it belongs to: the SEQEND of an INSERT or
 /// a polyline by its owner, the reactor object of an image's definition by the image, and a DIMASSOC and the extension dictionary
-/// that holds it by the dimension. A file and its save name the same owner, so the save can give the record the handle the file gave it.
-fn owned_roles(entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
+/// that holds it by the dimension, and the sort table of a block and the extension dictionary that holds it by the block's name. A
+/// file and its save name the same owner, so the save can give the record the handle the file gave it.
+fn owned_roles(tables: &Recs, entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
     let mut out: HashMap<String, ForeignKey> = HashMap::new();
     let mut put = |h: Option<String>, kind: &str, owner: String| {
         if let Some(h) = h {
@@ -410,9 +411,19 @@ fn owned_roles(entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String
             put(head(t).handle, "SEQEND", owner);
         }
     }
+    let block_names: HashMap<String, String> =
+        tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD").filter_map(|(_, _, t)| Some((head(t).handle?, up(&val(t, 2)?)))).collect();
     for (kind, _, t) in objects {
         let header = head(t);
         match kind.as_str() {
+            "SORTENTSTABLE" => {
+                // The block record is the last owner: after the AcDbSortentsTable marker the table names it (group 330).
+                let block = t.iter().rev().find(|g| g.code == 330).and_then(|g| block_names.get(&norm(&g.str())));
+                if let Some(name) = block {
+                    put(header.owner, "SORTENTS/XDICT", name.clone());
+                    put(header.handle, "SORTENTS", name.clone());
+                }
+            }
             "IMAGEDEF_REACTOR" => {
                 if let Some(owner) = header.owner {
                     put(header.handle, "IMAGEDEF_REACTOR", owner);
@@ -600,7 +611,7 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
         recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
     };
     let mut ids = identities(&by_sec("TABLES"), &by_sec("BLOCKS"), &by_sec("OBJECTS"));
-    ids.extend(owned_roles(&by_sec("ENTITIES"), &by_sec("BLOCKS"), &by_sec("OBJECTS")));
+    ids.extend(owned_roles(&by_sec("TABLES"), &by_sec("ENTITIES"), &by_sec("BLOCKS"), &by_sec("OBJECTS")));
     let used: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
     let renamed: HashMap<String, String> = ids
         .iter()
@@ -914,7 +925,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &objects);
-    keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&entities, &blocks, &objects)).collect());
+    keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&tables, &entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities);
@@ -978,7 +989,19 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // that name kept objects or other entities of the file (a hatch that lists its boundary).
     let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
+    let mut insert_of: Option<Handle> = None;
     for (kind, _, t) in blocks.iter().chain(&entities) {
+        // The SEQEND after the ATTRIBs of an INSERT is the INSERT's.
+        match kind.as_str() {
+            "INSERT" => insert_of = head(t).handle.and_then(|h| handle(&h)),
+            "ATTRIB" => {}
+            "SEQEND" => {
+                if let Some(parent) = insert_of.take() {
+                    f.entities.entry(parent).or_default().insert_seqend = Some(crate::dxf_read::seqend_record(t));
+                }
+            }
+            _ => insert_of = None,
+        }
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
             continue;
         }
@@ -1012,36 +1035,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     link_suns(&mut f, &viewports, &ids);
-    // The classes of kept objects and of entities of types CADCraft doesn't model.
-    let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
-    types.extend(all_entities(d).filter_map(|e| match &e.kind {
-        EntityKind::Unknown(u) => Some(up(&u.dxf_type)),
-        _ => None,
-    }));
-    // A proxy's class is the one its group 91 numbers in the file's CLASSES: keep it too, and the
-    // file's class order, by which saving renumbers the proxy.
-    let class_order: Vec<String> =
-        classes.iter().filter(|(k, _, _)| k == "CLASS").take(MAX_OBJECTS).map(|(_, _, t)| up(&val(t, 1).unwrap_or_default())).collect();
-    let mut proxies = false;
-    let proxy_tags = f.objects.iter().filter(|o| is_proxy(&o.kind)).map(|o| &o.tags);
-    let proxy_tags = proxy_tags.chain(all_entities(d).filter_map(|e| match &e.kind {
-        EntityKind::Unknown(u) if is_proxy(&u.dxf_type) => Some(&u.tags),
-        _ => None,
-    }));
-    for tags in proxy_tags {
-        proxies = true;
-        if let Some(name) = class_index(class_number(tags.iter().map(|r| (r.code, r.value.as_str())))).and_then(|i| class_order.get(i)) {
-            types.insert(name.clone());
-        }
-    }
-    if proxies {
-        f.class_order = class_order;
-    }
-    for (kind, _, t) in &classes {
-        if kind == "CLASS" && val(t, 1).is_some_and(|n| types.contains(&up(&n))) && f.classes.len() < MAX_OBJECTS {
-            f.classes.push(t.iter().map(raw).collect());
-        }
-    }
+    keep_object_classes(&mut f, d, &classes);
     // The roles of the handles kept data refers to.
     let mut refs: Vec<String> = Vec::new();
     let mut note = |tags: &[RawTag]| refs.extend(tags.iter().filter(|r| is_pointer(r.code)).map(|r| norm(&r.value)));
@@ -1073,6 +1067,39 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
     if !f.is_empty() {
         d.foreign = Arc::new(f);
+    }
+}
+
+/// The classes of kept objects and of entities of types CADCraft doesn't model.
+fn keep_object_classes(f: &mut Foreign, d: &Drawing, classes: &Recs<'_>) {
+    let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
+    types.extend(all_entities(d).filter_map(|e| match &e.kind {
+        EntityKind::Unknown(u) => Some(up(&u.dxf_type)),
+        _ => None,
+    }));
+    // A proxy's class is the one its group 91 numbers in the file's CLASSES: keep it too, and the
+    // file's class order, by which saving renumbers the proxy.
+    let class_order: Vec<String> =
+        classes.iter().filter(|(k, _, _)| k == "CLASS").take(MAX_OBJECTS).map(|(_, _, t)| up(&val(t, 1).unwrap_or_default())).collect();
+    let mut proxies = false;
+    let proxy_tags = f.objects.iter().filter(|o| is_proxy(&o.kind)).map(|o| &o.tags);
+    let proxy_tags = proxy_tags.chain(all_entities(d).filter_map(|e| match &e.kind {
+        EntityKind::Unknown(u) if is_proxy(&u.dxf_type) => Some(&u.tags),
+        _ => None,
+    }));
+    for tags in proxy_tags {
+        proxies = true;
+        if let Some(name) = class_index(class_number(tags.iter().map(|r| (r.code, r.value.as_str())))).and_then(|i| class_order.get(i)) {
+            types.insert(name.clone());
+        }
+    }
+    if proxies {
+        f.class_order = class_order;
+    }
+    for (kind, _, t) in classes {
+        if kind == "CLASS" && val(t, 1).is_some_and(|n| types.contains(&up(&n))) && f.classes.len() < MAX_OBJECTS {
+            f.classes.push(t.iter().map(raw).collect());
+        }
     }
 }
 
