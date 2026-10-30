@@ -579,13 +579,15 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         w.s(342, cx.table_style(&t.style));
         w.s(343, brh);
         w.p(11, t.dir);
-        w.i(90, 0);
+        let o = &t.overrides;
+        w.i(90, i64::from(o.value_flags));
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
         w.i(92, cols as i64);
-        for c in [93, 94, 95, 96] {
-            w.i(c, 0);
+        for (c, mask) in [(93, o.style), (94, o.border_color), (95, o.border_lineweight), (96, o.border_visibility)] {
+            w.i(c, i64::from(mask));
         }
+        w.t.extend(o.values.iter().map(crate::dxf_raw::tag));
         for h in t.row_heights.iter().take(rows) {
             w.f(141, *h);
         }
@@ -594,24 +596,29 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         }
         let cov = cadcraft_render::table_covered(t);
         let span = |v: u32| i64::from(v.min(i16::MAX as u32));
+        let blank = cadcraft_doc::TableCell::default();
         for r in 0..rows {
             for c in 0..cols {
                 let cell = t.cells.get(r).and_then(|x| x.get(c));
                 let covered = cov.get(r).and_then(|x| x.get(c)).copied().unwrap_or(false);
                 let merge = cell.and_then(|x| x.merged).filter(|&(a, b)| a >= 1 && b >= 1 && (a, b) != (1, 1));
+                let cell_ref = cell.unwrap_or(&blank);
+                // A text cell: the generated block holds the text only, so a source block cell (171 = 2, with its block, scale and
+                // attributes) is not carried.
                 w.i(171, 1);
-                w.i(172, 0);
+                w.i(172, i64::from(cell_ref.flag_value));
                 w.i(173, i64::from(covered || merge.is_some()));
-                w.i(174, 0);
+                w.i(174, i64::from(cell_ref.auto_fit));
                 let (rs, cs) = if covered { (0, 0) } else { merge.map(|(a, b)| (span(a), span(b))).unwrap_or((1, 1)) };
                 w.i(175, cs);
                 w.i(176, rs);
-                w.i(91, 0);
-                w.i(178, 0);
-                w.f(145, 0.0);
+                w.i(91, i64::from(cell_ref.override_flag));
+                w.i(178, i64::from(cell_ref.virtual_edge));
+                w.f(145, cell_ref.rotation);
                 if let Some(h) = cell.and_then(|x| x.text_height).filter(|h| h.is_finite() && *h > 0.0) {
                     w.f(140, h);
                 }
+                w.t.extend(cell_ref.style_groups.iter().map(crate::dxf_raw::tag));
                 // Long text: 250-character code-2 chunks, the rest in code 1.
                 let chars: Vec<char> = cell.map(|x| x.text.chars().collect()).unwrap_or_default();
                 let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();

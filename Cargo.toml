@@ -102,9 +102,9 @@ debug = 0
 # vertices, TABLESTYLE border linetypes and flags in the bridge, entity material and shadow mode,
 # VERTEX/SEQEND identity and polygon mesh vertex flags, AutoCAD-readable public DXF, no silent
 # record drops, ATTRIB/ATTDEF thickness, POINT angle in DXF degrees, every MLEADERSTYLE group in the DXF reader and
-# writer with the style name from its dictionary key; upstream main 2c436ae merged),
+# writer with the style name from its dictionary key, table override values in a text DXF, R2010 table style flow direction and cell overrides; upstream main 2c436ae merged),
 # until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "1c370d40e5e623b7ed0c507ace251c637ce0705c" }
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "b914fe3fda0daaeac00fdfe5630491cef04b2c81" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }

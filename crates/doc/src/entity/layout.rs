@@ -144,6 +144,49 @@ pub struct TableCell {
     /// `None`: its cell style's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_height: Option<f64>,
+    /// The cell flag value (group 172), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub flag_value: i32,
+    /// The cell flag (group 91 outside the cell's value block), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub override_flag: i32,
+    /// The cell fits its content automatically (group 174).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_fit: bool,
+    /// The cell has a virtual edge (group 178).
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub virtual_edge: i32,
+    /// The cell's own style groups (alignment 170, fill 283 and 63, text colour 64, text style 7, border colours, lineweights and
+    /// visibilities 65 to 69, 275 to 279 and 285 to 289), as the file gave them: the values the cell flag (91) says are overridden.
+    /// The text height (140) is `text_height`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub style_groups: Vec<super::RawTag>,
+    /// The rotation of the cell's content (group 145), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub rotation: f64,
+}
+
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+/// The table-wide groups of an ACAD_TABLE that the table model has no field for, as the file gave them: the value flags (90), the
+/// style override masks (93), the border colour, lineweight and visibility override masks (94 to 96) and the override values that
+/// follow them (280, 281, 70, 40, 41, 64 and so on up to the row heights).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableOverrides {
+    pub value_flags: i32,
+    pub style: i32,
+    pub border_color: i32,
+    pub border_lineweight: i32,
+    pub border_visibility: i32,
+    /// The override value groups after 96, with the text of each value.
+    pub values: Vec<super::RawTag>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -175,6 +218,15 @@ pub struct Table {
     /// The CSV file the cells come from (DATALINK).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_link: Option<crate::DataLink>,
+    /// The table's override masks and values, as the file gave them.
+    #[serde(default, skip_serializing_if = "TableOverrides::is_default")]
+    pub overrides: TableOverrides,
+}
+
+impl TableOverrides {
+    fn is_default(&self) -> bool {
+        *self == TableOverrides::default()
+    }
 }
 
 fn table_x_axis() -> Vec3 {
