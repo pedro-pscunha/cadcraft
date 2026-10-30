@@ -528,6 +528,16 @@ pub(super) fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
             let drawn = Polyline { vertices: pl.vertices.clone(), closed: pl.closed };
             (g.area().abs(), drawn.len())
         }
+        // A canonical ellipse is measured in its own plane: its major axis is a space vector, and the plan view of it is not the measure.
+        EntityKind::Ellipse(el) if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 => {
+            if cadcraft_geom::ccw_sweep(el.start, el.end) != cadcraft_geom::TAU {
+                return Err(bad("area", "object has no area"));
+            }
+            let a = el.major.len();
+            let b = a * el.ratio;
+            let flat = cadcraft_geom::Ellipse::from_conjugate(Vec2::ZERO, Vec2::new(a, 0.0), Vec2::new(0.0, b), 0.0, cadcraft_geom::TAU);
+            (cadcraft_geom::PI * a * b, flat.arc_length_from(0.0, cadcraft_geom::TAU))
+        }
         EntityKind::Ellipse(el) => {
             let arc = el.projected();
             if !arc.is_full() {
