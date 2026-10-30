@@ -190,8 +190,8 @@ fn the_codes_survive_a_dwg_save() {
 
 /// A style with every field at a value that is not the default.
 fn full_style() -> MLeaderStyle {
-    // 0xC3RRGGBB is a true colour and 0xC2 plus an index an AutoCAD colour index; 0xC1000000 is ByBlock.
-    let true_color = |rgb: u32| (0xC300_0000u32 | rgb) as i32 as i64;
+    // The colour method is the top byte: 0xC0 ByLayer, 0xC1 ByBlock, 0xC2 a true colour (0xC2RRGGBB), 0xC3 an index (0xC3000005).
+    let true_color = |rgb: u32| (0xC200_0000u32 | rgb) as i32 as i64;
     MLeaderStyle {
         name: "Full".into(),
         arrow_size: 0.3,
@@ -221,7 +221,7 @@ fn full_style() -> MLeaderStyle {
         enable_dogleg: false,
         description: "A description".into(),
         default_text: "Default".into(),
-        text_color: (0xC200_0005u32) as i32 as i64,
+        text_color: (0xC300_0005u32) as i32 as i64,
         text_frame: true,
         text_always_left: true,
         align_space: 3.5,
@@ -277,38 +277,6 @@ fn a_style_made_in_cadcraft_is_written_with_the_defaults() {
     }
 }
 
-/// The names (as serialized) of the fields of two styles that differ.
-fn differing(got: &MLeaderStyle, want: &MLeaderStyle) -> Vec<String> {
-    let (got, want) = (serde_json::to_value(got).unwrap(), serde_json::to_value(want).unwrap());
-    let (Some(got), Some(want)) = (got.as_object(), want.as_object()) else { return Vec::new() };
-    want.iter().filter(|(name, value)| got.get(*name) != Some(*value)).map(|(name, _)| name.clone()).collect()
-}
-
-/// What a DWG save loses of `full_style` today because acadrust's DXF reader drops or mislabels the group (it has no case for
-/// 90, 40, 41, 172 (draw leader order), 297, 46, 94, 47, 49, 140, 141, 295, 143, 271, 272 and 273, reads 300 as the description
-/// and 3 as the name, and turns the 91, 93 and 94 colour values into another colour). The root fix is in acadrust: when it lands
-/// this list is empty and this test fails until it is.
-const LOST_IN_DWG_TODAY: &[&str] = &[
-    "drawLeaderOrder",
-    "maxLeaderPoints",
-    "firstSegmentAngle",
-    "secondSegmentAngle",
-    "lineColor",
-    "description",
-    "defaultText",
-    "textColor",
-    "textAlwaysLeft",
-    "alignSpace",
-    "blockColor",
-    "blockScale",
-    "blockRotation",
-    "overwritten",
-    "breakGap",
-    "attachDirection",
-    "attachTop",
-    "attachBottom",
-];
-
 /// The style of the DWG `bytes`, field by field as acadrust reads it: the fields its DXF reader takes.
 fn assert_acadrust_fields(bytes: &[u8], want: &MLeaderStyle) {
     use acadrust::objects::{BlockContentConnectionType, LeaderContentType, ObjectType, TextAlignmentType, TextAngleType, TextAttachmentType};
@@ -342,6 +310,15 @@ fn assert_acadrust_fields(bytes: &[u8], want: &MLeaderStyle) {
         (style.scale_factor, style.landing_gap, style.landing_distance, style.arrowhead_size, style.text_height),
         (2.5, want.landing_gap, want.dogleg, want.arrow_size, want.text_height)
     );
+    // The groups acadrust's DXF reader used to drop or mislabel.
+    assert_eq!((style.description.as_str(), style.default_text.as_str()), ("A description", "Default"));
+    assert_eq!((style.max_leader_points, style.first_segment_angle, style.second_segment_angle), (4, 0.5, 0.75));
+    assert!(style.text_always_left);
+    assert_eq!(style.line_color, acadrust::types::Color::Rgb { r: 0x10, g: 0x20, b: 0x30 });
+    assert_eq!(style.text_color, acadrust::types::Color::Index(5));
+    assert_eq!(style.block_content_color, acadrust::types::Color::Rgb { r: 0x70, g: 0x80, b: 0x90 });
+    assert_eq!((style.align_space, style.break_gap_size, style.block_content_rotation), (3.5, 0.25, 0.5));
+    assert_eq!((style.block_content_scale_x, style.block_content_scale_y, style.block_content_scale_z), (2.0, 3.0, 4.0));
 }
 
 #[test]
@@ -349,11 +326,8 @@ fn every_field_of_a_multileader_style_survives_a_dwg_save() {
     let bytes = write(&drawing_with_full_style(), "x.dwg").unwrap();
     let want = full_style();
     assert_acadrust_fields(&bytes, &want);
-    // CADCraft reads the DWG back: every field but the ones acadrust loses.
-    let back = style_of(&read(&bytes, "x.dwg").unwrap());
-    let mut lost = differing(&back, &want);
-    lost.sort();
-    let mut known: Vec<&str> = LOST_IN_DWG_TODAY.to_vec();
-    known.sort_unstable();
-    assert_eq!(lost, known);
+    // CADCraft reads the DWG back to the same style, field for field, the name from the dictionary key.
+    let read_back = read(&bytes, "x.dwg").unwrap();
+    assert_eq!(style_of(&read_back), want);
+    assert_eq!(read_back.mleader_styles.iter().filter(|s| s.name == "Full").count(), 1);
 }

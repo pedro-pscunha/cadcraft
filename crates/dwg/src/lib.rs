@@ -324,36 +324,6 @@ mod native {
         }
     }
 
-    /// The block content connection type of each multileader style (DXF group 177, ODA DWG specification: the MLEADERSTYLE
-    /// block content connection). acadrust's DXF reader has no case for it, so the style would be written with its default
-    /// (centre extents) whatever the DXF says; the value is read from the DXF's MLEADERSTYLE records here, by handle.
-    fn mleader_style_connections(doc: &mut acadrust::CadDocument, dxf: &[u8]) {
-        use acadrust::objects::{BlockContentConnectionType, ObjectType};
-        let text = String::from_utf8_lossy(dxf);
-        let mut lines = text.lines();
-        let (mut in_style, mut handle) = (false, None::<u64>);
-        let mut found: Vec<(u64, i16)> = Vec::new();
-        while let (Some(code), Some(value)) = (lines.next(), lines.next()) {
-            let (code, value) = (code.trim(), value.trim());
-            match code {
-                "0" => (in_style, handle) = (value == "MLEADERSTYLE", None),
-                "5" if in_style => handle = u64::from_str_radix(value, 16).ok(),
-                "177" if in_style => {
-                    if let (Some(h), Ok(v)) = (handle, value.parse::<i16>()) {
-                        found.push((h, v));
-                    }
-                }
-                _ => {}
-            }
-        }
-        for o in doc.objects.values_mut() {
-            let ObjectType::MultiLeaderStyle(style) = o else { continue };
-            if let Some((_, v)) = found.iter().find(|(h, _)| *h == style.handle.value()) {
-                style.block_content_connection = BlockContentConnectionType::from(*v);
-            }
-        }
-    }
-
     /// The DWG dimension flags byte. Its bit 1 is DXF group 70's bit 32 (ODA DWG specification,
     /// common dimension data), which acadrust keeps no copy of from DXF: it is set here as
     /// CADCraft's DXF writer always sets it (#1094). Bit 0, the opposite of group 70's bit 128,
@@ -590,7 +560,6 @@ mod native {
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
-        mleader_style_connections(&mut doc, dxf);
         add_variable_dictionary(&mut doc);
         current_layer(&mut doc);
         std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
