@@ -1315,7 +1315,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     if let Some(tag) = w.t.get_mut(seed_pos + 1) {
         *tag = Tag::s(5, format!("{:X}", w.next));
     }
-    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     // Group 91 of a CLASS exists from AutoCAD 2004 on (AutoCAD 2000 expects the next group, 280, after 90);
     // the DWG bridge keeps it for acadrust.
     if version >= Version::R2004 || dwg_bridge {
@@ -1327,6 +1326,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::order_subclass_groups(&mut w.t);
     crate::dxf_raw::order_reactors(&mut w.t, d);
     crate::dxf_raw::restore_source_handles(&mut w.t, d);
+    // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
+    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     w.t
 }
 
