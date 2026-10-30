@@ -442,6 +442,33 @@ fn table_title_is_centred_and_merged() {
     assert!((b.center().x - 3.0).abs() < 0.05, "{b:?}");
 }
 
+#[test]
+fn a_table_cell_draws_the_block_it_holds() {
+    let mut d = Drawing::new_imperial();
+    let mut logo = cadcraft_doc::Block::new("Logo");
+    logo.entities
+        .push(cadcraft_doc::Entity::new(cadcraft_doc::Handle(0x4201), EntityKind::Circle(cadcraft_doc::Circle { center: Vec3::ZERO, radius: 0.5 })));
+    d.blocks.insert("Logo".into(), std::sync::Arc::new(logo));
+    let cell = cadcraft_doc::TableCell {
+        block: Some(cadcraft_doc::TableCellBlock { block: "Logo".into(), scale: 1.0, attribs: Vec::new() }),
+        ..Default::default()
+    };
+    let t = cadcraft_doc::Table {
+        col_widths: vec![2.0, 2.0],
+        row_heights: vec![2.0],
+        cells: vec![vec![Default::default(), cell]],
+        style: "Standard".into(),
+        text_height: 0.2,
+        ..Default::default()
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    // The circle is drawn inside the second cell (x 2 to 4, y 0 to -2), centred by the cell's alignment (middle left here,
+    // so its left edge is a margin from the cell's left border).
+    let drawn = Bounds2::from_points(l.prims.iter().flat_map(|p| l.points(p).to_vec()).filter(|q| q.x > 2.0 && q.x < 4.0 && q.y < 0.0 && q.y > -2.0));
+    assert!(!drawn.is_empty() && (drawn.max.y - drawn.min.y) > 0.9, "{drawn:?}");
+}
+
 // ---------- hatch level of detail (on-screen builds, issue #544) ----------
 
 fn pattern_hatch(pattern: &str, scale: f64, (x0, y0, x1, y1): (f64, f64, f64, f64)) -> Hatch {
