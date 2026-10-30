@@ -284,5 +284,6 @@ fn the_attributes_left_out_by_a_non_uniform_scale_are_a_note_of_the_save() {
     let (_, notes) =
         write_with_noted(&drawing(&leader(Some(Vec3::new(2.0, 2.0, 2.0)))), "x.dxf", &SaveOptions { version: Some(Version::R2004), binary: false })
             .unwrap();
-    assert!(notes.is_empty(), "{notes:?}");
+    // The drawing has no saved extents, so the save may note the extents it omits; it adds no multileader note.
+    assert!(notes.iter().all(|n| !n.contains("MULTILEADER")), "{notes:?}");
 }
