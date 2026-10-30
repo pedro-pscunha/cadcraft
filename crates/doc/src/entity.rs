@@ -85,7 +85,7 @@ pub use curves::{
     Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, Polyline3dFit, PolylineFit, PolylineFitVertex, PolylineRecord,
     PolylineRecords, RayLine, Solid,
 };
-pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
+pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame, LeaderLinks};
 pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
 pub use geometry::{DimensionAsRead, GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, TableCellBlock, TableOverrides, Viewport, ViewportStatus};
@@ -430,7 +430,21 @@ impl EntityKind {
                 // Mirrored, the elements change sides.
                 ml.scale *= if mirror { -s } else { s };
             }
-            EntityKind::Leader(l) => l.vertices.iter_mut().for_each(t3),
+            EntityKind::Leader(l) => {
+                l.vertices.iter_mut().for_each(t3);
+                // The direction and offsets are vectors (they turn, scale and mirror with the map); the annotation size scales.
+                if let Some(f) = &mut l.frame {
+                    let turn = |v: Vec3| m.apply_vec(v.xy()).to3(v.z);
+                    f.direction = turn(f.direction);
+                    f.block_offset = turn(f.block_offset);
+                    f.annotation_offset = turn(f.annotation_offset);
+                    if f.direction.len() > 1e-12 {
+                        f.direction = f.direction.normalized();
+                    }
+                    f.text_height *= s;
+                    f.text_width *= s;
+                }
+            }
             EntityKind::MLeader(ml) => {
                 // Each root keeps its own landing and dogleg: the dogleg turns and scales with the map.
                 let unit = |v: Vec3, by: Vec2| {

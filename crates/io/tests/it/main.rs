@@ -64,6 +64,7 @@ mod layout_canonical;
 mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;
+mod leader_links_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod legacy_text_flags;
 mod low_handseed;

@@ -123,8 +123,14 @@ impl MLeader {
         let direction = self.context.x_axis.normalized();
         let (text_height, text_width) = self.text.as_ref().map_or((0.0, 0.0), |t| (t.height, t.width));
         let frame = LeaderFrame { direction, block_offset: Vec3::ZERO, annotation_offset: Vec3::ZERO, text_height, text_width };
-        let leader =
-            |vertices: Vec<Vec3>, arrow: bool, spline: bool| Leader { vertices, arrow, spline, style: style.to_string(), frame: Some(frame.clone()) };
+        let leader = |vertices: Vec<Vec3>, arrow: bool, spline: bool| Leader {
+            vertices,
+            arrow,
+            spline,
+            style: style.to_string(),
+            frame: Some(frame.clone()),
+            links: Default::default(),
+        };
         let mut leaders: Vec<Leader> = self
             .lines()
             .map(|(root, branch)| leader(branch.vertices.iter().copied().chain(std::iter::once(root.landing)).collect(), true, self.spline))
