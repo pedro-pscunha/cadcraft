@@ -242,8 +242,15 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             let u = t.p(11);
             let v = t.p(12);
             // Clip vertices are in pixel space: origin at the image's top-left corner, y pointing down.
-            let pts: Vec<Vec2> = t.pts(14).into_iter().map(|q| o.xy() + u.xy() * (q.x + 0.5) + v.xy() * (0.5 - q.y)).collect();
-            EntityKind::Wipeout(Wipeout { boundary: pts, display: wipeout_display(&t), frame: None })
+            let image = cadcraft_doc::WipeoutFrame {
+                origin: o,
+                u,
+                v,
+                size: Vec2::new(t.fd(13, 1.0), t.fd(23, 1.0)),
+                clip_type: u8::try_from(t.i(71).unwrap_or(2)).unwrap_or(2),
+                clip: t.pts(14),
+            };
+            EntityKind::Wipeout(Wipeout { boundary: image.legacy_outline(), display: wipeout_display(&t), frame: None, image: Some(image) })
         }
         // The file path comes from the IMAGEDEF object (`dxf_image::resolve`).
         "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),

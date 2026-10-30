@@ -516,7 +516,17 @@ impl EntityKind {
                 i.u = m.apply_vec(i.u.xy()).to3(0.0);
                 i.v = m.apply_vec(i.v.xy()).to3(0.0);
             }
-            EntityKind::Wipeout(w) => w.boundary.iter_mut().for_each(|p| *p = m.apply(*p)),
+            EntityKind::Wipeout(w) => {
+                // The source image frame follows the boundary while it describes it (the clip is in pixels: it does not change).
+                let image = w.source_image().cloned();
+                w.boundary.iter_mut().for_each(|p| *p = m.apply(*p));
+                w.image = image.map(|f| WipeoutFrame {
+                    origin: m.apply(f.origin.xy()).to3(f.origin.z),
+                    u: m.apply_vec(f.u.xy()).to3(f.u.z),
+                    v: m.apply_vec(f.v.xy()).to3(f.v.z),
+                    ..f
+                });
+            }
             EntityKind::Table(t) => {
                 if let Some(b) = &mut t.breaks {
                     b.height *= s;

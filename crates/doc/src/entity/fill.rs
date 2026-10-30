@@ -224,6 +224,21 @@ pub struct Wipeout {
     /// `CanonicalV2`, `boundary` is empty and [`Wipeout::world_boundary`] gives the outline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<WipeoutFrame>,
+    /// A legacy wipeout's source image frame (origin, pixel vectors, size, clip type and clip) as its record held it. It
+    /// describes the wipeout only while `boundary` is still the outline of its clip (see [`Wipeout::source_image`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<WipeoutFrame>,
+}
+
+impl Wipeout {
+    /// The source image frame while it still describes the boundary: the boundary is the clip's outline in the frame's place.
+    pub fn source_image(&self) -> Option<&WipeoutFrame> {
+        let image = self.image.as_ref()?;
+        let outline = image.legacy_outline();
+        let same = outline.len() == self.boundary.len()
+            && outline.iter().zip(&self.boundary).all(|(a, b)| a.dist(*b) <= 1e-9 * (1.0 + a.len().max(b.len())));
+        same.then_some(image)
+    }
 }
 
 /// The display settings a WIPEOUT record keeps like an image: the display flags (70: 1 show image, 2 show when not aligned with the

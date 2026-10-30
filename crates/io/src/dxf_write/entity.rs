@@ -988,7 +988,8 @@ fn wipeout_display(w: &mut W, d: &cadcraft_doc::WipeoutDisplay) {
 
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
-        if let Some(frame) = &wo.frame {
+        // The frame of a canonical wipeout, or the source frame of a legacy one while it still describes its boundary.
+        if let Some(frame) = wo.frame.as_ref().or_else(|| wo.source_image()) {
             write_canonical_wipeout(w, e, owner, paper, frame, &wo.display);
             return;
         }

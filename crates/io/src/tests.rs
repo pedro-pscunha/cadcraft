@@ -1808,8 +1808,12 @@ fn wipeout_boundary_keeps_its_orientation() {
     let mut d = Drawing::new_imperial();
     // A triangle with its apex at the top.
     let boundary = vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(0.0, 4.0)];
-    d.add(&Space::Model, Common::default(), EntityKind::Wipeout(Wipeout { boundary: boundary.clone(), display: Default::default(), frame: None }))
-        .unwrap();
+    d.add(
+        &Space::Model,
+        Common::default(),
+        EntityKind::Wipeout(Wipeout { boundary: boundary.clone(), display: Default::default(), frame: None, image: None }),
+    )
+    .unwrap();
     let text = write_dxf(&d);
     // The apex (0, 4) is at the top-left corner of the image: pixel (-0.5, -0.5).
     let pts: Vec<(f64, f64)> = {
@@ -2042,8 +2046,12 @@ fn long_gradient_name_is_cut_only_in_xdata() {
 fn wipeout_survives_dxf_roundtrip() {
     let mut d = Drawing::new_imperial();
     let boundary = vec![Vec2::new(2.0, 3.0), Vec2::new(12.0, 3.0), Vec2::new(12.0, 13.0), Vec2::new(2.0, 13.0)];
-    d.add(&Space::Model, Common::default(), EntityKind::Wipeout(Wipeout { boundary: boundary.clone(), display: Default::default(), frame: None }))
-        .unwrap();
+    d.add(
+        &Space::Model,
+        Common::default(),
+        EntityKind::Wipeout(Wipeout { boundary: boundary.clone(), display: Default::default(), frame: None, image: None }),
+    )
+    .unwrap();
     let back = roundtrip(&d);
     let got = first(&back, |k| if let EntityKind::Wipeout(w) = k { Some(w.boundary.clone()) } else { None });
     // The DXF polygon is closed, so the first vertex is repeated at the end.

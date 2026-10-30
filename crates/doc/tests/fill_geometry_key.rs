@@ -18,6 +18,7 @@ fn wipeout() -> Wipeout {
             clip_type: 2,
             clip: vec![Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5), Vec2::new(-0.5, -0.5)],
         }),
+        image: None,
     }
 }
 

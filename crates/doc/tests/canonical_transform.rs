@@ -92,6 +92,7 @@ fn wipeout() -> Wipeout {
             clip_type: 2,
             clip: vec![Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5)],
         }),
+        image: None,
     }
 }
 
@@ -663,6 +664,7 @@ fn a_legacy_payload_keeps_the_legacy_path() {
                     boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 2.0)],
                     display: Default::default(),
                     frame: None,
+                    image: None,
                 }
             }
             _ => {}

@@ -136,6 +136,7 @@ mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
+mod wipeout_image_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_aci_fallback;
 #[cfg(not(target_arch = "wasm32"))]
