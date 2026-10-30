@@ -88,14 +88,77 @@ pub(super) fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Han
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        let grips = e.kind.grips();
+        let Ok(grips) = app.session.grips_with_world(*h) else { continue };
         let count = grips.len();
         for (i, g) in grips.into_iter().enumerate() {
-            let sp = xf.to_screen(g);
+            let sp = xf.to_screen(g.world.map_or(g.point, |world| world.xy()));
             if grip_rect(&e.kind, count, i, sp, gs).expand(3.0).contains(hp) {
                 return Some((*h, i));
             }
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::{Circle, Entity, EntityKind, GeometryRevision};
+    use cadcraft_engine::Session;
+    use cadcraft_geom::{Vec2, Vec3};
+
+    fn selected_circle(revision: GeometryRevision, normal: Vec3) -> (CadApp, Handle, Xf) {
+        let mut app = CadApp::new(Session::new(), crate::Services::default());
+        let drawing = app.session.doc_mut().unwrap();
+        let handle = drawing.new_handle();
+        let mut entity = Entity::new(handle, EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 5.0), radius: 4.0 }));
+        entity.geometry_revision = revision;
+        entity.common.extrusion = normal;
+        drawing.model.push(entity);
+        app.session.set_selection(vec![handle]);
+        let xf = Xf { rect: Rect::from_min_size(Pos2::ZERO, vec2(800.0, 800.0)), center: Vec2::ZERO, scale: 50.0 };
+        (app, handle, xf)
+    }
+
+    #[test]
+    fn canonical_grip_hit_testing_uses_the_world_center() {
+        let (app, handle, xf) = selected_circle(GeometryRevision::CanonicalV2, Vec3::new(0.0, 3.0, 4.0));
+        assert_eq!(grip_at(&app, &xf, Some(xf.to_screen(Vec2::new(-1.0, 1.4)))), Some((handle, 0)));
+        assert_eq!(grip_at(&app, &xf, Some(xf.to_screen(Vec2::new(1.0, 2.0)))), None);
+    }
+
+    #[test]
+    fn the_canvas_paints_a_canonical_grip_at_its_world_center() {
+        let (mut app, handle, _) = selected_circle(GeometryRevision::CanonicalV2, Vec3::new(0.0, 3.0, 4.0));
+        app.session.zoom_extents().unwrap();
+        let ctx = egui::Context::default();
+        app.logic(&ctx);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| app.ui(ui));
+        output.textures_delta.clear();
+        let xf = app.canvas.xf.unwrap();
+        let at = xf.to_screen(Vec2::new(-1.0, 1.4));
+        let drawing = app.session.doc().unwrap();
+        let kind = &drawing.entity(handle).unwrap().kind;
+        let expected = grip_rect(kind, 5, 0, at, app.session.settings.gripsize as f32);
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == expected && rect.fill != egui::Color32::TRANSPARENT)),
+            "the canonical center grip must be painted at {expected:?}"
+        );
+    }
+
+    #[test]
+    fn an_invalid_canonical_plane_has_no_projected_grip_fallback() {
+        let (app, _, xf) = selected_circle(GeometryRevision::CanonicalV2, Vec3::ZERO);
+        assert_eq!(grip_at(&app, &xf, Some(xf.to_screen(Vec2::new(1.0, 2.0)))), None);
+    }
+
+    #[test]
+    fn legacy_grip_hit_testing_keeps_the_projected_center() {
+        let (app, handle, xf) = selected_circle(GeometryRevision::LegacyProjectedV1, Vec3::new(0.0, 3.0, 4.0));
+        assert_eq!(grip_at(&app, &xf, Some(xf.to_screen(Vec2::new(1.0, 2.0)))), Some((handle, 0)));
+    }
 }

@@ -1080,10 +1080,10 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
             if let Some(e) = st.doc.entity(*h) {
-                let grips = e.kind.grips();
+                let Ok(grips) = app.session.grips_with_world(*h) else { continue };
                 let count = grips.len();
                 for (gi, g) in grips.into_iter().enumerate() {
-                    let sp = xf.to_screen(g);
+                    let sp = xf.to_screen(g.world.map_or(g.point, |world| world.xy()));
                     if rect.contains(sp) {
                         let r = grip_rect(&e.kind, count, gi, sp, gs);
                         let hot = app.canvas.hot_grips.contains(&(*h, gi));
