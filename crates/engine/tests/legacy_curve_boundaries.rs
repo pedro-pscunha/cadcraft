@@ -89,6 +89,7 @@ fn single_curve_edits_refuse_legacy_dispatch_for_canonical_inputs() {
         ("line", json!({"points": [[0, 0], [10, 0]]}), "lengthen", json!({"pick": [10, 0], "delta": 2})),
         ("line", json!({"points": [[0, 0], [10, 0]]}), "reverse", json!({})),
         ("line", json!({"points": [[0, 0], [10, 0]]}), "flatten", json!({})),
+        ("line", json!({"points": [[0, 0], [10, 0]]}), "qdim", json!({"at": [0, 5]})),
     ];
     for (create_command, create_params, command, mut params) in cases {
         let mut session = Session::new();
@@ -139,6 +140,66 @@ fn hatch_and_boundary_trace_only_supported_source_revisions() {
         let source = create(&mut session, "rectang", json!({"p1": [0, 0], "p2": [10, 10]}));
         let params = if by_point { json!({"points": [[5, 5]]}) } else { json!({"handle": source.hex()}) };
         check_refusals(session.doc().unwrap(), command, params, &[source]);
+    }
+}
+
+#[test]
+fn region_booleans_check_every_source_before_combining_or_consuming_it() {
+    for command in ["union", "subtract", "intersect"] {
+        let mut session = Session::new();
+        let a = create(&mut session, "rectang", json!({"p1": [0, 0], "p2": [10, 10]}));
+        let b = create(&mut session, "rectang", json!({"p1": [2, 2], "p2": [3, 3]}));
+        session.execute("region", &json!({"handles": [a.hex(), b.hex()]})).unwrap();
+        let params = if command == "subtract" { json!({"from": [a.hex()], "remove": [b.hex()]}) } else { json!({"handles": [a.hex(), b.hex()]}) };
+        check_refusals(session.doc().unwrap(), command, params, &[a, b]);
+    }
+}
+
+#[test]
+fn radial_and_arc_dimensions_check_the_source_plane_revision() {
+    for command in ["dimradius", "dimdiameter", "dimarc"] {
+        let mut session = Session::new();
+        let source = if command == "dimarc" {
+            create(&mut session, "arc", json!({"center": [0, 0], "radius": 5, "start": 0, "end": 90}))
+        } else {
+            create(&mut session, "circle", json!({"center": [0, 0], "radius": 5}))
+        };
+        check_refusals(session.doc().unwrap(), command, json!({"handle": source.hex(), "at": [8, 8]}), &[source]);
+    }
+}
+
+#[test]
+fn angular_dimensions_check_both_line_sources() {
+    let mut session = Session::new();
+    let a = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    let b = create(&mut session, "line", json!({"points": [[0, 0], [0, 10]]}));
+    check_refusals(session.doc().unwrap(), "dimangular", json!({"lines": [a.hex(), b.hex()], "at": [3, 3]}), &[a, b]);
+}
+
+#[test]
+fn linear_dimensions_check_an_object_source_before_projecting_it() {
+    let mut session = Session::new();
+    let source = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    check_refusals(session.doc().unwrap(), "dimlinear", json!({"object": source.hex(), "at": [0, 5]}), &[source]);
+}
+
+#[test]
+fn chained_dimensions_check_the_previous_dimensions_revision() {
+    for command in ["dimcontinue", "dimbaseline"] {
+        let mut session = Session::new();
+        let source = create(&mut session, "dimlinear", json!({"p1": [0, 0], "p2": [5, 0], "at": [2, 2]}));
+        let mut control = Session::new();
+        control.open_drawing(session.doc().unwrap().clone(), "legacy dimension", None);
+        control.last_dim = Some(source);
+        control.execute(command, &json!({"points": [[10, 0]]})).unwrap();
+        install_canonical_fixture(&mut session, source);
+        session.last_dim = Some(source);
+        let before = session.doc().unwrap().model.clone();
+        let seed = session.doc().unwrap().handseed;
+        let error = session.execute(command, &json!({"points": [[10, 0]]})).unwrap_err();
+        assert!(error.to_string().contains("canonical"));
+        assert_eq!(session.doc().unwrap().model, before);
+        assert_eq!(session.doc().unwrap().handseed, seed);
     }
 }
 

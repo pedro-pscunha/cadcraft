@@ -1,6 +1,18 @@
 use cadcraft_geom::{Mat4, OcsFrame, Vec3};
 
 #[test]
+fn computational_unit_vectors_do_not_use_a_drawing_unit_cutoff() {
+    let expected = Vec3::new(0.0, 0.8, 0.6);
+    for vector in [Vec3::new(0.0, 4.0, 3.0), Vec3::new(0.0, 4e-200, 3e-200), Vec3::new(0.0, 1.6e308, 1.2e308)] {
+        close(vector.try_normalized().unwrap(), expected);
+    }
+    assert_eq!(Vec3::new(0.0, 0.0, f64::from_bits(1)).try_normalized(), Some(Vec3::Z));
+    assert!(Vec3::ZERO.try_normalized().is_none());
+    assert!(Vec3::new(f64::NAN, 0.0, 1.0).try_normalized().is_none());
+    assert!(Vec3::new(f64::INFINITY, 0.0, 1.0).try_normalized().is_none());
+}
+
+#[test]
 fn invalid_normals_do_not_create_a_computational_frame() {
     for normal in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0), Vec3::new(0.0, f64::INFINITY, 1.0)] {
         assert!(OcsFrame::new(normal).is_none());

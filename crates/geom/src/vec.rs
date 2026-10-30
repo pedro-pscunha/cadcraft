@@ -171,6 +171,19 @@ impl Vec3 {
         let l = self.len();
         if l > crate::EPS { self * (1.0 / l) } else { Vec3::ZERO }
     }
+    /// A computational unit direction, without a drawing-unit cutoff or source-value mutation.
+    pub fn try_normalized(self) -> Option<Vec3> {
+        if !self.is_finite() {
+            return None;
+        }
+        let scale = self.x.abs().max(self.y.abs()).max(self.z.abs());
+        if scale == 0.0 {
+            return None;
+        }
+        // Divide components separately: the reciprocal can overflow for subnormal vectors.
+        let scaled = Vec3::new(self.x / scale, self.y / scale, self.z / scale);
+        Some(scaled * (1.0 / scaled.len()))
+    }
     pub fn is_finite(self) -> bool {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
     }

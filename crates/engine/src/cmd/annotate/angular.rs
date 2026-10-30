@@ -5,7 +5,13 @@ use super::{
 };
 
 /// Two-line angular dimension (type 2) between two lines, attached to them.
-fn angular_from_lines(s: &Session, h1: Handle, h2: Handle, at: Vec2) -> Option<EntityKind> {
+fn angular_from_lines(s: &Session, h1: Handle, h2: Handle, at: Vec2) -> Result<Option<EntityKind>> {
+    super::common::require_legacy_source(s, h1)?;
+    super::common::require_legacy_source(s, h2)?;
+    Ok(angular_from_legacy_lines(s, h1, h2, at))
+}
+
+fn angular_from_legacy_lines(s: &Session, h1: Handle, h2: Handle, at: Vec2) -> Option<EntityKind> {
     let d = s.doc().ok()?;
     let line = |h: Handle| match &d.entity(h)?.kind {
         EntityKind::Line(l) => Some((l.a.xy(), l.b.xy())),
@@ -47,11 +53,12 @@ pub(super) fn run_angular(s: &mut Session, p: &Value) -> Result<Value> {
         let hs: Vec<Handle> = ls.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))).collect();
         let (Some(h1), Some(h2)) = (hs.first(), hs.get(1)) else { return Err(bad("dimangular", "`lines` needs two line handles")) };
         let at = point_req("dimangular", p, "at")?;
-        let k = angular_from_lines(s, *h1, *h2, at).ok_or_else(|| bad("dimangular", "objects must be two non-parallel lines"))?;
+        let k = angular_from_lines(s, *h1, *h2, at)?.ok_or_else(|| bad("dimangular", "objects must be two non-parallel lines"))?;
         return Ok(json!({ "handle": add_dim(s, k)?.hex() }));
     }
     if let Some(h) = hex_param(p, "arc") {
         let at = point_req("dimangular", p, "at")?;
+        super::common::require_legacy_source(s, h)?;
         let a = match s.doc()?.entity(h).map(|e| e.kind.clone()) {
             Some(EntityKind::Arc(a)) => a,
             _ => return Err(bad("dimangular", "object is not an arc")),
@@ -74,6 +81,7 @@ pub(super) fn run_angular(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) fn run_arclen(s: &mut Session, p: &Value) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("dimarc", "`handle` of an arc is required"))?;
     let at = point_req("dimarc", p, "at")?;
+    super::common::require_legacy_source(s, h)?;
     let a = match s.doc()?.entity(h).map(|e| e.kind.clone()) {
         Some(EntityKind::Arc(a)) => a,
         _ => return Err(bad("dimarc", "object is not an arc")),
@@ -164,7 +172,7 @@ impl Interactive for AngularM {
                 Input::Point(at) => {
                     let at = self.located(v, at);
                     let k = match (self.handles.as_slice(), self.arc) {
-                        ([h1, h2], None) => angular_from_lines(s, *h1, *h2, at),
+                        ([h1, h2], None) => angular_from_lines(s, *h1, *h2, at)?,
                         _ => None,
                     };
                     let k = k.unwrap_or_else(|| dim(s, DimKind::Angular3P, at, a, b, v, ""));
@@ -201,6 +209,7 @@ impl Interactive for AngularM {
                     s.echo("*Invalid selection*");
                     return Ok(Step::Continue);
                 };
+                super::common::require_legacy_source(s, h)?;
                 let circle = s
                     .doc()?
                     .entity(h)
@@ -301,7 +310,11 @@ impl Interactive for ArcLenM {
         }
         match (self.arc, i) {
             (None, Input::Point(p)) => {
-                if let Some(EntityKind::Arc(a)) = pick_at(s, p).and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
+                let handle = pick_at(s, p);
+                if let Some(handle) = handle {
+                    super::common::require_legacy_source(s, handle)?;
+                }
+                if let Some(EntityKind::Arc(a)) = handle.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
                     self.arc = Some(cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end));
                 } else {
                     s.echo("Select an arc.");
