@@ -15,8 +15,11 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use cadcraft_doc::{Block, DimStyle, Drawing, Entity, EntityKind, EntityStore, Space, entity_bounds};
-use cadcraft_geom::Bounds2;
+use cadcraft_doc::{
+    Block, DimStyle, Drawing, Entity, EntityKind, EntityStore, GeometryRevision, MLeaderStyle, Space, TableStyle, TextStyle, entity_bounds,
+};
+use cadcraft_geom::{Bounds2, Mat4};
+use cadcraft_render::{GeometryRefusal, entity_world_bounds};
 use rstar::primitives::{GeomWithData, Rectangle};
 use rstar::{AABB, RTree};
 
@@ -37,6 +40,7 @@ struct ChunkIx {
     key: usize,
     ents: Vec<Arc<Entity>>,
     bounds: Vec<Bounds2>,
+    refused: Vec<(u32, GeometryRefusal)>,
     /// Local indices of xlines and rays (unbounded; always candidates for pick and crossing).
     infinite: Vec<u32>,
 }
@@ -44,18 +48,33 @@ struct ChunkIx {
 impl ChunkIx {
     fn build(d: &Drawing, key: usize, items: &[Arc<Entity>]) -> ChunkIx {
         let mut infinite = Vec::new();
+        let mut refused = Vec::new();
         let bounds = items
             .iter()
             .enumerate()
             .map(|(i, e)| {
+                let index = u32::try_from(i).unwrap_or(u32::MAX);
                 if matches!(e.kind, EntityKind::XLine(_) | EntityKind::Ray(_)) {
-                    infinite.push(u32::try_from(i).unwrap_or(u32::MAX));
+                    infinite.push(index);
+                    if e.geometry_revision == GeometryRevision::CanonicalV2 {
+                        return Bounds2::EMPTY;
+                    }
                 }
-                entity_bounds(d, e, 0)
+                if e.geometry_revision == GeometryRevision::CanonicalV2 {
+                    match entity_world_bounds(d, e, &Mat4::IDENTITY) {
+                        Ok(bounds) => bounds,
+                        Err(error) => {
+                            refused.push((index, GeometryRefusal { handle: e.handle, reason: error.to_string() }));
+                            Bounds2::EMPTY
+                        }
+                    }
+                } else {
+                    entity_bounds(d, e, 0)
+                }
             })
             .collect();
         let serial = NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        ChunkIx { serial, key, ents: items.to_vec(), bounds, infinite }
+        ChunkIx { serial, key, ents: items.to_vec(), bounds, refused, infinite }
     }
     fn items(&self) -> impl Iterator<Item = Item> + '_ {
         self.bounds.iter().enumerate().filter(|(_, b)| !b.is_empty()).map(|(i, b)| {
@@ -70,6 +89,9 @@ pub struct SpatialIndex {
     store: EntityStore,
     blocks: BTreeMap<String, Arc<Block>>,
     dim_styles: Vec<DimStyle>,
+    text_styles: Vec<TextStyle>,
+    table_styles: Vec<TableStyle>,
+    mleader_styles: Vec<MLeaderStyle>,
     dimscale: f64,
     /// Annotation scale factor and ANNOALLVISIBLE: annotative objects measure at that scale.
     anno: (u64, bool),
@@ -82,6 +104,7 @@ pub struct SpatialIndex {
     tree: RTree<Item>,
     /// Draw indices of xlines and rays.
     infinite: Vec<u32>,
+    refused: Vec<u32>,
     len: usize,
 }
 
@@ -146,10 +169,14 @@ impl SpatialIndex {
         };
         let offsets = chunks.iter().map(|(off, c)| (c.serial, *off)).collect();
         let infinite = chunks.iter().flat_map(|(off, c)| c.infinite.iter().map(move |i| off + i)).collect();
+        let refused = chunks.iter().flat_map(|(off, c)| c.refused.iter().map(move |(i, _)| off + i)).collect();
         SpatialIndex {
             store: store.clone(),
             blocks: d.blocks.clone(),
             dim_styles: d.dim_styles.clone(),
+            text_styles: d.text_styles.clone(),
+            table_styles: d.table_styles.clone(),
+            mleader_styles: d.mleader_styles.clone(),
             dimscale: d.header.f64("DIMSCALE", 1.0),
             anno: anno_key(d),
             hidden_layers: hidden_layers(d).map(str::to_owned).collect(),
@@ -157,6 +184,7 @@ impl SpatialIndex {
             offsets,
             tree,
             infinite,
+            refused,
             len: offset as usize,
         }
     }
@@ -166,6 +194,9 @@ impl SpatialIndex {
             && self.blocks.iter().zip(&d.blocks).all(|((ka, a), (kb, b))| ka == kb && Arc::ptr_eq(a, b))
             && self.dimscale.to_bits() == d.header.f64("DIMSCALE", 1.0).to_bits()
             && self.dim_styles == d.dim_styles
+            && self.text_styles == d.text_styles
+            && self.table_styles == d.table_styles
+            && self.mleader_styles == d.mleader_styles
             && self.anno == anno_key(d)
             && self.hidden_layers.iter().map(String::as_str).eq(hidden_layers(d))
     }
@@ -190,16 +221,27 @@ impl SpatialIndex {
         let (c, l) = self.locate(i)?;
         c.ents.get(l)
     }
-    /// The bounds of the entity at draw index `i` (as [`entity_bounds`] computes them).
+    /// The bounds at draw index `i`: legacy document bounds or canonical world bounds.
     pub fn bounds(&self, i: u32) -> Bounds2 {
         self.locate(i).and_then(|(c, l)| c.bounds.get(l).copied()).unwrap_or(Bounds2::EMPTY)
     }
 
+    /// Geometry refusals retained with their source handles. Refused objects remain query candidates.
+    pub fn geometry_refusals(&self) -> impl Iterator<Item = &GeometryRefusal> {
+        self.chunks.iter().flat_map(|(_, chunk)| chunk.refused.iter().map(|(_, refusal)| refusal))
+    }
+
     /// Draw indices (ascending) of entities whose bounds touch `b`, optionally with the infinite
-    /// lines. Returns `None` for a non-finite query box (callers fall back to a full scan).
+    /// lines. Refused bounds always remain candidates. Returns `None` for a non-finite query box.
     pub fn query(&self, b: &Bounds2, with_infinite: bool) -> Option<Vec<u32>> {
         if b.is_empty() {
-            return Some(if with_infinite { self.infinite.clone() } else { Vec::new() });
+            let mut out = self.refused.clone();
+            if with_infinite {
+                out.extend_from_slice(&self.infinite);
+            }
+            out.sort_unstable();
+            out.dedup();
+            return Some(out);
         }
         if !(b.min.is_finite() && b.max.is_finite()) {
             return None;
@@ -212,6 +254,7 @@ impl SpatialIndex {
         if with_infinite {
             out.extend_from_slice(&self.infinite);
         }
+        out.extend_from_slice(&self.refused);
         out.sort_unstable();
         out.dedup();
         Some(out)
