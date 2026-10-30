@@ -188,3 +188,21 @@ fn an_attribute_writes_a_transparency_only_when_it_has_one_of_its_own() {
     let values: Vec<String> = attribs.iter().map(|(_, t)| super::foreign_passthrough::val(t, 440)).collect();
     assert_eq!(values, ["33554559", ""], "the own 50 percent (alpha 127), and none for the one that follows its definition");
 }
+
+/// An attribute and the SEQEND that ends them are in paper space when their reference is, as AutoCAD writes them (group 67).
+#[test]
+fn the_attributes_of_a_reference_in_paper_space_are_in_paper_space() {
+    let (mut d, h) = drawing(vec![attrib("OWN", 0.0, AttribProps::default())]);
+    let EntityKind::Insert(ins) = d.model.get(h).expect("insert").kind.clone() else { panic!("not an insert") };
+    d.add(&Space::Paper("Layout1".into()), Common::default(), EntityKind::Insert(ins)).expect("add on paper");
+    let text = write_dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).expect("parse");
+    let section = cadcraft_dxf::sections(&tags).into_iter().find(|s| s.name == "ENTITIES").expect("entities");
+    let flags: Vec<(String, bool)> = cadcraft_dxf::records(&section.tags)
+        .into_iter()
+        .filter(|(k, _)| matches!(k.as_str(), "INSERT" | "ATTRIB" | "SEQEND"))
+        .map(|(k, t)| (k, t.iter().any(|g| g.code == 67 && g.i64() == 1)))
+        .collect();
+    let kinds = |paper: bool| flags.iter().filter(|(_, p)| *p == paper).map(|(k, _)| k.as_str()).collect::<Vec<_>>();
+    assert_eq!((kinds(false), kinds(true)), (vec!["INSERT", "ATTRIB", "SEQEND"], vec!["INSERT", "ATTRIB", "SEQEND"]), "{flags:?}");
+}

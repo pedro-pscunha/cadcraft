@@ -474,6 +474,9 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 w.s(5, ah);
                 w.s(330, e.handle.hex());
                 w.s(100, "AcDbEntity");
+                if paper {
+                    w.i(67, 1);
+                }
                 let (c, base) = attrib_common(d, e, i, a);
                 layer_and_props(w, &c, Some(&base));
                 // Only an attribute's own transparency: without one it follows its definition's, as AutoCAD reads it.
@@ -503,6 +506,9 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
             w.s(5, sh);
             w.s(330, e.handle.hex());
             w.s(100, "AcDbEntity");
+            if paper {
+                w.i(67, 1);
+            }
             w.s(8, &e.common.layer);
         }
     }
