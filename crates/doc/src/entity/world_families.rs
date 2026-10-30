@@ -12,9 +12,13 @@ use super::block::Attrib;
 use super::curves::{Arc, Circle, LwPolyline, Solid};
 use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop, Wipeout};
 use super::helix::Helix;
+use super::layout::Table;
+use super::mline::MLine;
 use super::text::{MText, Text};
+use super::text_canonical::TextFrame;
 use super::world::{WorldFill, WorldFillKind, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
-use crate::{DocError, Result};
+use crate::gdt::{GdtLayout, GdtPrim};
+use crate::{DocError, Result, Tolerance};
 
 fn frame(normal: Vec3) -> Result<OcsFrame> {
     OcsFrame::new(normal).ok_or_else(|| DocError::Invalid("A canonical curve needs a plane with a finite, non-zero normal.".into()))
@@ -257,6 +261,212 @@ pub fn attrib_primitives(attrib: &Attrib, parent: &Mat4) -> Result<Vec<WorldPrim
         out.extend(mtext_primitives(&m.mtext, m.normal, parent)?);
     }
     Ok(out)
+}
+
+/// The WCS point of the local 2D point `p` of a flat annotation frame (x along the frame, y up the plane).
+fn local(frame: &TextFrame, p: Vec2) -> Vec3 {
+    frame.origin + frame.x_axis * p.x + frame.y_axis * p.y
+}
+
+/// A text of a flat annotation at the local point `at`, attached like MTEXT (1 top left to 9 bottom right).
+fn local_text(frame: &TextFrame, at: Vec2, attach: u8, height: f64, style: &str, value: &str) -> WorldPrimitive {
+    let origin = local(frame, at);
+    let content = MText {
+        insert: origin,
+        height,
+        width: 0.0,
+        attach,
+        rotation: 0.0,
+        style: style.into(),
+        contents: value.into(),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+        direction: Some(frame.x_axis),
+    };
+    WorldPrimitive::Text(WorldText { frame: TextFrame { origin, ..*frame }, align: None, content: WorldTextContent::MText(content) })
+}
+
+fn local_loop(frame: &TextFrame, points: &[Vec2]) -> Vec<WorldPrimitive> {
+    (0..points.len()).map(|i| WorldPrimitive::Line { a: local(frame, points[i]), b: local(frame, points[(i + 1) % points.len()]) }).collect()
+}
+
+/// A canonical tolerance: the frame boxes and symbols of `layout` (laid out at the origin with no rotation, in the local
+/// coordinates of the frame: the layout of `Tolerance::layout` for a tolerance at (0, 0) turned by 0) placed on the
+/// tolerance's WCS frame, and its texts set in `text_style`.
+pub fn tolerance_primitives(tolerance: &Tolerance, normal: Vec3, layout: &GdtLayout, text_style: &str, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    let frame = tolerance.world_frame(normal)?;
+    let mut out = Vec::new();
+    for prim in layout.frame.iter().chain(&layout.symbols) {
+        match prim {
+            GdtPrim::Line(points) => out.extend(points.windows(2).map(|w| WorldPrimitive::Line { a: local(&frame, w[0]), b: local(&frame, w[1]) })),
+            GdtPrim::Circle { center, radius } => out.push(WorldPrimitive::Arc {
+                center: local(&frame, *center),
+                x_axis: frame.x_axis * *radius,
+                y_axis: frame.y_axis * *radius,
+                start: 0.0,
+                end: std::f64::consts::TAU,
+            }),
+            GdtPrim::Arc { center, radius, start, end } => out.push(WorldPrimitive::Arc {
+                center: local(&frame, *center),
+                x_axis: frame.x_axis * *radius,
+                y_axis: frame.y_axis * *radius,
+                start: *start,
+                end: *start + cadcraft_geom::ccw_sweep(*start, *end),
+            }),
+            GdtPrim::Fill(points) => {
+                out.push(WorldPrimitive::Fill(WorldFill { loops: vec![local_loop(&frame, points)], kind: WorldFillKind::Solid, style: 0 }));
+            }
+        }
+    }
+    // A layout text is a left baseline point, so attach at the bottom left (7).
+    out.extend(layout.texts.iter().map(|t| local_text(&frame, t.pos, 7, t.height, text_style, &t.value)));
+    finish(out, parent)
+}
+
+/// A table's layout in its local coordinates: the origin is the insertion point (the top left corner), x runs along the
+/// table and y up the plane, so rows have negative y. The renderer lays it out for a table at the origin.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TableLayout {
+    /// Cell backgrounds: corners in order round the cell.
+    pub fills: Vec<[Vec2; 4]>,
+    pub lines: Vec<[Vec2; 2]>,
+    pub texts: Vec<TableLayoutText>,
+}
+
+/// A cell text at its attachment point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableLayoutText {
+    pub at: Vec2,
+    /// MTEXT attachment (1 top left to 9 bottom right).
+    pub attach: u8,
+    pub height: f64,
+    pub style: String,
+    pub text: String,
+}
+
+/// A canonical table: its cell backgrounds, grid lines and cell texts placed on the WCS frame of the table.
+pub fn table_primitives(table: &Table, normal: Vec3, layout: &TableLayout, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    let frame = table.world_frame(normal)?;
+    let mut out: Vec<WorldPrimitive> = layout
+        .fills
+        .iter()
+        .map(|corners| WorldPrimitive::Fill(WorldFill { loops: vec![local_loop(&frame, corners)], kind: WorldFillKind::Solid, style: 0 }))
+        .collect();
+    out.extend(layout.lines.iter().map(|[a, b]| WorldPrimitive::Line { a: local(&frame, *a), b: local(&frame, *b) }));
+    out.extend(layout.texts.iter().map(|t| local_text(&frame, t.at, t.attach, t.height, &t.style, &t.text)));
+    finish(out, parent)
+}
+
+/// The pieces of a multiline element on one segment: `list` is the record's parameters for it (its distance along the
+/// miter, then where it starts and the break pairs), `len` the length of the element line.
+fn element_pieces(list: &[f64], len: f64) -> Vec<(f64, f64)> {
+    let Some(&start) = list.get(1) else { return Vec::new() };
+    let rest = list.get(2..).unwrap_or(&[]);
+    let (mut out, mut from) = (Vec::new(), start);
+    let mut push = |a: f64, b: f64| {
+        let (a, b) = (a.max(0.0), b.min(len));
+        if b > a + 1e-12 {
+            out.push((a, b));
+        }
+    };
+    for pair in rest.chunks(2) {
+        match pair {
+            [stop, restart] => {
+                push(from, start + stop);
+                from = start + restart;
+            }
+            [stop] => {
+                push(from, start + stop);
+                return out;
+            }
+            _ => {}
+        }
+    }
+    push(from, len);
+    out
+}
+
+/// A canonical multiline: its element pieces (breaks taken out), caps, joints and fill, from the vertices, miters and
+/// element parameters it holds. The style's caps, joints and fill switches come from `MLine::def`.
+pub fn mline_primitives(mline: &MLine, normal: Vec3, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    affine(parent)?;
+    let frames = mline.canonical_frames()?;
+    let unit_normal = frame(normal)?.to_world(Vec3::Z);
+    let n = mline.vertices.len();
+    let nseg = mline.segment_count();
+    let elements = frames[0].params.len();
+    let unit = |v: Vec3| if v.len() > 0.0 { v.normalized() } else { Vec3::ZERO };
+    let at = |k: usize, e: usize| {
+        let (v, f) = (&mline.vertices[k % n], frames[k % n]);
+        v.p + unit(f.miter) * f.params[e].first().copied().unwrap_or(0.0)
+    };
+    let mut out = Vec::new();
+    for (k, vertex_frame) in frames.iter().enumerate().take(nseg) {
+        for e in 0..elements {
+            let (a, b) = (at(k, e), at(k + 1, e));
+            let len = (b - a).len();
+            if len <= 1e-12 {
+                continue;
+            }
+            let dir = (b - a) * (1.0 / len);
+            for (s, t) in element_pieces(&vertex_frame.params[e], len) {
+                out.push(WorldPrimitive::Line { a: a + dir * s, b: a + dir * t });
+            }
+        }
+    }
+    // The elements by offset, the leftmost (largest) first, as the 2D geometry orders them.
+    let offsets = mline.offsets();
+    let mut order: Vec<usize> = (0..elements).collect();
+    order.sort_by(|a, b| offsets.get(*b).copied().unwrap_or(0.0).total_cmp(&offsets.get(*a).copied().unwrap_or(0.0)));
+    if let (Some(&top), Some(&bottom)) = (order.first(), order.last()) {
+        let across = |k: usize| WorldPrimitive::Line { a: at(k, top), b: at(k, bottom) };
+        if !mline.closed {
+            for (k, caps, skip, start) in
+                [(0, mline.def.start_caps, mline.no_start_caps, true), (n - 1, mline.def.end_caps, mline.no_end_caps, false)]
+            {
+                if skip {
+                    continue;
+                }
+                if caps.line && order.len() > 1 {
+                    out.push(across(k));
+                }
+                for i in 0..order.len() / 2 {
+                    if (i == 0 && !caps.outer_arc) || (i > 0 && !caps.inner_arcs) {
+                        continue;
+                    }
+                    let (a, b) = (at(k, order[i]), at(k, order[order.len() - 1 - i]));
+                    let r = (b - a).len() / 2.0;
+                    if r <= 1e-12 {
+                        continue;
+                    }
+                    // A half circle from one outer element to the other, behind the start or ahead of the end.
+                    let (c, from) = ((a + b) * 0.5, if start { a } else { b });
+                    let x_axis = from - c;
+                    out.push(WorldPrimitive::Arc { center: c, x_axis, y_axis: unit_normal.cross(x_axis), start: 0.0, end: std::f64::consts::PI });
+                }
+            }
+        }
+        if mline.def.joints && order.len() > 1 {
+            let inner = if mline.closed { 0..n } else { 1..n.saturating_sub(1) };
+            out.extend(inner.map(across));
+        }
+        if mline.def.fill.is_some() {
+            let side = |e: usize| (0..n).map(|k| at(k, e)).collect::<Vec<Vec3>>();
+            let ring = |points: Vec<Vec3>| -> Vec<WorldPrimitive> {
+                (0..points.len()).map(|i| WorldPrimitive::Line { a: points[i], b: points[(i + 1) % points.len()] }).collect()
+            };
+            let loops = if mline.closed {
+                vec![ring(side(top)), ring(side(bottom))]
+            } else {
+                let mut polygon = side(top);
+                polygon.extend(side(bottom).into_iter().rev());
+                vec![ring(polygon)]
+            };
+            out.push(WorldPrimitive::Fill(WorldFill { loops, kind: WorldFillKind::Solid, style: 0 }));
+        }
+    }
+    finish(out, parent)
 }
 
 #[cfg(test)]
@@ -632,5 +842,125 @@ mod tests {
             assert!(near(*a, want[i]) && near(*b, want[(i + 1) % 4]), "edge {i}");
         }
         assert!(wipeout_primitives(&Wipeout { boundary: Vec::new(), frame: None }, &parent()).is_err());
+    }
+
+    /// The in-plane directions (x along the frame, y up the plane) and a direction for each of the three planes.
+    fn frames() -> [(Vec3, Vec3, Vec3); 3] {
+        // +Z: dir X, up Y. -Z: dir X, up (0, -1, 0). (1, 0, 0): dir Y, up Z.
+        [(EX, EY, EX), (EX, Vec3::new(0.0, -1.0, 0.0), EX), (EY, Vec3::new(0.0, 0.0, 1.0), EY)]
+    }
+
+    #[test]
+    fn a_tolerance_layout_is_placed_on_the_frame_of_its_plane() {
+        use crate::gdt::GdtText;
+        let layout = GdtLayout {
+            frame: vec![GdtPrim::Line(vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, -2.0)])],
+            symbols: vec![
+                GdtPrim::Circle { center: Vec2::new(1.0, -1.0), radius: 0.5 },
+                GdtPrim::Arc { center: Vec2::new(2.0, -1.0), radius: 0.25, start: 0.5, end: 1.5 },
+                GdtPrim::Fill([Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0)]),
+            ],
+            texts: vec![GdtText { pos: Vec2::new(0.5, -1.5), height: 0.18, rotation: 0.0, value: "0.1".into() }],
+            bounds: Default::default(),
+        };
+        let insert = Vec3::new(1.0, 2.0, 3.0);
+        for (plane, normal) in NORMALS.iter().enumerate() {
+            let (xa, ya, dir) = frames()[plane];
+            let t = Tolerance { insert, dir, style: "Standard".into(), text: "x".into() };
+            let got = tolerance_primitives(&t, *normal, &layout, "Standard", &Mat4::IDENTITY).unwrap();
+            let at = |x: f64, y: f64| insert + xa * x + ya * y;
+            let WorldPrimitive::Line { a, b } = &got[1] else { panic!("line") };
+            assert!(near(*a, at(4.0, 0.0)) && near(*b, at(4.0, -2.0)), "plane {plane}");
+            let WorldPrimitive::Arc { center, x_axis, y_axis, .. } = &got[2] else { panic!("circle") };
+            assert!(near(*center, at(1.0, -1.0)) && near(*x_axis, xa * 0.5) && near(*y_axis, ya * 0.5), "plane {plane}");
+            assert!(near(arc_at(&got[3], 0.5), at(2.0 + 0.25 * f64::cos(0.5), -1.0 + 0.25 * f64::sin(0.5))), "plane {plane}");
+            let WorldPrimitive::Fill(f) = &got[4] else { panic!("fill") };
+            assert!(matches!(&f.loops[0][1], WorldPrimitive::Line { a, .. } if near(*a, at(1.0, 0.0))), "plane {plane}");
+            let WorldPrimitive::Text(text) = &got[5] else { panic!("text") };
+            assert!(near(text.frame.origin, at(0.5, -1.5)) && near(text.frame.x_axis, xa) && near(text.frame.y_axis, ya), "plane {plane}");
+            let WorldTextContent::MText(m) = &text.content else { panic!("mtext") };
+            assert_eq!((m.attach, m.height, m.contents.as_str()), (7, 0.18, "0.1"));
+        }
+        let off_plane = Tolerance { insert, dir: EX, style: "Standard".into(), text: "x".into() };
+        assert!(tolerance_primitives(&off_plane, NORMALS[2], &layout, "Standard", &Mat4::IDENTITY).is_err(), "the direction must lie in the plane");
+    }
+
+    #[test]
+    fn a_table_layout_is_placed_on_the_frame_of_its_plane() {
+        let layout = TableLayout {
+            fills: vec![[Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, -1.0), Vec2::new(0.0, -1.0)]],
+            lines: vec![[Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0)], [Vec2::new(0.0, -1.0), Vec2::new(3.0, -1.0)]],
+            texts: vec![TableLayoutText { at: Vec2::new(0.1, -0.1), attach: 1, height: 0.2, style: "Standard".into(), text: "cell".into() }],
+        };
+        let insert = Vec3::new(1.0, 2.0, 3.0);
+        for (plane, normal) in NORMALS.iter().enumerate() {
+            let (xa, ya, dir) = frames()[plane];
+            let table = Table { insert, dir, col_widths: vec![3.0], row_heights: vec![1.0], ..Table::default() };
+            let got = table_primitives(&table, *normal, &layout, &parent()).unwrap();
+            let at = |x: f64, y: f64| parent().apply(insert + xa * x + ya * y);
+            let WorldPrimitive::Fill(f) = &got[0] else { panic!("fill") };
+            assert!(matches!(&f.loops[0][2], WorldPrimitive::Line { a, .. } if near(*a, at(3.0, -1.0))), "plane {plane}");
+            let WorldPrimitive::Line { a, b } = &got[2] else { panic!("line") };
+            assert!(near(*a, at(0.0, -1.0)) && near(*b, at(3.0, -1.0)), "plane {plane}");
+            let WorldPrimitive::Text(t) = &got[3] else { panic!("text") };
+            assert!(near(t.frame.origin, at(0.1, -0.1)), "plane {plane}");
+            assert!(near(t.frame.x_axis, parent().apply_vec(xa)) && near(t.frame.y_axis, parent().apply_vec(ya)), "plane {plane}");
+        }
+    }
+
+    use crate::{MLineJust, MLineStyle, MLineVertex, MLineVertexFrame};
+
+    /// A two-element multiline from (0,0,0) to (10,0,0) turned into the plane by `turn`, with `breaks` in the first element.
+    fn mline(turn: impl Fn(Vec3) -> Vec3, breaks: &[f64]) -> MLine {
+        let mut m = MLine::new(&MLineStyle::default(), &[], false, MLineJust::Zero, 1.0);
+        m.def.elements = vec![crate::MLineElement { offset: 1.0, ..Default::default() }, crate::MLineElement { offset: -1.0, ..Default::default() }];
+        for x in [0.0, 10.0] {
+            let mut first = vec![1.0, 0.0];
+            first.extend_from_slice(breaks);
+            let frame = MLineVertexFrame { dir: turn(EX), miter: turn(EY), params: vec![first, vec![-1.0, 0.0]] };
+            let mut v = MLineVertex::new(turn(Vec3::new(x, 0.0, 0.0)));
+            v.frame = Some(frame);
+            m.vertices.push(v);
+        }
+        m
+    }
+
+    #[test]
+    fn a_multiline_has_its_element_pieces_caps_joints_and_fill() {
+        // A turn about X by 0.6 radians takes the XY plane to a tilted one; the plane normal turns with it.
+        let (s, c) = 0.6f64.sin_cos();
+        let turn = |v: Vec3| Vec3::new(v.x, c * v.y - s * v.z, s * v.y + c * v.z);
+        let normal = turn(Vec3::Z);
+        let mut m = mline(turn, &[3.0, 5.0]);
+        let got = mline_primitives(&m, normal, &parent()).unwrap();
+        let p = |x: f64, y: f64| parent().apply(turn(Vec3::new(x, y, 0.0)));
+        // Element 0 (y = +1) has a break from 3 to 5; element 1 (y = -1) is whole.
+        let drawn = lines(&got);
+        let want = [(p(0.0, 1.0), p(3.0, 1.0)), (p(5.0, 1.0), p(10.0, 1.0)), (p(0.0, -1.0), p(10.0, -1.0))];
+        assert_eq!(drawn.len(), 3, "{drawn:?}");
+        for (i, (a, b)) in want.iter().enumerate() {
+            assert!(near(drawn[i].0, *a) && near(drawn[i].1, *b), "piece {i}: {:?}", drawn[i]);
+        }
+        // A cap line at the start, an outer arc at the end, and a fill.
+        m.def.start_caps.line = true;
+        m.def.end_caps.outer_arc = true;
+        m.def.fill = Some(cadcraft_color::Color::Index(1));
+        let got = mline_primitives(&m, normal, &parent()).unwrap();
+        assert!(lines(&got).iter().any(|(a, b)| near(*a, p(0.0, 1.0)) && near(*b, p(0.0, -1.0))), "the start cap line");
+        let arc = got.iter().find(|g| matches!(g, WorldPrimitive::Arc { .. })).expect("the end cap arc");
+        // A half circle from the lower end point round the end: ahead of the multiline, through (11, 0).
+        assert!(near(arc_at(arc, 0.0), p(10.0, -1.0)) && near(arc_at(arc, std::f64::consts::PI), p(10.0, 1.0)));
+        assert!(near(arc_at(arc, std::f64::consts::FRAC_PI_2), p(11.0, 0.0)), "{:?}", arc_at(arc, std::f64::consts::FRAC_PI_2));
+        let fill = got.iter().find_map(|g| if let WorldPrimitive::Fill(f) = g { Some(f) } else { None }).expect("a fill");
+        assert_eq!(fill.loops.len(), 1);
+        assert_eq!(fill.loops[0].len(), 4);
+    }
+
+    #[test]
+    fn a_legacy_multiline_or_a_bad_normal_refuses() {
+        let mut legacy = mline(|v| v, &[]);
+        legacy.vertices[0].frame = None;
+        assert!(mline_primitives(&legacy, Vec3::Z, &Mat4::IDENTITY).is_err());
+        assert!(mline_primitives(&mline(|v| v, &[]), Vec3::ZERO, &Mat4::IDENTITY).is_err());
     }
 }

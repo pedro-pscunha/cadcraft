@@ -63,8 +63,8 @@ mod world;
 mod world_families;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
-    arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives, mtext_primitives,
-    solid_primitives, text_primitives, wipeout_primitives,
+    TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives,
+    mline_primitives, mtext_primitives, solid_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
 };
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
