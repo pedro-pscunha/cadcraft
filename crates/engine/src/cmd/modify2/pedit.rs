@@ -1,7 +1,6 @@
 use super::{
-    Accept, Chain, EntityKind, Handle, Input, Interactive, LwPolyline, MAX_GEN, PolyVertex, Prompt, Result, SelOutcome, SelectPhase, Session, Spline,
-    Step, Value, Vec2, as_lwpoly, bad, bool_or, curves, f64_or, f64_req, json, line, number, other, pedit_vertex, point_req, set_kind, str_param,
-    targets,
+    Accept, Chain, EntityKind, Handle, Input, Interactive, LwPolyline, MAX_GEN, PolyVertex, Prompt, Result, SelOutcome, SelectPhase, Session, Step,
+    Value, Vec2, as_lwpoly, bad, bool_or, curves, f64_or, f64_req, json, line, number, other, pedit_vertex, point_req, set_kind, str_param, targets,
 };
 
 /// Fit curve: a tangent-continuous pair of arcs (biarc) per segment through every vertex,
@@ -72,37 +71,11 @@ pub(crate) fn fit_vertices(vs: &[PolyVertex], closed: bool, tans: &[Option<Vec2>
 
 /// Spline curve: a cubic B-spline with the vertices as its frame (control points).
 pub(crate) fn spline_vertices(vs: &[PolyVertex], closed: bool, segs: usize) -> Vec<PolyVertex> {
-    let pts: Vec<Vec2> = vs.iter().map(|v| v.p).collect();
-    let n = pts.len();
-    if n < 3 {
+    if vs.len() < 3 {
         return vs.to_vec();
     }
-    let segs = segs.clamp(1, 64).min((MAX_GEN / n).max(1));
-    let mut out: Vec<Vec2> = Vec::new();
-    if closed {
-        // Uniform periodic cubic B-spline.
-        let at = |i: usize| pts.get(i % n).copied().unwrap_or_default();
-        for i in 0..n {
-            let (p0, p1, p2, p3) = (at(i + n - 1), at(i), at(i + 1), at(i + 2));
-            for k in 0..segs {
-                let t = k as f64 / segs as f64;
-                let (t2, t3) = (t * t, t * t * t);
-                let b0 = (1.0 - t).powi(3) / 6.0;
-                let b1 = (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0;
-                let b2 = (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0;
-                let b3 = t3 / 6.0;
-                out.push(p0 * b0 + p1 * b1 + p2 * b2 + p3 * b3);
-            }
-        }
-    } else {
-        let sp = Spline::from_control(pts.clone(), 3);
-        let (lo, hi) = sp.domain();
-        let m = (segs * (n - 1)).min(MAX_GEN);
-        for k in 0..=m {
-            out.push(sp.eval(lo + (hi - lo) * k as f64 / m as f64));
-        }
-    }
-    out.into_iter().map(PolyVertex::new).collect()
+    let frame: Vec<cadcraft_geom::Vec3> = vs.iter().map(|v| v.p.to3(0.0)).collect();
+    cadcraft_geom::frame_curve(&frame, closed, 3, segs, MAX_GEN).into_iter().map(|p| PolyVertex::new(p.xy())).collect()
 }
 
 /// Join connected lines/arcs/open polylines onto the ends of polyline `h` (kept in place).

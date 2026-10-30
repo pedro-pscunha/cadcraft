@@ -113,6 +113,71 @@ impl LwPolyline {
         })
     }
 
+    /// The sign of X between the vertices of `vertices` and the OCS of the fit records: a legacy polyline in a plane facing down is
+    /// mirrored (-1), a canonical one is not. It is read off the first generated vertex that is not on the Y axis.
+    fn ocs_x(&self) -> f64 {
+        let Some(fit) = &self.fit else { return 1.0 };
+        let generated = fit.vertices.iter().filter(|v| v.flags & 16 == 0);
+        let shown = generated.zip(&self.vertices).find(|(v, q)| v.position.x.abs() > 1e-12 && q.p.x.abs() > 1e-12);
+        shown.map_or(1.0, |(v, q)| if v.position.x * q.p.x < 0.0 { -1.0 } else { 1.0 })
+    }
+
+    /// The frame control points of a spline-fit polyline whose curve can be rebuilt (curve type quadratic or cubic B-spline), in
+    /// the coordinates of `vertices`, in record order. `None`
+    /// for any other polyline: those are edited by their drawn vertices.
+    pub fn spline_frame(&self) -> Option<Vec<Vec2>> {
+        let ocs_x = self.ocs_x();
+        let fit = self.saved_fit()?;
+        spline_degree(fit.flags, fit.smooth_type)?;
+        let frame: Vec<Vec2> = fit.vertices.iter().filter(|v| v.flags & 16 != 0).map(|v| Vec2::new(ocs_x * v.position.x, v.position.y)).collect();
+        (frame.len() >= 3).then_some(frame)
+    }
+
+    /// Move frame control point `k` to `to` and refit the curve from the edited frame (`segs` segments per span, at most `max`
+    /// points): the polyline stays spline-fit, with its flags, curve type and frame count, and new generated vertices. `None`
+    /// when this is not a rebuildable spline-fit polyline or `k` is out of range.
+    pub fn drag_frame(&mut self, k: usize, to: Vec2, segs: usize, max: usize) -> Option<()> {
+        let ocs_x = self.ocs_x();
+        let mut frame = self.spline_frame()?;
+        *frame.get_mut(k)? = to;
+        let fit = self.fit.as_mut()?;
+        let degree = spline_degree(fit.flags, fit.smooth_type)?;
+        let curve = cadcraft_geom::frame_curve(&frame.iter().map(|p| p.to3(0.0)).collect::<Vec<_>>(), self.closed, degree, segs, max);
+        let template = fit.vertices.iter().find(|v| v.flags & 16 == 0).cloned();
+        let curve_z = template.as_ref().map_or(0.0, |t| t.position.z);
+        let mut frame_vertices: Vec<PolylineFitVertex> = fit.vertices.iter().filter(|v| v.flags & 16 != 0).cloned().collect();
+        for (v, p) in frame_vertices.iter_mut().zip(&frame) {
+            v.position = Vec3::new(ocs_x * p.x, p.y, v.position.z);
+        }
+        let old_curve: Vec<PolylineFitVertex> = fit.vertices.iter().filter(|v| v.flags & 16 == 0).cloned().collect();
+        let blank = PolylineFitVertex {
+            record: PolylineRecord::default(),
+            position: Vec3::ZERO,
+            flags: 8,
+            start_width: fit.start_width,
+            end_width: fit.end_width,
+            bulge: 0.0,
+            tangent: 0.0,
+        };
+        let curve_vertices: Vec<PolylineFitVertex> = curve
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let base = old_curve.get(i).or(template.as_ref()).cloned().unwrap_or_else(|| blank.clone());
+                let record = old_curve.get(i).map(|v| v.record.clone()).unwrap_or_default();
+                PolylineFitVertex { record, position: Vec3::new(ocs_x * p.x, p.y, curve_z), bulge: 0.0, tangent: 0.0, ..base }
+            })
+            .collect();
+        self.vertices = curve_vertices
+            .iter()
+            .map(|v| PolyVertex { p: Vec2::new(ocs_x * v.position.x, v.position.y), bulge: 0.0, start_width: v.start_width, end_width: v.end_width })
+            .collect();
+        self.records.vertices.resize(self.vertices.len(), PolylineRecord::default());
+        fit.vertices = frame_vertices.into_iter().chain(curve_vertices).collect();
+        fit.display_vertices.clone_from(&self.vertices);
+        Some(())
+    }
+
     pub fn transform(&mut self, m: &Mat3) {
         if self.saved_fit().is_none() {
             self.fit = None;
@@ -269,10 +334,101 @@ pub struct Polyline3dFit {
     pub display_points: Vec<Vec3>,
 }
 
+/// The B-spline degree of a spline-fit polyline whose curve CADCraft rebuilds: header bit 4 (spline-fit vertices added) with
+/// curve type 5 (quadratic) or 6 (cubic). Curve-fit polylines and Bézier curves are not rebuilt.
+fn spline_degree(flags: i64, smooth_type: i64) -> Option<usize> {
+    if flags & 4 == 0 {
+        return None;
+    }
+    match smooth_type {
+        5 => Some(2),
+        6 => Some(3),
+        _ => None,
+    }
+}
+
 impl Polyline3d {
+    /// The grip points: the frame control points of a spline-fit polyline whose curve can be rebuilt, else the drawn points.
+    pub fn grip_points(&self) -> Vec<Vec2> {
+        match self.spline_frame() {
+            Some(frame) => frame.iter().map(|p| p.xy()).collect(),
+            None => self.points.iter().map(|p| p.xy()).collect(),
+        }
+    }
+
+    /// The frame control points of a spline-fit polyline whose curve can be rebuilt (see [`LwPolyline::spline_frame`]).
+    pub fn spline_frame(&self) -> Option<Vec<Vec3>> {
+        let fit = self.saved_fit()?;
+        spline_degree(fit.flags, fit.smooth_type)?;
+        let frame: Vec<Vec3> = fit.vertices.iter().filter(|v| v.flags & 16 != 0).map(|v| v.position).collect();
+        (frame.len() >= 3).then_some(frame)
+    }
+
+    /// Drag grip `index` to `to` in the XY plane. A spline-fit polyline moves a frame control point and refits the curve
+    /// (`segs` segments per span, at most `max` points), staying spline-fit with its flags, curve type and frame count; any other
+    /// polyline moves a drawn point. `None` when `index` is out of range.
+    pub fn drag_grip(&mut self, index: usize, to: Vec2, segs: usize, max: usize) -> Option<()> {
+        let Some(mut frame) = self.spline_frame() else {
+            let p = self.points.get_mut(index)?;
+            (p.x, p.y) = (to.x, to.y);
+            return Some(());
+        };
+        let moved = frame.get_mut(index)?;
+        (moved.x, moved.y) = (to.x, to.y);
+        let fit = self.fit.as_mut()?;
+        let degree = spline_degree(fit.flags, fit.smooth_type)?;
+        let curve = cadcraft_geom::frame_curve(&frame, self.closed, degree, segs, max);
+        let old_curve: Vec<PolylineFitVertex> = fit.vertices.iter().filter(|v| v.flags & 16 == 0).cloned().collect();
+        let blank = PolylineFitVertex {
+            record: PolylineRecord::default(),
+            position: Vec3::ZERO,
+            flags: 8 | 32,
+            start_width: 0.0,
+            end_width: 0.0,
+            bulge: 0.0,
+            tangent: 0.0,
+        };
+        let mut vertices: Vec<PolylineFitVertex> = fit.vertices.iter().filter(|v| v.flags & 16 != 0).cloned().collect();
+        for (v, p) in vertices.iter_mut().zip(&frame) {
+            v.position = *p;
+        }
+        vertices.extend(curve.iter().enumerate().map(|(i, p)| {
+            let base = old_curve.get(i).or(old_curve.first()).cloned().unwrap_or_else(|| blank.clone());
+            PolylineFitVertex { record: old_curve.get(i).map(|v| v.record.clone()).unwrap_or_default(), position: *p, ..base }
+        }));
+        fit.vertices = vertices;
+        self.points = curve;
+        self.records.vertices.resize(self.points.len(), PolylineRecord::default());
+        fit.display_points.clone_from(&self.points);
+        Some(())
+    }
+
     /// The fit data, while it still describes the polyline (its points and closed state are the ones it was made with).
     pub fn saved_fit(&self) -> Option<&Polyline3dFit> {
         self.fit.as_ref().filter(|fit| self.points == fit.display_points && self.closed == (fit.flags & 1 != 0))
+    }
+
+    /// This polyline in the other direction. Fit data that still describes it is reversed too: the frame control points and the
+    /// generated curve are two sequences, each reversed, so it stays spline-fit; fit data that no longer describes it is dropped.
+    pub fn reversed(&self) -> Polyline3d {
+        let mut out = self.clone();
+        out.points.reverse();
+        out.records.vertices.reverse();
+        out.fit = self.saved_fit().map(|fit| {
+            let mut reversed = fit.clone();
+            for control in [false, true] {
+                let sequence: Vec<&PolylineFitVertex> = fit.vertices.iter().filter(|v| (v.flags & 16 != 0) == control).collect();
+                let n = sequence.len();
+                for (i, v) in reversed.vertices.iter_mut().filter(|v| (v.flags & 16 != 0) == control).enumerate() {
+                    if let Some(old) = n.checked_sub(i + 1).and_then(|k| sequence.get(k)) {
+                        *v = (*old).clone();
+                    }
+                }
+            }
+            reversed.display_points.clone_from(&out.points);
+            reversed
+        });
+        out
     }
 
     /// Move every point (a whole-polyline edit): the fit data moves with it, or is dropped when it no longer described the

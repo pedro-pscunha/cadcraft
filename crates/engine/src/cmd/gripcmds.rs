@@ -204,6 +204,8 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
             if k.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1
                 && let (EntityKind::LwPolyline(original), EntityKind::LwPolyline(edited)) = (&e.kind, &mut k.kind)
                 && original.saved_fit().is_some()
+                // A spline-fit polyline refit from its moved frame is spline-fit already.
+                && edited.saved_fit().is_none()
             {
                 let mut whole = original.clone();
                 whole.transform(&Mat3::translate(delta));

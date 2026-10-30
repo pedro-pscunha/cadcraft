@@ -64,7 +64,8 @@ pub fn grip_points(d: &Drawing, e: &Entity) -> Vec<Vec2> {
 /// or points, a polyline vertex or segment, a spline control point), or refuses typed.
 pub fn stretch_grip_in(d: &Drawing, entity: &Entity, index: usize, to: Vec2) -> Result<Option<Entity>> {
     if entity.geometry_revision != GeometryRevision::CanonicalV2 {
-        return stretch_grip(entity, index, to);
+        entity.require_legacy_geometry()?;
+        return grip_candidate(entity, stretch_grip_legacy(&entity.kind, index, to, splinesegs(d)));
     }
     crate::canonical_grips::stretch(d, entity, index, to)
 }
@@ -94,9 +95,14 @@ pub(crate) enum PolyGrip {
     Vertex(usize),
     /// Midpoint of the segment starting at this vertex.
     Mid(usize),
+    /// A frame control point of a spline-fit polyline (the polyline has no other grips).
+    Frame(usize),
 }
 
 pub(crate) fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
+    if let Some(frame) = p.spline_frame() {
+        return (index < frame.len()).then_some(PolyGrip::Frame(index));
+    }
     let n = p.vertices.len();
     // Start vertices of the non-degenerate segments, in the same order as Polyline::segments().
     let count = if p.closed { n } else { n.saturating_sub(1) };
@@ -128,7 +134,15 @@ pub(crate) fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
 /// exist or the result would be degenerate.
 pub fn stretch_grip(entity: &Entity, index: usize, to: Vec2) -> Result<Option<Entity>> {
     entity.require_legacy_geometry()?;
-    grip_candidate(entity, stretch_grip_legacy(&entity.kind, index, to))
+    grip_candidate(entity, stretch_grip_legacy(&entity.kind, index, to, DEFAULT_SPLINESEGS))
+}
+
+/// The SPLINESEGS default: the segments per span of a spline-fit polyline's curve.
+const DEFAULT_SPLINESEGS: usize = 8;
+
+/// SPLINESEGS of the drawing.
+pub(crate) fn splinesegs(d: &Drawing) -> usize {
+    usize::try_from(d.header.i64("SPLINESEGS", DEFAULT_SPLINESEGS as i64)).unwrap_or(DEFAULT_SPLINESEGS).clamp(1, 64)
 }
 
 fn grip_candidate(source: &Entity, kind: Option<EntityKind>) -> Result<Option<Entity>> {
@@ -142,7 +156,7 @@ fn grip_candidate(source: &Entity, kind: Option<EntityKind>) -> Result<Option<En
     .transpose()
 }
 
-fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityKind> {
+fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2, segs: usize) -> Option<EntityKind> {
     if !to.is_finite() {
         return None;
     }
@@ -197,9 +211,10 @@ fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2) -> Option<Enti
             stretch_ellipse(e, index, to)?;
         }
         EntityKind::LwPolyline(p) => {
-            stretch_polyline(p, index, to, delta)?;
+            stretch_polyline(p, index, to, delta, segs)?;
         }
-        EntityKind::Polyline3d(p) => set_xy(p.points.get_mut(index)?, to),
+        // A spline-fit polyline moves a frame control point and refits its curve.
+        EntityKind::Polyline3d(p) => p.drag_grip(index, to, segs, crate::cmd::curves::MAX_GEN)?,
         EntityKind::PolylineMesh(mesh) => set_xy(&mut mesh.vertices.iter_mut().filter(|v| !v.is_face()).nth(index)?.vertex.position, to),
         EntityKind::Spline(sp) => {
             if sp.fit.is_empty() {
@@ -369,9 +384,10 @@ fn stretch_ellipse_minor(ellipse: &mut cadcraft_doc::Ellipse, to: Vec2, center: 
     Some(())
 }
 
-fn stretch_polyline(polyline: &mut LwPolyline, index: usize, to: Vec2, delta: Vec2) -> Option<()> {
+fn stretch_polyline(polyline: &mut LwPolyline, index: usize, to: Vec2, delta: Vec2, segs: usize) -> Option<()> {
     let count = polyline.vertices.len();
     match poly_grip(polyline, index)? {
+        PolyGrip::Frame(k) => return polyline.drag_frame(k, to, segs, crate::cmd::curves::MAX_GEN),
         PolyGrip::Vertex(i) => polyline.vertices.get_mut(i)?.p = to,
         PolyGrip::Mid(i) => {
             let next = (i + 1) % count.max(1);
@@ -466,7 +482,7 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
                 let arc = p.vertices.get(i).is_some_and(|v| v.bulge.abs() > 1e-12);
                 vec![GripAction::AddVertex, if arc { GripAction::ToLine } else { GripAction::ToArc }]
             }
-            None => Vec::new(),
+            Some(PolyGrip::Frame(_)) | None => Vec::new(),
         },
         EntityKind::Line(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
         EntityKind::Arc(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
@@ -495,6 +511,7 @@ fn grip_action_legacy(kind: &EntityKind, index: usize, action: GripAction, to: O
             let to = to?;
             let at = match poly_grip(p, index)? {
                 PolyGrip::Vertex(i) | PolyGrip::Mid(i) => i,
+                PolyGrip::Frame(_) => return None,
             };
             if at >= p.vertices.len() {
                 return None;
