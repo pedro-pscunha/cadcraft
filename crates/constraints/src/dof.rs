@@ -225,7 +225,7 @@ mod budget_tests {
         let mut spline = Spline::from_control(pts.clone(), 3);
         spline.fit = pts;
         let h = d.add(&Space::Model, Common::default(), EntityKind::Spline(spline)).unwrap();
-        let model = Model::build(&d, &[h]);
+        let model = Model::build(&d, &[h]).unwrap();
         let endpoint = Built {
             id: 1,
             kind: ConstraintKind::Tangent,

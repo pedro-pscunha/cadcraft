@@ -158,9 +158,9 @@ fn rigid_points_budgeted(d: &Drawing, ins: &Insert, members_left: &mut usize) ->
 
 /// Constraint points of an object as the solver sees them (`Sub`, position): end points,
 /// centres, axis ends, defining points, rigid points. Points at the same place are listed once.
-pub fn ref_points(d: &Drawing, h: Handle) -> Vec<(Sub, Vec2)> {
-    let m = Model::build(d, &[h]);
-    let Some(s) = m.slots.first() else { return Vec::new() };
+pub fn ref_points(d: &Drawing, h: Handle) -> Result<Vec<(Sub, Vec2)>, crate::SolveError> {
+    let m = Model::build(d, &[h])?;
+    let Some(s) = m.slots.first() else { return Ok(Vec::new()) };
     let n = match s.shape {
         Shape::Ellipse { .. } => 4,
         Shape::Spline { n, .. } | Shape::Insert { n } | Shape::Poly { n, .. } => n,
@@ -174,7 +174,7 @@ pub fn ref_points(d: &Drawing, h: Handle) -> Vec<(Sub, Vec2)> {
             out.push((sub, p));
         }
     }
-    out
+    Ok(out)
 }
 
 fn p2(x: &[f64], i: usize) -> Option<Vec2> {
@@ -188,9 +188,9 @@ fn fit_mode(s: &GSpline) -> bool {
 
 impl Model {
     /// Build a model for the given entities. Unsupported or missing entities are skipped.
-    pub fn build(d: &Drawing, handles: &[Handle]) -> Model {
+    pub fn build(d: &Drawing, handles: &[Handle]) -> Result<Model, crate::SolveError> {
         let mut members_left = MAX_RIGID_WORK;
-        Self::build_budgeted(&mut crate::admission::Admission::new(d), handles, &mut members_left).unwrap_or_default()
+        Self::build_budgeted(&mut crate::admission::Admission::new(d), handles, &mut members_left)
     }
 
     /// Add the parameters of one supported entity to `m`, and return its shape; `None` when it is
@@ -711,7 +711,7 @@ mod budget_tests {
         let mut spline = GSpline::from_control(vec![Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0)], 2);
         spline.weights = vec![2.0, 0.5];
         let h = drawing.add(&Space::Model, Common::default(), EntityKind::Spline(spline.clone())).unwrap();
-        let model = Model::build(&drawing, &[h]);
+        let model = Model::build(&drawing, &[h]).unwrap();
         model.write_back(&mut drawing, &model.x0);
         let EntityKind::Spline(after) = &drawing.entity(h).unwrap().kind else { panic!("spline") };
         assert_eq!(after.weights, spline.weights);

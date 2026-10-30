@@ -62,7 +62,13 @@ fn direct_solver_refuses_mixed_block_graphs_before_moving_any_component() {
             assert!(cadcraft_constraints::purge_invalid(&mut d).is_empty());
             assert!(d.model.same_as(&before.model));
             assert_eq!(d.constraints, before.constraints);
-            assert!(cadcraft_constraints::ref_points(&d, insert).is_empty(), "no projected rigid points");
+            assert!(matches!(cadcraft_constraints::ref_points(&d, insert), Err(cadcraft_constraints::SolveError::CanonicalGeometry { .. })));
+            assert!(cadcraft_constraints::residuals(&d).is_err());
+            assert!(cadcraft_constraints::glyphs(&d).is_err());
+            assert!(cadcraft_constraints::all_satisfied(&d).is_err());
+            assert!(cadcraft_constraints::restore_fixed(&mut d, &before).is_err());
+            assert!(cadcraft_constraints::edited_points(&d, &before, insert).is_err());
+            assert!(cadcraft_constraints::moved_anchors(&d, &before).is_err());
         }
     }
 }
@@ -71,16 +77,25 @@ fn inference_never_samples_part_of_a_mixed_batch() {
     let (mut d, insert, _) = fixture(true, true);
     let line = d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(3.0, 0.0, 0.0) })).unwrap();
     let before = d.clone();
-    assert!(cadcraft_constraints::infer(&d, &[line, insert], &Default::default()).is_empty());
-    assert!(cadcraft_constraints::infer_placed(&d, &[line], &[insert], &Default::default()).is_empty());
-    assert!(cadcraft_constraints::autoconstrain(&mut d, &[line, insert], &Default::default()).is_empty());
+    assert!(matches!(
+        cadcraft_constraints::infer(&d, &[line, insert], &Default::default()),
+        Err(cadcraft_constraints::SolveError::CanonicalGeometry { .. })
+    ));
+    assert!(matches!(
+        cadcraft_constraints::infer_placed(&d, &[line], &[insert], &Default::default()),
+        Err(cadcraft_constraints::SolveError::CanonicalGeometry { .. })
+    ));
+    assert!(matches!(
+        cadcraft_constraints::autoconstrain(&mut d, &[line, insert], &Default::default()),
+        Err(cadcraft_constraints::SolveError::CanonicalGeometry { .. })
+    ));
     assert!(d.model.same_as(&before.model));
     assert_eq!(d.constraints, before.constraints);
 }
 #[test]
 fn legacy_rigid_points_and_solving_keep_their_existing_behavior() {
     let (mut d, insert, line) = fixture(false, false);
-    let points = cadcraft_constraints::ref_points(&d, insert);
+    let points = cadcraft_constraints::ref_points(&d, insert).unwrap();
     assert!(points.iter().any(|(_, p)| *p == Vec2::new(11.0, 22.0)));
     d.constraints.push(constraint(1, ConstraintKind::Horizontal, line));
     cadcraft_constraints::solve(&mut d, &Default::default()).unwrap();

@@ -191,7 +191,7 @@ fn ellipse_constraints() {
     ok(&mut d, con(K::Coincident, &[s(e, Sub::Vertex(0)), s(m, Sub::Start)]));
     let g = ell(&d, e);
     assert!(ends(&d, m).0.near(g.center + g.major, 1e-7));
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn circle_tangent_to_ellipse_and_elliptical_arc_ends() {
     let g = ell(&d, e);
     let near = (0..20000).map(|i| g.at_param(i as f64 * std::f64::consts::TAU / 20000.0).dist(cc)).fold(f64::INFINITY, f64::min);
     assert!((near - r).abs() < 1e-3, "{near} vs {r}");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
     // Elliptical arc ends are points.
     let arc = ellipse(&mut d, (20.0, 0.0), (4.0, 0.0), 0.5, 0.0, std::f64::consts::PI);
     assert_eq!(obj_dof(&d, arc), Some(7));
@@ -236,7 +236,7 @@ fn spline_points_tangent_and_smooth_g2() {
     assert!(t.near(Vec2::new(1.0, 0.0), 1e-4), "{t:?}");
     let k = curvature(|u| g.eval(u), lo + 1e-3, 1e-4);
     assert!((k - 1.0 / 3.0).abs() < 2e-2, "curvature {k}");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
     // The spline's control points are constraint points.
     let p = point(&mut d, (9.5, 2.5));
     ok(&mut d, con(K::Coincident, &[s(sp, Sub::Vertex(3)), w(p)]));
@@ -253,7 +253,7 @@ fn spline_points_tangent_and_smooth_g2() {
     assert!(g.eval(hi).near(ends(&d, l).0, 1e-7));
     let k = curvature(|u| g.eval(u), hi - 1e-3, 1e-4);
     assert!(k.abs() < 2e-2, "curvature at the line {k}");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn spline_tangent_to_circle_and_fit_spline_smooth() {
     assert!(g.fit[0].near(Vec2::new(19.8, 0.2), 1e-7));
     let (lo, _) = g.domain();
     assert!(g.eval(lo).near(g.fit[0], 1e-9));
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -432,7 +432,7 @@ fn tangent_that_swaps_a_round_ellipse_axes_is_kept() {
     ok(&mut d, con(K::Fix, &[w(l)]));
     ok(&mut d, con(K::Tangent, &[w(l), w(e)]));
     assert!(ell(&d, e).ratio <= 1.0);
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn point_on_curve_that_swaps_a_round_ellipse_axes_is_kept() {
     ok(&mut d, con(K::Fix, &[w(p)]));
     ok(&mut d, con(K::Coincident, &[w(p), w(e)]));
     assert!(ell(&d, e).ratio <= 1.0);
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -454,7 +454,7 @@ fn elliptical_arc_start_that_swaps_its_axes_is_kept() {
     ok(&mut d, con(K::Fix, &[w(p)]));
     ok(&mut d, con(K::Coincident, &[s(e, Sub::Start), w(p)]));
     assert!(ell(&d, e).ratio <= 1.0);
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -465,5 +465,5 @@ fn tangent_circle_that_swaps_a_round_ellipse_axes_is_kept() {
     ok(&mut d, con(K::Fix, &[w(c)]));
     ok(&mut d, con(K::Tangent, &[w(c), w(e)]));
     assert!(ell(&d, e).ratio <= 1.0);
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
