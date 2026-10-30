@@ -29,17 +29,16 @@ impl T<'_> {
     }
 }
 
-/// An entity's group 440: `0x01` in the top byte is ByBlock, `0x02` a fixed alpha (mapped to a
-/// percentage as for layers), anything else ByLayer.
-fn transparency_440(v: i64) -> Transparency {
+/// An entity's group 440: `0x01` in the top byte is ByBlock, `0x02` a fixed alpha (shown as a
+/// percentage as for layers, the alpha itself kept beside it), anything else ByLayer.
+fn transparency_440(v: i64) -> (Transparency, Option<u8>) {
     match (v >> 24) & 0xff {
-        1 => Transparency::ByBlock,
+        1 => (Transparency::ByBlock, None),
         2 => {
-            let alpha = u32::try_from(v & 0xff).unwrap_or(255);
-            let opaque = (alpha * 100 + 127) / 255;
-            Transparency::Percent(u8::try_from(100u32.saturating_sub(opaque).min(90)).unwrap_or(90))
+            let alpha = u8::try_from(v & 0xff).unwrap_or(255);
+            (Transparency::from_alpha(alpha), Some(alpha))
         }
-        _ => Transparency::ByLayer,
+        _ => (Transparency::ByLayer, None),
     }
 }
 
@@ -68,7 +67,7 @@ pub(super) fn common(t: &T) -> Common {
         c.visible = false;
     }
     if let Some(v) = t.i(440) {
-        c.transparency = transparency_440(v);
+        (c.transparency, c.transparency_alpha) = transparency_440(v);
     }
     c.thickness = t.fd(39, 0.0);
     c.extrusion = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));

@@ -69,6 +69,17 @@ pub enum Transparency {
 }
 
 impl Transparency {
+    /// The percentage an alpha value (0 transparent to 255 opaque) shows as: 0 to 90 percent, as AutoCAD's property allows.
+    pub fn from_alpha(alpha: u8) -> Transparency {
+        let opaque = (u32::from(alpha) * 100 + 127) / 255;
+        Transparency::Percent(u8::try_from(100u32.saturating_sub(opaque).min(90)).unwrap_or(90))
+    }
+
+    /// The alpha value AutoCAD stores for a percentage: the opaque share of 255, truncated.
+    pub fn default_alpha(percent: u8) -> u8 {
+        u8::try_from((100 - u32::from(percent.min(90))) * 255 / 100).unwrap_or(255)
+    }
+
     /// "ByLayer", "ByBlock" or the percentage ("50").
     pub fn name(&self) -> String {
         match self {
@@ -89,6 +100,10 @@ pub struct Common {
     pub lineweight: Lineweight,
     pub ltscale: f64,
     pub transparency: Transparency,
+    /// The alpha value a file gave for a fixed transparency, when more than one alpha shows as the same percentage (128 and 127 are both
+    /// 50 percent). A save writes it back while `transparency` still shows as the same percentage, so the file's value is exact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparency_alpha: Option<u8>,
     pub visible: bool,
     pub thickness: f64,
     pub extrusion: Vec3,
@@ -118,6 +133,7 @@ impl Default for Common {
             lineweight: Lineweight::ByLayer,
             ltscale: 1.0,
             transparency: Transparency::ByLayer,
+            transparency_alpha: None,
             visible: true,
             thickness: 0.0,
             extrusion: Vec3::Z,

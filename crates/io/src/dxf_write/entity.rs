@@ -386,7 +386,10 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             if n == 0 {
                 w.s(1, "");
             }
-            w.s(7, &t.style);
+            // AutoCAD leaves out the style of an MTEXT in the default style (it writes the group for any other).
+            if !t.style.eq_ignore_ascii_case("Standard") {
+                w.s(7, &t.style);
+            }
             match canonical_plane(e) {
                 // The plane and the full WCS direction of a canonical text.
                 Some(normal) => {
@@ -481,6 +484,22 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
     }
 }
 
+/// Whether the DIMASSOC object of a dimension says all of its links: the source's own, kept as read, or the one written, which a reader
+/// takes back as the same links. Then the links need no CADCraft xdata beside it.
+fn standard_association(d: &Drawing, handle: cadcraft_doc::Handle, dm: &cadcraft_doc::Dimension, cx: &Ctx) -> bool {
+    if d.has_raw_dimassoc(handle) {
+        return true;
+    }
+    let Some(object) = cx.assoc.get(&handle) else { return false };
+    let tags = super::assoc::dimassoc_tags("0", "0", handle, object.flags, &object.refs);
+    let Some((start, _)) = cadcraft_doc::foreign::dimassoc_reference(tags.iter().map(|t| (t.code, t.str()))) else { return false };
+    let mut read = crate::dxf_read::dimassoc::links_of(d, handle, dm, tags.get(start..).unwrap_or(&[]));
+    let mut own = dm.assoc.clone();
+    read.sort_by(|a, b| a.point.cmp(&b.point));
+    own.sort_by(|a, b| a.point.cmp(&b.point));
+    read == own
+}
+
 fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx) {
     if let EntityKind::Dimension(dm) = &e.kind {
         w.s(0, "DIMENSION");
@@ -567,7 +586,7 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
                 w.p(14, dm.p14);
             }
         }
-        dim_xdata(w, dm, cx);
+        dim_xdata(w, dm, cx, standard_association(d, e.handle, dm, cx));
     }
 }
 

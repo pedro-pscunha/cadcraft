@@ -17,7 +17,7 @@ use crate::{IoError, Result};
 
 mod common;
 mod curve_canonical;
-mod dimassoc;
+pub(crate) mod dimassoc;
 mod document;
 mod entities;
 mod fill_canonical;
