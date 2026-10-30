@@ -171,16 +171,35 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false)
 }
 
-/// Notes for what a save at `target` leaves out of the multileaders that are split into parts (a file before R2007 has no
+/// Notes for the handles a save repairs (two objects held one), and for what a save at `target` leaves out of the multileaders that are split into parts (a file before R2007 has no
 /// MULTILEADER): the block attributes of a canonical multileader whose block matrix places no text exactly (a non-uniform
 /// scale), by multileader handle and count.
 pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
+    let mut notes: Vec<String> = d
+        .committed()
+        .with_unique_handles()
+        .map(|(_, repairs)| repairs)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| {
+            format!(
+                "Handle {} was held by two objects ({} and {}): the one in {} now has handle {}; a reference to {} names the one in {}.",
+                r.old.hex(),
+                r.kept_in,
+                r.moved_in,
+                r.moved_in,
+                r.new.hex(),
+                r.old.hex(),
+                r.kept_in
+            )
+        })
+        .collect();
     if target >= Version::R2007 {
-        return Vec::new();
+        return notes;
     }
     let style = d.header.str("DIMSTYLE", "Standard");
     let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
-    spaces
+    let attributes = spaces
         .flat_map(|s| s.iter())
         .filter(|e| e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2)
         .filter_map(|e| {
@@ -195,8 +214,9 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
                     e.handle.hex()
                 )
             })
-        })
-        .collect()
+        });
+    notes.extend(attributes);
+    notes
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG

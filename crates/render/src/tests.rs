@@ -1179,3 +1179,62 @@ fn raster_hatch_pattern_matches_one_by_one() {
         assert!(render(&l, &view, &o).unwrap().data() == render_one_by_one(&l, &view, &o).data());
     }
 }
+
+#[test]
+fn a_block_cell_whose_extents_are_refused_is_drawn_without_the_block_and_reports_it() {
+    use cadcraft_doc::{Block, Circle, Entity, GeometryRevision, Handle, TableCell, TableCellBlock};
+    let mut d = Drawing::new_imperial();
+    let mut logo = Block::new("Logo");
+    // A canonical entity without a plane: its extents are refused.
+    let mut circle = Entity {
+        geometry_revision: GeometryRevision::CanonicalV2,
+        ..Entity::new(Handle(0x4201), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 0.5 }))
+    };
+    circle.common.extrusion = Vec3::ZERO;
+    logo.entities.push(circle);
+    d.blocks.insert("Logo".into(), std::sync::Arc::new(logo));
+    let block = TableCell { block: Some(TableCellBlock { block: "Logo".into(), scale: 1.0, attribs: Vec::new() }), ..Default::default() };
+    let t = cadcraft_doc::Table {
+        col_widths: vec![2.0, 2.0],
+        row_heights: vec![2.0],
+        cells: vec![vec![Default::default(), block.clone()]],
+        style: "Standard".into(),
+        text_height: 0.2,
+        ..Default::default()
+    };
+    let h = d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert_eq!(l.geometry_refusals.len(), 1, "{:?}", l.geometry_refusals);
+    assert_eq!(l.geometry_refusals[0].handle, h);
+    assert!(l.geometry_refusals[0].reason.contains("table cell (1, 2)"), "{}", l.geometry_refusals[0].reason);
+    // The table's borders are still drawn, and the cell is unchanged.
+    assert!(!l.prims.is_empty());
+    let kept = d.entity(h).and_then(|e| if let EntityKind::Table(t) = &e.kind { t.cells[0][1].block.clone() } else { None });
+    assert_eq!(kept, block.block);
+}
+
+#[test]
+fn a_block_cell_of_canonical_entities_is_drawn() {
+    use cadcraft_doc::{Block, Circle, Entity, GeometryRevision, Handle, TableCell, TableCellBlock};
+    let mut d = Drawing::new_imperial();
+    let mut logo = Block::new("Logo");
+    logo.entities.push(Entity {
+        geometry_revision: GeometryRevision::CanonicalV2,
+        ..Entity::new(Handle(0x4201), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 0.5 }))
+    });
+    d.blocks.insert("Logo".into(), std::sync::Arc::new(logo));
+    let block = TableCell { block: Some(TableCellBlock { block: "Logo".into(), scale: 1.0, attribs: Vec::new() }), ..Default::default() };
+    let t = cadcraft_doc::Table {
+        col_widths: vec![2.0, 2.0],
+        row_heights: vec![2.0],
+        cells: vec![vec![Default::default(), block]],
+        style: "Standard".into(),
+        text_height: 0.2,
+        ..Default::default()
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.geometry_refusals.is_empty(), "{:?}", l.geometry_refusals);
+    let drawn = Bounds2::from_points(l.prims.iter().flat_map(|p| l.points(p).to_vec()).filter(|q| q.x > 2.0 && q.x < 4.0 && q.y < 0.0 && q.y > -2.0));
+    assert!(!drawn.is_empty() && (drawn.max.y - drawn.min.y) > 0.9, "{drawn:?}");
+}

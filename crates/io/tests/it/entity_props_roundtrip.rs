@@ -58,7 +58,12 @@ fn thickness_roundtrips_on_every_entity_that_has_one() {
             heavy: false,
             fit: None,
         }),
-        EntityKind::Polyline3d(Polyline3d { records: Default::default(), points: vec![p(0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)], closed: false }),
+        EntityKind::Polyline3d(Polyline3d {
+            records: Default::default(),
+            points: vec![p(0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)],
+            closed: false,
+            fit: None,
+        }),
         EntityKind::Solid(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),
         EntityKind::Trace(Solid { corners: [p(0.0, 0.0), p(1.0, 0.0), p(0.0, 1.0), p(1.0, 1.0)] }),
     ];

@@ -300,9 +300,22 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     w.s(9, "$DWGCODEPAGE");
     w.s(3, code_page(d, version));
     // Saving source records must not require a display adapter or replace their saved WCS extents.
-    for name in ["EXTMIN", "EXTMAX"] {
-        w.s(9, format!("${name}"));
-        w.p(10, d.header.point(name).unwrap_or(Vec3::ZERO));
+    let computed = if d.header.point("EXTMIN").is_none() && d.header.point("EXTMAX").is_none() {
+        d.model
+            .iter()
+            .try_fold(cadcraft_geom::Bounds2::EMPTY, |bounds, entity| {
+                cadcraft_doc::legacy_entity_bounds(d, entity, 0).map(|entity_bounds| bounds.union(&entity_bounds))
+            })
+            .ok()
+            .filter(|bounds| !bounds.is_empty())
+    } else {
+        None
+    };
+    for (name, fallback) in [("EXTMIN", computed.map(|bounds| bounds.min.to3(0.0))), ("EXTMAX", computed.map(|bounds| bounds.max.to3(0.0)))] {
+        if let Some(point) = d.header.point(name).or(fallback) {
+            w.s(9, format!("${name}"));
+            w.p(10, point);
+        }
     }
     header_vars(w, d, target);
     let seed_pos = w.t.len();
@@ -882,15 +895,24 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
     }
 }
 
-/// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
-/// file ends up in: `version`, or the DWG version the bridge writes) has.
-pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
-    // An in-place block edit in progress is not written: the drawing as before it.
+/// The drawing as a save writes it: an in-place block edit in progress is not written (the drawing as before it), and a handle
+/// two objects hold would make one of them unreadable (the DWG conversion drops it), so the later holder gets a new one.
+fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
     let mut committed = d.committed();
     let stale = committed.stale_raw_dimassocs();
     if !stale.is_empty() {
         committed.to_mut().retire_raw_dimassocs(&stale);
     }
+    if let Some((unique, _)) = committed.with_unique_handles() {
+        *committed.to_mut() = unique;
+    }
+    committed
+}
+
+/// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
+/// file ends up in: `version`, or the DWG version the bridge writes) has.
+pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
+    let committed = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
     let mut w = W { reactors: hatch_reactors(d), dwg_bridge, ..W::new(d) };

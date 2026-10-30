@@ -191,8 +191,8 @@ pub(crate) fn point_marker(
         .ok_or_else(|| DocError::Invalid(format!("Entity {} has no valid source plane.", entity.handle.hex())))?;
     let at = frame.to_ocs(point.p);
     let local = local_context(context, entity, at.z)?;
-    // Relative sizes follow the view: undo the block / viewport scale.
-    let view = builder.opts.view_height / context.xf.scale_factor().max(1e-12);
+    // Relative sizes follow the largest visible scale, even when the parent makes the plane edge-on.
+    let view = builder.opts.view_height / super::max_scale(&local.xf).max(1e-12);
     let size = super::point::size(context.d.header.f64("PDSIZE", 0.0), view);
     let tol = builder.opts.tolerance / local.xf.scale_factor().max(1e-12);
     let figure = super::point::figure(context.d.header.i64("PDMODE", 0), size, at.xy(), point.angle, tol);

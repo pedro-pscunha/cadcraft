@@ -172,6 +172,10 @@ pub struct TableCell {
     /// The cell has a virtual edge (group 178).
     #[serde(default, skip_serializing_if = "is_zero_i32")]
     pub virtual_edge: i32,
+    /// The FIELD object the cell shows (DXF 344), by its handle in the file it came from: kept with the table. `text` is its cached
+    /// value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<Handle>,
     /// The block the cell holds instead of text (DXF cell type 171 = 2); `text` is then not drawn or written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<TableCellBlock>,

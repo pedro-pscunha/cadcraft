@@ -234,10 +234,6 @@ pub struct PolylineFitVertex {
 pub struct PolylineRecord {
     pub handle: Option<super::Handle>,
     pub common: super::Common,
-    /// The VERTEX flags (group 70) of a 3D polyline vertex as read: 32 marks a 3D polyline vertex, 8 a spline frame control
-    /// point. `None` for a vertex made in CADCraft (written as 32) and for the records of other polylines.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flags: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -250,8 +246,47 @@ pub struct PolylineRecords {
 pub struct Polyline3d {
     #[serde(default)]
     pub records: PolylineRecords,
+    /// The vertices that are drawn: for a spline-fit polyline, the points of the generated curve (the frame control points
+    /// are in `fit`).
     pub points: Vec<Vec3>,
     pub closed: bool,
+    /// Curve-fit or spline-fit data and its display snapshot, kept together by whole-polyline edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<Polyline3dFit>,
+}
+
+/// The fit data of a 3D polyline as its record holds it: the polyline flags (group 70: 1 closed, 2 curve-fit vertices added,
+/// 4 spline-fit vertices added, 8 3D polyline, 128 linetype generation), the curve type (75: 0 none, 5 quadratic B-spline,
+/// 6 cubic B-spline, 8 Bézier), and every vertex with its flags (group 70: 1 added by curve fitting, 2 curve-fit tangent
+/// defined, 8 vertex created by spline fitting, 16 spline frame control point, 32 3D polyline vertex), so the frame control
+/// points and the generated curve both survive a save.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Polyline3dFit {
+    pub flags: i64,
+    pub smooth_type: i64,
+    pub vertices: Vec<PolylineFitVertex>,
+    /// The polyline's `points` when the fit data was made: the fit data describes the polyline only while they are the same.
+    pub display_points: Vec<Vec3>,
+}
+
+impl Polyline3d {
+    /// The fit data, while it still describes the polyline (its points and closed state are the ones it was made with).
+    pub fn saved_fit(&self) -> Option<&Polyline3dFit> {
+        self.fit.as_ref().filter(|fit| self.points == fit.display_points && self.closed == (fit.flags & 1 != 0))
+    }
+
+    /// Move every point (a whole-polyline edit): the fit data moves with it, or is dropped when it no longer described the
+    /// polyline.
+    pub fn map_points(&mut self, mut f: impl FnMut(&mut Vec3)) {
+        if self.saved_fit().is_none() {
+            self.fit = None;
+        }
+        self.points.iter_mut().for_each(&mut f);
+        if let Some(fit) = &mut self.fit {
+            fit.vertices.iter_mut().for_each(|v| f(&mut v.position));
+            fit.display_points.clone_from(&self.points);
+        }
+    }
 }
 
 /// SOLID / TRACE: up to four corners (DXF order 1,2,4,3 when drawn).
