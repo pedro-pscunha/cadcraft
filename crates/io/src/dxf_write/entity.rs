@@ -527,7 +527,13 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
             // Written as aligned, marked by CADCraft xdata (see `dim_xdata`).
             DimKind::ArcLength => 1,
         };
-        w.i(70, ty | 32 | if dm.user_text_pos { 128 } else { 0 });
+        // Bit 32 says the dimension's block is its own; AutoCAD sets it in model and paper space, not for a dimension inside a block
+        // definition, and leaves the group out when no bit is set.
+        let in_block = !cx.dwg_bridge && d.entity(e.handle).is_none();
+        let ty = ty | if in_block { 0 } else { 32 } | if dm.user_text_pos { 128 } else { 0 };
+        if ty != 0 || !in_block {
+            w.i(70, ty);
+        }
         // The actual measurement (read-only in DXF): AutoLISP's entget shows it.
         w.f(42, g.measurement);
         if !dm.text.is_empty() {
@@ -768,7 +774,10 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.p(11, f.corners[1]);
             w.p(12, f.corners[2]);
             w.p(13, f.corners[3]);
-            w.i(70, i64::from(f.hidden_edges));
+            // AutoCAD leaves the invisible-edge flags out while no edge is invisible.
+            if f.hidden_edges != 0 || cx.dwg_bridge {
+                w.i(70, i64::from(f.hidden_edges));
+            }
         }
         _ => {}
     }
