@@ -260,7 +260,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                 let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
                 w.p(10, *q);
-                w.i(70, 32);
+                w.i(70, record.and_then(|r| r.flags).unwrap_or(32));
                 if let Some(record) = record {
                     plot_style_xdata(w, &record.common.plot_style, start);
                 }

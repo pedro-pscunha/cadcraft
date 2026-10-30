@@ -234,6 +234,10 @@ pub struct PolylineFitVertex {
 pub struct PolylineRecord {
     pub handle: Option<super::Handle>,
     pub common: super::Common,
+    /// The VERTEX flags (group 70) of a 3D polyline vertex as read: 32 marks a 3D polyline vertex, 8 a spline frame control
+    /// point. `None` for a vertex made in CADCraft (written as 32) and for the records of other polylines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
