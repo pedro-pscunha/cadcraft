@@ -56,6 +56,7 @@ mod empty_xdictionary;
 mod entity_normals;
 mod entity_plane_manifest;
 mod entity_props_roundtrip;
+mod entity_reactor_kept;
 mod entity_subclass_groups;
 mod fill_canonical;
 mod followups_626;

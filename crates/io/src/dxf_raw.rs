@@ -619,7 +619,7 @@ fn entity_groups(tags: &[Tag]) -> &[Tag] {
 }
 
 /// What an entity record (`entity`) or a table record carries beyond the model; reactors and
-/// the extension dictionary only when kept (`kept`).
+/// the extension dictionary only when kept (`kept`; an entity's reactors may also name entities).
 fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<String>) -> ForeignExtra {
     let h = head(tags);
     let mut x = ForeignExtra {
@@ -894,7 +894,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         strip_empty_node_marker(kind, &mut tags);
         f.objects.push(ForeignObject { handle: h, kind: kind.clone(), tags });
     }
-    // Extras of entities, tables, table records, blocks and attributes.
+    // Extras of entities, tables, table records, blocks and attributes. An entity keeps the reactors
+    // that name kept objects or other entities of the file (a hatch that lists its boundary).
+    let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
     for (kind, _, t) in blocks.iter().chain(&entities) {
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
@@ -902,7 +904,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
         let Some(h) = head(t).handle else { continue };
         let Some(&unknown) = ents.get(&h) else { continue };
-        let mut x = extra(kind, t, true, unknown, &kept);
+        let mut x = extra(kind, t, true, unknown, &reactor_targets);
         let Some(hh) = handle(&h) else { continue };
         // Child instances own their extras by Handle; top-level entities carry xdata in Common.
         if !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") {
