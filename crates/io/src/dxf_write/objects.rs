@@ -57,74 +57,76 @@ pub(super) fn group_obj(w: &mut W, g: &Group, h: &str, dict: &str, written: &std
 }
 
 /// A MLEADERSTYLE object (DXF Reference, OBJECTS: MLEADERSTYLE): MText content and straight
-/// ByBlock leaders with the style's landing gap, dogleg length, arrow size, text style and
-/// text height, and its arrowhead block (`arrow`, none = closed filled).
-pub(super) fn mleader_style_obj(
-    w: &mut W,
-    s: &MLeaderStyle,
-    h: &str,
-    dict: &str,
-    byblock_ltype: Option<&str>,
-    text_style: Option<String>,
-    arrow: Option<String>,
-) {
-    // ByBlock as a 32-bit colour value (0xC1000000).
-    const BYBLOCK: i64 = -1_056_964_608;
+/// The handles an MLEADERSTYLE names: its text style, its arrowhead block, its line's linetype and its content block (none: the
+/// group is left out).
+pub(super) struct StyleRefs {
+    pub text_style: Option<String>,
+    pub arrow: Option<String>,
+    pub line_type: Option<String>,
+    pub block: Option<String>,
+}
+
+/// A MLEADERSTYLE object (DXF Reference, OBJECTS: MLEADERSTYLE): every field the model has, the ones a file gave as it gave
+/// them, a style made in CADCraft with the defaults of [`MLeaderStyle::default`].
+pub(super) fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, refs: &StyleRefs) {
     w.s(0, "MLEADERSTYLE");
     w.s(5, h);
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbMLeaderStyle");
-    w.i(179, 2);
-    w.i(170, 2);
-    w.i(171, 1);
-    w.i(172, 0);
-    w.i(90, 2);
-    w.f(40, 0.0);
-    w.f(41, 0.0);
-    w.i(173, 1);
-    w.i(91, BYBLOCK);
-    if let Some(lt) = byblock_ltype {
+    w.i(179, s.version);
+    w.i(170, s.content_type);
+    w.i(171, s.draw_mleader_order);
+    w.i(172, s.draw_leader_order);
+    w.i(90, s.max_leader_points);
+    w.f(40, s.first_segment_angle);
+    w.f(41, s.second_segment_angle);
+    w.i(173, s.leader_line_type);
+    w.i(91, s.line_color);
+    if let Some(lt) = &refs.line_type {
         w.s(340, lt);
     }
-    w.i(92, -2);
-    w.i(290, 1);
+    w.i(92, s.line_weight);
+    w.i(290, i64::from(s.enable_landing));
     w.f(42, s.landing_gap);
-    w.i(291, 1);
+    w.i(291, i64::from(s.enable_dogleg));
     w.f(43, s.dogleg);
-    w.s(3, "");
-    if let Some(a) = arrow {
+    w.s(3, &s.description);
+    if let Some(a) = &refs.arrow {
         w.s(341, a);
     }
     w.f(44, s.arrow_size);
-    w.s(300, "");
-    if let Some(ts) = text_style {
+    w.s(300, &s.default_text);
+    if let Some(ts) = &refs.text_style {
         w.s(342, ts);
     }
     w.i(174, s.text_left_attachment);
     w.i(178, s.text_right_attachment);
     w.i(175, s.text_angle_type);
     w.i(176, s.text_alignment);
-    w.i(93, BYBLOCK);
+    w.i(93, s.text_color);
     w.f(45, s.text_height);
-    w.i(292, 0);
-    w.i(297, 0);
-    w.f(46, 4.0);
-    w.i(94, BYBLOCK);
-    for c in [47, 49, 140] {
-        w.f(c, 1.0);
+    w.i(292, i64::from(s.text_frame));
+    w.i(297, i64::from(s.text_always_left));
+    w.f(46, s.align_space);
+    if let Some(b) = &refs.block {
+        w.s(343, b);
     }
-    w.i(293, 1);
-    w.f(141, 0.0);
-    w.i(294, 1);
+    w.i(94, s.block_color);
+    for (c, v) in [47, 49, 140].into_iter().zip(s.block_scale) {
+        w.f(c, v);
+    }
+    w.i(293, i64::from(s.enable_block_scale));
+    w.f(141, s.block_rotation);
+    w.i(294, i64::from(s.enable_block_rotation));
     w.i(177, s.block_connection);
-    w.f(142, 1.0);
-    w.i(295, 0);
+    w.f(142, s.scale);
+    w.i(295, i64::from(s.overwritten));
     w.i(296, i64::from(s.annotative));
-    w.f(143, 0.125);
-    w.i(271, 0);
-    w.i(272, 9);
-    w.i(273, 9);
+    w.f(143, s.break_gap);
+    w.i(271, s.attach_direction);
+    w.i(272, s.attach_top);
+    w.i(273, s.attach_bottom);
 }
 
 /// The ACAD_SCALELIST dictionary and its SCALE objects (DXF Reference, OBJECTS section): name

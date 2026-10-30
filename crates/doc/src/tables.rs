@@ -682,7 +682,48 @@ pub struct MLeaderStyle {
     pub text_angle_type: i64,
     pub text_alignment: i64,
     pub block_connection: i64,
+    /// The object's other fields as the file gave them (DXF Reference, MLEADERSTYLE): version (179), content type (170: 0 none, 1 block,
+    /// 2 MTEXT, 3 tolerance), draw order of the content (171) and of the leader (172), maximum leader points (90), the two segment
+    /// angle constraints (40, 41), leader line type (173), its colour (91, a 32-bit colour value), linetype (340, a name) and
+    /// lineweight (92), the landing and dogleg switches (290, 291), the description (3), the default text (300), the text colour
+    /// (93), frame (292) and "always left" (297) switches, the alignment space (46), the content block (343, a name), its colour (94),
+    /// scale (47, 49, 140) and rotation (141) with their switches (293, 294), the style's scale (142), overwritten flag (295), break
+    /// gap (143) and the three attachment directions (271, 272, 273).
+    pub version: i64,
+    pub content_type: i64,
+    pub draw_mleader_order: i64,
+    pub draw_leader_order: i64,
+    pub max_leader_points: i64,
+    pub first_segment_angle: f64,
+    pub second_segment_angle: f64,
+    pub leader_line_type: i64,
+    pub line_color: i64,
+    pub line_type: String,
+    pub line_weight: i64,
+    pub enable_landing: bool,
+    pub enable_dogleg: bool,
+    pub description: String,
+    pub default_text: String,
+    pub text_color: i64,
+    pub text_frame: bool,
+    pub text_always_left: bool,
+    pub align_space: f64,
+    pub block: String,
+    pub block_color: i64,
+    pub block_scale: [f64; 3],
+    pub enable_block_scale: bool,
+    pub block_rotation: f64,
+    pub enable_block_rotation: bool,
+    pub scale: f64,
+    pub overwritten: bool,
+    pub break_gap: f64,
+    pub attach_direction: i64,
+    pub attach_top: i64,
+    pub attach_bottom: i64,
 }
+
+/// ByBlock as a 32-bit colour value (0xC1000000), the colour of a style created in CADCraft.
+const BYBLOCK_COLOR: i64 = -1_056_964_608;
 
 impl Default for MLeaderStyle {
     fn default() -> Self {
@@ -700,6 +741,37 @@ impl Default for MLeaderStyle {
             text_angle_type: 1,
             text_alignment: 0,
             block_connection: 0,
+            version: 2,
+            content_type: 2,
+            draw_mleader_order: 1,
+            draw_leader_order: 0,
+            max_leader_points: 2,
+            first_segment_angle: 0.0,
+            second_segment_angle: 0.0,
+            leader_line_type: 1,
+            line_color: BYBLOCK_COLOR,
+            line_type: "ByBlock".into(),
+            line_weight: -2,
+            enable_landing: true,
+            enable_dogleg: true,
+            description: String::new(),
+            default_text: String::new(),
+            text_color: BYBLOCK_COLOR,
+            text_frame: false,
+            text_always_left: false,
+            align_space: 4.0,
+            block: String::new(),
+            block_color: BYBLOCK_COLOR,
+            block_scale: [1.0, 1.0, 1.0],
+            enable_block_scale: true,
+            block_rotation: 0.0,
+            enable_block_rotation: true,
+            scale: 1.0,
+            overwritten: false,
+            break_gap: 0.125,
+            attach_direction: 0,
+            attach_top: 9,
+            attach_bottom: 9,
         }
     }
 }
