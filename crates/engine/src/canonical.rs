@@ -26,20 +26,16 @@ pub(crate) struct Flat {
     pub inserts: Vec<Vec2>,
     /// Its WCS primitives, for the Z of a 2D hit.
     pub world: Vec<WorldPrimitive>,
-    /// The resolver refused its geometry: it is picked on the outline of its bounds (so a command can still name it and
-    /// report the refusal) and snapped to nothing.
-    pub unresolved: Option<cadcraft_geom::Bounds2>,
 }
 
 /// The XY view of `e` when it is canonical (`None` for a legacy payload). A canonical entity whose geometry the resolver
-/// refuses is [`Flat::unresolved`]: picked on the outline of its bounds, never snapped.
+/// refuses has no geometry here: it is neither picked nor snapped, never read as its 2D fields.
 pub(crate) fn flatten(d: &Drawing, e: &Entity) -> Option<Flat> {
     if e.geometry_revision != GeometryRevision::CanonicalV2 {
         return None;
     }
-    let unresolved = || Some(Flat { unresolved: Some(cadcraft_doc::entity_bounds(d, e, 0)), ..Flat::default() });
-    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) else { return unresolved() };
-    let Ok(prims) = geometry.project_xy() else { return unresolved() };
+    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) else { return Some(Flat::default()) };
+    let Ok(prims) = geometry.project_xy() else { return Some(Flat::default()) };
     let mut flat = Flat { prims, world: geometry.primitives().to_vec(), ..Flat::default() };
     // A canonical SOLID or TRACE is a closed loop of lines: its polygon is the filled area.
     if matches!(e.kind, cadcraft_doc::EntityKind::Solid(_) | cadcraft_doc::EntityKind::Trace(_)) {
@@ -117,10 +113,6 @@ impl Flat {
     /// The tessellated outlines of the primitives (and the words' boxes) for hit tests at `tol`.
     pub fn polylines(&self, tol: f64) -> Vec<Vec<Vec2>> {
         let mut out = Vec::new();
-        if let Some(b) = self.unresolved.filter(|b| !b.is_empty()) {
-            let c = b.corners();
-            return vec![vec![c[0], c[1], c[2], c[3], c[0]]];
-        }
         for p in &self.prims {
             let mut pts = Vec::new();
             match p {

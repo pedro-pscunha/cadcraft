@@ -43,6 +43,8 @@ fn a_crossing_box_touches_the_projected_outline() {
     assert!(select::select_window(&d, &Space::Model, around(CENTER + Vec2::new(0.0, 4.0)), true).is_empty());
     // A box inside the ellipse touches nothing.
     assert!(select::select_window(&d, &Space::Model, around(CENTER), true).is_empty());
+    // A window that holds the ellipse (4 by 3.2 around the center) selects it.
+    assert_eq!(select::select_window(&d, &Space::Model, Bounds2::new(CENTER - Vec2::new(4.5, 3.5), CENTER + Vec2::new(4.5, 3.5)), false), vec![h]);
 }
 
 #[test]
@@ -111,11 +113,8 @@ fn a_canonical_mtext_is_picked_on_its_words_turned_by_its_full_direction() {
     let up = Vec2::new(-0.8, 0.6);
     let origin = Vec2::new(10.0, 10.0);
     // The text hangs below its top-left insertion point, along the direction.
-    // The spatial index uses the entity bounds, which a canonical text only gets right once the bounds are canonical too, so
-    // this tests the distance the pick measures.
-    let e = d.entity(h).unwrap();
-    assert_eq!(select::entity_distance(&d, e, origin + along * 3.0 - up * 1.0, 0.05), 0.0);
-    assert!(select::entity_distance(&d, e, origin + along * 3.0 + up * 4.0, 0.05) > 1.0);
+    assert_eq!(select::pick(&d, &Space::Model, origin + along * 3.0 - up * 1.0, 0.05), Some(h));
+    assert_eq!(select::pick(&d, &Space::Model, origin + along * 3.0 + up * 4.0, 0.05), None);
     // The Insertion snap is the WCS insertion point.
     let hit = snap::osnap(&d, &Space::Model, origin + Vec2::new(0.1, 0.05), 0.3, mode::INS, None, false).unwrap();
     assert!((hit.point - origin).len() < 1e-9);
@@ -150,10 +149,10 @@ fn a_canonical_multileader_is_picked_on_its_lines_and_its_text() {
 }
 
 #[test]
-fn a_canonical_entity_the_resolver_refuses_is_picked_on_its_bounds_and_never_snapped() {
-    // A spline with no Z values has no spatial form: the resolver refuses it.
+fn a_canonical_entity_the_resolver_refuses_is_neither_picked_nor_snapped() {
+    // A spline with no Z values has no spatial form: the resolver refuses it, and its 2D fields are not read instead.
     let spline = cadcraft_geom::Spline::from_control(vec![Vec2::new(0.0, 0.0), Vec2::new(3.0, 4.0), Vec2::new(6.0, 0.0)], 2);
-    let (d, h) = drawing(EntityKind::Spline(spline), Vec3::Z);
-    assert_eq!(select::pick(&d, &Space::Model, Vec2::new(0.0, 0.0), 0.1), Some(h), "a corner of the bounds");
+    let (d, _) = drawing(EntityKind::Spline(spline), Vec3::Z);
+    assert_eq!(select::pick(&d, &Space::Model, Vec2::new(0.0, 0.0), 0.1), None);
     assert!(snap::osnap(&d, &Space::Model, Vec2::new(0.05, 0.05), 0.3, mode::END | mode::NEA, None, false).is_none());
 }
