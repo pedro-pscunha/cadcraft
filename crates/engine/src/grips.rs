@@ -40,15 +40,16 @@ pub struct Grip {
 /// The grips of `e`, in the order grip indices refer to. A legacy object has the grips of its 2D reading; a canonical one has
 /// the grips of its WCS geometry (the shared resolver, as pick and snap use), none when the resolver refuses it.
 pub fn entity_grips(d: &Drawing, e: &Entity) -> Vec<Grip> {
-    let Some(flat) = crate::canonical::flatten(d, e) else {
+    if e.geometry_revision != GeometryRevision::CanonicalV2 {
         return e.kind.grips().into_iter().map(|point| Grip { point, world: None }).collect();
-    };
-    let grips = flat.grips();
+    }
+    let grips = crate::canonical_grips::grips(d, e);
     grips
         .iter()
         .map(|g| {
-            let alone = grips.iter().filter(|o| o.point.near(g.point, 1e-9 * (1.0 + g.point.len()))).all(|o| (o.world.z - g.world.z).abs() <= 1e-9);
-            Grip { point: g.point, world: alone.then_some(g.world) }
+            let point = g.world.xy();
+            let alone = grips.iter().filter(|o| o.world.xy().near(point, 1e-9 * (1.0 + point.len()))).all(|o| (o.world.z - g.world.z).abs() <= 1e-9);
+            Grip { point, world: alone.then_some(g.world) }
         })
         .collect()
 }
@@ -58,53 +59,24 @@ pub fn grip_points(d: &Drawing, e: &Entity) -> Vec<Vec2> {
     entity_grips(d, e).into_iter().map(|g| g.point).collect()
 }
 
-/// Like [`stretch_grip`], for an object of the drawing `d`. A canonical object has no 2D fields to stretch: a grip that stands
-/// for the whole object moves it through the canonical transform, and any other grip refuses.
+/// Like [`stretch_grip`], for an object of the drawing `d`. A canonical object has no 2D fields to stretch: a grip moves the whole
+/// object through the canonical transform, or stretches the object in its own plane (a line end, a circle or arc by its quadrant
+/// or points, a polyline vertex or segment, a spline control point), or refuses typed.
 pub fn stretch_grip_in(d: &Drawing, entity: &Entity, index: usize, to: Vec2) -> Result<Option<Entity>> {
     if entity.geometry_revision != GeometryRevision::CanonicalV2 {
         return stretch_grip(entity, index, to);
     }
-    let Some(flat) = crate::canonical::flatten(d, entity) else { return stretch_grip(entity, index, to) };
-    let Some(grip) = flat.grips().get(index).copied() else { return Ok(None) };
-    if !to.is_finite() {
-        return Ok(None);
-    }
-    let delta = to - grip.point;
-    if grip.moves {
-        let moved = entity.transformed(&cadcraft_geom::Mat4::from_mat3(&Mat3::translate(delta)))?;
-        return Ok(Some(moved));
-    }
-    Err(EngineError::Other(
-        "A canonical object's grip can only move the whole object here: this grip would stretch the fields of its 2D reading.".into(),
-    ))
+    crate::canonical_grips::stretch(d, entity, index, to)
 }
 
-/// Put the stretched `candidate` of the object `h` in the drawing. A legacy object is replaced; a canonical one was moved as a
-/// whole by [`stretch_grip_in`], so the same translation goes through the drawing's canonical transform (the only canonical edit
-/// the drawing commits), after checking that it is that translation and nothing else.
+/// Put the stretched `candidate` of the object `h` in the drawing: a legacy object is replaced by its legacy edit, a canonical one
+/// through the drawing's canonical commit.
 pub fn commit_stretch(d: &mut Drawing, h: Handle, candidate: Entity) -> Result<()> {
-    let Some(current) = d.entity(h).map(|e| e.as_ref().clone()) else { return Err(cadcraft_doc::DocError::NoEntity(h).into()) };
-    if current.geometry_revision != GeometryRevision::CanonicalV2 {
+    if candidate.geometry_revision == GeometryRevision::CanonicalV2 {
+        d.commit_canonical_entity(candidate)?;
+    } else {
         d.modify_entity(h, |e| *e = candidate)?;
-        return Ok(());
     }
-    let (before, after) = (crate::canonical::flatten(d, &current).map(|f| f.grips()), crate::canonical::flatten(d, &candidate).map(|f| f.grips()));
-    let shift = match (before.as_deref(), after.as_deref()) {
-        (Some([a, ..]), Some([b, ..])) => b.world - a.world,
-        _ => return Err(EngineError::Other("A canonical object without geometry cannot be moved by a grip.".into())),
-    };
-    let translation = cadcraft_geom::Mat4::from_mat3(&Mat3::translate(shift.xy()));
-    // The candidate is the object moved by `shift` and nothing else: its grips are the moved grips of the object.
-    let tol = 1e-9 * (1.0 + shift.len());
-    let moved = current.transformed(&translation)?;
-    let same = |a: &Entity, b: &Entity| {
-        let (ga, gb) = (crate::canonical::flatten(d, a).map(|f| f.grips()), crate::canonical::flatten(d, b).map(|f| f.grips()));
-        matches!((ga, gb), (Some(x), Some(y)) if x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| (p.world - q.world).len() <= tol))
-    };
-    if shift.z.abs() > tol || !same(&moved, &candidate) {
-        return Err(EngineError::Other("A canonical object only takes the move of the whole object from a grip.".into()));
-    }
-    d.transform_entity(h, &translation)?;
     Ok(())
 }
 
@@ -118,13 +90,13 @@ fn translated(k: &EntityKind, d: Vec2) -> Option<EntityKind> {
 }
 
 /// What a polyline grip index refers to (matches the order of `EntityKind::grips`).
-enum PolyGrip {
+pub(crate) enum PolyGrip {
     Vertex(usize),
     /// Midpoint of the segment starting at this vertex.
     Mid(usize),
 }
 
-fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
+pub(crate) fn poly_grip(p: &LwPolyline, index: usize) -> Option<PolyGrip> {
     let n = p.vertices.len();
     // Start vertices of the non-degenerate segments, in the same order as Polyline::segments().
     let count = if p.closed { n } else { n.saturating_sub(1) };

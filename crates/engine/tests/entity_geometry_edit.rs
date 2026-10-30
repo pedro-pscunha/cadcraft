@@ -27,26 +27,39 @@ fn a_failed_typed_transform_restores_the_current_input_step() {
 
 #[test]
 fn unmigrated_grip_operations_refuse_canonical_geometry_atomically() {
-    let mut accepted = Vec::new();
-    for operation in ["single", "multiple", "option"] {
+    // The multifunctional options (Lengthen, Add Vertex, ...) edit the 2D fields of a legacy payload and stay off.
+    let mut session = Session::new();
+    let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
+    let handle = cadcraft_doc::Handle::parse_hex(&line).unwrap();
+    let entity = canonical_entity(&session, handle);
+    session.doc_mut().unwrap().model.push(entity);
+    let before = session.doc().unwrap().model.clone();
+    let result = session.execute("grip.option", &json!({"handle": line, "index": 0, "option": "lengthen", "value": 2}));
+    assert!(result.is_err(), "a canonical option entered legacy grip code");
+    assert_eq!(session.doc().unwrap().model, before);
+}
+
+#[test]
+fn a_canonical_line_end_stretches_in_xy_through_the_canonical_commit() {
+    for multiple in [false, true] {
         let mut session = Session::new();
         let line = session.execute("line", &json!({"points": [[0, 0], [5, 0]]})).unwrap()["handles"][0].as_str().unwrap().to_string();
         let handle = cadcraft_doc::Handle::parse_hex(&line).unwrap();
-        let entity = canonical_entity(&session, handle);
-        session.doc_mut().unwrap().model.push(entity);
-        let before = session.doc().unwrap().model.clone();
-        let result = match operation {
-            "single" => session.execute("grip.stretch", &json!({"handle": line, "index": 0, "to": [2, 3]})),
-            "multiple" => session.execute("grip.stretch", &json!({"grips": [[line, 0]], "delta": [2, 3]})),
-            _ => session.execute("grip.option", &json!({"handle": line, "index": 0, "option": "lengthen", "value": 2})),
-        };
-        if result.is_ok() {
-            accepted.push(operation);
-        } else {
-            assert_eq!(session.doc().unwrap().model, before, "{operation}");
+        let mut entity = canonical_entity(&session, handle);
+        if let EntityKind::Line(l) = &mut entity.kind {
+            l.a.z = 1.0;
         }
+        session.doc_mut().unwrap().model.push(entity);
+        let result = if multiple {
+            session.execute("grip.stretch", &json!({"grips": [[line, 0]], "delta": [2, 3]}))
+        } else {
+            session.execute("grip.stretch", &json!({"handle": line, "index": 0, "to": [2, 3]}))
+        };
+        result.unwrap();
+        let EntityKind::Line(l) = &session.doc().unwrap().entity(handle).unwrap().kind else { panic!("line") };
+        assert_eq!((l.a.x, l.a.y, l.a.z), (2.0, 3.0, 1.0), "multiple={multiple}");
+        assert_eq!((l.b.x, l.b.y), (5.0, 0.0));
     }
-    assert!(accepted.is_empty(), "canonical edits entered legacy grip code: {accepted:?}");
 }
 
 #[test]

@@ -26,6 +26,8 @@ pub(crate) struct Flat {
     pub inserts: Vec<Vec2>,
     /// Its WCS primitives, for the Z of a 2D hit.
     pub world: Vec<WorldPrimitive>,
+    /// The resolver refused its geometry.
+    pub refused: bool,
 }
 
 /// The XY view of `e` when it is canonical (`None` for a legacy payload). A canonical entity whose geometry the resolver
@@ -34,8 +36,9 @@ pub(crate) fn flatten(d: &Drawing, e: &Entity) -> Option<Flat> {
     if e.geometry_revision != GeometryRevision::CanonicalV2 {
         return None;
     }
-    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) else { return Some(Flat::default()) };
-    let Ok(prims) = geometry.project_xy() else { return Some(Flat::default()) };
+    let refused = || Some(Flat { refused: true, ..Flat::default() });
+    let Ok(geometry) = cadcraft_render::entity_world_geometry(d, e, &Mat4::IDENTITY) else { return refused() };
+    let Ok(prims) = geometry.project_xy() else { return refused() };
     let mut flat = Flat { prims, world: geometry.primitives().to_vec(), ..Flat::default() };
     // A canonical SOLID or TRACE is a closed loop of lines: its polygon is the filled area.
     if matches!(e.kind, cadcraft_doc::EntityKind::Solid(_) | cadcraft_doc::EntityKind::Trace(_)) {
