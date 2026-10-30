@@ -256,3 +256,36 @@ fn each_canonical_dimension_field_alone_changes_the_key() {
     regenerated.block = Some("*D3".into());
     assert_eq!(key(&regenerated, &common()), base, "the measurement, text, style and block are regenerated, not replayed");
 }
+
+#[test]
+fn each_ellipse_line_and_point_field_alone_changes_the_key() {
+    use cadcraft_doc::{Ellipse, Line, Point};
+    let key = |k: EntityKind, c: &Common| geometry_key(&k, c).unwrap();
+    let ellipse = || Ellipse { center: Vec3::new(1.0, 2.0, 3.0), major: Vec3::new(4.0, 0.0, 0.0), normal: Vec3::Z, ratio: 0.5, start: 0.3, end: 2.0 };
+    let line = || Line { a: Vec3::new(0.0, 0.0, 1.0), b: Vec3::new(4.0, 1.0, 2.0) };
+    let point = || Point { p: Vec3::new(1.0, 2.0, 3.0), angle: 0.5 };
+    let mut keys =
+        vec![key(EntityKind::Ellipse(ellipse()), &common()), key(EntityKind::Line(line()), &common()), key(EntityKind::Point(point()), &common())];
+    let e = |f: fn(&mut Ellipse)| {
+        let mut x = ellipse();
+        f(&mut x);
+        key(EntityKind::Ellipse(x), &common())
+    };
+    keys.extend([
+        e(|x| x.center.z += 0.5),
+        e(|x| x.major.y = 0.5),
+        e(|x| x.ratio = 0.25),
+        e(|x| x.start = 0.4),
+        e(|x| x.end = 2.5),
+        key(EntityKind::Ellipse(ellipse()), &Common { extrusion: Vec3::new(0.0, 3.0, 5.0), ..common() }),
+    ]);
+    keys.extend([
+        key(EntityKind::Line(Line { a: Vec3::new(0.0, 0.0, 1.5), ..line() }), &common()),
+        key(EntityKind::Line(Line { b: Vec3::new(4.0, 1.5, 2.0), ..line() }), &common()),
+        key(EntityKind::Line(line()), &Common { thickness: -0.5, ..common() }),
+        key(EntityKind::Point(Point { p: Vec3::new(1.0, 2.0, 3.5), ..point() }), &common()),
+        key(EntityKind::Point(Point { angle: 0.75, ..point() }), &common()),
+        key(EntityKind::Point(point()), &Common { extrusion: Vec3::new(0.25, 3.0, 4.0), ..common() }),
+    ]);
+    distinct(&keys);
+}

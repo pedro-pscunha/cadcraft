@@ -172,12 +172,14 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             thickness(w, e);
             w.p(10, l.a);
             w.p(11, l.b);
+            canonical_normal(w, e);
         }
         EntityKind::Point(p) => {
             w.s(0, "POINT");
             common(w, e, owner, paper, "AcDbPoint");
             w.p(10, p.p);
             thickness(w, e);
+            canonical_normal(w, e);
             if p.angle != 0.0 {
                 w.f(50, p.angle.to_degrees());
             }
@@ -206,7 +208,8 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             common(w, e, owner, paper, "AcDbEllipse");
             w.p(10, el.center);
             w.p(11, el.major);
-            w.p(210, el.normal);
+            // A canonical ellipse has the plane of its entity; the legacy one the normal it was read with.
+            w.p(210, canonical_plane(e).unwrap_or(el.normal));
             w.f(40, el.ratio);
             w.f(41, el.start);
             w.f(42, el.end);
@@ -250,6 +253,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.i(66, 1);
             w.p(10, Vec3::ZERO);
             thickness(w, e);
+            canonical_normal(w, e);
             w.i(70, 8 | i64::from(p.closed));
             for (index, q) in p.points.iter().enumerate() {
                 let record = p.records.vertices.get(index);

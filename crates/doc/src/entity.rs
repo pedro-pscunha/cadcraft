@@ -42,6 +42,7 @@ pub use region::*;
 mod revision;
 pub use revision::GeometryRevision;
 
+mod affine_canonical;
 mod block;
 mod common;
 mod curves;

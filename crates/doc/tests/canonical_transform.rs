@@ -5,11 +5,12 @@
 
 use cadcraft_color::Color;
 use cadcraft_doc::{
-    Arc, Attrib, Circle, Common, DimKind, Dimension, Entity, EntityKind, GeometryRevision, HAlign, Handle, Hatch, HatchEdge, HatchLoop, Helix,
-    HelixConstrain, HelixFrame, Leader, LeaderArrowLayout, LeaderFrame, LwPolyline, MLine, MLineJust, MLineStyle, MLineVertex, MLineVertexFrame,
-    MText, Solid, Table, TableCell, TableLayout, TableLayoutText, Text, Tolerance, VAlign, Wipeout, WipeoutFrame, WorldPrimitive, arc_primitives,
-    circle_primitives, hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives,
-    solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
+    Arc, Attrib, Circle, Common, DimKind, Dimension, Ellipse, Entity, EntityKind, Face3d, GeometryRevision, HAlign, Handle, Hatch, HatchEdge,
+    HatchLoop, Helix, HelixConstrain, HelixFrame, Leader, LeaderArrowLayout, LeaderFrame, Line, LwPolyline, MLine, MLineJust, MLineStyle,
+    MLineVertex, MLineVertexFrame, MText, MeshKind, MeshVertex, Point, Polyline3d, PolylineFitVertex, PolylineMesh, Solid, Table, TableCell,
+    TableLayout, TableLayoutText, Text, Tolerance, VAlign, Wipeout, WipeoutFrame, WorldPrimitive, arc_primitives, circle_primitives,
+    hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives, solid_primitives,
+    spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
 };
 use cadcraft_geom::{FitOptions, Mat4, PolyVertex, Spline, SplineSpace, Vec2, Vec3};
 
@@ -208,6 +209,25 @@ fn dimension() -> Dimension {
     }
 }
 
+fn mesh() -> PolylineMesh {
+    let vertex = |p: Vec3| MeshVertex {
+        vertex: PolylineFitVertex { record: Default::default(), position: p, flags: 64, start_width: 0.0, end_width: 0.0, bulge: 0.0, tangent: 0.0 },
+        indices: [0; 4],
+    };
+    let face = MeshVertex { vertex: PolylineFitVertex { flags: 128, position: Vec3::ZERO, ..vertex(Vec3::ZERO).vertex }, indices: [1, 2, 3, 0] };
+    PolylineMesh {
+        kind: MeshKind::Polyface,
+        flags: 0,
+        m_count: 0,
+        n_count: 0,
+        m_density: 0,
+        n_density: 0,
+        smooth_type: 0,
+        vertices: vec![vertex(Vec3::new(0.0, 0.0, 0.0)), vertex(Vec3::new(1.0, 0.0, 2.0)), vertex(Vec3::new(1.0, 1.0, 3.0)), face],
+        seqend: None,
+    }
+}
+
 /// The plane of every fixture: tilted, with a source magnitude that is not 1.
 const NORMAL: Vec3 = Vec3 { x: 0.0, y: 3.0, z: 4.0 };
 
@@ -269,6 +289,36 @@ fn fixtures() -> Vec<(&'static str, Entity)> {
         ("SPLINE", entity(EntityKind::Spline(spline()), NORMAL)),
         ("LEADER", entity(EntityKind::Leader(leader()), NORMAL)),
         ("DIMENSION", entity(EntityKind::Dimension(dimension()), NORMAL)),
+        // The major axis of the ellipse lies in the plane of NORMAL = (0, 3, 4).
+        (
+            "ELLIPSE",
+            entity(
+                EntityKind::Ellipse(Ellipse {
+                    center: Vec3::new(1.0, 2.0, 3.0),
+                    major: Vec3::new(4.0, 0.0, 0.0),
+                    normal: NORMAL,
+                    ratio: 0.5,
+                    start: 0.3,
+                    end: 2.0,
+                }),
+                NORMAL,
+            ),
+        ),
+        ("LINE", entity(EntityKind::Line(Line { a: Vec3::new(0.0, 0.0, 1.0), b: Vec3::new(4.0, 1.0, 2.0) }), NORMAL)),
+        ("POINT", entity(EntityKind::Point(Point { p: Vec3::new(1.0, 2.0, 3.0), angle: 0.5 }), NORMAL)),
+        (
+            "POLYLINE3D",
+            entity(
+                EntityKind::Polyline3d(Polyline3d {
+                    records: Default::default(),
+                    points: vec![Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0), Vec3::new(5.0, 1.0, -2.0)],
+                    closed: false,
+                }),
+                NORMAL,
+            ),
+        ),
+        ("3DFACE", entity(EntityKind::Face3d(Face3d { corners, hidden_edges: 2 }), NORMAL)),
+        ("MESH", entity(EntityKind::PolylineMesh(mesh()), NORMAL)),
     ]
 }
 
@@ -306,6 +356,10 @@ fn primitives(e: &Entity) -> Option<Vec<WorldPrimitive>> {
         EntityKind::Solid(s) | EntityKind::Trace(s) => solid_primitives(s, n, id).unwrap(),
         EntityKind::Spline(s) => spline_primitives(s, id).unwrap(),
         EntityKind::Leader(l) => leader_primitives(l, n, &LeaderArrowLayout::default(), id).unwrap(),
+        EntityKind::Ellipse(_) | EntityKind::Line(_) | EntityKind::Point(_) => e.world_geometry(id).unwrap().primitives().to_vec(),
+        EntityKind::Polyline3d(p) => p.points.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }).collect(),
+        EntityKind::Face3d(f) => f.corners.windows(2).map(|w| WorldPrimitive::Line { a: w[0], b: w[1] }).collect(),
+        EntityKind::PolylineMesh(m) => m.vertices.iter().filter(|v| !v.is_face()).map(|v| WorldPrimitive::Point(v.vertex.position)).collect(),
         _ => return None,
     })
 }
@@ -394,7 +448,10 @@ fn a_canonical_move_and_a_tilted_rotation_give_the_hooks_result_for_every_family
                 }
             }
             // The plane follows the motion (a rigid one: the normal turns, its magnitude and the thickness stay).
-            if !matches!(e.kind, EntityKind::Wipeout(_) | EntityKind::Helix(_)) {
+            if !matches!(
+                e.kind,
+                EntityKind::Wipeout(_) | EntityKind::Helix(_) | EntityKind::Polyline3d(_) | EntityKind::Face3d(_) | EntityKind::PolylineMesh(_)
+            ) {
                 assert!(near(moved.common.extrusion, m.apply_vec(e.common.extrusion)), "{name} {what}: normal {:?}", moved.common.extrusion);
             }
             assert_eq!(moved.common.thickness, 0.5, "{name} {what}");
@@ -419,7 +476,17 @@ fn the_dimension_follows_a_motion_point_by_point() {
 fn a_scale_scales_the_thickness_with_the_similarity_families() {
     for (name, e) in fixtures() {
         let moved = e.transformed(&uniform(2.0)).unwrap_or_else(|err| panic!("{name}: {err}"));
-        let expected = if matches!(e.kind, EntityKind::Wipeout(_) | EntityKind::Helix(_) | EntityKind::Spline(_)) { 0.5 } else { 1.0 };
+        let unscaled = matches!(
+            e.kind,
+            EntityKind::Wipeout(_)
+                | EntityKind::Helix(_)
+                | EntityKind::Spline(_)
+                | EntityKind::Ellipse(_)
+                | EntityKind::Polyline3d(_)
+                | EntityKind::Face3d(_)
+                | EntityKind::PolylineMesh(_)
+        );
+        let expected = if unscaled { 0.5 } else { 1.0 };
         assert_eq!(moved.common.thickness, expected, "{name}");
     }
 }
@@ -430,8 +497,18 @@ fn a_mirror_refuses_with_the_entity_unchanged_where_the_family_is_a_similarity()
         let before = e.clone();
         let mut candidate = e.clone();
         let result = candidate.try_transform(&mirror());
-        // A wipeout frame and a B-spline are affine-invariant: a mirror is exact for them.
-        if matches!(e.kind, EntityKind::Wipeout(_) | EntityKind::Spline(_)) {
+        // These are exact under any invertible affine map (a frame, a B-spline, an ellipse, WCS positions, a line's extrusion vector).
+        if matches!(
+            e.kind,
+            EntityKind::Wipeout(_)
+                | EntityKind::Spline(_)
+                | EntityKind::Ellipse(_)
+                | EntityKind::Line(_)
+                | EntityKind::Point(_)
+                | EntityKind::Polyline3d(_)
+                | EntityKind::Face3d(_)
+                | EntityKind::PolylineMesh(_)
+        ) {
             assert!(result.is_ok(), "{name}");
         } else {
             assert!(result.is_err(), "{name}: a mirror must refuse");
@@ -442,29 +519,17 @@ fn a_mirror_refuses_with_the_entity_unchanged_where_the_family_is_a_similarity()
 
 #[test]
 fn families_with_no_canonical_hook_keep_refusing() {
-    let cases = vec![
-        EntityKind::Line(cadcraft_doc::Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 2.0) }),
-        EntityKind::Point(cadcraft_doc::Point { p: Vec3::ZERO, angle: 0.0 }),
-        EntityKind::Ellipse(cadcraft_doc::Ellipse {
-            center: Vec3::ZERO,
-            major: Vec3::new(2.0, 0.0, 0.0),
-            normal: Vec3::Z,
-            ratio: 0.5,
-            start: 0.0,
-            end: 1.0,
-        }),
-        EntityKind::Insert(cadcraft_doc::Insert {
-            block: "B".into(),
-            insert: Vec3::ZERO,
-            scale: Vec3::new(1.0, 1.0, 1.0),
-            rotation: 0.0,
-            attribs: Vec::new(),
-            cols: 1,
-            rows: 1,
-            col_spacing: 0.0,
-            row_spacing: 0.0,
-        }),
-    ];
+    let cases = vec![EntityKind::Insert(cadcraft_doc::Insert {
+        block: "B".into(),
+        insert: Vec3::ZERO,
+        scale: Vec3::new(1.0, 1.0, 1.0),
+        rotation: 0.0,
+        attribs: Vec::new(),
+        cols: 1,
+        rows: 1,
+        col_spacing: 0.0,
+        row_spacing: 0.0,
+    })];
     for kind in cases {
         let e = entity(kind, NORMAL);
         let mut candidate = e.clone();
