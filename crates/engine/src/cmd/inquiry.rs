@@ -307,6 +307,26 @@ fn face_z(c: &[Vec3; 4], p: Vec2) -> Option<f64> {
     tri(c[0], c[1], c[2]).or_else(|| if c[3] == c[2] { None } else { tri(c[0], c[2], c[3]) })
 }
 
+/// How LIST reads the points of an entity: a canonical circle, arc, polyline or text keeps them in its OCS, so they are placed in the
+/// world by its extrusion; a legacy entity's points are listed as they are.
+struct ListFrame {
+    canonical: bool,
+    frame: Option<cadcraft_geom::OcsFrame>,
+}
+
+impl ListFrame {
+    fn of(e: &Entity) -> ListFrame {
+        let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
+        ListFrame { canonical, frame: canonical.then(|| cadcraft_geom::OcsFrame::new(e.common.extrusion)).flatten() }
+    }
+    fn center(&self, ocs: Vec3) -> Vec3 {
+        match &self.frame {
+            Some(frame) => frame.to_world(ocs),
+            None => ocs,
+        }
+    }
+}
+
 fn list_text(s: &Session, h: Handle) -> String {
     let Ok(d) = s.doc() else { return String::new() };
     let Some(e) = d.entity(h) else { return String::new() };
@@ -318,6 +338,14 @@ fn list_text(s: &Session, h: Handle) -> String {
         space,
         h.hex()
     );
+    let world = ListFrame::of(e);
+    if world.canonical
+        && world.frame.is_none()
+        && matches!(e.kind, EntityKind::Circle(_) | EntityKind::Arc(_) | EntityKind::LwPolyline(_) | EntityKind::Text(_))
+    {
+        t.push_str("\n          canonical geometry has no valid source plane");
+        return t;
+    }
     match &e.kind {
         EntityKind::Line(l) => {
             t.push_str(&format!(
@@ -338,22 +366,24 @@ fn list_text(s: &Session, h: Handle) -> String {
             t.push_str(&format!("\n          Delta X = {},  Delta Y = {},  Delta Z = {}", fmt_d(s, d.x), fmt_d(s, d.y), fmt_d(s, d.z)));
         }
         EntityKind::Circle(c) => {
+            let center = world.center(c.center);
             t.push_str(&format!(
                 "\n            center point, X={}  Y={}  Z={}\n            radius {}\n     circumference {}\n             area {}",
-                fmt_d(s, c.center.x),
-                fmt_d(s, c.center.y),
-                fmt_d(s, c.center.z),
+                fmt_d(s, center.x),
+                fmt_d(s, center.y),
+                fmt_d(s, center.z),
                 fmt_d(s, c.radius),
                 fmt_d(s, c.radius * cadcraft_geom::TAU),
                 fmt_d(s, c.radius * c.radius * cadcraft_geom::PI)
             ));
         }
         EntityKind::Arc(a) => {
+            let center = world.center(a.center);
             t.push_str(&format!(
                 "\n            center point, X={}  Y={}  Z={}\n            radius {}\n            start angle {}\n              end angle {}",
-                fmt_d(s, a.center.x),
-                fmt_d(s, a.center.y),
-                fmt_d(s, a.center.z),
+                fmt_d(s, center.x),
+                fmt_d(s, center.y),
+                fmt_d(s, center.z),
                 fmt_d(s, a.radius),
                 fmt_a(s, a.start),
                 fmt_a(s, a.end)
@@ -367,20 +397,30 @@ fn list_text(s: &Session, h: Handle) -> String {
             } else {
                 t.push_str(&format!("\n           length   {}", fmt_d(s, pl.len())));
             }
-            // The elevation, in world Z (down Z for a mirrored polyline).
-            let z = entity_z(d, e, Vec2::ZERO, 0.0).unwrap_or(p.elevation);
-            t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
-            for v in &p.vertices {
-                t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
+            if world.canonical {
+                // A canonical polyline keeps its elevation in its own plane; each vertex is listed in world coordinates.
+                t.push_str(&format!("\n        elevation   {}", fmt_d(s, p.elevation)));
+                for v in &p.vertices {
+                    let at = world.center(Vec3::new(v.p.x, v.p.y, p.elevation));
+                    t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, at.x), fmt_d(s, at.y), fmt_d(s, at.z)));
+                }
+            } else {
+                // The elevation, in world Z (down Z for a mirrored polyline).
+                let z = entity_z(d, e, Vec2::ZERO, 0.0).unwrap_or(p.elevation);
+                t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
+                for v in &p.vertices {
+                    t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
+                }
             }
         }
         EntityKind::Text(tx) => {
+            let start = world.center(tx.insert);
             t.push_str(&format!(
                 "\n            Style = \"{}\"\n       start point, X={}  Y={}  Z={}\n          height {}\n           text {}\n        rotation angle {}",
                 tx.style,
-                fmt_d(s, tx.insert.x),
-                fmt_d(s, tx.insert.y),
-                fmt_d(s, tx.insert.z),
+                fmt_d(s, start.x),
+                fmt_d(s, start.y),
+                fmt_d(s, start.z),
                 fmt_d(s, tx.height),
                 tx.value,
                 fmt_a(s, tx.rotation)
