@@ -54,16 +54,17 @@ fn dwg_cmc_fallbacks_follow_the_native_nearest_color_rule() {
 }
 
 #[test]
-#[ignore = "pending acadrust: entity colour index next to a true colour (ENC)"]
 fn dwg_entity_enc_keeps_the_source_index_next_to_rgb() {
-    let mut drawing = cadcraft_io::read_dxf(SOURCE.as_bytes()).unwrap();
-    for _ in 0..2 {
-        let saved = cadcraft_io::write(&drawing, "saved.dwg").unwrap();
-        let dxf = cadcraft_dwg::dwg_to_dxf(&saved).unwrap();
-        let records = records(&dxf);
-        let line = &records.iter().find(|(k, _)| k == "LINE").unwrap().1;
-        assert_eq!((value(line, 62), value(line, 420)), (7, 1122867));
-        drawing = cadcraft_io::read(&saved, "saved.dwg").unwrap();
+    for source in [SOURCE.to_string(), SOURCE.replace("62\n7\n420\n1122867", "420\n1122867\n62\n7")] {
+        let mut drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+        for _ in 0..2 {
+            let saved = cadcraft_io::write(&drawing, "saved.dwg").unwrap();
+            let dxf = cadcraft_dwg::dwg_to_dxf(&saved).unwrap();
+            let records = records(&dxf);
+            let line = &records.iter().find(|(k, _)| k == "LINE").unwrap().1;
+            assert_eq!((value(line, 62), value(line, 420)), (7, 1122867));
+            drawing = cadcraft_io::read(&saved, "saved.dwg").unwrap();
+        }
     }
 }
 #[test]
