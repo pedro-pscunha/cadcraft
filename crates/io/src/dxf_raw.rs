@@ -485,6 +485,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     if matches!(kind, "BLOCK" | "ENDBLK") {
         x.props.extend(tags.iter().find(|t| t.code == 8).map(raw));
+        x.props.extend(entity_groups(tags).iter().filter(|t| matches!(t.code, 48 | 62)).map(raw));
     }
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
@@ -535,9 +536,11 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
 /// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
 /// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
-    let retain_listed = kind == "MTEXT";
+    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION" | "HATCH");
     let (marker, codes): (&str, &[i32]) = match kind {
         "MTEXT" => ("AcDbMText", &[46]),
+        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
+        "HATCH" if tags.iter().any(|t| t.code == 450 && t.i64() == 0) => ("AcDbHatch", &[450, 451, 452, 453, 460, 461, 462, 463, 63, 421, 470]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
@@ -1086,6 +1089,8 @@ struct Map<'a> {
     geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
     /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
     version: u32,
+    /// The actual save target, which can differ from the DWG bridge's DXF declaration.
+    target: cadcraft_dxf::Version,
     pages: HashMap<String, &'a cadcraft_doc::PageSetup>,
     block_attributes: HashMap<String, bool>,
     table_aliases: HashMap<String, &'a ForeignObject>,
@@ -1509,7 +1514,7 @@ pub(crate) fn reform_for_version(tags: &mut Vec<Tag>, source: u32, target: u32) 
 }
 
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
-pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
+pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
     let f = public.as_ref().unwrap_or(&d.foreign);
     let unknown = unknown_handles(d);
@@ -1662,7 +1667,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         .unwrap_or(0);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages, block_attributes, table_aliases };
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, target, pages, block_attributes, table_aliases };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1878,13 +1883,22 @@ fn record(
     let dictionary = is_dictionary(&r.kind);
     let boundary = matches!(r.kind.as_str(), "BLOCK" | "ENDBLK");
     let attributes = (r.kind == "BLOCK").then(|| val(b, 2).and_then(|name| map.block_attributes.get(&up(&name)).copied())).flatten();
+    let replaces_gradient = r.kind == "HATCH" && (map.target < cadcraft_dxf::Version::R2004 || b.iter().any(|t| t.code == 450 && t.i64() != 0));
     let replay = |p: &RawTag| {
-        (!boundary || p.code != 8)
+        let dimension_field_supported = r.kind != "DIMENSION"
+            || match p.code {
+                73..=75 => map.target >= cadcraft_dxf::Version::R2007,
+                280 => map.target >= cadcraft_dxf::Version::R2010,
+                _ => true,
+            };
+        dimension_field_supported
+            && (!replaces_gradient || !matches!(p.code, 450..=470 | 63 | 421))
+            && (!boundary || p.code != 8)
             && (flag_mask == 0 || p.code != 70)
             && (!dictionary || p.code != 281)
             && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
     };
-    let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
+    let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS");
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
     // Where unmodelled properties go: the end of AcDbEntity, else before the xdata. The groups of
@@ -1899,8 +1913,15 @@ fn record(
         None
     }
     .unwrap_or(xdata_at);
-    // MTEXT's own fields precede the embedded column object, whose codes have other meanings.
-    let subclass_at = if r.kind == "MTEXT" { b.iter().position(|t| t.code == 101).unwrap_or(xdata_at) } else { xdata_at };
+    // Keep presentation fields in their own subclass, before subtype or embedded-object groups.
+    let subclass_at = match r.kind.as_str() {
+        "MTEXT" => b.iter().position(|t| t.code == 101).unwrap_or(xdata_at),
+        "DIMENSION" => b
+            .iter()
+            .position(|t| t.code == 100 && t.str() == "AcDbDimension")
+            .map_or(xdata_at, |start| start + 1 + b.iter().skip(start + 1).take_while(|t| t.code != 100 && t.code < 1000).count()),
+        _ => xdata_at,
+    };
     let rgb = b.iter().take(xdata_at).find(|t| t.code == 420).map(Tag::str);
     let has_book = b.iter().take(xdata_at).any(|t| t.code == 430);
     let handle_at = b.iter().position(|t| matches!(t.code, 5 | 105));
