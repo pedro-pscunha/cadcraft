@@ -932,7 +932,7 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
         // Gradient fills (450 to 470) exist from AutoCAD 2004; AutoCAD 2000 ends the hatch at the seed points
         // and the fill stays in CADCraft's xdata below.
         if let Some(g) = &h.gradient {
-            gradient(w, g, cx.dwg_bridge || cx.target >= Version::R2004);
+            gradient(w, g, cx.dwg_bridge || cx.target >= Version::R2004, cx.dwg_bridge && cx.target >= Version::R2004);
         }
         hatch_xdata(w, h);
     }
@@ -1121,11 +1121,14 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
 /// carrying ACI (63) and, for true colours, the RGB value (421). Those groups belong to R2004+
 /// files, so the same gradient also travels as `CADCRAFT` xdata, which survives this R2000
 /// file's conversion to DWG (where the native fields don't exist).
-fn gradient(w: &mut W, g: &Gradient, groups: bool) {
+fn gradient(w: &mut W, g: &Gradient, groups: bool, native_in_dwg: bool) {
     if groups {
         gradient_groups(w, g);
     }
-    gradient_xdata(w, g);
+    // The DWG keeps the native fields (acadrust writes them since its HATCH gradient fix): its copy as xdata would only be extra.
+    if !native_in_dwg {
+        gradient_xdata(w, g);
+    }
 }
 
 fn gradient_groups(w: &mut W, g: &Gradient) {

@@ -1942,6 +1942,21 @@ fn gradient_hatch_roundtrips_through_dxf() {
     assert_eq!(plain_hatches(&roundtrip(&back)), plain_hatches(&back));
 }
 
+/// A DWG of AutoCAD 2004 or later keeps the native gradient fields, so the save has no CADCRAFT xdata copy of them; a DWG 2000 has no
+/// such fields and keeps the copy. Either way the gradients come back.
+#[test]
+fn a_dwg_keeps_the_gradient_natively_from_2004_and_by_xdata_before() {
+    let (d, gradients) = gradient_sample();
+    for (version, xdata) in [(Version::R2000, true), (Version::R2004, false), (Version::R2018, false)] {
+        let bytes = crate::write_with(&d, "x.dwg", &crate::SaveOptions { version: Some(version), binary: false }).unwrap();
+        let back = crate::read(&bytes, "x.dwg").unwrap();
+        let read: Vec<_> = hatches(&back).into_iter().map(|h| plain(h.gradient)).collect();
+        assert_eq!(read, gradients.iter().cloned().map(plain).collect::<Vec<_>>(), "{version:?}");
+        let dxf = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
+        assert_eq!(dxf.lines().any(|l| l.trim() == "GRADIENT"), xdata, "{version:?}: the xdata copy");
+    }
+}
+
 /// R2000 readers and DWG conversions drop the native groups; CADCraft's xdata copy restores the
 /// gradient. When native groups are present (another program may have edited them) they win.
 #[test]
