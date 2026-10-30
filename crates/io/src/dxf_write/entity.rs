@@ -12,6 +12,16 @@ pub(super) fn hatch_reactors(d: &Drawing) -> HashMap<Handle, Vec<String>> {
     let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
     for st in stores {
         for e in st.iter() {
+            // The annotation of a leader (its text, block or tolerance) lists the leader as a persistent reactor.
+            if let EntityKind::Leader(l) = &e.kind
+                && let Some(a) = l.links.annotation.filter(|a| *a != e.handle && st.contains(*a))
+            {
+                let r = out.entry(a).or_default();
+                let own = e.handle.hex();
+                if !r.contains(&own) {
+                    r.push(own);
+                }
+            }
             let EntityKind::Hatch(h) = &e.kind else { continue };
             if !h.associative {
                 continue;

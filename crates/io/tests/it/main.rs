@@ -76,6 +76,7 @@ mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;
 mod leader_default_flags;
+mod leader_links;
 mod leader_links_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod legacy_text_flags;

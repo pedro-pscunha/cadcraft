@@ -640,7 +640,7 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         "HATCH" if tags.iter().any(|t| t.code == 450 && t.i64() == 0) => ("AcDbHatch", &[450, 451, 452, 453, 460, 461, 462, 463, 63, 421, 470]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
-        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 73, 74, 75, 76, 340, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 40, 41, 361]),
         "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
