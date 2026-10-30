@@ -3,7 +3,7 @@
 //! blocks in the order the file had them, and the layout blocks under the names the file gave them.
 //! A save also gives the tables, symbol records, blocks and layouts the handles the file gave them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::Handle;
 use crate::foreign::ForeignKey;
@@ -22,6 +22,8 @@ pub struct SourceSymbols {
     /// The references to each block (the `{BLKREFS` list of its record) in the order the file listed them, by upper-case block
     /// name. AutoCAD lists them in the order they were made, which a handle does not say.
     pub block_refs: BTreeMap<String, Vec<Handle>>,
+    /// The upper-case names of the layouts the file gave viewports but no paper-space viewport (id 1): a save does not add one.
+    pub layouts_without_sheet: BTreeSet<String>,
 }
 
 impl SourceSymbols {
