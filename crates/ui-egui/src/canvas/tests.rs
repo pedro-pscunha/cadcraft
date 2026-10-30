@@ -8,6 +8,27 @@ fn list(handles: &[u64]) -> DisplayList {
 }
 
 #[test]
+fn cursor_coordinates_keep_a_unique_snap_z_and_reject_a_stale_snap() {
+    let mut canvas = CanvasState {
+        cursor: Some(Vec2::new(1.0, 2.0)),
+        snap: Some(SnapHit {
+            point: Vec2::new(1.0, 2.0),
+            mode: snap::mode::END,
+            name: "Endpoint",
+            viewport: None,
+            deferred: None,
+            world: Some(cadcraft_geom::Vec3::new(1.0, 2.0, 3.0)),
+        }),
+        ..CanvasState::default()
+    };
+    assert_eq!(canvas.cursor_coordinates(), Some(cadcraft_geom::Vec3::new(1.0, 2.0, 3.0)));
+    canvas.cursor = Some(Vec2::new(4.0, 5.0));
+    assert_eq!(canvas.cursor_coordinates(), Some(cadcraft_geom::Vec3::new(4.0, 5.0, 0.0)));
+    canvas.cursor = None;
+    assert_eq!(canvas.cursor_coordinates(), None);
+}
+
+#[test]
 fn geometry_refusals_report_once_until_the_diagnostics_or_document_change() {
     let refusal = cadcraft_render::GeometryRefusal { handle: Handle(0x180), reason: "invalid plane".into() };
     let mut canvas =

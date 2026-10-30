@@ -382,13 +382,13 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         let size = 20.0;
         let rx = r.right() - 8.0 - toggles.len() as f32 * (size + 4.0);
         // Coordinates.
-        let coord = app.canvas.cursor.map(|c| {
+        let coord = app.canvas.cursor_coordinates().map(|c| {
             let (lu, lp) = app.session.doc().map(|d| (d.header.i64("LUNITS", 2), d.header.i64("LUPREC", 4))).unwrap_or((2, 4));
             format!(
                 "{}, {}, {}",
                 cadcraft_engine::units::format_distance(c.x, lu, lp),
                 cadcraft_engine::units::format_distance(c.y, lu, lp),
-                cadcraft_engine::units::format_distance(0.0, lu, lp)
+                cadcraft_engine::units::format_distance(c.z, lu, lp)
             )
         });
         // MODEL / PAPER (layouts only): toggles MSPACE and PSPACE like AutoCAD's status button.
