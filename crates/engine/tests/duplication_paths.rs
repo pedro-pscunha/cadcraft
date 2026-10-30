@@ -402,7 +402,7 @@ fn wblock_duplicates_model_and_nested_attribute_instances() {
             let path = std::env::temp_dir().join(format!("cadcraft-copy-wblock-{}-{nested}.{extension}", std::process::id()));
             let handles: Vec<_> = s.doc().unwrap().model.iter().map(|e| e.handle.hex()).collect();
             s.execute("wblock", &json!({"path":path, "handles":handles})).unwrap();
-            let d = cadcraft_io::read(&std::fs::read(&path).unwrap(), &path.to_string_lossy()).unwrap();
+            let d = cadcraft_io::read(&std::fs::read(&path).unwrap(), &path).unwrap();
             let copies: Vec<_> =
                 d.model.iter().chain(d.blocks.values().flat_map(|b| b.entities.iter())).filter(|e| e.kind.attributes().len() == 2).collect();
             assert_eq!(copies.len(), 1, "WBLOCK must write its attributed INSERT");
