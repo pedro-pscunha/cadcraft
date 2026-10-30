@@ -2,7 +2,7 @@
 //! it with a typed reason before it writes anything.
 #![allow(dead_code)]
 
-use cadcraft_doc::{Drawing, GeometryRevision, Handle};
+use cadcraft_doc::{Common, Drawing, EntityKind, GeometryRevision, Handle, Line, Space};
 use cadcraft_engine::Session;
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
@@ -10,6 +10,12 @@ use serde_json::{Value, json};
 pub fn create(session: &mut Session, command: &str, params: Value) -> Handle {
     session.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"));
     session.doc().unwrap().model.iter().last().unwrap().handle
+}
+
+/// A LINE from `a` to `b` with their Z values kept (the `line` command drops them).
+pub fn spatial_line(session: &mut Session, a: [f64; 3], b: [f64; 3]) -> Handle {
+    let line = Line { a: Vec3::new(a[0], a[1], a[2]), b: Vec3::new(b[0], b[1], b[2]) };
+    session.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Line(line)).unwrap()
 }
 
 /// The same entity, canonical, in the plane of the normal (0, 3, 4) / 5.
