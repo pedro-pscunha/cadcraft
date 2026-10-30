@@ -118,6 +118,9 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
                 let _ = write!(s, "LWPOLY{base:?}{plane:?}");
             }
         }
+        EntityKind::Ellipse(el) => {
+            let _ = write!(s, "ELLIPSE{:?}{plane:?}", (el.center, el.major, el.ratio, el.start, el.end));
+        }
         EntityKind::Polyline3d(p) => {
             let _ = write!(s, "POLY3D{:?}{plane:?}", p.closed);
         }

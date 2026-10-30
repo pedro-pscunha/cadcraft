@@ -149,6 +149,12 @@ impl Entity {
                 | EntityKind::Spline(_)
                 | EntityKind::Leader(_)
                 | EntityKind::Dimension(_)
+                | EntityKind::Ellipse(_)
+                | EntityKind::Line(_)
+                | EntityKind::Point(_)
+                | EntityKind::Polyline3d(_)
+                | EntityKind::PolylineMesh(_)
+                | EntityKind::Face3d(_)
         )
     }
 
@@ -238,6 +244,36 @@ impl Entity {
                 let (moved, n) = d.transformed_canonical(normal, transform)?;
                 *d = moved;
                 Some((n, scale()?))
+            }
+            // An ellipse has no thickness; any invertible affine map gives an ellipse.
+            EntityKind::Ellipse(e) => {
+                let (moved, n) = e.transformed_canonical(normal, transform)?;
+                *e = moved;
+                Some((n, 1.0))
+            }
+            // The extrusion of a line or a point is a vector: it follows the linear part and the thickness its length.
+            EntityKind::Line(l) => {
+                let (moved, extrusion, factor) = l.transformed_canonical(normal, transform)?;
+                *l = moved;
+                Some((extrusion, factor))
+            }
+            EntityKind::Point(p) => {
+                let (moved, extrusion, factor) = p.transformed_canonical(normal, transform)?;
+                *p = moved;
+                Some((extrusion, factor))
+            }
+            // WCS positions only: the plane and the thickness of these stay as they are.
+            EntityKind::Polyline3d(p) => {
+                *p = p.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::PolylineMesh(m) => {
+                *m = m.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::Face3d(f) => {
+                *f = f.transformed_canonical(transform)?;
+                None
             }
             _ => return Err(DocError::Invalid("This canonical entity has no supported geometry transform.".into())),
         };
