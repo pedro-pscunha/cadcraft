@@ -314,7 +314,10 @@ pub(super) fn text_tags(
     if t.oblique != 0.0 {
         w.f(51, t.oblique.to_degrees());
     }
-    w.s(7, &t.style);
+    // AutoCAD leaves out the style of a text in the default style (it writes the group for any other).
+    if !t.style.eq_ignore_ascii_case("Standard") {
+        w.s(7, &t.style);
+    }
     if t.backward || t.upside_down {
         w.i(71, if t.backward { 2 } else { 0 } | if t.upside_down { 4 } else { 0 });
     }

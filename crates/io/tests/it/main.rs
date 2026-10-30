@@ -140,6 +140,7 @@ mod text_direction_roundtrip;
 mod text_generation_flags;
 mod text_insert_moved;
 mod text_left_justify;
+mod text_style_group;
 mod tolerance_roundtrip;
 mod transparency_alpha;
 mod unknown_entity_block;
