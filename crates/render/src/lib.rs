@@ -317,7 +317,10 @@ pub use pipeline::{Options, build, build_entities, build_plot};
 use props::{default_lineweight, resolve_common};
 use text_entity::text_style;
 pub use text_entity::{layout_mtext_entity, place_text_entity, text_align};
+
+mod world_text;
 pub use viewports::{viewport_clip, viewport_content};
+pub use world_text::{WorldGlyph, WorldMTextPiece, WorldShaped, WorldTextLayout, layout_world_text, local_text_layout};
 
 #[cfg(test)]
 mod tests;
