@@ -80,7 +80,7 @@ pub(super) fn oblique_52(w: &mut W, dm: &Dimension, base: f64) {
 
 /// An entity's group 440 (DXF Reference): ByBlock is `0x01000000`, a fixed transparency its alpha
 /// with the "by alpha" flag `0x02000000` (the alpha mapping layers use). ByLayer writes nothing.
-fn transparency_440(c: &Common) -> Option<i64> {
+pub(super) fn transparency_440(c: &Common) -> Option<i64> {
     match c.transparency {
         Transparency::ByLayer => None,
         Transparency::ByBlock => Some(0x0100_0000),

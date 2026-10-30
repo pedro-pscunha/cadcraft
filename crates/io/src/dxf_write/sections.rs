@@ -426,6 +426,8 @@ fn layout_obj(w: &mut W, context: LayoutWriteContext<'_>, data: LayoutWriteData<
     };
     w.s(0, "LAYOUT");
     w.s(5, h);
+    // AutoCAD lists the layout dictionary among the layout's persistent reactors, as well as its owner.
+    w.group("ACAD_REACTORS", 330, &[layout_dict]);
     w.s(330, layout_dict.to_string());
     w.s(100, "AcDbPlotSettings");
     w.s(1, "");

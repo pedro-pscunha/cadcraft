@@ -31,7 +31,7 @@ impl T<'_> {
 
 /// An entity's group 440: `0x01` in the top byte is ByBlock, `0x02` a fixed alpha (shown as a
 /// percentage as for layers, the alpha itself kept beside it), anything else ByLayer.
-fn transparency_440(v: i64) -> (Transparency, Option<u8>) {
+pub(super) fn transparency_440(v: i64) -> (Transparency, Option<u8>) {
     match (v >> 24) & 0xff {
         1 => (Transparency::ByBlock, None),
         2 => {

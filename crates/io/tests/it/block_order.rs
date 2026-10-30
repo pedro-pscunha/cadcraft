@@ -84,3 +84,17 @@ fn layouts_keep_the_block_names_the_file_gave_them() {
     let again: Vec<(String, String)> = read.paper_space_blocks().into_iter().map(|(n, l)| (l.name.clone(), n)).collect();
     assert_eq!(again, expected.map(|(l, b)| (l.to_string(), b.to_string())));
 }
+
+#[test]
+fn a_layout_lists_its_dictionary_as_a_reactor_as_well_as_its_owner() {
+    let text = cadcraft_io::write_dxf(&Drawing::new_metric());
+    let layouts: Vec<_> = section(&text, "OBJECTS").into_iter().filter(|(k, _)| k == "LAYOUT").collect();
+    assert!(layouts.len() >= 3, "Model and two layouts");
+    for (_, tags) in layouts {
+        let open = tags.iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS").unwrap();
+        let owner =
+            tags[open..].iter().skip_while(|t| !(t.code == 102 && t.str() == "}")).find(|t| t.code == 330).map(|t| t.str()).unwrap_or_default();
+        assert_eq!(tags[open + 1].code, 330);
+        assert_eq!(tags[open + 1].str(), owner);
+    }
+}

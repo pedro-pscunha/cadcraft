@@ -138,6 +138,8 @@ pub struct ProxyGraphics {
     /// No display proof when cache bytes are invalid or dependencies exceed the bounded inspection budget.
     pub display: Option<u64>,
     pub tags: Vec<RawTag>,
+    /// The graphics were in the `AcDbMLeader` subclass of the source record, not in its `AcDbEntity` one.
+    pub in_mleader: bool,
 }
 
 /// What an entity, table record, block or attribute carries beyond what CADCraft models.

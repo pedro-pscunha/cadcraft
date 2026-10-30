@@ -564,6 +564,10 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
     }
+    // A TrueType style AutoCAD makes has an empty font file (3) and the typeface in its ACAD xdata.
+    if kind == "STYLE" && typeface(&x.xdata).is_some() {
+        x.subclass.extend(tags.iter().find(|t| t.code == 3 && t.str().trim().is_empty()).map(raw));
+    }
     // The text of group 1 of a BLOCK that is not an external reference ("Acad:XRef" on the blocks AutoCAD makes of one).
     if kind == "BLOCK" && !tags.iter().any(|t| t.code == 70 && t.i64() & 4 != 0) {
         x.subclass.extend(tags.iter().find(|t| t.code == 1 && !t.str().trim().is_empty()).map(raw));
@@ -574,10 +578,20 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
+/// The typeface a style's `ACAD` xdata names (its first string), as a text style of a TrueType font has it.
+fn typeface(xdata: &[RawTag]) -> Option<&str> {
+    let at = xdata.iter().position(|t| t.code == 1001 && t.value.trim().eq_ignore_ascii_case("ACAD"))?;
+    xdata.get(at + 1).filter(|t| t.code == 1000).map(|t| t.value.trim()).filter(|v| !v.is_empty())
+}
+
 /// Whether the group `t` the writer wrote for a record of `kind` is replaced by one the file had: the fields of a table record (not
 /// its marker, handle and owner), and the empty text (group 1) of a BLOCK that the file gave a text of its own.
 fn replaced_by_kept(kind: &str, entity: bool, t: &Tag, x: Option<&ForeignExtra>, replay: &dyn Fn(&RawTag) -> bool) -> bool {
     let Some(x) = x else { return false };
+    // The empty font file of such a style stays empty while the style's font is still the typeface of the xdata.
+    if kind == "STYLE" && t.code == 3 {
+        return x.subclass.iter().any(|p| p.code == 3) && typeface(&x.xdata).is_some_and(|face| face == t.str().trim());
+    }
     if kind == "BLOCK" {
         return t.code == 1 && x.subclass.iter().any(|p| p.code == 1);
     }
@@ -608,6 +622,8 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
     if matches!(kind, "BLOCK" | "ENDBLK") && t.code == 8 {
         return extra.and_then(|extra| first_group(&extra.props, 8)).map_or_else(|| t.clone(), tag);
     }
+    let source =
+        extra.filter(|_| t.code == 70 && mask != 0).and_then(|extra| first_group(&extra.subclass, 70)).and_then(|tag| tag.value.parse::<i64>().ok());
     if t.code == 70
         && mask == 2
         && let Some((old, current)) = extra.and_then(|extra| extra.block_attributes).zip(attributes)
@@ -615,9 +631,9 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
     {
         return Tag::i(70, (t.i64() & !2) | if current { 2 } else { 0 });
     }
-    let source =
-        extra.filter(|_| t.code == 70 && mask != 0).and_then(|extra| first_group(&extra.subclass, 70)).and_then(|tag| tag.value.parse::<i64>().ok());
-    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !mask) | (source & mask)))
+    // A block keeps the anonymous bit (1) the file gave it, even when its name says otherwise (a `*U…` block AutoCAD does not call anonymous).
+    let anonymous_bit = if mask == 2 { 1 } else { 0 };
+    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !(mask | anonymous_bit)) | (source & (mask | anonymous_bit))))
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
@@ -627,15 +643,18 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
 /// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
 /// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
-    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION" | "HATCH");
+    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION" | "HATCH" | "IMAGE" | "WIPEOUT");
     let (marker, codes): (&str, &[i32]) = match kind {
         // The reference column height (46) and the background fill: its setting (90), colour (63, 421), box scale (45) and transparency (441).
         "MTEXT" => ("AcDbMText", &[46, 90, 63, 421, 45, 441]),
         "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
+        // The clip mode of an image (290) and the null pointers a wipeout has where an image has its definition (340, 360).
+        "IMAGE" => ("AcDbRasterImage", &[290]),
+        "WIPEOUT" => ("AcDbWipeout", &[290, 340, 360]),
         "HATCH" if tags.iter().any(|t| t.code == 450 && t.i64() == 0) => ("AcDbHatch", &[450, 451, 452, 453, 460, 461, 462, 463, 63, 421, 470]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
-        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
+        "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 73, 74, 75, 76, 340, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 40, 41, 361]),
         "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
@@ -1662,8 +1681,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         .chain(xd.values().flat_map(|tags| tags.iter()))
         .filter(|t| t.code == 1001)
         .map(|t| t.value.clone())
-        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()))
-        .chain(d.registered_apps.iter().cloned());
+        // The registered names come before the roles, which only have the upper-case name: the first spelling seen is written.
+        .chain(d.registered_apps.iter().cloned())
+        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()));
     add_appids(tags, apps);
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);

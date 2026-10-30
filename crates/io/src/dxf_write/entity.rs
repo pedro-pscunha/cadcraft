@@ -12,6 +12,16 @@ pub(super) fn hatch_reactors(d: &Drawing) -> HashMap<Handle, Vec<String>> {
     let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
     for st in stores {
         for e in st.iter() {
+            // The annotation of a leader (its text, block or tolerance) lists the leader as a persistent reactor.
+            if let EntityKind::Leader(l) = &e.kind
+                && let Some(a) = l.links.annotation.filter(|a| *a != e.handle && st.contains(*a))
+            {
+                let r = out.entry(a).or_default();
+                let own = e.handle.hex();
+                if !r.contains(&own) {
+                    r.push(own);
+                }
+            }
             let EntityKind::Hatch(h) = &e.kind else { continue };
             if !h.associative {
                 continue;
@@ -462,6 +472,12 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 w.s(100, "AcDbEntity");
                 let (c, base) = attrib_common(d, e, i, a);
                 layer_and_props(w, &c, Some(&base));
+                // Only an attribute's own transparency: without one it follows its definition's, as AutoCAD reads it.
+                if a.props.transparency.is_some()
+                    && let Some(v) = super::common::transparency_440(&c)
+                {
+                    w.i(440, v);
+                }
                 plot_style(w, &c.plot_style);
                 // Hidden as the attribute is: its own visibility, else its definition's (a dynamic block's visibility state hides it).
                 if !c.visible {
@@ -710,11 +726,14 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
                 text_style: m.text.as_ref().and_then(|t| cx.style(&t.style)),
                 block: m.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).cloned()),
                 arrow: cx.arrow(&m.arrow_block),
+                line_type: m.context.codes.line_type.as_ref().and_then(|n| cx.ltypes.get(&n.to_ascii_uppercase()).cloned()),
             };
             let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && m.require_canonical().is_ok();
             w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs, canonical, cx.target));
-            let proxy = crate::dxf_mleader_proxy::tags(d, e, cx.target);
-            let anchor = if proxy.iter().any(|tag| tag.code == 160) { 270 } else { 8 };
+            let (proxy, in_mleader) = crate::dxf_mleader_proxy::tags(d, e, cx.target);
+            // Where the source had them: after the layer in AcDbEntity, or after the version (270) in AcDbMLeader (a file before 2007 has them in
+            // AcDbEntity only).
+            let anchor = if in_mleader && cx.target >= Version::R2007 { 270 } else { 8 };
             if !proxy.is_empty()
                 && let Some(position) = w.t.iter().skip(start).position(|tag| tag.code == anchor)
             {

@@ -81,6 +81,8 @@ fn attribute_properties_roundtrip() {
         lineweight: Some(Lineweight::Mm100(50)),
         plot_style: Some("ByBlock".into()),
         visible: Some(false),
+        transparency: Some(Transparency::Percent(50)),
+        transparency_alpha: Some(128),
     };
     let red = AttribProps { color: Some(Color::ByLayer), ..AttribProps::default() };
     let (d, h) = drawing(vec![attrib("OWN", 0.0, own.clone()), attrib("DEFLAYER", 10.0, AttribProps::default()), attrib("RED", 20.0, red.clone())]);
@@ -170,4 +172,19 @@ fn an_attribute_on_its_references_layer_keeps_it_when_its_definition_is_on_anoth
         assert_eq!(i.attribs[0].props.layer.as_deref(), Some("INS"), "{what}: saved again to a DWG");
     }
     let _ = h;
+}
+
+#[test]
+fn an_attribute_writes_a_transparency_only_when_it_has_one_of_its_own() {
+    let own = AttribProps { transparency: Some(Transparency::Percent(50)), ..AttribProps::default() };
+    let (mut d, _) = drawing(vec![attrib("OWN", 0.0, own), attrib("DEFLAYER", 10.0, AttribProps::default())]);
+    // The definitions have a transparency too: an attribute without its own one follows it and writes none.
+    let handles: Vec<Handle> = d.block("TAGS").unwrap().entities.iter().map(|e| e.handle).collect();
+    for h in handles {
+        d.modify_entity_including_blocks(h, |e| e.common.transparency = Transparency::Percent(20)).unwrap();
+    }
+    let text = write_dxf(&d);
+    let attribs: Vec<_> = super::foreign_passthrough::section(&text, "ENTITIES").into_iter().filter(|(k, _)| k == "ATTRIB").collect();
+    let values: Vec<String> = attribs.iter().map(|(_, t)| super::foreign_passthrough::val(t, 440)).collect();
+    assert_eq!(values, ["33554559", ""], "the own 50 percent (alpha 127), and none for the one that follows its definition");
 }

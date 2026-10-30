@@ -245,3 +245,21 @@ fn new_native_old_target_entities_report_the_absent_proxy_cache() {
         assert!(notes.iter().any(|note| note.contains(&h.hex()) && note.contains("proxy graphics")), "{notes:?}");
     }
 }
+
+/// A source that has the graphics in its `AcDbEntity` subclass (AutoCAD 2010 files do, with group 160) gets them back there, not
+/// inside `AcDbMLeader`.
+#[test]
+fn a_proxy_in_the_entity_subclass_stays_there_in_a_new_target() {
+    let d = drawing();
+    let bytes = cadcraft_io::write_with(&d, "source.dxf", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap();
+    let mut tags = cadcraft_dxf::parse(&bytes).unwrap();
+    let start = tags.iter().position(|tag| tag.code == 0 && tag.str() == "MULTILEADER").unwrap();
+    let at = start + tags.iter().skip(start).position(|tag| tag.code == 8).unwrap() + 1;
+    tags.splice(at..at, [Tag::i(160, 4), Tag::new(310, Value::Hex("01020304".into()))]);
+    let source = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    let saved = cadcraft_io::write_with(&source, "new.dxf", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap();
+    let body = record(&saved);
+    assert_eq!(cache(&body), vec![(160, "4".into()), (310, "01020304".into())], "in AcDbEntity");
+    let marker = body.iter().position(|tag| tag.code == 100 && tag.str() == "AcDbMLeader").unwrap();
+    assert!(body[marker..].iter().all(|tag| !matches!(tag.code, 160 | 310)), "none inside AcDbMLeader");
+}
