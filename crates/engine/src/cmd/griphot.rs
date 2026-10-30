@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, Entity, EntityKind, Handle};
+use cadcraft_doc::{Drawing, Entity, Handle};
 use cadcraft_geom::{Mat3, Vec2};
 
 use super::gripcmds::stretch_grips;
@@ -433,27 +433,27 @@ impl Interactive for GripEdit {
         }
     }
 
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         if self.picking {
             return Vec::new();
         }
         let base = match self.ask {
             Ask::Action(a) => {
-                let mut out: Vec<EntityKind> = self.acted(s, a, Some(c), None).ok().flatten().map(|(_, entity)| entity.kind).into_iter().collect();
-                out.push(line(self.base, c));
+                let mut out: Vec<Entity> = self.acted(s, a, Some(c), None).ok().flatten().map(|(_, entity)| entity).into_iter().collect();
+                out.push(s.preview_entity(line(self.base, c)));
                 return out;
             }
             Ask::Mode | Ask::RefNew(_) => self.base,
-            Ask::RefSecond(a) => return vec![line(a, c)],
+            Ask::RefSecond(a) => return vec![s.preview_entity(line(a, c))],
             Ask::Base | Ask::RefFirst => return Vec::new(),
         };
         let Ok(d) = s.doc() else { return Vec::new() };
-        let mut out: Vec<EntityKind> = if self.mode == GripMode::Stretch {
+        let mut out: Vec<Entity> = if self.mode == GripMode::Stretch {
             super::gripcmds::stretched(s, &self.hot, &self.targets, c - base)
                 .unwrap_or_default()
                 .into_iter()
                 .take(500)
-                .map(|(_, entity)| entity.kind)
+                .map(|(_, entity)| entity)
                 .collect()
         } else {
             match self.matrix(c) {
@@ -462,12 +462,12 @@ impl Interactive for GripEdit {
                     .iter()
                     .take(500)
                     .filter_map(|h| d.entity(*h))
-                    .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
+                    .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok())
                     .collect(),
                 None => Vec::new(),
             }
         };
-        out.push(line(base, c));
+        out.push(s.preview_entity(line(base, c)));
         out
     }
 }

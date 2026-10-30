@@ -223,6 +223,27 @@ pub struct Leader {
     /// The direction, offsets and sizes of a canonical leader as its record holds them (see [`LeaderFrame`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<LeaderFrame>,
+    /// The creation type, hookline settings and annotation link of the record, as a file gave them.
+    #[serde(default, skip_serializing_if = "LeaderLinks::is_empty")]
+    pub links: LeaderLinks,
+}
+
+/// Groups of a LEADER that no other field holds: the annotation type (73: 0 text, 1 tolerance, 2 block reference, 3 none), the
+/// hookline direction (74: 0 opposite to the horizontal direction, 1 same) and flag (75), and the annotation handle (340). All
+/// `None` for a leader made here.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaderLinks {
+    pub creation: Option<i64>,
+    pub hookline_direction: Option<i64>,
+    pub hookline: Option<i64>,
+    pub annotation: Option<super::Handle>,
+}
+
+impl LeaderLinks {
+    pub fn is_empty(&self) -> bool {
+        *self == LeaderLinks::default()
+    }
 }
 
 /// What a canonical LEADER holds beside its WCS vertices and the normal of its plane (`Common.extrusion`): the
@@ -240,6 +261,6 @@ pub struct LeaderFrame {
 
 impl Default for Leader {
     fn default() -> Self {
-        Leader { vertices: Vec::new(), arrow: true, spline: false, style: "Standard".into(), frame: None }
+        Leader { vertices: Vec::new(), arrow: true, spline: false, style: "Standard".into(), frame: None, links: Default::default() }
     }
 }

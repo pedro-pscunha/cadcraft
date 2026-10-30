@@ -66,6 +66,7 @@ pub struct Cache {
     key: Option<(u64, u64, usize)>,
     glyphs: Vec<Glyph>,
     dof: Dof,
+    refusal: Option<cadcraft_engine::EngineError>,
     /// The dimensional constraint whose expression is being edited: (name, buffer, screen pos).
     editing: Option<(String, String, Pos2)>,
 }
@@ -83,13 +84,21 @@ fn refresh(app: &mut CadApp) {
     app.canvas.param.key = key;
     app.canvas.param.glyphs.clear();
     app.canvas.param.dof = Dof::default();
+    app.canvas.param.refusal = None;
     if app.session.doc().is_ok_and(|d| d.constraints.is_empty()) {
         return;
     }
-    if let Ok(v) = app.session.execute("constraints.inspect", &json!({}))
-        && let Some(g) = v.get("glyphs")
-    {
-        app.canvas.param.glyphs = serde_json::from_value(g.clone()).unwrap_or_default();
+    match app.session.execute("constraints.inspect", &json!({})) {
+        Ok(v) => {
+            if let Some(g) = v.get("glyphs") {
+                app.canvas.param.glyphs = serde_json::from_value(g.clone()).unwrap_or_default();
+            }
+        }
+        Err(error) => {
+            app.canvas.param.refusal = Some(error);
+            app.canvas.param.editing = None;
+            return;
+        }
     }
     // Every constrained object (an empty list: not the selection).
     if let Ok(v) = app.session.execute("constraints.dof", &json!({ "handles": [] })) {
@@ -100,7 +109,9 @@ fn refresh(app: &mut CadApp) {
 // ---------------- geometry of constraint references ----------------
 
 fn ent_kind(d: &Drawing, h: Handle) -> Option<&EntityKind> {
-    d.entity(h).map(|e| &e.kind)
+    let entity = d.entity(h)?;
+    entity.require_legacy_geometry().ok()?;
+    Some(&entity.kind)
 }
 
 fn poly_vertex(p: &cadcraft_doc::LwPolyline, i: u32) -> Option<Vec2> {
@@ -502,6 +513,16 @@ fn draw_geometric_constraints(app: &CadApp, ui: &mut egui::Ui, painter: &egui::P
 pub fn draw_overlay(app: &mut CadApp, ui: &mut egui::Ui, painter: &egui::Painter, xf: &Xf) {
     refresh(app);
     let Ok(d) = app.session.doc() else { return };
+    if let Some(refusal) = &app.canvas.param.refusal {
+        painter.text(
+            xf.rect.left_top() + vec2(12.0, 12.0),
+            egui::Align2::LEFT_TOP,
+            refusal.to_string(),
+            egui::FontId::proportional(13.0),
+            Color32::from_rgb(0xff, 0x8a, 0x6a),
+        );
+        return;
+    }
     if d.constraints.is_empty() {
         app.canvas.param.editing = None;
         return;
@@ -737,6 +758,76 @@ pub fn expr_field(ui: &mut egui::Ui, id: egui::Id, value: &str, label: Option<eg
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn geometry_fixture(canonical: bool) -> (Drawing, Handle, Handle) {
+        use cadcraft_doc::{Circle, Entity, GeometryRevision, Line};
+        use cadcraft_geom::Vec3;
+        let mut d = Drawing::new_metric();
+        let mut add = |kind| {
+            let h = d.new_handle();
+            let mut e = Entity::new(h, kind);
+            if canonical {
+                e.geometry_revision = GeometryRevision::CanonicalV2;
+            }
+            e.common.extrusion = Vec3::new(0.0, 3.0, 4.0);
+            d.model.push(e);
+            h
+        };
+        let circle = add(EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 5.0), radius: 4.0 }));
+        let line = add(EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(3.0, 0.0, 4.0) }));
+        (d, circle, line)
+    }
+
+    #[test]
+    fn loaded_canonical_constraints_display_the_typed_refusal() {
+        for canonical in [false, true] {
+            let (mut d, circle, _) = geometry_fixture(canonical);
+            d.constraints.push(cadcraft_doc::Constraint {
+                id: 1,
+                kind: ConstraintKind::Fix,
+                refs: vec![GeomRef::whole(circle)],
+                name: String::new(),
+                expr: String::new(),
+            });
+            let mut session = cadcraft_engine::Session::new();
+            session.open_drawing(d, "constraints.dxf", None);
+            let mut app = CadApp::new(session, crate::Services::default());
+            let ctx = egui::Context::default();
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let painter = ui.painter().clone();
+                let xf = Xf { rect: ui.max_rect(), center: Vec2::ZERO, scale: 1.0 };
+                draw_overlay(&mut app, ui, &painter, &xf);
+            });
+            if canonical {
+                assert!(matches!(app.canvas.param.refusal, Some(cadcraft_engine::EngineError::Constraint(_))));
+                assert!(app.canvas.param.glyphs.is_empty());
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(text) if text.galley.text().contains("canonical"))));
+            } else {
+                assert!(app.canvas.param.refusal.is_none());
+                assert!(!app.canvas.param.glyphs.is_empty());
+            }
+            assert_eq!(app.session.doc().unwrap().constraints.len(), 1);
+            output.drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn canonical_constraint_adapters_do_not_return_projected_fields() {
+        let (d, circle, line) = geometry_fixture(true);
+        assert!(ref_point(&d, &GeomRef::whole(circle)).is_none());
+        assert!(ref_circle(&d, &GeomRef::whole(circle)).is_none());
+        assert!(ref_line(&d, &GeomRef::whole(line)).is_none());
+        assert!(ref_point(&d, &GeomRef::new(line, Sub::End)).is_none());
+    }
+
+    #[test]
+    fn legacy_constraint_adapters_keep_their_existing_coordinates() {
+        let (d, circle, line) = geometry_fixture(false);
+        assert_eq!(ref_point(&d, &GeomRef::whole(circle)), Some(Vec2::new(1.0, 2.0)));
+        assert_eq!(ref_circle(&d, &GeomRef::whole(circle)), Some((Vec2::new(1.0, 2.0), 4.0)));
+        assert_eq!(ref_line(&d, &GeomRef::whole(line)), Some((Vec2::ZERO, Vec2::new(3.0, 0.0))));
+        assert_eq!(ref_point(&d, &GeomRef::new(line, Sub::End)), Some(Vec2::new(3.0, 0.0)));
+    }
 
     #[test]
     fn line_intersection() {

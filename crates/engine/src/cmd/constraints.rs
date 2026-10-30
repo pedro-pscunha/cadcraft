@@ -185,10 +185,11 @@ fn char_points(kind: &EntityKind) -> Vec<(Sub, Vec2)> {
 /// Characteristic points of an object, including the solver's points of ellipses (centre, axis
 /// ends, arc ends), splines (defining points) and block references (insertion point, the
 /// block's points).
-fn object_points(d: &Drawing, h: Handle, kind: &EntityKind) -> Vec<(Sub, Vec2)> {
+fn object_points(d: &Drawing, h: Handle, kind: &EntityKind) -> std::result::Result<Vec<(Sub, Vec2)>, cs::SolveError> {
+    cs::require_legacy_inputs(d, [h])?;
     match kind {
         EntityKind::Ellipse(_) | EntityKind::Spline(_) | EntityKind::Insert(_) => cs::ref_points(d, h),
-        _ => char_points(kind),
+        _ => Ok(char_points(kind)),
     }
 }
 
@@ -249,13 +250,20 @@ fn resolve(d: &Drawing, h: Handle, hint: Hint, want: Want, aperture: f64) -> std
     };
     let sub = match (hint, want) {
         (Hint::Sub(s), _) => Some(s),
-        (Hint::None, Want::Point) => object_points(d, h, k).first().map(|c| c.0),
+        (Hint::None, Want::Point) => object_points(d, h, k).map_err(|e| e.to_string())?.first().map(|c| c.0),
         (Hint::None, _) => object(None),
-        (Hint::Pick(p), Want::Point) => {
-            object_points(d, h, k).into_iter().filter(|c| c.1.is_finite()).min_by(|a, b| a.1.dist(p).total_cmp(&b.1.dist(p))).map(|c| c.0)
-        }
+        (Hint::Pick(p), Want::Point) => object_points(d, h, k)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|c| c.1.is_finite())
+            .min_by(|a, b| a.1.dist(p).total_cmp(&b.1.dist(p)))
+            .map(|c| c.0),
         (Hint::Pick(p), Want::PointOrObject) => {
-            let near = object_points(d, h, k).into_iter().filter(|c| c.1.is_finite()).min_by(|a, b| a.1.dist(p).total_cmp(&b.1.dist(p)));
+            let near = object_points(d, h, k)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .filter(|c| c.1.is_finite())
+                .min_by(|a, b| a.1.dist(p).total_cmp(&b.1.dist(p)));
             let limit = (aperture * 2.0).max(object_size(k) * 0.15);
             match near {
                 Some((s, q)) if q.dist(p) <= limit => Some(s),
@@ -285,13 +293,13 @@ fn resolve(d: &Drawing, h: Handle, hint: Hint, want: Want, aperture: f64) -> std
 }
 
 /// The closest pair of characteristic points of two objects (COINCIDENT with no hints).
-fn closest_points(d: &Drawing, a: Handle, b: Handle) -> Option<(GeomRef, GeomRef)> {
-    let (ea, eb) = (d.entity(a)?, d.entity(b)?);
+fn closest_points(d: &Drawing, a: Handle, b: Handle) -> std::result::Result<Option<(GeomRef, GeomRef)>, String> {
+    let (Some(ea), Some(eb)) = (d.entity(a), d.entity(b)) else { return Ok(None) };
     if ea.require_legacy_geometry().is_err() || eb.require_legacy_geometry().is_err() {
-        return None;
+        return Err("canonical geometry cannot be constrained yet".into());
     }
-    let pa: Vec<_> = object_points(d, a, &ea.kind).into_iter().filter(|c| c.0 != Sub::Mid).collect();
-    let pb: Vec<_> = object_points(d, b, &eb.kind).into_iter().filter(|c| c.0 != Sub::Mid).collect();
+    let pa: Vec<_> = object_points(d, a, &ea.kind).map_err(|e| e.to_string())?.into_iter().filter(|c| c.0 != Sub::Mid).collect();
+    let pb: Vec<_> = object_points(d, b, &eb.kind).map_err(|e| e.to_string())?.into_iter().filter(|c| c.0 != Sub::Mid).collect();
     let mut best: Option<(f64, Sub, Sub)> = None;
     for (sa, qa) in pa.iter().take(1000) {
         for (sb, qb) in pb.iter().take(1000) {
@@ -301,7 +309,7 @@ fn closest_points(d: &Drawing, a: Handle, b: Handle) -> Option<(GeomRef, GeomRef
             }
         }
     }
-    best.map(|(_, sa, sb)| (GeomRef::new(a, sa), GeomRef::new(b, sb)))
+    Ok(best.map(|(_, sa, sb)| (GeomRef::new(a, sa), GeomRef::new(b, sb))))
 }
 
 fn wants(kind: K, n: usize) -> Vec<Want> {
@@ -339,7 +347,7 @@ fn build_refs(s: &Session, kind: K, picks: &[(Handle, Hint)]) -> std::result::Re
         if let Some(h) = [a, b].into_iter().find(|h| d.entity(**h).is_some_and(|e| e.require_legacy_geometry().is_err())) {
             return Err(format!("object {} has canonical geometry, which cannot be constrained yet", h.hex()));
         }
-        return closest_points(d, *a, *b).map(|(x, y)| vec![x, y]).ok_or_else(|| "Select two points".into());
+        return closest_points(d, *a, *b)?.map(|(x, y)| vec![x, y]).ok_or_else(|| "Select two points".into());
     }
     let ap = aperture(s);
     let mut refs: Vec<GeomRef> = Vec::new();
@@ -851,7 +859,7 @@ fn run_autoconstrain(s: &mut Session, p: &Value) -> Result<Value> {
     }
     require_legacy_solver_inputs(s.doc()?, hs.iter().copied())?;
     let mut d = s.doc()?.clone();
-    let ids = cs::autoconstrain(&mut d, &hs, &o);
+    let ids = cs::autoconstrain(&mut d, &hs, &o).map_err(err)?;
     if !ids.is_empty() {
         *s.doc_mut()? = d;
     }
@@ -1059,10 +1067,10 @@ fn run_inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let dof = cs::dof(d, &[]).ok().map(|r| json!({ "dof": r.dof, "status": r.status, "redundant": r.redundant, "message": r.message }));
     Ok(json!({
         "constraints": d.constraints,
-        "glyphs": cs::glyphs(d),
+        "glyphs": cs::glyphs(d).map_err(err)?,
         "parameters": cs::parameter_table(d),
         "settings": d.parametric.settings,
-        "satisfied": cs::all_satisfied(d),
+        "satisfied": cs::all_satisfied(d).map_err(err)?,
         "dof": dof,
     }))
 }
@@ -1123,7 +1131,14 @@ fn infer_after(s: &mut Session, before: &Drawing) {
     let mut dirs: Vec<Vec2> = Vec::new();
     for h in &placed {
         let Some(e) = d.entity(*h) else { continue };
-        pts.extend(object_points(d, *h, &e.kind).into_iter().map(|(_, p)| p).filter(|p| p.is_finite()).take(1000));
+        let points = match object_points(d, *h, &e.kind) {
+            Ok(points) => points,
+            Err(error) => {
+                s.echo(format!("Constraints were not inferred: {error}"));
+                return;
+            }
+        };
+        pts.extend(points.into_iter().map(|(_, p)| p).filter(|p| p.is_finite()).take(1000));
         if let EntityKind::Line(l) = &e.kind {
             let v = (l.b.xy() - l.a.xy()).normalized();
             if v.x.abs() > 1e-9 && v.y.abs() > 1e-9 {
@@ -1169,7 +1184,13 @@ fn infer_after(s: &mut Session, before: &Drawing) {
     }
     others.extend(parallel.map(|p| p.1));
     let o = cs::InferOptions { distance_tolerance: tol, angle_tolerance: 1e-7, types };
-    let cands = cs::infer_placed(d, &placed, &others, &o);
+    let cands = match cs::infer_placed(d, &placed, &others, &o) {
+        Ok(cands) => cands,
+        Err(error) => {
+            s.echo(format!("Constraints were not inferred: {error}"));
+            return;
+        }
+    };
     if cands.is_empty() {
         return;
     }
@@ -1207,55 +1228,65 @@ pub fn after_command(s: &mut Session, before: Option<&Arc<Drawing>>, ok: bool) {
         return;
     }
     let mut d = (*st.doc).clone();
-    let purged = cs::purge_invalid(&mut d);
-    let restored = cs::restore_fixed(&mut d, before);
-    let anchors = cs::moved_anchors(&d, before);
-    let satisfied = anchors.is_empty() && cs::all_satisfied(&d);
-    if purged.is_empty() && !restored && satisfied {
-        return;
-    }
-    let mut msg = Vec::new();
-    if !purged.is_empty() {
-        msg.push(format!("{} constraint(s) removed with their objects.", purged.len()));
-    }
-    if !satisfied {
-        let mut keep: Vec<Handle> = Vec::new();
-        for h in d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)) {
-            let changed = match (before.entity(h), d.entity(h)) {
-                (Some(a), Some(b)) => !Arc::ptr_eq(a, b) && a != b,
-                _ => false,
-            };
-            if changed && !keep.contains(&h) {
-                keep.push(h);
+    let outcome = (|| -> std::result::Result<Option<Vec<String>>, cs::SolveError> {
+        let purged = cs::purge_invalid(&mut d);
+        let restored = cs::restore_fixed(&mut d, before)?;
+        let anchors = cs::moved_anchors(&d, before)?;
+        let satisfied = anchors.is_empty() && cs::all_satisfied(&d)?;
+        if purged.is_empty() && !restored && satisfied {
+            return Ok(None);
+        }
+        let mut msg = Vec::new();
+        if !purged.is_empty() {
+            msg.push(format!("{} constraint(s) removed with their objects.", purged.len()));
+        }
+        if !satisfied {
+            let mut keep: Vec<Handle> = Vec::new();
+            for h in d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)) {
+                let changed = match (before.entity(h), d.entity(h)) {
+                    (Some(a), Some(b)) => !Arc::ptr_eq(a, b) && a != b,
+                    _ => false,
+                };
+                if changed && !keep.contains(&h) {
+                    keep.push(h);
+                }
             }
-        }
-        // A grip drag moved some of an object's points: they stay where they were put, and the
-        // edited objects still move least. When that cannot be solved, the edited objects are
-        // only kept as a whole, as for any other edit.
-        let hold: Vec<GeomRef> = keep.iter().flat_map(|&h| cs::edited_points(&d, before, h)).collect();
-        let mut solved = None;
-        if !hold.is_empty() {
-            let mut trial = d.clone();
-            let opts = cs::SolveOptions { keep: keep.clone(), prefer_move: Vec::new(), hold, anchors: anchors.clone() };
-            solved = cs::solve(&mut trial, &opts).ok().map(|_| trial);
-        }
-        let solved = match solved {
-            Some(t) => Ok(t),
-            None => {
+            // A grip drag moved some of an object's points: they stay where they were put, and the
+            // edited objects still move least. When that cannot be solved, the edited objects are
+            // only kept as a whole, as for any other edit.
+            let hold: Vec<GeomRef> =
+                keep.iter().map(|&h| cs::edited_points(&d, before, h)).collect::<std::result::Result<Vec<_>, _>>()?.into_iter().flatten().collect();
+            let mut solved = None;
+            if !hold.is_empty() {
                 let mut trial = d.clone();
-                cs::solve(&mut trial, &cs::SolveOptions { keep, anchors, ..Default::default() }).map(|_| trial)
+                let opts = cs::SolveOptions { keep: keep.clone(), prefer_move: Vec::new(), hold, anchors: anchors.clone() };
+                solved = cs::solve(&mut trial, &opts).ok().map(|_| trial);
             }
-        };
-        match solved {
-            Ok(t) => d = t,
-            Err(e) => msg.push(format!("Constraints could not be satisfied: {e}")),
+            let solved = match solved {
+                Some(t) => Ok(t),
+                None => {
+                    let mut trial = d.clone();
+                    cs::solve(&mut trial, &cs::SolveOptions { keep, anchors, ..Default::default() }).map(|_| trial)
+                }
+            };
+            match solved {
+                Ok(t) => d = t,
+                Err(e) => msg.push(format!("Constraints could not be satisfied: {e}")),
+            }
         }
-    }
-    if let Ok(st) = s.state_mut() {
-        st.doc = Arc::new(d);
-    }
-    for m in msg {
-        s.echo(m);
+        Ok(Some(msg))
+    })();
+    match outcome {
+        Ok(Some(messages)) => {
+            if let Ok(st) = s.state_mut() {
+                st.doc = Arc::new(d);
+            }
+            for message in messages {
+                s.echo(message);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => s.echo(format!("Constraints were not solved: {error}")),
     }
 }
 

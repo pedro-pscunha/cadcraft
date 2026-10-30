@@ -233,6 +233,7 @@ fn leader_kind(canonical: bool) -> EntityKind {
             text_height: 0.0,
             text_width: 0.0,
         }),
+        links: Default::default(),
     })
 }
 

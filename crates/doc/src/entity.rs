@@ -85,7 +85,7 @@ pub use curves::{
     Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, Polyline3dFit, PolylineFit, PolylineFitVertex, PolylineRecord,
     PolylineRecords, RayLine, Solid,
 };
-pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
+pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame, LeaderLinks};
 pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
 pub use geometry::{DimensionAsRead, GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, TableCellBlock, TableOverrides, Viewport, ViewportStatus};
@@ -426,12 +426,34 @@ impl EntityKind {
                 d.block = None;
             }
             EntityKind::MLine(ml) => {
+                // The source direction and miter follow a similarity with the vertices; another map leaves them to be computed.
+                let keep = m.is_similarity() && ml.source_vectors().is_some();
                 ml.vertices.iter_mut().for_each(|v| t3(&mut v.p));
+                for v in &mut ml.vertices {
+                    v.vectors = v.vectors.filter(|_| keep).map(|s| {
+                        let vector = |u: Vec3| m.apply_vec(u.xy()).normalized().to3(u.z);
+                        MLineVectors { p: v.p, dir: vector(s.dir), miter: vector(s.miter) }
+                    });
+                }
                 ml.vertices.iter_mut().flat_map(|v| v.cuts.iter_mut()).for_each(|c| (c.start, c.end) = (c.start * s, c.end * s));
                 // Mirrored, the elements change sides.
                 ml.scale *= if mirror { -s } else { s };
             }
-            EntityKind::Leader(l) => l.vertices.iter_mut().for_each(t3),
+            EntityKind::Leader(l) => {
+                l.vertices.iter_mut().for_each(t3);
+                // The direction and offsets are vectors (they turn, scale and mirror with the map); the annotation size scales.
+                if let Some(f) = &mut l.frame {
+                    let turn = |v: Vec3| m.apply_vec(v.xy()).to3(v.z);
+                    f.direction = turn(f.direction);
+                    f.block_offset = turn(f.block_offset);
+                    f.annotation_offset = turn(f.annotation_offset);
+                    if f.direction.len() > 1e-12 {
+                        f.direction = f.direction.normalized();
+                    }
+                    f.text_height *= s;
+                    f.text_width *= s;
+                }
+            }
             EntityKind::MLeader(ml) => {
                 // Each root keeps its own landing and dogleg: the dogleg turns and scales with the map.
                 let unit = |v: Vec3, by: Vec2| {
@@ -479,7 +501,13 @@ impl EntityKind {
                     }
                 }
                 h.scale *= s;
-                h.angle = cadcraft_geom::norm_angle(h.angle + rot);
+                // MIRRHATCH = 0 (the default): a mirrored hatch keeps its pattern and gradient direction.
+                if !mirror {
+                    h.angle = cadcraft_geom::norm_angle(h.angle + rot);
+                    if let Some(g) = &mut h.gradient {
+                        g.angle = cadcraft_geom::norm_angle(g.angle + rot);
+                    }
+                }
                 h.origin = m.apply(h.origin);
                 h.seed_points.iter_mut().for_each(|p| *p = m.apply(*p));
             }
@@ -503,7 +531,17 @@ impl EntityKind {
                 i.u = m.apply_vec(i.u.xy()).to3(0.0);
                 i.v = m.apply_vec(i.v.xy()).to3(0.0);
             }
-            EntityKind::Wipeout(w) => w.boundary.iter_mut().for_each(|p| *p = m.apply(*p)),
+            EntityKind::Wipeout(w) => {
+                // The source image frame follows the boundary while it describes it (the clip is in pixels: it does not change).
+                let image = w.source_image().cloned();
+                w.boundary.iter_mut().for_each(|p| *p = m.apply(*p));
+                w.image = image.map(|f| WipeoutFrame {
+                    origin: m.apply(f.origin.xy()).to3(f.origin.z),
+                    u: m.apply_vec(f.u.xy()).to3(f.u.z),
+                    v: m.apply_vec(f.v.xy()).to3(f.v.z),
+                    ..f
+                });
+            }
             EntityKind::Table(t) => {
                 if let Some(b) = &mut t.breaks {
                     b.height *= s;

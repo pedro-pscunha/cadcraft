@@ -512,6 +512,11 @@ impl Session {
         }
     }
 
+    /// New legacy rubber-band geometry with the current properties, never a converted source entity.
+    pub(crate) fn preview_entity(&self, kind: cadcraft_doc::EntityKind) -> Entity {
+        Entity { geometry_revision: Default::default(), handle: Handle(0), common: self.current_common(), kind }
+    }
+
     /// Preview entities for the cursor: objects drawn with their own properties
     /// ([`Interactive::preview_objects`]), then the rubber band with the current properties, in
     /// the grip blue over such objects (so it shows over their fills, whatever their colour).
@@ -534,12 +539,7 @@ impl Session {
     pub fn drag(&self, cursor: Vec2) -> Option<(Drag, Vec<Entity>)> {
         let r = self.running.as_ref()?;
         let d = r.machine.drag(self, cursor)?;
-        let common = self.current_common();
-        let extra = d
-            .extra
-            .iter()
-            .map(|k| Entity { geometry_revision: Default::default(), handle: Handle(0), common: common.clone(), kind: k.clone() })
-            .collect();
+        let extra = d.extra.clone();
         Some((d, extra))
     }
 }

@@ -165,7 +165,7 @@ fn two_line_angle_over_180_is_rejected() {
     assert!(d.constraints.is_empty());
     assert_eq!((ln(&d, a), ln(&d, b)), before);
     ok(&mut d, dim(ConstraintKind::Angular, &[w(a), w(b)], "", "180"));
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn dimensional_constraints() {
     let f = line(&mut d, (0.0, 50.0), (3.0, 54.0));
     let id = ok(&mut d, dim(ConstraintKind::Distance(DistAxis::Aligned), &[w(f)], "", ""));
     assert_eq!(d.constraints.iter().find(|c| c.id == id).unwrap().expr, "5");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 /// A rectangle of four lines: coincident corners, horizontal/vertical sides, a fixed corner,
@@ -234,7 +234,7 @@ fn rectangle_chain_with_parameters() {
     let c = corners(&d);
     assert!(c[0].near(o, 1e-12), "fixed corner moved");
     assert!((c[2] - o).near(Vec2::new(20.0, 10.0), 1e-6), "{c:?}");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
     // A bad expression is refused and leaves the drawing alone.
     let before = d.clone();
     assert!(set_parameter(&mut d, "width", "w*2", &SolveOptions::default()).is_err());
@@ -403,7 +403,7 @@ fn hostile_geometry_never_panics() {
         }
     }
     let _ = solve(&mut d, &SolveOptions::default());
-    let _ = glyphs(&d);
+    let _ = glyphs(&d).unwrap();
     let _ = residuals(&d);
     let _ = parameter_table(&d);
     let _ = purge_invalid(&mut d);
@@ -414,7 +414,7 @@ fn glyphs_and_residuals() {
     let mut d = Drawing::default();
     let a = line(&mut d, (0.0, 0.0), (10.0, 0.0));
     ok(&mut d, con(ConstraintKind::Horizontal, &[w(a)]));
-    let g = glyphs(&d);
+    let g = glyphs(&d).unwrap();
     assert_eq!(g.len(), 1);
     assert_eq!(g[0].kind, "Horizontal");
     assert!(g[0].satisfied);
@@ -425,10 +425,10 @@ fn glyphs_and_residuals() {
         }
     })
     .unwrap();
-    assert!(!all_satisfied(&d));
+    assert!(!all_satisfied(&d).unwrap());
     let r = solve(&mut d, &SolveOptions::default()).unwrap();
     assert_eq!(r.moved, vec![a]);
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 #[test]
@@ -440,25 +440,25 @@ fn autoconstrain_rectangle_of_lines() {
         line(&mut d, (10.0, 5.0), (0.0, 5.02)),
         line(&mut d, (0.0, 5.0), (0.0, 0.0)),
     ];
-    let ids = autoconstrain(&mut d, &hs, &InferOptions::default());
+    let ids = autoconstrain(&mut d, &hs, &InferOptions::default()).unwrap();
     let kinds: Vec<&str> = d.constraints.iter().map(|c| c.kind.name()).collect();
     assert_eq!(kinds.iter().filter(|k| **k == "Coincident").count(), 4, "{kinds:?}");
     assert_eq!(kinds.iter().filter(|k| **k == "Horizontal").count(), 2, "{kinds:?}");
     assert_eq!(kinds.iter().filter(|k| **k == "Vertical").count(), 2, "{kinds:?}");
     // Perpendicular/parallel/equal are implied and were skipped as redundant.
     assert_eq!(ids.len(), 8, "{kinds:?}");
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
     let (a, b) = ln(&d, hs[0]);
     assert!(near(a.y, b.y));
     // Circles: concentric and equal.
     let c1 = circle(&mut d, (30.0, 0.0), 2.0);
     let c2 = circle(&mut d, (30.01, 0.0), 2.01);
-    autoconstrain(&mut d, &[c1, c2], &InferOptions::default());
+    autoconstrain(&mut d, &[c1, c2], &InferOptions::default()).unwrap();
     assert!(circ(&d, c1).0.near(circ(&d, c2).0, 1e-7) && near(circ(&d, c1).1, circ(&d, c2).1));
     // Type filter.
     let l = line(&mut d, (50.0, 0.0), (60.0, 0.001));
     let only_v = InferOptions { types: vec!["Vertical".into()], ..Default::default() };
-    assert!(autoconstrain(&mut d, &[l], &only_v).is_empty());
+    assert!(autoconstrain(&mut d, &[l], &only_v).unwrap().is_empty());
 }
 
 #[test]
@@ -475,7 +475,7 @@ fn set_parameter_rejects_out_of_domain_dimension() {
     assert_eq!(d, before);
     set_parameter(&mut d, "d1", "6", &opts).unwrap();
     set_parameter(&mut d, "rad1", "2", &opts).unwrap();
-    assert!(all_satisfied(&d));
+    assert!(all_satisfied(&d).unwrap());
 }
 
 /// The solver may meet a coincidence with a negative arc radius; the stored arc must still put
@@ -498,7 +498,7 @@ fn arc_solved_with_a_negative_radius_keeps_its_points() {
             } else {
                 ok(&mut d, k);
             }
-            assert!(all_satisfied(&d), "{c:?} solve {through_solve}: {:?}", residuals(&d));
+            assert!(all_satisfied(&d).unwrap(), "{c:?} solve {through_solve}: {:?}", residuals(&d));
             assert!(circ(&d, a).1 > 0.0);
         }
     }

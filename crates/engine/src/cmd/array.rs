@@ -249,7 +249,7 @@ fn copy_all(s: &mut Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) ->
 }
 
 /// The objects transformed by each matrix, for the preview.
-fn preview_copies(s: &Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) -> Vec<EntityKind> {
+fn preview_copies(s: &Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) -> Vec<Entity> {
     let Ok(d) = s.doc() else { return Vec::new() };
     let src: Vec<Entity> = hs.iter().take(PREVIEW_LIMIT).filter_map(|h| d.entity(*h)).map(|e| (**e).clone()).collect();
     if src.is_empty() {
@@ -262,7 +262,7 @@ fn preview_copies(s: &Session, hs: &[Handle], mats: impl Iterator<Item = Mat3>) 
                 return out;
             }
             if let Ok(entity) = k.transformed(&cadcraft_geom::Mat4::from_mat3(&m)) {
-                out.push(entity.kind);
+                out.push(entity);
             }
         }
     }
@@ -452,6 +452,9 @@ impl Interactive for ArrayM {
     }
     fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         self.inner.as_ref().map(|m| m.preview(s, cursor)).unwrap_or_default()
+    }
+    fn preview_objects(&self, s: &Session, cursor: Vec2) -> Vec<Entity> {
+        self.inner.as_ref().map(|m| m.preview_objects(s, cursor)).unwrap_or_default()
     }
     fn drag(&self, s: &Session, cursor: Vec2) -> Option<crate::prompt::Drag> {
         self.inner.as_ref().and_then(|m| m.drag(s, cursor))
@@ -786,13 +789,13 @@ impl Interactive for RectM {
         self.stage = next;
         Ok(Step::Continue)
     }
-    fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, cursor: Vec2) -> Vec<Entity> {
         if !self.sel.done {
             return Vec::new();
         }
         let mut out = preview_copies(s, &self.objs, item_mats(&self.params(), self.base).into_iter());
         match (self.stage, self.corner) {
-            (RStage::UnitCell, Some(c)) => out.push(line(c, cursor)),
+            (RStage::UnitCell, Some(c)) => out.push(s.preview_entity(line(c, cursor))),
             (
                 RStage::SpaceCols
                 | RStage::SpaceRows
@@ -803,7 +806,7 @@ impl Interactive for RectM {
                 | RStage::LevelsSpace
                 | RStage::LevelsTotal,
                 _,
-            ) => out.push(line(self.base, cursor)),
+            ) => out.push(s.preview_entity(line(self.base, cursor))),
             _ => {}
         }
         out
@@ -1165,7 +1168,7 @@ impl Interactive for PolarM {
         self.stage = next;
         Ok(Step::Continue)
     }
-    fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, cursor: Vec2) -> Vec<Entity> {
         if !self.sel.done {
             return Vec::new();
         }

@@ -1,7 +1,5 @@
 use super::blocks::table_size;
-use super::common::{
-    attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, plot_style_xdata, text_tags,
-};
+use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
 use super::ctx::Ctx;
 use super::layout::paper_view;
 use super::{
@@ -46,7 +44,6 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
     write_viewport_entity(w, d, e, owner, paper, cx);
     write_wipeout_entity(w, d, e, owner, paper, cx);
     write_other_entity(w, d, e, owner, paper, cx);
-    plot_style_xdata(w, &e.common.plot_style, start);
     let mut top_level = false;
     let mut handles = Vec::new();
     for tag in w.t.get(start..).unwrap_or_default() {
@@ -102,7 +99,7 @@ fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_
     polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
 }
 
-fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::PolylineRecord>, kind: &str, subclass: &str) -> usize {
+fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::PolylineRecord>, kind: &str, subclass: &str) {
     let handle = w.instance_handle(record.and_then(|r| r.handle));
     let child = Entity {
         geometry_revision: Default::default(),
@@ -110,17 +107,12 @@ fn polyline_child(w: &mut W, parent: &Entity, record: Option<&cadcraft_doc::Poly
         common: record.map_or_else(|| cadcraft_doc::Common { layer: parent.common.layer.clone(), ..Default::default() }, |r| r.common.clone()),
         kind: EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 }),
     };
-    let start = w.t.len();
     w.s(0, kind);
     common(w, &child, &parent.handle.hex(), false, subclass);
-    if subclass.is_empty() {
-        plot_style_xdata(w, &child.common.plot_style, start);
-    }
-    start
 }
 
 fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex) {
-    let start = polyline_child(w, e, Some(&vertex.record), "VERTEX", "AcDbVertex");
+    polyline_child(w, e, Some(&vertex.record), "VERTEX", "AcDbVertex");
     w.s(100, "AcDb2dVertex");
     w.p(10, vertex.position);
     w.f(40, vertex.start_width);
@@ -128,7 +120,6 @@ fn heavy_vertex(w: &mut W, e: &Entity, vertex: &cadcraft_doc::PolylineFitVertex)
     w.f(42, vertex.bulge);
     w.i(70, vertex.flags);
     w.f(50, vertex.tangent.to_degrees());
-    plot_style_xdata(w, &vertex.record.common.plot_style, start);
 }
 
 fn polyline_mesh(w: &mut W, e: &Entity, owner: &str, paper: bool, mesh: &cadcraft_doc::PolylineMesh) {
@@ -148,7 +139,7 @@ fn polyline_mesh(w: &mut W, e: &Entity, owner: &str, paper: bool, mesh: &cadcraf
     }
     for record in &mesh.vertices {
         let v = &record.vertex;
-        let start = polyline_child(w, e, Some(&v.record), "VERTEX", if record.is_face() { "AcDbFaceRecord" } else { "AcDbVertex" });
+        polyline_child(w, e, Some(&v.record), "VERTEX", if record.is_face() { "AcDbFaceRecord" } else { "AcDbVertex" });
         if !record.is_face() {
             w.s(100, vertex_class);
         }
@@ -159,7 +150,6 @@ fn polyline_mesh(w: &mut W, e: &Entity, owner: &str, paper: bool, mesh: &cadcraf
                 w.i(code, value);
             }
         }
-        plot_style_xdata(w, &v.record.common.plot_style, start);
     }
     polyline_child(w, e, mesh.seqend.as_ref(), "SEQEND", "");
 }
@@ -268,13 +258,10 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                 }
             };
             for (record, q, flags) in vertices {
-                let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
+                polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
                 w.p(10, q);
                 w.i(70, flags);
-                if let Some(record) = record {
-                    plot_style_xdata(w, &record.common.plot_style, start);
-                }
             }
             polyline_child(w, e, p.records.seqend.as_ref(), "SEQEND", "");
         }
@@ -462,7 +449,6 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
         if !i.attribs.is_empty() {
             for a in &i.attribs {
                 let ah = w.instance_handle(a.handle).hex();
-                let start = w.t.len();
                 w.s(0, "ATTRIB");
                 w.s(5, ah);
                 w.s(330, e.handle.hex());
@@ -484,7 +470,6 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }
-                plot_style_xdata(w, &c.plot_style, start);
             }
             let sh = w.h();
             w.s(0, "SEQEND");
@@ -533,7 +518,9 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         if dm.text_rotation != 0.0 {
             w.f(53, dm.text_rotation.to_degrees());
         }
-        canonical_normal(w, e);
+        if plane.is_some() || e.common.extrusion != Vec3::Z {
+            w.p(210, e.common.extrusion);
+        }
         match dm.kind {
             DimKind::Linear { rotation } => {
                 w.s(100, "AcDbAlignedDimension");
@@ -602,7 +589,8 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         w.s(343, brh);
         w.p(11, t.dir);
         let o = &t.overrides;
-        w.i(90, i64::from(o.value_flags));
+        // The flags of the file; a table made here has AutoCAD's (0x16 for a table with a title, as AutoCAD writes a -TABLE).
+        w.i(90, i64::from(o.value_flags.unwrap_or_else(|| cadcraft_doc::TableOverrides::default_value_flags(t.title))));
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
         w.i(92, cols as i64);
@@ -703,8 +691,14 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.s(3, &l.style);
             w.i(71, i64::from(l.arrow));
             w.i(72, i64::from(l.spline));
-            // A canonical leader writes its annotation size, its plane, direction and offsets as it holds them.
-            if let (Some(f), Some(_)) = (&l.frame, canonical_plane(e)) {
+            // The annotation type and hookline settings of the record, then its annotation size, plane, direction and offsets as
+            // the leader holds them (a leader made here has none of them).
+            for (code, value) in [(73, l.links.creation), (74, l.links.hookline_direction), (75, l.links.hookline)] {
+                if let Some(value) = value {
+                    w.i(code, value);
+                }
+            }
+            if let Some(f) = &l.frame {
                 w.f(40, f.text_height);
                 w.f(41, f.text_width);
             }
@@ -712,8 +706,12 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             for v in &l.vertices {
                 w.p(10, *v);
             }
-            if let (Some(f), Some(normal)) = (&l.frame, canonical_plane(e)) {
-                w.p(210, normal);
+            // The annotation it points at, while that entity is still in the drawing.
+            if let Some(h) = l.links.annotation.filter(|h| w.used.contains(h)) {
+                w.s(340, h.hex());
+            }
+            if let Some(f) = &l.frame {
+                w.p(210, canonical_plane(e).unwrap_or(e.common.extrusion));
                 w.p(211, f.direction);
                 w.p(212, f.block_offset);
                 w.p(213, f.annotation_offset);
@@ -978,7 +976,8 @@ fn wipeout_display(w: &mut W, d: &cadcraft_doc::WipeoutDisplay) {
 
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
-        if let Some(frame) = &wo.frame {
+        // The frame of a canonical wipeout, or the source frame of a legacy one while it still describes its boundary.
+        if let Some(frame) = wo.frame.as_ref().or_else(|| wo.source_image()) {
             write_canonical_wipeout(w, e, owner, paper, frame, &wo.display);
             return;
         }
@@ -1066,7 +1065,10 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
     for (root, arm) in m.lines().take(64) {
         let mut vertices = arm.vertices.clone();
         vertices.push(root.landing);
-        let le = part(w, EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), frame: None }));
+        let le = part(
+            w,
+            EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), frame: None, links: Default::default() }),
+        );
         entity(w, d, &le, owner, paper, cx);
     }
     if let Some(t) = &m.text {

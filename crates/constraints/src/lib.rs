@@ -63,7 +63,7 @@ pub enum SolveError {
     Conflict { ids: Vec<u32> },
     #[error("constraint would over-constrain the geometry (redundant with {})", ids_text(ids))]
     Redundant { ids: Vec<u32> },
-    #[error("object {handle:?} has canonical geometry, which the constraint solver cannot read")]
+    #[error("object {} has canonical geometry, which the constraint solver does not read yet. Nothing was changed", handle.hex())]
     CanonicalGeometry { handle: Handle },
     #[error("constraint system too large to solve")]
     TooLarge,
@@ -488,11 +488,11 @@ pub fn solve(d: &mut Drawing, opts: &SolveOptions) -> Result<SolveReport, SolveE
 
 /// Largest residual of each constraint at the current geometry (`None` when it cannot be
 /// interpreted).
-pub fn residuals(d: &Drawing) -> Vec<(u32, Option<f64>)> {
+pub fn residuals(d: &Drawing) -> Result<Vec<(u32, Option<f64>)>, crate::SolveError> {
     let mut e = env(d);
     let handles: Vec<Handle> = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)).collect();
-    let mut model = Model::build(d, &handles);
-    d.constraints
+    let mut model = Model::build(d, &handles)?;
+    Ok(d.constraints
         .iter()
         .take(MAX_CONSTRAINTS)
         .map(|c| {
@@ -504,7 +504,7 @@ pub fn residuals(d: &Drawing) -> Vec<(u32, Option<f64>)> {
             });
             (c.id, r)
         })
-        .collect()
+        .collect())
 }
 
 /// Put back what each Fix locks where `before` had it, and report whether anything moved.
@@ -515,7 +515,7 @@ pub fn residuals(d: &Drawing) -> Vec<(u32, Option<f64>)> {
 /// An object held by a Fix on a derived point (a line's midpoint, an arc's end) has nothing to
 /// lock: when the edit only moved it (MOVE), it is put back whole, so it is not reshaped to bring
 /// the point back.
-pub fn restore_fixed(d: &mut Drawing, before: &Drawing) -> bool {
+pub fn restore_fixed(d: &mut Drawing, before: &Drawing) -> Result<bool, crate::SolveError> {
     let refs: Vec<GeomRef> = d
         .constraints
         .iter()
@@ -523,10 +523,10 @@ pub fn restore_fixed(d: &mut Drawing, before: &Drawing) -> bool {
         .flat_map(|c| c.refs.iter().copied())
         .collect();
     if refs.is_empty() {
-        return false;
+        return Ok(false);
     }
     let handles: Vec<Handle> = refs.iter().map(|r| r.handle).collect();
-    let (now, old) = (Model::build(d, &handles), Model::build(before, &handles));
+    let (now, old) = (Model::build(d, &handles)?, Model::build(before, &handles)?);
     let mut x = now.x0.clone();
     let mut changed = false;
     for r in &refs {
@@ -558,7 +558,7 @@ pub fn restore_fixed(d: &mut Drawing, before: &Drawing) -> bool {
     if changed {
         now.write_back(d, &x);
     }
-    changed
+    Ok(changed)
 }
 
 /// The parameters of `h`'s points (see [`Model::point_refs`]) in `m`, as (x, y) pairs.
@@ -591,10 +591,10 @@ fn translated(now: &Model, old: &Model, h: Handle) -> bool {
 /// moved some of them but not all: the grip that was dragged, to pass as [`SolveOptions::hold`] so
 /// it stays where it was put and the rest of the object takes up the constraints. Empty when the
 /// object kept its points or moved them all.
-pub fn edited_points(d: &Drawing, before: &Drawing, h: Handle) -> Vec<GeomRef> {
-    let (now, old) = (Model::build(d, &[h]), Model::build(before, &[h]));
+pub fn edited_points(d: &Drawing, before: &Drawing, h: Handle) -> Result<Vec<GeomRef>, crate::SolveError> {
+    let (now, old) = (Model::build(d, &[h])?, Model::build(before, &[h])?);
     if !matches!((now.slot(h), old.slot(h)), (Some(a), Some(b)) if a.shape == b.shape) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let tol = scale_tol(&old.x0) * 10.0;
     let refs = now.point_refs(h);
@@ -603,7 +603,7 @@ pub fn edited_points(d: &Drawing, before: &Drawing, h: Handle) -> Vec<GeomRef> {
         .filter(|r| matches!((now.lock_indices(r), old.lock_indices(r)), (Some(i), Some(j)) if i.iter().zip(&j).any(|(&i, &j)| matches!((now.x0.get(i), old.x0.get(j)), (Some(p), Some(q)) if (p - q).abs() > tol))))
         .copied()
         .collect();
-    if moved.len() == refs.len() { Vec::new() } else { moved }
+    Ok(if moved.len() == refs.len() { Vec::new() } else { moved })
 }
 
 /// Where `before` had each derived point held by a Fix (a line's midpoint, an arc's end), for the
@@ -612,7 +612,7 @@ pub fn edited_points(d: &Drawing, before: &Drawing, h: Handle) -> Vec<GeomRef> {
 /// A Fix on a derived point anchors it where it is when the system is built, and
 /// [`restore_fixed`] has no parameters to put back: without this, an edit that moves the point
 /// would leave the Fix satisfied at the new place.
-pub fn moved_anchors(d: &Drawing, before: &Drawing) -> Vec<(u32, Vec2)> {
+pub fn moved_anchors(d: &Drawing, before: &Drawing) -> Result<Vec<(u32, Vec2)>, crate::SolveError> {
     let fixes: Vec<(u32, GeomRef)> = d
         .constraints
         .iter()
@@ -623,10 +623,10 @@ pub fn moved_anchors(d: &Drawing, before: &Drawing) -> Vec<(u32, Vec2)> {
         })
         .collect();
     if fixes.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let handles: Vec<Handle> = fixes.iter().map(|(_, r)| r.handle).collect();
-    let (now, old) = (Model::build(d, &handles), Model::build(before, &handles));
+    let (now, old) = (Model::build(d, &handles)?, Model::build(before, &handles)?);
     let tol = scale_tol(&old.x0);
     let mut out = Vec::new();
     for (id, r) in fixes {
@@ -640,14 +640,14 @@ pub fn moved_anchors(d: &Drawing, before: &Drawing) -> Vec<(u32, Vec2)> {
             out.push((id, a));
         }
     }
-    out
+    Ok(out)
 }
 
 /// True when every interpretable constraint holds at the current geometry.
-pub fn all_satisfied(d: &Drawing) -> bool {
+pub fn all_satisfied(d: &Drawing) -> Result<bool, crate::SolveError> {
     let handles: Vec<Handle> = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)).collect();
-    let tol = scale_tol(&Model::build(d, &handles).x0) * 10.0;
-    residuals(d).iter().all(|(_, r)| r.is_none_or(|v| v <= tol))
+    let tol = scale_tol(&Model::build(d, &handles)?.x0) * 10.0;
+    Ok(residuals(d)?.iter().all(|(_, r)| r.is_none_or(|v| v <= tol)))
 }
 
 /// Check that a constraint's references make sense for its type.
@@ -661,7 +661,7 @@ pub fn validate(d: &Drawing, c: &Constraint) -> Result<(), String> {
             _ => {}
         }
     }
-    let mut model = Model::build(d, &handles);
+    let mut model = Model::build(d, &handles).map_err(|e| e.to_string())?;
     interpret(c, &mut model, 1.0).map(|_| ())
 }
 
@@ -670,7 +670,7 @@ pub fn measure(d: &Drawing, kind: ConstraintKind, refs: &[GeomRef]) -> Result<f6
     require_legacy_inputs(d, refs.iter().map(|r| r.handle)).map_err(|e| e.to_string())?;
     let c = Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() };
     let handles: Vec<Handle> = refs.iter().map(|r| r.handle).collect();
-    let mut model = Model::build(d, &handles);
+    let mut model = Model::build(d, &handles).map_err(|e| e.to_string())?;
     let b = interpret(&c, &mut model, 1.0)?;
     Ok(b.measure(&model, &model.x0))
 }
@@ -927,14 +927,14 @@ pub struct Glyph {
 }
 
 /// Glyph anchors for every constraint (for the constraint bars / dynamic constraints UI).
-pub fn glyphs(d: &Drawing) -> Vec<Glyph> {
+pub fn glyphs(d: &Drawing) -> Result<Vec<Glyph>, crate::SolveError> {
     let handles: Vec<Handle> = d.constraints.iter().flat_map(|c| c.refs.iter().map(|r| r.handle)).collect();
-    let model = Model::build(d, &handles);
+    let model = Model::build(d, &handles)?;
     let x = &model.x0;
     let tol = scale_tol(x) * 10.0;
-    let res: HashMap<u32, Option<f64>> = residuals(d).into_iter().collect();
+    let res: HashMap<u32, Option<f64>> = residuals(d)?.into_iter().collect();
     let mut e = env(d);
-    d.constraints
+    Ok(d.constraints
         .iter()
         .take(MAX_CONSTRAINTS)
         .map(|c| {
@@ -961,7 +961,7 @@ pub fn glyphs(d: &Drawing) -> Vec<Glyph> {
                 satisfied: res.get(&c.id).copied().flatten().is_some_and(|v| v <= tol),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]

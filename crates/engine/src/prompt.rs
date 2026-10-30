@@ -1,6 +1,6 @@
 //! Interactive commands: prompts, inputs and the command-line coordinate grammar.
 
-use cadcraft_doc::{EntityKind, Handle};
+use cadcraft_doc::{Entity, EntityKind, Handle};
 use cadcraft_geom::{Mat3, Vec2};
 use serde::Serialize;
 
@@ -252,7 +252,7 @@ pub struct Drag {
     pub matrix: Mat3,
     /// Rubber-band geometry drawn as well (the base-to-cursor line), and dragged objects the
     /// matrix can't draw (text MIRROR keeps readable), already transformed.
-    pub extra: Vec<EntityKind>,
+    pub extra: Vec<Entity>,
     /// The dragged objects are the clipboard's ([`Session::clipboard`]), not `handles`.
     pub clipboard: bool,
 }

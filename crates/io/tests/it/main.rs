@@ -28,6 +28,7 @@ mod dimstyle_fidelity;
 mod dimstyle_vars_roundtrip;
 mod dimtfill_roundtrip;
 mod drafting_spacing;
+mod dstyle_order;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,6 +51,7 @@ mod foreign_passthrough;
 mod geometry_snapshot;
 mod groups_roundtrip;
 mod handle_collision;
+mod hatch_angles_edit;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
 mod hatch_exact_edges;
@@ -64,6 +66,7 @@ mod layout_canonical;
 mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;
+mod leader_links_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod legacy_text_flags;
 mod low_handseed;
@@ -76,6 +79,7 @@ mod mleader_roots;
 mod mleader_roundtrip;
 mod mline_dictionary_names;
 mod mline_roundtrip;
+mod mline_vectors_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_layout_plot_type;
 mod mtext_columns_roundtrip;
@@ -135,6 +139,7 @@ mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
+mod wipeout_image_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_aci_fallback;
 #[cfg(not(target_arch = "wasm32"))]

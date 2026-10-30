@@ -38,7 +38,7 @@ pub fn dimension_layout(
             style: style.text_style.clone(),
             contents: g.mtext_contents(),
         }),
-        elevation: local.defpt.z,
+        elevation: local.local_picture_elevation(),
     })
 }
 

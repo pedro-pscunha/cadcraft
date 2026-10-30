@@ -61,6 +61,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         spline: false,
         style: st,
         frame: None,
+        links: Default::default(),
     }))?;
     let mut out = vec![h.hex()];
     if let (Some(t), Some(last)) = (str_param(p, "text"), pts.last()) {

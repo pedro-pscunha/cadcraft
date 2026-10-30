@@ -39,6 +39,10 @@ fn a_legacy_insert_with_a_canonical_child_refuses_in_both_constraint_orders() {
         let (h1, p1, h2, p2) = if insert_first { (insert, "v0", line, "start") } else { (line, "start", insert, "v0") };
         let error = session.execute("gccoincident", &json!({"h1":h1.hex(),"p1":p1,"h2":h2.hex(),"p2":p2})).unwrap_err();
         assert!(matches!(error, cadcraft_engine::EngineError::Constraint(cadcraft_constraints::SolveError::CanonicalGeometry { .. })), "{error}");
+        let error = session.execute("autoconstrain", &json!({"handles":[h1.hex(),h2.hex()]})).unwrap_err();
+        assert!(matches!(error, cadcraft_engine::EngineError::Constraint(cadcraft_constraints::SolveError::CanonicalGeometry { .. })), "{error}");
+        assert!(error.to_string().contains("canonical geometry"), "{error}");
+        assert!(error.to_string().contains("Nothing was changed"), "{error}");
         let after = session.doc().unwrap();
         assert!(after.model.same_as(&before.model));
         assert_eq!(after.constraints, before.constraints);

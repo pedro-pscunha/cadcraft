@@ -173,6 +173,35 @@ pub struct MLineVertex {
     /// made by MLEDIT), as the record held them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fills: Vec<Vec<f64>>,
+    /// A legacy multiline's direction and miter at this vertex as its record held them, with the point they were read at (see
+    /// [`MLine::source_vectors`]). `None` for a canonical vertex (its `frame` holds them) and a vertex made here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vectors: Option<MLineVectors>,
+}
+
+/// The direction of the segment that starts at a vertex (DXF 12) and its miter (13), both unit vectors, and the vertex point
+/// (11) they were read at.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MLineVectors {
+    pub p: Vec3,
+    pub dir: Vec3,
+    pub miter: Vec3,
+}
+
+impl MLine {
+    /// The source direction and miter of every vertex in XY, while they still describe the multiline: each vertex still is at the
+    /// point they were read at and has them. `None` once a vertex moved, was added or was removed; the writer then computes them
+    /// from the points.
+    pub fn source_vectors(&self) -> Option<Vec<(Vec2, Vec2)>> {
+        self.vertices
+            .iter()
+            .map(|v| {
+                let s = v.vectors.filter(|s| s.p == v.p)?;
+                (s.dir.xy().len() > 1e-12 && s.miter.xy().len() > 1e-12).then(|| (s.dir.xy().normalized(), s.miter.xy().normalized()))
+            })
+            .collect()
+    }
 }
 
 /// What a canonical MLINE holds at a vertex, as its record does (DXF groups 12, 13, 74 and 41): the direction of the
@@ -188,7 +217,7 @@ pub struct MLineVertexFrame {
 
 impl MLineVertex {
     pub fn new(p: Vec3) -> Self {
-        MLineVertex { p, cuts: Vec::new(), frame: None, fills: Vec::new() }
+        MLineVertex { p, cuts: Vec::new(), frame: None, fills: Vec::new(), vectors: None }
     }
 }
 

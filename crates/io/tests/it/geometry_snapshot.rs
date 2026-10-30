@@ -287,7 +287,7 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
             assert_eq!(got.iter().filter(|t| t.code == code).count(), 1, "group {code} once: {got:?}");
         }
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3);
-        // A vertex edit writes the model: its vertices once and no plane from the source.
+        // A vertex edit writes the model: its vertices once, and the plane, direction, offsets and sizes the leader keeps.
         let mut d = d;
         let h = first_handle(&d);
         d.modify_entity(h, |e| {
@@ -298,7 +298,9 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
         .unwrap();
         let got = record(&cadcraft_io::write_dxf(&d), "LEADER");
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3, "{got:?}");
-        assert!(!got.iter().any(|t| (210..=213).contains(&t.code)), "{got:?}");
+        for code in [40, 41, 210, 211, 212, 213] {
+            assert_eq!(got.iter().filter(|t| t.code == code).count(), 1, "group {code} once after the edit: {got:?}");
+        }
     }
 }
 
@@ -458,7 +460,7 @@ fn dimensions_keep_their_plane_and_definition_points_through_every_save() {
 }
 
 #[test]
-fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
+fn dimension_text_and_point_edits_keep_the_source_plane() {
     let own = "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25";
     let source = dxf(&[&dimension(33, PLANES[0], own)]);
     let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
@@ -479,7 +481,10 @@ fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
     })
     .unwrap();
     let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
-    assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
+    assert_eq!(bits(&got, 210), vec![0.0f64.to_bits()]);
+    assert_eq!(bits(&got, 220), vec![0.0f64.to_bits()]);
+    assert_eq!(bits(&got, 230), vec![(-1.0f64).to_bits()]);
+    assert_eq!(bits(&got, 14), vec![9.5f64.to_bits()]);
 }
 
 /// A drawing saved as 2018 DXF: the version with a native MULTILEADER.

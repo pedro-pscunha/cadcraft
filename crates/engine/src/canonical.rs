@@ -266,8 +266,85 @@ fn world_point(w: &WorldPrimitive, p: Vec2, tol: f64) -> Option<Vec3> {
             let point = at(t);
             (point.xy().dist(p) <= tol).then_some(point)
         }
-        // A spline and a text have no WCS point to give back here.
-        WorldPrimitive::Spline { .. } | WorldPrimitive::Text(_) | WorldPrimitive::Fill(_) => None,
+        WorldPrimitive::Spline { degree, knots, control, weights } => spline_point(*degree, knots, control, weights, p, tol),
+        // A text and a fill have no single WCS point at a plan-view point.
+        WorldPrimitive::Text(_) | WorldPrimitive::Fill(_) => None,
+    }
+}
+
+/// The WCS point of a (rational) B-spline whose XY is nearest `p`, when it is within `tol`. Z is evaluated as a second spline over the
+/// same knots and weights (the Z of the control points on the first axis), which is the Z of the same rational curve.
+fn spline_point(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], p: Vec2, tol: f64) -> Option<Vec3> {
+    let plan = cadcraft_geom::Spline {
+        degree,
+        knots: knots.to_vec(),
+        control: control.iter().map(|c| c.xy()).collect(),
+        weights: weights.to_vec(),
+        ..Default::default()
+    };
+    if !plan.is_valid() {
+        return None;
+    }
+    let height = cadcraft_geom::Spline { control: control.iter().map(|c| Vec2::new(c.z, 0.0)).collect(), ..plan.clone() };
+    let (lo, hi) = plan.domain();
+    if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
+        return None;
+    }
+    let n = (control.len() * 32).max(256);
+    let (mut best_t, mut best) = (lo, f64::INFINITY);
+    for i in 0..=n {
+        let t = lo + (hi - lo) * i as f64 / n as f64;
+        let d = plan.eval(t).dist(p);
+        if d < best {
+            (best_t, best) = (t, d);
+        }
+    }
+    // Refine around the best sample (the curve is smooth between samples; a ternary search finds the local minimum).
+    let step = (hi - lo) / n as f64;
+    let (mut a, mut b) = ((best_t - step).max(lo), (best_t + step).min(hi));
+    for _ in 0..60 {
+        let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
+        if plan.eval(m1).dist(p) < plan.eval(m2).dist(p) {
+            b = m2;
+        } else {
+            a = m1;
+        }
+    }
+    let t = (a + b) / 2.0;
+    let at = plan.eval(t);
+    (at.dist(p) <= tol).then(|| Vec3::new(at.x, at.y, height.eval(t).x))
+}
+
+/// What a plan-view sample of a canonical entity finds.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum WorldSample {
+    /// The WCS point of the geometry under the sample.
+    Hit(Vec3),
+    /// Nothing of the entity is under the sample.
+    Miss,
+    /// Parts of the entity at the same plan-view point have different Z values.
+    Ambiguous,
+    /// The geometry has no single WCS point there (text, a filled area), or no world form at all.
+    Unsupported(&'static str),
+}
+
+impl Flat {
+    /// The WCS point under the plan-view point `p` within `tol`, or why there is none.
+    pub fn sample(&self, p: Vec2, tol: f64) -> WorldSample {
+        if self.refused {
+            return WorldSample::Unsupported("its geometry has no world form");
+        }
+        let mut points = self.world_points(p, tol);
+        if points.is_empty() {
+            return if self.covers(p) { WorldSample::Unsupported("text and filled areas have no single world point") } else { WorldSample::Miss };
+        }
+        points.sort_by(|a, b| a.xy().dist(p).total_cmp(&b.xy().dist(p)));
+        let nearest = points[0].xy().dist(p);
+        let same: Vec<f64> = points.iter().filter(|q| q.xy().dist(p) <= nearest + tol).map(|q| q.z).collect();
+        if same.iter().any(|z| (z - points[0].z).abs() > tol) {
+            return WorldSample::Ambiguous;
+        }
+        WorldSample::Hit(points[0])
     }
 }
 
@@ -339,5 +416,46 @@ impl Flat {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(a: (f64, f64, f64), b: (f64, f64, f64)) -> WorldPrimitive {
+        WorldPrimitive::Line { a: Vec3::new(a.0, a.1, a.2), b: Vec3::new(b.0, b.1, b.2) }
+    }
+
+    #[test]
+    fn a_sample_says_hit_miss_ambiguous_or_unsupported() {
+        let flat = Flat { world: vec![line((0.0, 0.0, 0.0), (10.0, 0.0, 4.0))], ..Flat::default() };
+        assert_eq!(flat.sample(Vec2::new(5.0, 0.0), 1e-6), WorldSample::Hit(Vec3::new(5.0, 0.0, 2.0)));
+        assert_eq!(flat.sample(Vec2::new(5.0, 3.0), 1e-6), WorldSample::Miss);
+        // Two parts that cross in the plan view at different heights have no single Z there.
+        let crossing = Flat { world: vec![line((0.0, 0.0, 0.0), (10.0, 0.0, 0.0)), line((5.0, -5.0, 3.0), (5.0, 5.0, 3.0))], ..Flat::default() };
+        assert_eq!(crossing.sample(Vec2::new(5.0, 0.0), 1e-6), WorldSample::Ambiguous);
+        // Where they agree, it is a hit.
+        let touching = Flat { world: vec![line((0.0, 0.0, 3.0), (10.0, 0.0, 3.0)), line((5.0, -5.0, 3.0), (5.0, 5.0, 3.0))], ..Flat::default() };
+        assert_eq!(touching.sample(Vec2::new(5.0, 0.0), 1e-6), WorldSample::Hit(Vec3::new(5.0, 0.0, 3.0)));
+        // A refused geometry has no world form.
+        assert!(matches!(Flat { refused: true, ..Flat::default() }.sample(Vec2::ZERO, 1.0), WorldSample::Unsupported(_)));
+    }
+
+    #[test]
+    fn a_spatial_spline_gives_its_z_at_a_plan_view_point() {
+        // Three control points on the line y = 0 with Z equal to X: the rational curve keeps Z = X at every point.
+        let spline = WorldPrimitive::Spline {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            control: vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 5.0), Vec3::new(10.0, 0.0, 10.0)],
+            weights: Vec::new(),
+        };
+        let flat = Flat { world: vec![spline], ..Flat::default() };
+        for x in [1.0, 4.0, 7.5] {
+            let WorldSample::Hit(w) = flat.sample(Vec2::new(x, 0.0), 1e-6) else { panic!("no hit at {x}") };
+            assert!((w.z - x).abs() < 1e-6, "z {} at x {x}", w.z);
+        }
+        assert_eq!(flat.sample(Vec2::new(4.0, 2.0), 1e-6), WorldSample::Miss);
     }
 }

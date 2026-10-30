@@ -1,7 +1,7 @@
 //! DIMTEDIT at the command line: "Select dimension", then a new text location or
 //! Left/Right/Center/Home/Angle. Each answer runs the JSON form on the picked dimension.
 
-use cadcraft_doc::{EntityKind, Handle};
+use cadcraft_doc::{Entity, EntityKind, Handle};
 use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
@@ -92,18 +92,19 @@ impl Interactive for TEditM {
         }
     }
     /// The text follows the cursor.
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         if self.asking_angle {
             return Vec::new();
         }
-        let Some(EntityKind::Dimension(mut d)) = self.dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) else { return Vec::new() };
+        let Some(mut entity) = self.dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| (**e).clone())) else { return Vec::new() };
+        let EntityKind::Dimension(d) = &mut entity.kind else { return Vec::new() };
         d.text_mid = v3(c);
         d.user_text_pos = true;
         if let Ok(doc) = s.doc() {
             let st = doc.dim_style(&d.style).cloned().unwrap_or_default().with_overrides(&d.overrides);
-            st.follow_text(&mut d, doc.header.f64("DIMSCALE", 1.0));
+            st.follow_text(d, doc.header.f64("DIMSCALE", 1.0));
         }
         d.block = None;
-        vec![EntityKind::Dimension(d)]
+        vec![entity]
     }
 }

@@ -161,13 +161,41 @@ impl Interactive for NcopyM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, _s: &Session, c: Vec2) -> Vec<Entity> {
         let Some(b) = self.base else { return Vec::new() };
         let m = Mat3::translate(c - b);
-        self.items
-            .iter()
-            .take(500)
-            .filter_map(|entity| entity.entity.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
-            .collect()
+        self.items.iter().take(500).filter_map(|entity| entity.entity.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::{Circle, GeometryRevision};
+    use cadcraft_geom::{OcsFrame, Vec3};
+
+    #[test]
+    fn nested_copy_preview_keeps_the_leaf_revision_and_plane() {
+        for canonical in [false, true] {
+            let mut entity = Entity::new(Handle(0x100), EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 5.0), radius: 4.0 }));
+            if canonical {
+                entity.geometry_revision = GeometryRevision::CanonicalV2;
+            }
+            entity.common.extrusion = Vec3::new(0.0, 3.0, 4.0);
+            let common = entity.common.clone();
+            let machine =
+                NcopyM { items: vec![NestedLeaf { entity, occurrence: vec![Handle(0x200)] }], selecting_done: true, base: Some(Vec2::ZERO) };
+            let preview = machine.preview_objects(&Session::new(), Vec2::new(3.0, 2.0));
+            let entity = &preview[0];
+            assert_eq!(entity.geometry_revision, if canonical { GeometryRevision::CanonicalV2 } else { GeometryRevision::LegacyProjectedV1 });
+            assert_eq!(entity.common, common);
+            let center = match &entity.kind {
+                EntityKind::Circle(circle) if canonical => OcsFrame::new(common.extrusion).map(|frame| frame.to_world(circle.center)),
+                EntityKind::Circle(circle) => Some(circle.center),
+                _ => None,
+            };
+            let want = if canonical { Vec3::new(2.0, 3.4, 5.2) } else { Vec3::new(4.0, 4.0, 5.0) };
+            assert!(center.is_some_and(|center| (center - want).len() < 1e-9));
+        }
     }
 }
