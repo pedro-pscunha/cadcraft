@@ -5,8 +5,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::Handle;
 use crate::foreign::ForeignKey;
+use crate::{Handle, RawTag};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SourceSymbols {
@@ -24,6 +24,12 @@ pub struct SourceSymbols {
     pub block_refs: BTreeMap<String, Vec<Handle>>,
     /// The upper-case names of the layouts the file gave viewports but no paper-space viewport (id 1): a save does not add one.
     pub layouts_without_sheet: BTreeSet<String>,
+    /// The CLASS records of the file in its order, with the groups the writer repeats (1 name, 2 C++ name, 3 application, 90 proxy
+    /// flags, 280, 281): a save keeps the application and the proxy flags AutoCAD gave each class, and the classes no object uses.
+    pub classes: Vec<Vec<RawTag>>,
+    /// The persistent reactors of each entity that had two or more, in the order the file listed them (AutoCAD notifies them in
+    /// that order, and its own save keeps it).
+    pub reactor_order: BTreeMap<Handle, Vec<Handle>>,
 }
 
 impl SourceSymbols {

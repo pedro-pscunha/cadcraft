@@ -406,6 +406,63 @@ fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
     }
 }
 
+/// Remember the order of the persistent reactors of the entities that have more than one.
+fn keep_reactor_order(d: &mut Drawing, blocks: &Recs, entities: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (_, _, t) in blocks.iter().chain(entities).filter(|(kind, _, _)| !matches!(kind.as_str(), "BLOCK" | "ENDBLK")) {
+        let h = head(t);
+        let order: Vec<Handle> = h.reactors.iter().filter_map(|r| handle(r)).collect();
+        if let (Some(own), true) = (h.handle.as_deref().and_then(handle), order.len() >= 2) {
+            source.reactor_order.entry(own).or_insert(order);
+        }
+    }
+}
+
+/// Put the persistent reactors of each entity in the order the file listed them, the ones it did not have after them.
+pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
+    if d.source_symbols.reactor_order.is_empty() {
+        return;
+    }
+    let mut section = String::new();
+    let mut opening = false;
+    let mut i = 0;
+    while i < tags.len() {
+        let t = &tags[i];
+        if t.code == 0 {
+            match t.str().as_str() {
+                "SECTION" => opening = true,
+                "ENDSEC" => section.clear(),
+                _ => {}
+            }
+        } else if opening && t.code == 2 {
+            section = t.str();
+            opening = false;
+        }
+        let entity_section = matches!(section.as_str(), "ENTITIES" | "BLOCKS");
+        if entity_section
+            && t.code == 5
+            && tags.get(i + 1).is_some_and(|n| n.code == 102 && n.str().trim() == "{ACAD_REACTORS")
+            && let Some(source) = handle(&t.str()).and_then(|h| d.source_symbols.reactor_order.get(&h))
+        {
+            let from = i + 2;
+            let len = tags[from..].iter().take_while(|g| g.code == 330).count();
+            tags[from..from + len].sort_by_key(|g| handle(&g.str()).and_then(|h| source.iter().position(|s| *s == h)).unwrap_or(usize::MAX));
+        }
+        i += 1;
+    }
+}
+
+/// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 280 and 281), in order.
+fn keep_classes(d: &mut Drawing, classes: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (_, _, t) in classes.iter().filter(|(kind, _, _)| kind == "CLASS").take(MAX_OBJECTS) {
+        let groups: Vec<RawTag> = t.iter().filter(|g| matches!(g.code, 1 | 2 | 3 | 90 | 280 | 281)).map(raw).collect();
+        if groups.iter().any(|g| g.code == 1) {
+            source.classes.push(groups);
+        }
+    }
+}
+
 /// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -415,6 +472,41 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
         if !refs.is_empty() {
             source.block_refs.entry(up(&name)).or_insert(refs);
         }
+    }
+}
+
+/// The place of a group in the `AcDbDimension` subclass of a DIMENSION as AutoCAD reads it (DXF Reference): its version (280) first,
+/// then the block, the points, the type and presentation groups, the measurement, the text, the rotation, the normal and the style.
+/// A coordinate's x, y and z groups share the place of the first.
+fn dimension_rank(code: i32) -> usize {
+    const ORDER: [i32; 20] = [280, 2, 10, 11, 12, 70, 71, 72, 41, 42, 73, 74, 75, 1, 53, 51, 54, 210, 3, 0];
+    let base = match code {
+        20 | 30 => 10,
+        21 | 31 => 11,
+        22 | 32 => 12,
+        220 | 230 => 210,
+        c => c,
+    };
+    ORDER.iter().position(|c| *c == base).unwrap_or(ORDER.len())
+}
+
+/// Put the groups of the `AcDbDimension` subclass of every DIMENSION in AutoCAD's order. The writer and the replays of the source's
+/// groups (the versioned presentation groups, the geometry) each place theirs, and AutoCAD refuses a file whose version group (280)
+/// does not follow the subclass marker ("unexpected DXF group code: 280").
+pub(crate) fn order_dimension_groups(tags: &mut [Tag]) {
+    let mut at = 0;
+    while at < tags.len() {
+        if !(tags[at].code == 0 && tags[at].str() == "DIMENSION") {
+            at += 1;
+            continue;
+        }
+        let end = tags[at + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |n| at + 1 + n);
+        let start = tags[at..end].iter().position(|t| t.code == 100 && t.str() == "AcDbDimension").map(|n| at + n + 1);
+        if let Some(start) = start {
+            let stop = tags[start..end].iter().position(|t| t.code == 100 || t.code >= 1000).map_or(end, |n| start + n);
+            tags[start..stop].sort_by_key(|t| dimension_rank(t.code));
+        }
+        at = end;
     }
 }
 
@@ -610,6 +702,8 @@ fn symbol_flag_mask(kind: &str) -> i64 {
         "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID" => 16 | 32,
         "STYLE" => 1,
         "BLOCK" => 2,
+        // The bit that says the dimension's block is its own (32) is the file's: AutoCAD sets it on some dimensions of a block.
+        "DIMENSION" => 32,
         _ => 0,
     }
 }
@@ -647,7 +741,7 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, codes): (&str, &[i32]) = match kind {
         // The reference column height (46) and the background fill: its setting (90), colour (63, 421), box scale (45) and transparency (441).
         "MTEXT" => ("AcDbMText", &[46, 90, 63, 421, 45, 441]),
-        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
+        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280, 12, 22, 32]),
         // The clip mode of an image (290) and the null pointers a wipeout has where an image has its definition (340, 360).
         "IMAGE" => ("AcDbRasterImage", &[290]),
         "WIPEOUT" => ("AcDbWipeout", &[290, 340, 360]),
@@ -742,6 +836,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ids = identities(&tables, &blocks, &objects);
     keep_source_handles(d, &ids);
     keep_block_references(d, &tables);
+    keep_classes(d, &classes);
+    keep_reactor_order(d, &blocks, &entities);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")
@@ -1616,6 +1712,14 @@ fn public_foreign(f: &Foreign) -> Foreign {
     let kept: HashSet<String> = public.objects.iter().map(|o| up(&o.kind)).collect();
     public.classes.retain(|c| c.iter().find(|t| t.code == 1).map(|n| up(&n.value)).is_none_or(|n| !private.contains(&n) || kept.contains(&n)));
     public
+}
+
+/// The upper-case names of the classes only private DWG records use: a user DXF does not name them (the DWG bridge keeps them).
+pub(crate) fn private_classes(d: &Drawing) -> HashSet<String> {
+    let public = public_foreign(&d.foreign);
+    let name = |c: &Vec<RawTag>| c.iter().find(|t| t.code == 1).map(|n| up(&n.value));
+    let kept: HashSet<String> = public.classes.iter().filter_map(name).collect();
+    d.foreign.classes.iter().filter_map(name).filter(|n| !kept.contains(n)).collect()
 }
 
 /// The form a kept record has in a DXF of `release` (an `$ACADVER` number), for the kinds whose form depends on

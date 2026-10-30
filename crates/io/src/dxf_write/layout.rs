@@ -34,7 +34,16 @@ pub(super) fn paper_views(d: &Drawing) -> HashMap<Handle, usize> {
 pub(super) fn sheet_first(l: &Layout) -> Vec<&Entity> {
     let sheet = |e: &&Entity| matches!(&e.kind, EntityKind::Viewport(v) if v.id == 1);
     let all = || l.entities.iter().map(|e| e.as_ref());
-    all().filter(sheet).chain(all().filter(|e| !sheet(e))).collect()
+    all().filter(sheet).chain(in_handle_order(all().filter(|e| !sheet(e)))).collect()
+}
+
+/// The entities of a space in the order of their handles, which is the order AutoCAD writes them in (the order they were made in).
+/// An associative hatch's boundary objects come before it, and AutoCAD drops the association of a hatch it reads before them. The
+/// draw order is the SORTENTSTABLE's (written when the entities are not in this order), not the order of the records.
+pub(super) fn in_handle_order<'a>(entities: impl Iterator<Item = &'a Entity>) -> Vec<&'a Entity> {
+    let mut all: Vec<&Entity> = entities.collect();
+    all.sort_by_key(|e| e.handle);
+    all
 }
 
 /// The paper-space viewport (id 1) of the layout whose first viewport is `e`, if it needs one

@@ -4,7 +4,7 @@ use super::common::annotative_xdata;
 use super::ctx::{AssocObj, Ctx};
 use super::entity::{entity, hatch_reactors};
 use super::header::{code_page, header_vars};
-use super::layout::{paper_views, record_head, sheet_first, table_head, vport_table};
+use super::layout::{in_handle_order, paper_views, record_head, sheet_first, table_head, vport_table};
 use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
 use super::{
     Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup,
@@ -29,7 +29,8 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
     // in the STYLE table below: (tag position, style name, is a shape) are filled in there.
     let mut ltype_handles: HashMap<String, String> = HashMap::new();
     let mut ltype_style_refs: Vec<(usize, Option<String>, bool)> = Vec::new();
-    let th = table_head(w, "LTYPE", d.linetypes.len());
+    // AutoCAD counts the linetypes without ByBlock and ByLayer, which it keeps in the table control itself.
+    let th = table_head(w, "LTYPE", d.linetypes.len().saturating_sub(2));
     for lt in &d.linetypes {
         let h = record_head(w, "LTYPE", &th, "AcDbLinetypeTableRecord");
         ltype_handles.entry(lt.name.to_ascii_uppercase()).or_insert(h.clone());
@@ -324,7 +325,7 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     seed_pos
 }
 
-fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
+fn write_classes(w: &mut W, d: &Drawing, cx: &Ctx, every: &[&Entity]) {
     w.s(0, "SECTION");
     w.s(2, "CLASSES");
     let mut classes = vec![
@@ -355,14 +356,32 @@ fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
         classes.push(("RASTERVARIABLES", "AcDbRasterVariables", 0, false));
     }
     classes.push(("SCALE", "AcDbScale", 0, false));
+    // The file's own record of a class (its application and proxy flags) replaces ours; the classes it had that no object needs here
+    // stay too, as AutoCAD keeps them.
+    let source = |name: &str| d.source_symbols.classes.iter().find(|c| c.iter().any(|g| g.code == 1 && g.value.trim().eq_ignore_ascii_case(name)));
+    let mut written: Vec<String> = if w.dwg_bridge { Vec::new() } else { crate::dxf_raw::private_classes(d).into_iter().collect() };
     for (dxf_name, cpp, proxy, is_entity) in classes {
+        written.push(dxf_name.to_ascii_uppercase());
         w.s(0, "CLASS");
-        w.s(1, dxf_name);
-        w.s(2, cpp);
-        w.s(3, "ObjectDBX Classes");
-        w.i(90, proxy);
-        w.i(280, 0);
-        w.i(281, i64::from(is_entity));
+        match source(dxf_name) {
+            Some(c) => w.t.extend(c.iter().map(crate::dxf_raw::tag)),
+            None => {
+                w.s(1, dxf_name);
+                w.s(2, cpp);
+                w.s(3, "ObjectDBX Classes");
+                w.i(90, proxy);
+                w.i(280, 0);
+                w.i(281, i64::from(is_entity));
+            }
+        }
+    }
+    for c in &d.source_symbols.classes {
+        let Some(name) = c.iter().find(|g| g.code == 1).map(|g| g.value.trim().to_ascii_uppercase()) else { continue };
+        if !written.contains(&name) {
+            w.s(0, "CLASS");
+            w.t.extend(c.iter().map(crate::dxf_raw::tag));
+            written.push(name);
+        }
     }
     w.s(0, "ENDSEC");
 }
@@ -370,7 +389,7 @@ fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
 fn write_entities(w: &mut W, d: &Drawing, ms_br: &str, ps_brs: &[(String, String, &Layout)], cx: &Ctx) {
     w.s(0, "SECTION");
     w.s(2, "ENTITIES");
-    for e in d.model.iter() {
+    for e in in_handle_order(d.model.iter().map(|e| e.as_ref())) {
         entity(w, d, e, ms_br, false, cx);
     }
     if let Some((_, h, l)) = ps_brs.first() {
@@ -1074,13 +1093,18 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
 
     let seed_pos = write_header(&mut w, d, version, target);
 
-    write_classes(&mut w, &cx, &every);
+    write_classes(&mut w, d, &cx, &every);
 
     let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext });
 
     // BLOCK_RECORD
     let block_refs = block_references(d, &every);
-    let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());
+    // AutoCAD counts the block records without *Model_Space and *Paper_Space, which the table control keeps.
+    let th = table_head(
+        &mut w,
+        "BLOCK_RECORD",
+        (ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len()).saturating_sub(1),
+    );
     let br_rec = |w: &mut W, h: &str, name: &str, layout: Option<&str>, blk: Option<&Block>| {
         w.s(0, "BLOCK_RECORD");
         w.s(5, h);
@@ -1189,7 +1213,15 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             }
             BlockSlot::User(i) => {
                 let (n, h, b) = &user_blocks[i];
-                block(&mut w, (n, &b.description), h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
+                block(
+                    &mut w,
+                    (n, &b.description),
+                    h,
+                    b.base,
+                    if b.anonymous { 1 } else { 0 },
+                    &mut in_handle_order(b.entities.iter().map(|e| e.as_ref())).into_iter(),
+                    false,
+                );
             }
             BlockSlot::Dim(i) => {
                 let (n, h, ents) = &dim_defs[i];
@@ -1284,6 +1316,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         remove_class_instance_counts(&mut w.t);
     }
     mark_xrefs(&mut w.t, d);
+    crate::dxf_raw::order_dimension_groups(&mut w.t);
+    crate::dxf_raw::order_reactors(&mut w.t, d);
     crate::dxf_raw::restore_source_handles(&mut w.t, d);
     w.t
 }

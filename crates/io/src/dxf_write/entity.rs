@@ -552,12 +552,10 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
             DimKind::ArcLength => 1,
         };
         // Bit 32 says the dimension's block is its own; AutoCAD sets it in model and paper space, not for a dimension inside a block
-        // definition, and leaves the group out when no bit is set.
+        // definition. The group stays even at 0: AutoCAD refuses a file whose dimension lacks it while the version group (280)
+        // follows the other groups.
         let in_block = !cx.dwg_bridge && d.entity(e.handle).is_none();
-        let ty = ty | if in_block { 0 } else { 32 } | if dm.user_text_pos { 128 } else { 0 };
-        if ty != 0 || !in_block {
-            w.i(70, ty);
-        }
+        w.i(70, ty | if in_block { 0 } else { 32 } | if dm.user_text_pos { 128 } else { 0 });
         // The actual measurement (read-only in DXF): AutoLISP's entget shows it.
         w.f(42, g.measurement);
         if !dm.text.is_empty() {
