@@ -54,7 +54,7 @@ fn dwg_cmc_fallbacks_follow_the_native_nearest_color_rule() {
 }
 
 #[test]
-#[ignore = "pending acadrust: ACI fallback with true colour in DWG"]
+#[ignore = "pending acadrust: entity colour index next to a true colour (ENC)"]
 fn dwg_entity_enc_keeps_the_source_index_next_to_rgb() {
     let mut drawing = cadcraft_io::read_dxf(SOURCE.as_bytes()).unwrap();
     for _ in 0..2 {
