@@ -123,3 +123,30 @@ fn the_sort_table_keeps_its_place_among_the_entries_of_its_dictionary() {
     let names = dictionary_names(&cadcraft_io::write_dxf(&d));
     assert_eq!(names, ["ACAD_ENHANCEDBLOCK", "ACAD_SORTENTS", "AcDbDynamicBlockRoundTripPurgePreventer"]);
 }
+
+/// The handle of the SORTENTSTABLE of a written drawing and of the dictionary that holds it.
+fn table_and_dictionary(text: &str) -> Vec<(String, String)> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    sections(&tags)
+        .into_iter()
+        .filter(|s| s.name == "OBJECTS")
+        .flat_map(|s| records(&s.tags))
+        .filter(|(kind, _)| kind == "SORTENTSTABLE")
+        .map(|(_, body): (String, Vec<Tag>)| {
+            let handle = body.iter().find(|t| t.code == 5).unwrap().str();
+            let dictionary = cadcraft_doc::foreign::object_owner(body.iter().map(|t| (t.code, t.str()))).unwrap().hex();
+            (handle, dictionary)
+        })
+        .collect()
+}
+
+#[test]
+fn the_table_and_its_dictionary_keep_the_handles_of_the_file() {
+    let d = cadcraft_io::read_dxf(source(Some("331\nA1\n5\nA3\n331\nA2\n5\nA1\n331\nA3\n5\nA2\n")).as_bytes()).unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    assert_eq!(table_and_dictionary(&text), [("B0".to_string(), "B1".to_string())]);
+    // And again, when the table is the one a new order wrote.
+    let mut moved = d.clone();
+    moved.model.send_to_back(Handle(0xA4));
+    assert_eq!(table_and_dictionary(&cadcraft_io::write_dxf(&moved)), [("B0".to_string(), "B1".to_string())]);
+}
