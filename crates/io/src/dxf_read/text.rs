@@ -108,8 +108,16 @@ pub(super) fn text_from(t: &T) -> Text {
     text
 }
 
+/// The text generation flags (group 71: 2 backward, 4 upside down) of a TEXT, ATTDEF or ATTRIB: the 71 of its text part, before
+/// any attribute subclass, where a multiline attribute has its attribute type.
+pub(super) fn generation_flags(tags: &[Tag]) -> i64 {
+    let end = tags.iter().position(|t| t.code == 100 && t.str().starts_with("AcDbAttribute")).unwrap_or(tags.len());
+    tags.get(..end).unwrap_or(tags).iter().find(|t| t.code == 71).map(Tag::i64).unwrap_or(0)
+}
+
 /// A TEXT's fields as the groups hold them (OCS points, baseline angle), whatever its normal.
 pub(super) fn text_fields(t: &T) -> Text {
+    let flags = generation_flags(t.0);
     let h = match t.i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
@@ -138,8 +146,8 @@ pub(super) fn text_fields(t: &T) -> Text {
         style: t.s(7).unwrap_or_else(|| "Standard".into()),
         halign: h,
         valign: v,
-        backward: false,
-        upside_down: false,
+        backward: flags & 2 != 0,
+        upside_down: flags & 4 != 0,
     }
 }
 

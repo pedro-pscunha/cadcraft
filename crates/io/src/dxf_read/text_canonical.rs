@@ -25,13 +25,9 @@ fn normal_of(t: &T) -> Option<Vec3> {
     OcsFrame::new(n).map(|_| n)
 }
 
-/// A TEXT or an attribute with its generation flags (group 71).
+/// A TEXT or an attribute with its generation flags (group 71), read from the text part of its groups.
 fn canonical_text(own: &[Tag]) -> Text {
-    let mut text = text_fields(&T(text_part(own)));
-    let flags = T(text_part(own)).i(71).unwrap_or(0);
-    text.backward = flags & 2 != 0;
-    text.upside_down = flags & 4 != 0;
-    text
+    text_fields(&T(text_part(own)))
 }
 
 /// Multiline text with its own plane from the MTEXT groups of an MTEXT entity (`entity_normal`) or an embedded object.
