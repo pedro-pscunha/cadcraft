@@ -106,9 +106,9 @@ debug = 0
 # and legacy table fields, block cells, the DXF cell flag apart from the R2010 geometry flag, xref names and resolved bits of layers, linetypes, text styles and applications, field cells, the ENDBLK layer,
 # the planar bit of a spline read from a DWG, MULTILEADER text flow direction kept as read, VIEWPORT status derived on a DWG read as the DXF
 # reference gives it, entity ENC true-color fallback indices, duplicate-handle remapping, shape STYLE names kept as read;
-# versioned DIMENSION presentation fields, ENDBLK color and linetype scale, inactive solid-HATCH gradient data, the angular DIMENSION arc point at the entity elevation, bit 4 of a fit-point spline's DWG flags as Periodic, the viewport on bit kept when group 68 is 0; upstream main 2c436ae merged),
+# versioned DIMENSION presentation fields, ENDBLK color and linetype scale, inactive solid-HATCH gradient data, the angular DIMENSION arc point at the entity elevation, bit 4 of a fit-point spline's DWG flags as Periodic, the viewport on bit kept when group 68 is 0, no attribute flag on the model and paper space block records; upstream main 2c436ae merged),
 # until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "fea718a20147fe193a084418d3c6db5248d1b8cd" }
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "ff2f7d3e72cca09d16389c48eaeef0f7e8816cf8" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
