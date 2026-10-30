@@ -1667,8 +1667,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         .chain(xd.values().flat_map(|tags| tags.iter()))
         .filter(|t| t.code == 1001)
         .map(|t| t.value.clone())
-        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()))
-        .chain(d.registered_apps.iter().cloned());
+        // The registered names come before the roles, which only have the upper-case name: the first spelling seen is written.
+        .chain(d.registered_apps.iter().cloned())
+        .chain(f.targets.values().chain(f.records.keys()).filter(|key| key.0 == "APPID").map(|key| key.1.clone()));
     add_appids(tags, apps);
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);

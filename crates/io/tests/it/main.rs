@@ -4,6 +4,7 @@ mod acis_data_store;
 mod activation_graph;
 mod angle_header;
 mod annotative_roundtrip;
+mod appid_case;
 mod arrow_block_refs;
 mod assoc_array_roundtrip;
 mod attrib_fields_roundtrip;
