@@ -88,7 +88,7 @@ mod text;
 mod text_canonical;
 mod world;
 mod world_families;
-pub use legacy_recovery::{Promotion, promote_legacy_spline_leader};
+pub use legacy_recovery::{LoadPolicy, Promotion, apply_load_policy, promote_legacy_spline_leader};
 pub use spline_canonical::spline_transformed_canonical;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldLayout, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
