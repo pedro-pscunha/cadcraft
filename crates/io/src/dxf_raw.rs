@@ -900,7 +900,10 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 break root_key(&handle).is_some_and(|key| !modelled_key(key));
             }
             if is_xdict(current) {
-                break entries(tags).iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
+                // An extension dictionary with no entry at all is kept (AutoCAD keeps them on the objects that had one); one whose
+                // entries are all modelled is written from the model.
+                let all = entries(tags);
+                break all.is_empty() || all.iter().any(|(key, h)| !modelled_xdict_entry(key, h, modelled_assoc));
             }
             if let Some(&parent) = by_handle.get(&owner) {
                 if is_xdict(parent) && objects.get(parent).is_some_and(|object| modelled_entry(object.2, &handle)) {

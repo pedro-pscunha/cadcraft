@@ -901,6 +901,18 @@ fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
+/// The INSERTs of each block, by upper-case block name, in handle order: the `{BLKREFS` list AutoCAD keeps in a block's record.
+fn block_references(every: &[&Entity]) -> HashMap<String, Vec<Handle>> {
+    let mut refs: HashMap<String, Vec<Handle>> = HashMap::new();
+    for e in every {
+        if let EntityKind::Insert(i) = &e.kind {
+            refs.entry(i.block.to_ascii_uppercase()).or_default().push(e.handle);
+        }
+    }
+    refs.values_mut().for_each(|hs| hs.sort_unstable());
+    refs
+}
+
 pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
     let committed = written_drawing(d);
     let d: &Drawing = &committed;
@@ -1017,6 +1029,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext });
 
     // BLOCK_RECORD
+    let block_refs = block_references(&every);
     let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());
     let br_rec = |w: &mut W, h: &str, name: &str, layout: Option<&str>, blk: Option<&Block>| {
         w.s(0, "BLOCK_RECORD");
@@ -1030,6 +1043,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             for group in &p.groups {
                 w.s(310, group);
             }
+        }
+        if let Some(refs) = block_refs.get(&name.to_ascii_uppercase()) {
+            w.group("BLKREFS", 331, &refs.iter().map(|h| h.hex()).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>());
         }
         // Insertion units (70), explodability (280) and scalability (281) are AutoCAD 2007's, on every record.
         if version >= Version::R2007 || dwg_bridge {
