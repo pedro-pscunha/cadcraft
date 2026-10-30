@@ -1,8 +1,12 @@
 //! Where the file a drawing was read from kept its blocks and symbols. A block's number in an
 //! anonymous name (`*U12`, `*D3`) is its place among the block records, so a save writes the
 //! blocks in the order the file had them, and the layout blocks under the names the file gave them.
+//! A save also gives the tables, symbol records, blocks and layouts the handles the file gave them.
 
 use std::collections::BTreeMap;
+
+use crate::Handle;
+use crate::foreign::ForeignKey;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SourceSymbols {
@@ -11,6 +15,10 @@ pub struct SourceSymbols {
     pub block_order: BTreeMap<String, usize>,
     /// The block each layout had, by upper-case layout name (`*Paper_Space`, `*Paper_Space0`…).
     pub layout_blocks: BTreeMap<String, String>,
+    /// The file's handle of each table, symbol record, block, block end and dictionary entry
+    /// CADCraft writes itself, by role (see [`ForeignKey`]). A role that is not here (a record made
+    /// since) gets a new handle.
+    pub handles: BTreeMap<ForeignKey, Handle>,
 }
 
 impl SourceSymbols {

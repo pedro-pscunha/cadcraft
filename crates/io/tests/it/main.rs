@@ -117,6 +117,7 @@ mod sortents;
 mod sortents_emission;
 mod sortents_read;
 mod sortents_roundtrip;
+mod source_handles;
 mod spline_fit_data;
 mod spline_groups_roundtrip;
 mod split_entities_section;

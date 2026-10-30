@@ -395,6 +395,68 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
     out
 }
 
+/// Remember the file's handle of each role CADCraft writes itself. A role two records share (a
+/// repeated name) keeps the lowest.
+fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
+    let mut found: Vec<(Handle, &ForeignKey)> = ids.iter().filter_map(|(h, k)| Some((handle(h)?, k))).collect();
+    found.sort();
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (h, k) in found {
+        source.handles.entry(k.clone()).or_insert(h);
+    }
+}
+
+/// Give the written tables, symbol records, blocks and dictionary entries the handles the file
+/// the drawing came from gave them, wherever a group names one: the written handle of a role the
+/// file had becomes the file's, unless another record of the written file already has it. A role
+/// the file did not have keeps its new handle.
+pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
+    if d.source_symbols.handles.is_empty() {
+        return;
+    }
+    let recs = written_records(tags);
+    let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
+    let by_sec = |name: &str| -> Recs {
+        recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
+    };
+    let ids = identities(&by_sec("TABLES"), &by_sec("BLOCKS"), &by_sec("OBJECTS"));
+    let used: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
+    let renamed: HashMap<String, String> = ids
+        .iter()
+        .filter_map(|(written, role)| {
+            let old = d.source_symbols.handles.get(role)?.hex();
+            (norm(written) != old && !used.contains(&old)).then(|| (norm(written), old))
+        })
+        .collect();
+    if renamed.is_empty() {
+        return;
+    }
+    let mut section = String::new();
+    let mut opening = false;
+    for t in tags.iter_mut() {
+        if t.code == 0 {
+            match t.str().as_str() {
+                "SECTION" => opening = true,
+                "ENDSEC" => section.clear(),
+                _ => {}
+            }
+            continue;
+        }
+        if opening && t.code == 2 {
+            section = t.str();
+            opening = false;
+            continue;
+        }
+        // The header's group 5 is the next free handle, not a record's.
+        if !(is_pointer(t.code) || matches!(t.code, 5 | 105) && section != "HEADER") {
+            continue;
+        }
+        if let Some(new) = renamed.get(&norm(&t.str())) {
+            *t = Tag::s(t.code, new.clone());
+        }
+    }
+}
+
 /// Other applications' xdata of a record of type `kind`: whole applications, each with valid
 /// groups (codes 1000 and up, balanced `1002` braces), up to [`MAX_XDATA_GROUPS`].
 fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
@@ -629,6 +691,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &objects);
+    keep_source_handles(d, &ids);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")

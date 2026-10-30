@@ -1251,6 +1251,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         remove_class_instance_counts(&mut w.t);
     }
     mark_xrefs(&mut w.t, d);
+    crate::dxf_raw::restore_source_handles(&mut w.t, d);
     w.t
 }
 
