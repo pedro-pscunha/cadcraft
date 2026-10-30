@@ -547,7 +547,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     if matches!(kind, "BLOCK" | "ENDBLK") {
         x.props.extend(tags.iter().find(|t| t.code == 8).map(raw));
-        x.props.extend(entity_groups(tags).iter().filter(|t| matches!(t.code, 48 | 62)).map(raw));
+        x.props.extend(entity_groups(tags).iter().filter(|t| matches!(t.code, 6 | 48 | 62 | 370 | 440)).map(raw));
     }
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));

@@ -11,6 +11,7 @@ mod attrib_handles;
 mod attrib_modes;
 mod attrib_props;
 mod block_entity_paper_flag;
+mod block_entity_properties;
 mod block_expansion;
 mod block_order;
 mod block_references;
