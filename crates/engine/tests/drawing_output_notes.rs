@@ -3,7 +3,7 @@ use cadcraft_engine::cmd::file::{IoHooks, set_io, set_write_noted};
 use serde_json::json;
 
 #[test]
-fn exports_and_layout_templates_report_real_dwg_omissions() {
+fn exports_and_layout_templates_refuse_a_dwg_that_would_omit_an_object() {
     set_io(IoHooks {
         read: |bytes, path| cadcraft_io::read(bytes, path).map_err(|e| e.to_string()),
         write: |d, path| cadcraft_io::write(d, path).map_err(|e| e.to_string()),
@@ -22,10 +22,8 @@ fn exports_and_layout_templates_report_real_dwg_omissions() {
         ("export", json!({"format": "dwg", "path": path})),
         ("layout.saveas", json!({"name": layout, "path": path})),
     ] {
-        session.log.clear();
-        let result = session.execute(command, &params).unwrap();
-        assert!(result["warnings"].as_array().unwrap().iter().any(|note| note.as_str().unwrap().contains("DWG: not saved: TESTCLASS")), "{command}");
-        assert!(session.log.iter().any(|line| line.contains("DWG: not saved: TESTCLASS")), "{command}: session log");
+        let error = session.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("DWG save refused") && error.contains("TESTCLASS (AA)"), "{command}: {error}");
+        assert!(!path.exists(), "{command}: a refused save writes no file");
     }
-    std::fs::remove_file(path).unwrap();
 }

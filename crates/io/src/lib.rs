@@ -18,6 +18,7 @@ mod dxf_write;
 mod dxf_xref;
 pub mod pdf;
 pub mod plotter;
+mod raw_preservation;
 pub mod svg;
 mod svg_read;
 
@@ -58,6 +59,8 @@ pub enum IoError {
     Format(String),
     #[error("unsupported file type `{0}`")]
     Unsupported(String),
+    #[error("Save refused for raw unit {unit}: {record} ({handle}), field {field}: {reason}")]
+    RawPreservation { unit: cadcraft_doc::Handle, record: String, handle: cadcraft_doc::Handle, field: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, IoError>;
@@ -67,19 +70,24 @@ fn ext(name: impl AsRef<Path>) -> String {
 }
 
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
-/// (SVG and gzip-compressed SVGZ).
+/// (SVG and gzip-compressed SVGZ). The activation policy is the environment's ([`activation::ReaderPolicy::current`]).
 pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
+    read_with_policy(bytes, name, dxf_read::current_policy()?)
+}
+
+/// [`read`] with the activation policy of the caller.
+pub fn read_with_policy(bytes: &[u8], name: impl AsRef<Path>, policy: activation::ReaderPolicy) -> Result<Drawing> {
     let name = name.as_ref();
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read_from_dwg(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        let mut d = dxf_read::read_from_dwg(&dxf, policy).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
         d.read_notes.extend(notes);
         return Ok(d);
     }
     match (Format::from_path(name), ext(name).as_str()) {
         (Some(Format::Svg | Format::Svgz), _) => svg_read::read(bytes),
-        (Some(Format::Dxf), _) => dxf_read::read(bytes),
-        (_, e) if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
+        (Some(Format::Dxf), _) => dxf_read::read_with_policy(bytes, policy),
+        (_, e) if bytes.len() > 4 => dxf_read::read_with_policy(bytes, policy).map_err(|_| IoError::Unsupported(e.to_string())),
         (_, e) => Err(IoError::Unsupported(e.to_string())),
     }
 }
@@ -97,12 +105,15 @@ pub fn write_with(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions) -> Re
     write_with_noted(d, name, opts).map(|(bytes, _)| bytes)
 }
 
-/// Like [`write_with`], with notes for every record that the writer leaves out.
+/// Like [`write_with`], with notes for unsupported DXF records. Native DWG omissions return an error.
 pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions) -> Result<(Vec<u8>, Vec<String>)> {
     let name = name.as_ref();
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match Format::from_path(name) {
         Some(Format::Dxf) => {
+            if opts.binary {
+                raw_preservation::require_ascii(d)?;
+            }
             let tags = dxf_write::tags(d, version);
             let bytes = if opts.binary {
                 cadcraft_dxf::write_binary(&tags, version.utf8())
@@ -116,17 +127,27 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
         // gradients, so a drawing from an R2000 DXF doesn't lose them by default.
         Some(Format::Dwg | Format::Dwt) if !opts.binary => {
             let version = opts.version.unwrap_or_else(|| version.max(Version::R2004));
-            let page = d.header.str("DWGCODEPAGE", "ANSI_1252");
-            let page = page.trim();
-            let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
-            let (bytes, mut notes) =
-                cadcraft_dwg::dxf_to_dwg_as_noted(&dxf_write::dwg_bridge(d, version), version.code(), source_page).map_err(IoError::Format)?;
-            notes.extend(dxf_write::omitted_notes(d, version));
-            Ok((bytes, notes))
+            write_dwg_with(d, version, |bridge, page| cadcraft_dwg::dxf_to_dwg_as_noted(bridge, version.code(), page))
         }
         _ if opts.binary => Err(IoError::Format(format!("binary output is for DXF files, not `{}`", ext(name)))),
         _ => write_framed(d, name, None).map(|bytes| (bytes, Vec::new())),
     }
+}
+
+fn write_dwg_with(
+    drawing: &Drawing,
+    version: Version,
+    encode: impl FnOnce(&[u8], Option<&str>) -> std::result::Result<(Vec<u8>, Vec<String>), String>,
+) -> Result<(Vec<u8>, Vec<String>)> {
+    let bridge = dxf_write::dwg_bridge(drawing, version);
+    let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references)?;
+    let page = drawing.header.str("DWGCODEPAGE", "ANSI_1252");
+    let page = page.trim();
+    let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
+    let (bytes, mut notes) = encode(&bridge.bytes, source_page).map_err(IoError::Format)?;
+    check.verify(&bytes)?;
+    notes.extend(dxf_write::omitted_notes(drawing, version));
+    Ok((bytes, notes))
 }
 
 /// Like [`write`], but image formats (PNG, SVG, PDF) show `window` (a model-space rectangle in

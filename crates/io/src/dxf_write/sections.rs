@@ -991,7 +991,7 @@ fn block_slots(
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
-pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
+pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> (Vec<Tag>, crate::dxf_raw::WrittenReferences) {
     let committed = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
@@ -1278,7 +1278,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     if let Some(t) = w.t.get_mut(seed_pos + 1) {
         *t = Tag::s(5, seed);
     }
-    crate::dxf_raw::finish(&mut w.t, d, dwg_bridge, target);
+    let mut references = crate::dxf_raw::finish(&mut w.t, d, dwg_bridge, target);
     // Source replay can restore newer attachment fields. Gate the final records, including bridge DXF.
     if target < Version::R2010 {
         let mut mleader = false;
@@ -1325,12 +1325,13 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         remove_class_instance_counts(&mut w.t);
     }
     mark_xrefs(&mut w.t, d);
-    crate::dxf_raw::order_subclass_groups(&mut w.t);
+    crate::dxf_raw::order_subclass_groups(&mut w.t, d);
     crate::dxf_raw::order_reactors(&mut w.t, d);
-    crate::dxf_raw::restore_source_handles(&mut w.t, d);
+    let restored = crate::dxf_raw::restore_source_handles(&mut w.t, d);
+    references.restore(&restored);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
-    w.t
+    (w.t, references)
 }
 
 /// Write DXF Reference group 91 on every CLASS record. Count records after `dxf_raw::finish`

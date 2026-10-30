@@ -57,6 +57,15 @@ impl Limits {
     pub const DEFAULT: Limits = Limits { max_dwg_bytes: 512 << 20, max_dxf_bytes: 1 << 30 };
 }
 
+/// A fresh decoder view, including identities that its DXF rendition cannot expose.
+pub struct DwgInspection {
+    pub dxf: Vec<u8>,
+    pub handles: std::collections::BTreeSet<u64>,
+    /// Model variants that expose only opaque or partial payload data.
+    pub unexposed: std::collections::BTreeSet<u64>,
+    pub notes: Vec<String>,
+}
+
 /// A byte count in megabytes for messages ("9.9 MB", "1024 MB").
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn mb(n: u64) -> String {
@@ -88,6 +97,16 @@ mod native {
     /// file, and the notes say how many were skipped and of which types, so a partial read never
     /// passes for a complete one.
     pub fn dwg_to_dxf_noted(bytes: &[u8], limits: Limits) -> Result<(Vec<u8>, Vec<String>), String> {
+        let inspection = read_dwg(bytes, limits, false)?;
+        Ok((inspection.dxf, inspection.notes))
+    }
+
+    /// Decode completed DWG bytes independently of the model that the writer used.
+    pub fn inspect_dwg(bytes: &[u8], limits: Limits) -> Result<super::DwgInspection, String> {
+        read_dwg(bytes, limits, true)
+    }
+
+    fn read_dwg(bytes: &[u8], limits: Limits, semantic: bool) -> Result<super::DwgInspection, String> {
         if bytes.len() > limits.max_dwg_bytes {
             return Err(format!("DWG: the file is {}, larger than the {} CADCraft opens", mb(bytes.len() as u64), mb(limits.max_dwg_bytes as u64)));
         }
@@ -104,6 +123,7 @@ mod native {
         }
         let mut notes = read_notes(&outcome.stats);
         let mut doc = outcome.document;
+        let (handles, unexposed) = if semantic { decoded_handles(&doc) } else { Default::default() };
         // The DXF writer writes the entities each block record lists. When a damaged record (the
         // model space's, say) loses its list, the entities it owned are read but never written,
         // and the skipped-records note doesn't count them (acadrust 0.6.8).
@@ -135,7 +155,9 @@ mod native {
         }
         let mut out = CappedWriter { buf: Vec::new(), limit: limits.max_dxf_bytes, exceeded: false };
         let written = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            acadrust::DxfWriter::new(&doc).for_dwg_bridge().keep_heavy_polylines().write_to_writer(&mut out)
+            let mut writer = acadrust::DxfWriter::new(&doc).for_dwg_bridge().keep_heavy_polylines();
+            writer.set_binary(semantic);
+            writer.write_to_writer(&mut out)
         }))
         .map_err(|_| "the DWG→DXF conversion failed on this file".to_string())?;
         if out.exceeded {
@@ -147,7 +169,63 @@ mod native {
             ));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
-        Ok((add_header_vars(out.buf, &doc.header), notes))
+        let dxf = if semantic { out.buf } else { add_header_vars(out.buf, &doc.header) };
+        Ok(super::DwgInspection { dxf, handles, unexposed, notes })
+    }
+
+    fn decoded_handles(doc: &acadrust::CadDocument) -> (std::collections::BTreeSet<u64>, std::collections::BTreeSet<u64>) {
+        use acadrust::entities::EntityType;
+        use acadrust::objects::ObjectType;
+        use acadrust::tables::TableEntry;
+        let mut handles: std::collections::BTreeSet<u64> = doc.objects.keys().map(|handle| handle.value()).collect();
+        let mut unexposed = std::collections::BTreeSet::new();
+        macro_rules! tables {
+            ($($name:ident),+ $(,)?) => { $(
+                handles.insert(doc.$name.handle().value());
+                handles.extend(doc.$name.iter().map(|record| record.handle().value()));
+            )+ };
+        }
+        tables!(layers, line_types, text_styles, block_records, dim_styles, app_ids, views, vports, ucss, vx_table);
+        handles.extend(doc.block_records.iter().flat_map(|block| [block.block_entity_handle.value(), block.block_end_handle.value()]));
+        for (handle, object) in &doc.objects {
+            if matches!(object, ObjectType::Unknown { .. } | ObjectType::Arch(_) | ObjectType::ProxyObject(_))
+                || matches!(object, ObjectType::XRecord(record) if !record.entries_complete)
+            {
+                unexposed.insert(handle.value());
+            }
+        }
+        for entity in doc.entities() {
+            handles.insert(entity.common().handle.value());
+            match entity {
+                EntityType::Insert(insert) => {
+                    handles.extend(insert.attributes.iter().map(|attribute| attribute.common.handle.value()));
+                    handles.extend(insert.seqend_handle.map(|handle| handle.value()));
+                }
+                EntityType::Polyline2D(polyline) => {
+                    handles.extend(polyline.vertices.iter().map(|vertex| vertex.handle.value()));
+                    handles.extend(polyline.seqend.iter().map(|common| common.handle.value()));
+                }
+                EntityType::Polyline3D(polyline) => {
+                    handles.extend(polyline.vertices.iter().map(|vertex| vertex.handle.value()));
+                    handles.extend(polyline.seqend.iter().map(|common| common.handle.value()));
+                }
+                EntityType::PolyfaceMesh(mesh) => {
+                    handles.extend(mesh.vertices.iter().map(|vertex| vertex.common.handle.value()));
+                    handles.extend(mesh.faces.iter().map(|face| face.common.handle.value()));
+                    handles.extend(mesh.seqend_handle.map(|handle| handle.value()));
+                }
+                EntityType::PolygonMesh(mesh) => {
+                    handles.extend(mesh.vertices.iter().map(|vertex| vertex.common.handle.value()));
+                    handles.extend(mesh.seqend.iter().map(|common| common.handle.value()));
+                }
+                EntityType::Unknown(_) | EntityType::Extended(_) => {
+                    unexposed.insert(entity.common().handle.value());
+                }
+                _ => {}
+            }
+        }
+        handles.remove(&0);
+        (handles, unexposed)
     }
 
     /// Entities that no block record lists, so the DXF writer leaves them out. Attributes and the
@@ -548,7 +626,7 @@ mod native {
         dxf_to_dwg_as_noted(dxf, version, source_code_page).map(|(bytes, _)| bytes)
     }
 
-    /// Convert DXF to DWG and report every record the writer cannot keep.
+    /// Convert DXF to DWG. Any omitted entity or object refuses the entire save with its name, handle and reason.
     pub fn dxf_to_dwg_as_noted(dxf: &[u8], version: &str, source_code_page: Option<&str>) -> Result<(Vec<u8>, Vec<String>), String> {
         let v = match version.trim().to_ascii_uppercase().as_str() {
             "AC1015" => acadrust::DxfVersion::AC1015,
@@ -628,9 +706,16 @@ mod native {
         std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
             .map_err(|_| "the DWG writer failed on this drawing".to_string())?
             .map_err(|e| format!("DWG write: {e}"))
-            .map(|(bytes, omitted)| {
-                let notes = omitted.into_iter().map(|o| format!("DWG: not saved: {} ({}): {}", o.name, o.handle, o.reason)).collect();
-                (bytes, notes)
+            .and_then(|(bytes, omitted)| {
+                if omitted.is_empty() {
+                    Ok((bytes, Vec::new()))
+                } else {
+                    let records = omitted
+                        .into_iter()
+                        .map(|record| format!("{} ({:X}): {}", record.name, record.handle.value(), record.reason))
+                        .collect::<Vec<_>>();
+                    Err(format!("DWG save refused because objects cannot be preserved: {}", records.join("; ")))
+                }
             })
     }
 
@@ -728,7 +813,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_as_noted, reform_object};
+pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_as_noted, inspect_dwg, reform_object};
 
 /// The error for a DWG version CADCraft can't write.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -740,6 +825,10 @@ fn unsupported(version: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 pub fn reform_object(_kind: &str, _tags: &[(i32, String)], _from: &str, _to: &str) -> Option<Vec<(i32, String)>> {
     None
+}
+#[cfg(target_arch = "wasm32")]
+pub fn inspect_dwg(_bytes: &[u8], _limits: Limits) -> Result<DwgInspection, String> {
+    Err("DWG files can't be opened in the web build yet; save as DXF".into())
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf(_bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -770,6 +859,35 @@ pub fn dxf_to_dwg_as_noted(_dxf: &[u8], _version: &str, _source_code_page: Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_unwritable_object_refuses_the_whole_dwg_instead_of_returning_bytes_and_notes() {
+        let dxf = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nCLASSES\n0\nCLASS\n1\nUNWRITABLE_TEST_OBJECT\n2\nAcDbUnwritableTestObject\n3\nRAW_TEST\n90\n0\n91\n2\n280\n0\n281\n0\n0\nENDSEC\n0\nSECTION\n2\nOBJECTS\n0\nUNWRITABLE_TEST_OBJECT\n5\n2A0\n330\n0\n100\nAcDbUnwritableTestObject\n1\nsynthetic source data without a DWG payload\n0\nUNWRITABLE_TEST_OBJECT\n5\n2A1\n330\n0\n100\nAcDbUnwritableTestObject\n1\nsecond synthetic object without a DWG payload\n0\nENDSEC\n0\nEOF\n";
+        let document = acadrust::DxfReader::from_reader(std::io::Cursor::new(dxf)).unwrap().read().unwrap();
+        let omitted = acadrust::DwgWriter::omitted_records(&document);
+        assert!(omitted.iter().any(|record| record.name == "UNWRITABLE_TEST_OBJECT" && record.handle.value() == 0x2A0), "{omitted:?}");
+        let result = dxf_to_dwg_as_noted(dxf, "AC1032", None);
+        assert!(result.is_err(), "an omitted object returned successful DWG bytes");
+        let error = result.unwrap_err();
+        assert!(error.contains("UNWRITABLE_TEST_OBJECT") && error.contains("2A0") && error.contains("2A1"), "{error}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn independent_inventory_includes_block_endpoints_and_table_containers() {
+        let document = acadrust::CadDocument::with_version(acadrust::DxfVersion::AC1032);
+        let bytes = acadrust::DwgWriter::write_to_vec(&document).unwrap();
+        let source = acadrust::DwgReader::from_stream(std::io::Cursor::new(&bytes)).read().unwrap();
+        let inspection = inspect_dwg(&bytes, Limits::DEFAULT).unwrap();
+        let mut expected = vec![source.layers.handle(), source.block_records.handle()];
+        expected.extend(source.block_records.iter().flat_map(|block| [block.block_entity_handle, block.block_end_handle]));
+        assert!(expected.len() >= 6);
+        for handle in expected {
+            assert_ne!(handle.value(), 0);
+            assert!(inspection.handles.contains(&handle.value()), "native target {:X} is missing", handle.value());
+        }
+    }
 
     #[test]
     fn detects_magic() {

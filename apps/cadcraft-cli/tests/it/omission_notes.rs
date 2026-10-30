@@ -1,8 +1,8 @@
-//! The direct CLI save reports objects that the DWG writer cannot write.
+//! The direct CLI save refuses a DWG that would leave out an object the DWG writer cannot write.
 use std::process::Command;
 
 #[test]
-fn run_save_reports_writer_omissions() {
+fn run_save_refuses_a_dwg_that_would_omit_an_object() {
     let dir = std::env::temp_dir().join(format!("cc-cli-omissions-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("source.dxf");
@@ -17,7 +17,8 @@ fn run_save_reports_writer_omissions() {
     let result =
         Command::new(env!("CARGO_BIN_EXE_cadcraft-cli")).args(["run", source.to_str().unwrap(), "--save", saved.to_str().unwrap()]).output().unwrap();
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(result.status.success(), "{stderr}");
-    assert!(stderr.contains("DWG: not saved: TESTCLASS"), "{stderr}");
+    assert!(!result.status.success(), "{stderr}");
+    assert!(stderr.contains("DWG save refused") && stderr.contains("TESTCLASS (AA)"), "{stderr}");
+    assert!(!saved.exists(), "a refused save writes no file");
     std::fs::remove_dir_all(dir).unwrap();
 }

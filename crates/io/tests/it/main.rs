@@ -130,6 +130,7 @@ mod polyline_owned_vertices;
 mod polyline_parent_plot_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod raw_dwg_bridge;
+mod reader_switch;
 mod region_roundtrip;
 mod roundtrip_audit;
 mod scale_list_keys;

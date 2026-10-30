@@ -962,14 +962,24 @@ fn hostile_raw_data_never_panics() {
     }
 }
 
-/// Through the DWG bridge (acadrust): what the DWG writer and reader keep of the same data.
-/// Entities and objects of custom classes, xdata on table records and blocks, entities' colour
-/// book names and reactors are not kept there (acadrust gaps); the rest is.
+/// The complete fixture refuses DWG because its custom classes have no native payload.
+/// Its writable subset still checks extension dictionaries, XRECORDs and entity xdata through two saves.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn dwg_keeps_extension_dictionaries_xrecords_and_entity_xdata() {
     let via_dwg = |d: &Drawing| cadcraft_io::read(&cadcraft_io::write(d, "x.dwg").expect("write DWG"), "x.dwg").expect("read DWG");
-    let d = via_dwg(&via_dwg(&read_dxf(fixture().as_bytes()).expect("read fixture")));
+    let mut drawing = read_dxf(fixture().as_bytes()).expect("read fixture");
+    let error = cadcraft_io::write(&drawing, "refused.dwg").expect_err("the custom objects cannot be preserved").to_string();
+    assert!(error.contains("ACME_WIDGET") && error.contains("ACME_OBJECT"), "{error}");
+    for handle in [0x30, 0x31] {
+        drawing.remove_entity(cadcraft_doc::Handle(handle)).expect("the custom entity exists");
+    }
+    std::sync::Arc::make_mut(drawing.blocks.get_mut("DOOR").expect("DOOR"))
+        .entities
+        .remove(cadcraft_doc::Handle(0x32))
+        .expect("the custom block member exists");
+    std::sync::Arc::make_mut(&mut drawing.foreign).objects.retain(|object| object.kind != "ACME_OBJECT");
+    let d = via_dwg(&via_dwg(&drawing));
     let o = Out::new(&write_dxf(&d));
     assert_eq!(o.dangling(), Vec::<String>::new());
     let line = o.handle("2A").expect("line").1;

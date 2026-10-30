@@ -67,12 +67,12 @@ const DROPPED: &[&str] = &["ACAD_PROXY_ENTITY", "LAYOUTPRINTCONFIG", "REPEAT", "
 const VERSIONS: [Version; 6] = [Version::R2000, Version::R2004, Version::R2007, Version::R2010, Version::R2013, Version::R2018];
 
 /// Whether an entity of type `dxf_type` is in the file after a DWG save at `version`.
-fn survives(dxf_type: &str, version: Version) -> bool {
+fn survives(dxf_type: &str, version: Version) -> Result<bool, cadcraft_io::IoError> {
     let text = format!("0\nSECTION\n2\nENTITIES\n0\n{dxf_type}\n5\n30\n100\nAcDbEntity\n8\n0\n0\nENDSEC\n0\nEOF\n");
     let d = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
-    let dwg = cadcraft_io::write_with(&d, "x.dwg", &SaveOptions { version: Some(version), binary: false }).unwrap();
-    let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
-    back.model.iter().chain(back.layouts.iter().flat_map(|l| l.entities.iter())).count() > 0
+    let dwg = cadcraft_io::write_with(&d, "x.dwg", &SaveOptions { version: Some(version), binary: false })?;
+    let back = cadcraft_io::read(&dwg, "x.dwg")?;
+    Ok(back.model.iter().chain(back.layouts.iter().flat_map(|l| l.entities.iter())).count() > 0)
 }
 
 fn listed(dxf_type: &str) -> bool {
@@ -83,13 +83,19 @@ fn listed(dxf_type: &str) -> bool {
 fn the_list_is_what_the_dwg_writer_writes() {
     for &t in WRITTEN {
         for v in VERSIONS {
-            assert!(survives(t, v), "{t} is not in a {v:?} DWG");
+            assert!(survives(t, v).unwrap(), "{t} is not in a {v:?} DWG");
         }
         assert!(listed(t), "{t} survives a DWG save but a save reports it as dropped");
     }
     for &t in DROPPED {
         for v in VERSIONS {
-            assert!(!survives(t, v), "{t} survives a {v:?} DWG save but is not listed");
+            match survives(t, v) {
+                Ok(kept) => assert!(!kept, "{t} survives a {v:?} DWG save but is not listed"),
+                Err(error) => {
+                    let error = error.to_string();
+                    assert!(error.contains(t) && error.contains("cannot be preserved"), "{t} {v:?}: {error}");
+                }
+            }
         }
         assert!(!listed(t), "{t} is dropped by a DWG save but listed as kept");
     }
