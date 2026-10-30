@@ -480,7 +480,17 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
     }
+    if !entity && is_dictionary(kind) {
+        x.subclass.extend(tags.iter().find(|t| t.code == 281).map(raw));
+    }
     x
+}
+
+fn source_dictionary_group(t: &Tag, extra: Option<&ForeignExtra>, dictionary: bool) -> Tag {
+    if dictionary && t.code == 281 {
+        return extra.and_then(|extra| first_group(&extra.subclass, 281)).map_or_else(|| t.clone(), tag);
+    }
+    t.clone()
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
@@ -656,7 +666,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     put_xdata(d, xdata_of);
     let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
     crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
-    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
+    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
         let x = extra(kind, t, kind == "BLOCK", false, &kept);
@@ -1204,7 +1214,9 @@ impl<'a> Extras<'a> {
             ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "ENDBLK") => None,
             ("ENTITIES" | "BLOCKS", _) => entity_extra(f, self.xd, handle(&head(body).handle?)?),
-            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
+            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) || is_dictionary(kind) => {
+                f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed)
+            }
             _ => None,
         }
     }
@@ -1742,7 +1754,8 @@ fn record(
     let h = head(b);
     // Header snap/grid edits belong only to the first active VPORT tile.
     let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
-    let replay = |p: &RawTag| !active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50);
+    let dictionary = is_dictionary(&r.kind);
+    let replay = |p: &RawTag| (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50));
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
@@ -1789,7 +1802,7 @@ fn record(
         {
             continue;
         }
-        let mut t = t.clone();
+        let mut t = source_dictionary_group(t, x, dictionary);
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
