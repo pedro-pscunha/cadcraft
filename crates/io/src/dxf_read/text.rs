@@ -123,14 +123,21 @@ pub(super) fn text_from(t: &T) -> Text {
 /// The text generation flags (group 71: 2 backward, 4 upside down) of a TEXT, ATTDEF or ATTRIB: the 71 of its text part, before
 /// any attribute subclass, where a multiline attribute has its attribute type.
 pub(super) fn generation_flags(tags: &[Tag]) -> i64 {
+    text_part(tags).iter().find(|t| t.code == 71).map(Tag::i64).unwrap_or(0)
+}
+
+/// The groups of a TEXT, ATTDEF or ATTRIB before any attribute subclass: its text part. A multiline attribute has a group 71 and
+/// a group 72 of its own after them.
+fn text_part(tags: &[Tag]) -> &[Tag] {
     let end = tags.iter().position(|t| t.code == 100 && t.str().starts_with("AcDbAttribute")).unwrap_or(tags.len());
-    tags.get(..end).unwrap_or(tags).iter().find(|t| t.code == 71).map(Tag::i64).unwrap_or(0)
+    tags.get(..end).unwrap_or(tags)
 }
 
 /// A TEXT's fields as the groups hold them (OCS points, baseline angle), whatever its normal.
 pub(super) fn text_fields(t: &T) -> Text {
     let flags = generation_flags(t.0);
-    let h = match t.i(72).unwrap_or(0) {
+    // Left justification omits group 72: the one a multiline attribute has after its type is not the text's.
+    let h = match T(text_part(t.0)).i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
         3 => HAlign::Aligned,
