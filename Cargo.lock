@@ -756,8 +756,10 @@ dependencies = [
  "quick-xml 0.42.0",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
  "tiny-skia",
+ "toml",
 ]
 
 [[package]]

@@ -29,3 +29,5 @@ acadrust = "0.6.5"
 tiny-skia = { workspace = true }
 # Reads plotted PDFs back.
 craft-pdf = { workspace = true, features = ["read"] }
+sha2 = "0.10"
+toml = "1"
