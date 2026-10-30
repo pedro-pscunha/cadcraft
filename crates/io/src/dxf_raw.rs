@@ -483,7 +483,10 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
     }
-    if !entity && symbol_flag_mask(kind) != 0 {
+    if matches!(kind, "BLOCK" | "ENDBLK") {
+        x.props.extend(tags.iter().find(|t| t.code == 8).map(raw));
+    }
+    if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
     }
     if !entity && is_dictionary(kind) {
@@ -492,16 +495,35 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
-fn symbol_flag_mask(kind: &str) -> i64 {
-    if matches!(kind, "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID") { 16 | 32 } else { 0 }
+fn nonconstant_attributes(block: &cadcraft_doc::Block) -> bool {
+    block.entities.iter().any(|entity| matches!(&entity.kind, EntityKind::AttDef(attribute) if !attribute.constant))
 }
 
-fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str) -> Tag {
+fn symbol_flag_mask(kind: &str) -> i64 {
+    match kind {
+        "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID" => 16 | 32,
+        "BLOCK" => 2,
+        _ => 0,
+    }
+}
+
+fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attributes: Option<bool>) -> Tag {
+    let mask = symbol_flag_mask(kind);
     if is_dictionary(kind) && t.code == 281 {
         return extra.and_then(|extra| first_group(&extra.subclass, 281)).map_or_else(|| t.clone(), tag);
     }
-    let mask = symbol_flag_mask(kind);
-    let source = extra.filter(|_| t.code == 70 && mask != 0).and_then(|x| first_group(&x.subclass, 70)).and_then(|t| t.value.parse::<i64>().ok());
+    if matches!(kind, "BLOCK" | "ENDBLK") && t.code == 8 {
+        return extra.and_then(|extra| first_group(&extra.props, 8)).map_or_else(|| t.clone(), tag);
+    }
+    if t.code == 70
+        && mask == 2
+        && let Some((old, current)) = extra.and_then(|extra| extra.block_attributes).zip(attributes)
+        && old != current
+    {
+        return Tag::i(70, (t.i64() & !2) | if current { 2 } else { 0 });
+    }
+    let source =
+        extra.filter(|_| t.code == 70 && mask != 0).and_then(|extra| first_group(&extra.subclass, 70)).and_then(|tag| tag.value.parse::<i64>().ok());
     source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !mask) | (source & mask)))
 }
 
@@ -678,10 +700,12 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     put_xdata(d, xdata_of);
     let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
     crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
+    let block_attributes: HashMap<_, _> = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
-    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
+    for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| matches!(k.as_str(), "BLOCK" | "ENDBLK"))).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
-        let x = extra(kind, t, kind == "BLOCK", false, &kept);
+        let mut x = extra(kind, t, kind == "BLOCK", false, &kept);
+        x.block_attributes = (kind == "BLOCK").then(|| block_attributes.get(&key.1).copied()).flatten();
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
         }
@@ -1053,6 +1077,7 @@ struct Map<'a> {
     /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
     version: u32,
     pages: HashMap<String, &'a cadcraft_doc::PageSetup>,
+    block_attributes: HashMap<String, bool>,
 }
 
 impl Map<'_> {
@@ -1224,7 +1249,7 @@ impl<'a> Extras<'a> {
             ("TABLES", "VPORT") => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
             ("TABLES", kind) => f.records.get(&(kind.to_string(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
-            ("BLOCKS", "ENDBLK") => None,
+            ("BLOCKS", "ENDBLK") => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
             ("ENTITIES" | "BLOCKS", _) => entity_extra(f, self.xd, handle(&head(body).handle?)?),
             ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) || is_dictionary(kind) => {
                 f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed)
@@ -1578,7 +1603,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
         .unwrap_or(0);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages };
+    let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages, block_attributes };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1794,8 +1820,13 @@ fn record(
     let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
     let flag_mask = symbol_flag_mask(&r.kind);
     let dictionary = is_dictionary(&r.kind);
+    let boundary = matches!(r.kind.as_str(), "BLOCK" | "ENDBLK");
+    let attributes = (r.kind == "BLOCK").then(|| val(b, 2).and_then(|name| map.block_attributes.get(&up(&name)).copied())).flatten();
     let replay = |p: &RawTag| {
-        (flag_mask == 0 || p.code != 70) && (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
+        (!boundary || p.code != 8)
+            && (flag_mask == 0 || p.code != 70)
+            && (!dictionary || p.code != 281)
+            && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
     };
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
@@ -1826,7 +1857,7 @@ fn record(
             {
                 out.push(Tag::s(430, book.clone()));
             }
-            out.extend(x.props.iter().map(|p| map.group(p)));
+            out.extend(x.props.iter().filter(|p| replay(p)).map(|p| map.group(p)));
         }
         if i == xdata_at
             && let Some(x) = x
@@ -1843,7 +1874,7 @@ fn record(
         {
             continue;
         }
-        let mut t = source_record_group(t, x, &r.kind);
+        let mut t = source_record_group(t, x, &r.kind, attributes);
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
@@ -1875,7 +1906,7 @@ fn record(
             {
                 out.push(Tag::s(430, book.clone()));
             }
-            out.extend(x.props.iter().map(|p| map.group(p)));
+            out.extend(x.props.iter().filter(|p| replay(p)).map(|p| map.group(p)));
         }
         if xdata_at == b.len() {
             out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
