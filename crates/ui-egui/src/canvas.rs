@@ -174,6 +174,11 @@ pub struct CanvasState {
 type CycleKey = (Option<String>, Option<String>, u64, u64, Vec2, f64);
 
 impl CanvasState {
+    pub(crate) fn cursor_coordinates(&self) -> Option<cadcraft_geom::Vec3> {
+        let cursor = self.cursor?;
+        Some(self.snap.filter(|hit| hit.point == cursor).and_then(|hit| hit.world).unwrap_or_else(|| cursor.to3(0.0)))
+    }
+
     fn new_geometry_refusals(&mut self) -> Vec<cadcraft_render::GeometryRefusal> {
         let generation = (self.key.0, self.list_gen, self.vp.builds);
         if self.geometry_refusal_generation == Some(generation) {
