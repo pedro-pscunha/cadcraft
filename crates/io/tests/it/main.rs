@@ -73,6 +73,7 @@ mod minsert_subclass;
 mod mleader_canonical;
 mod mleader_codes;
 mod mleader_content;
+mod mleader_entity_tail;
 mod mleader_pre2007;
 mod mleader_roots;
 mod mleader_roundtrip;
