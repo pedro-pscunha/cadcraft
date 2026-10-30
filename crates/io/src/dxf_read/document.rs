@@ -1,7 +1,7 @@
 use super::common::T;
 use super::entities::{entity_extras, entity_plot_style, entity_with_table_budget, insert_attribs, polyline_entity};
 use super::objects::{MAX_OBJECTS, Objects, SortentsTable, page_setup};
-use super::{Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
+use super::{BTreeMap, Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
 
 pub(super) fn parse_entities(
     recs: &[(String, Vec<Tag>)],
@@ -334,7 +334,15 @@ pub(super) fn shift_dimension_blocks(d: &mut Drawing, rx: &Rx) -> super::Result<
 
 /// Draw each space with a SORTENTSTABLE in sort-handle order: an entity listed in the table by
 /// its sort handle, any other by its own handle.
-pub(super) fn apply_sortents(d: &mut Drawing, objects: &Objects, rx: &Rx, paper_for: &HashMap<String, String>, first_layout: &str) {
+/// Returns the table of each space, for the save to write back ([`cadcraft_doc::foreign::Foreign::sort_tables`]).
+pub(super) fn apply_sortents(
+    d: &mut Drawing,
+    objects: &Objects,
+    rx: &Rx,
+    paper_for: &HashMap<String, String>,
+    first_layout: &str,
+) -> BTreeMap<cadcraft_doc::foreign::ForeignKey, cadcraft_doc::foreign::SortTable> {
+    let mut tables = BTreeMap::new();
     // Record order is not draw order. Unlisted entities (including a whole space with no
     // table) draw by their own handles; establish that default before explicit overrides.
     d.model.sort_by_key(|e| e.handle);
@@ -348,19 +356,21 @@ pub(super) fn apply_sortents(d: &mut Drawing, objects: &Objects, rx: &Rx, paper_
     for linked in objects.sortents(rx) {
         let Some(name) = rx.brs.get(&linked.block.hex()) else { continue };
         let up = name.to_ascii_uppercase();
-        let store = if up == "*MODEL_SPACE" {
-            &mut d.model
+        let (key, store) = if up == "*MODEL_SPACE" {
+            (("MODEL".to_string(), String::new()), &mut d.model)
         } else if up.starts_with("*PAPER_SPACE") {
             let lname = paper_for.get(&up).map(String::as_str).unwrap_or(first_layout);
             let Some(layout) = d.layouts.iter_mut().find(|l| l.name == lname) else { continue };
-            &mut layout.entities
+            (("LAYOUT".to_string(), layout.name.clone()), &mut layout.entities)
         } else {
             let Some(block) = d.blocks.get_mut(name.as_str()) else { continue };
-            &mut std::sync::Arc::make_mut(block).entities
+            (("BLOCK".to_string(), up), &mut std::sync::Arc::make_mut(block).entities)
         };
         let members = store.iter().map(|entity| entity.handle).collect();
         let table = objects.recover_sortents(linked, &members);
         let keys = table.keys(&members);
+        let entries = table.valid_entries(&members).into_iter().collect();
+        tables.insert(key, cadcraft_doc::foreign::SortTable { entries, place: objects.sortents_place(linked) });
         store.sort_by_key(|entity| keys.get(&entity.handle).copied().unwrap_or(entity.handle.0));
         if linked.handle != table.handle || keys.len() != table.entries.len() {
             notes.push(format!(
@@ -373,4 +383,5 @@ pub(super) fn apply_sortents(d: &mut Drawing, objects: &Objects, rx: &Rx, paper_
         }
     }
     d.read_notes.extend(notes);
+    tables
 }

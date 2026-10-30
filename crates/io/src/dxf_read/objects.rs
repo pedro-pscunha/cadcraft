@@ -13,15 +13,21 @@ pub(super) struct SortentsTable {
 
 impl SortentsTable {
     /// AutoCAD drops dead entries and later duplicate keys when it opens a damaged table.
-    pub(super) fn keys(&self, members: &HashSet<Handle>) -> HashMap<Handle, u64> {
-        let mut keys = HashMap::new();
+    pub(super) fn valid_entries(&self, members: &HashSet<Handle>) -> Vec<(Handle, u64)> {
+        let mut seen = HashSet::new();
         let mut used = HashSet::new();
+        let mut valid = Vec::new();
         for &(entity, key) in &self.entries {
-            if members.contains(&entity) && !keys.contains_key(&entity) && used.insert(key) {
-                keys.insert(entity, key);
+            if members.contains(&entity) && !seen.contains(&entity) && used.insert(key) {
+                seen.insert(entity);
+                valid.push((entity, key));
             }
         }
-        keys
+        valid
+    }
+
+    pub(super) fn keys(&self, members: &HashSet<Handle>) -> HashMap<Handle, u64> {
+        self.valid_entries(members).into_iter().collect()
     }
 }
 
@@ -46,8 +52,8 @@ pub(super) struct Objects {
     layout_views: Vec<(String, (Vec2, f64))>,
     /// SORTENTSTABLE candidates. Only an attached dictionary's named entry is authoritative.
     sortents: Vec<SortentsTable>,
-    /// Dictionary → (owning block record, ACAD_SORTENTS object).
-    sortents_links: HashMap<Handle, (Handle, Handle)>,
+    /// Dictionary → (owning block record, ACAD_SORTENTS object, place of the entry among the dictionary's).
+    sortents_links: HashMap<Handle, (Handle, Handle, usize)>,
     /// WIPEOUTVARIABLES: the drawing's WIPEOUTFRAME (0 = frames hidden, 1 = shown).
     wipeout_frame: Option<i64>,
 }
@@ -67,6 +73,7 @@ impl Objects {
             }
             "DICTIONARY" | "ACDBDICTIONARYWDFLT" => {
                 let mut name: Option<String> = None;
+                let mut place = 0;
                 for t in tags {
                     match t.code {
                         3 => name = Some(t.str()),
@@ -81,8 +88,9 @@ impl Objects {
                                         Handle::parse_hex(&t.str()),
                                     )
                                 {
-                                    self.sortents_links.insert(dictionary, (owner, table));
+                                    self.sortents_links.insert(dictionary, (owner, table, place));
                                 }
+                                place += 1;
                                 self.names.insert(t.str().trim().to_ascii_uppercase(), n);
                             }
                         }
@@ -113,10 +121,15 @@ impl Objects {
         }
     }
 
+    /// The place of `table`'s entry among the entries of its dictionary.
+    pub(super) fn sortents_place(&self, table: &SortentsTable) -> usize {
+        self.sortents_links.get(&table.dictionary).map_or(usize::MAX, |&(_, _, place)| place)
+    }
+
     pub(super) fn sortents<'a>(&'a self, rx: &'a Rx) -> impl Iterator<Item = &'a SortentsTable> {
         self.sortents.iter().filter(|table| {
             rx.block_xdicts.get(&table.block) == Some(&table.dictionary)
-                && self.sortents_links.get(&table.dictionary) == Some(&(table.block, table.handle))
+                && self.sortents_links.get(&table.dictionary).is_some_and(|&(block, handle, _)| (block, handle) == (table.block, table.handle))
         })
     }
 

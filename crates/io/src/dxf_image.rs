@@ -338,7 +338,16 @@ pub(crate) fn objects(p: &Plan, root: &str) -> Vec<Tag> {
     if p.is_empty() {
         return t;
     }
-    t.extend([Tag::s(0, "DICTIONARY"), Tag::s(5, &p.dict), Tag::s(330, root), Tag::s(100, "AcDbDictionary"), Tag::i(281, 1)]);
+    t.extend([
+        Tag::s(0, "DICTIONARY"),
+        Tag::s(5, &p.dict),
+        Tag::s(102, "{ACAD_REACTORS"),
+        Tag::s(330, root),
+        Tag::s(102, "}"),
+        Tag::s(330, root),
+        Tag::s(100, "AcDbDictionary"),
+        Tag::i(281, 1),
+    ]);
     for d in &p.defs {
         t.extend([Tag::s(3, &d.name), Tag::s(350, &d.handle)]);
     }

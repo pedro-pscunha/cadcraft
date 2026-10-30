@@ -1,5 +1,9 @@
 //! Explicit draw order uses the final emitted records, not pre-lowering source identities.
 
+use std::collections::BTreeSet;
+
+use cadcraft_doc::foreign::SortTable;
+
 use super::{Entity, Handle, HashMap, HashSet, Tag, W};
 
 pub(super) struct Table {
@@ -7,7 +11,10 @@ pub(super) struct Table {
     dictionary: Handle,
     new_dictionary: bool,
     handle: String,
-    order: Vec<Handle>,
+    /// Entity and sort handle, in the order the table lists them.
+    entries: Vec<(Handle, u64)>,
+    /// How many entries of its dictionary come before it.
+    place: usize,
 }
 
 /// Final records after foreign passthrough: dictionaries can be reused, and unknown entities
@@ -77,7 +84,17 @@ pub(super) fn written(w: &mut W) -> Written {
     out
 }
 
-pub(super) fn plan<'a>(w: &mut W, tables: &mut Vec<Table>, written: &Written, owner: &str, entities: impl Iterator<Item = &'a Entity>) {
+/// Plan the SORTENTSTABLE of one space. While the space draws in the order its source table gave,
+/// that table is written back as it was, an empty one included (AutoCAD keeps every table). Any
+/// other order that is not ascending by handle gets a table of its own, listed by entity handle.
+pub(super) fn plan<'a>(
+    w: &mut W,
+    tables: &mut Vec<Table>,
+    written: &Written,
+    owner: &str,
+    source: Option<&SortTable>,
+    entities: impl Iterator<Item = &'a Entity>,
+) {
     let mut order = Vec::new();
     for entity in entities {
         match w.emitted.get(&entity.handle).filter(|handles| !handles.is_empty()) {
@@ -87,14 +104,28 @@ pub(super) fn plan<'a>(w: &mut W, tables: &mut Vec<Table>, written: &Written, ow
             None => {}
         }
     }
-    if order.is_sorted() {
-        return;
-    }
+    let place = source.map_or(usize::MAX, |table| table.place);
+    let kept = source.and_then(|table| {
+        let members: BTreeSet<Handle> = order.iter().copied().collect();
+        let entries = table.restricted(&members);
+        (SortTable::draw_order(&entries, &members) == order).then_some(entries)
+    });
+    let entries = match kept {
+        Some(entries) => entries,
+        None if order.is_sorted() => return,
+        None => {
+            let mut sorted = order.clone();
+            sorted.sort_unstable();
+            let mut entries: Vec<(Handle, u64)> = order.iter().copied().zip(sorted.into_iter().map(|h| h.0)).collect();
+            entries.sort_unstable();
+            entries
+        }
+    };
     let Some(owner) = Handle::parse_hex(owner) else { return };
     let existing = written.dictionaries.get(&owner).copied();
     let dictionary = existing.map(Handle::hex).unwrap_or_else(|| w.h());
     let Some(dictionary) = Handle::parse_hex(&dictionary) else { return };
-    tables.push(Table { owner, dictionary, new_dictionary: existing.is_none(), handle: w.h(), order });
+    tables.push(Table { owner, dictionary, new_dictionary: existing.is_none(), handle: w.h(), entries, place });
 }
 
 fn objects(w: &mut W, tables: &[Table]) {
@@ -102,7 +133,7 @@ fn objects(w: &mut W, tables: &[Table]) {
         if table.new_dictionary {
             w.s(0, "DICTIONARY");
             w.s(5, table.dictionary.hex());
-            w.group("ACAD_REACTORS", 330, &[&table.owner.hex()]);
+            // AutoCAD's extension dictionaries of a block record have no reactor.
             w.s(330, table.owner.hex());
             w.s(100, "AcDbDictionary");
             w.i(280, 1);
@@ -116,11 +147,9 @@ fn objects(w: &mut W, tables: &[Table]) {
         w.s(330, table.dictionary.hex());
         w.s(100, "AcDbSortentsTable");
         w.s(330, table.owner.hex());
-        let mut sorted = table.order.clone();
-        sorted.sort_unstable();
-        for (entity, sort) in table.order.iter().zip(sorted) {
+        for (entity, sort) in &table.entries {
             w.s(331, entity.hex());
-            w.s(5, sort.hex());
+            w.s(5, Handle(*sort).hex());
         }
     }
 }
@@ -153,7 +182,9 @@ pub(super) fn attach(w: &mut W, tables: &[Table]) {
         } else if cadcraft_doc::foreign::is_dictionary(&kind)
             && let Some(table) = handle(body).and_then(|h| dictionaries.get(&h))
         {
-            let at = body.iter().position(|t| t.code == 1001).unwrap_or(body.len());
+            // Where the source listed it among the entries, else after them.
+            let end = body.iter().position(|t| t.code == 1001).unwrap_or(body.len());
+            let at = body.iter().take(end).enumerate().filter(|(_, t)| t.code == 3).nth(table.place).map_or(end, |(i, _)| i);
             inserts.entry(start + at + 1).or_default().extend([Tag::s(3, "ACAD_SORTENTS"), Tag::s(360, &table.handle)]);
         } else if kind == "ENDSEC" {
             if section == "CLASSES" && !has_class {
