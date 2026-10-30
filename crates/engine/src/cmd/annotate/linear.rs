@@ -37,7 +37,9 @@ pub(super) fn run_ordinate(s: &mut Session, p: &Value) -> Result<Value> {
 /// The last linear/aligned dimension (for CONTINUE/BASELINE).
 fn last_linear(s: &Session) -> Option<Dimension> {
     let h = s.last_dim?;
-    match &s.doc().ok()?.entity(h)?.kind {
+    let entity = s.doc().ok()?.entity(h)?;
+    entity.require_legacy_geometry().ok()?;
+    match &entity.kind {
         EntityKind::Dimension(d) if matches!(d.kind, DimKind::Linear { .. } | DimKind::Aligned) => Some(d.clone()),
         _ => None,
     }
@@ -85,6 +87,9 @@ fn chained(s: &Session, prev: &Dimension, next: Vec2, baseline: bool) -> EntityK
 pub(super) const MAX_CHAIN: usize = 100_000;
 
 fn chain_run(s: &mut Session, p: &Value, baseline: bool) -> Result<Value> {
+    if let Some(handle) = s.last_dim {
+        super::common::require_legacy_source(s, handle)?;
+    }
     let id = if baseline { "dimbaseline" } else { "dimcontinue" };
     let pts = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(id, "`points` is required"))?;
     if pts.len() > MAX_CHAIN {
@@ -330,6 +335,9 @@ impl Interactive for ChainM {
         if self.baseline { "DIMBASELINE" } else { "DIMCONTINUE" }
     }
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        if let Some(handle) = s.last_dim {
+            super::common::require_legacy_source(s, handle)?;
+        }
         if last_linear(s).is_none() {
             s.echo("No linear dimension to continue. Create one with DIMLINEAR first.");
             return Ok(Step::Done);
@@ -345,6 +353,9 @@ impl Interactive for ChainM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
+                if let Some(handle) = s.last_dim {
+                    super::common::require_legacy_source(s, handle)?;
+                }
                 let prev = last_linear(s).ok_or_else(|| EngineError::Other("no linear dimension".into()))?;
                 let k = chained(s, &prev, p, self.baseline);
                 self.created.push(add_dim(s, k)?);

@@ -184,6 +184,26 @@ fn linear_dimensions_check_an_object_source_before_projecting_it() {
 }
 
 #[test]
+fn chained_dimensions_check_the_previous_dimensions_revision() {
+    for command in ["dimcontinue", "dimbaseline"] {
+        let mut session = Session::new();
+        let source = create(&mut session, "dimlinear", json!({"p1": [0, 0], "p2": [5, 0], "at": [2, 2]}));
+        let mut control = Session::new();
+        control.open_drawing(session.doc().unwrap().clone(), "legacy dimension", None);
+        control.last_dim = Some(source);
+        control.execute(command, &json!({"points": [[10, 0]]})).unwrap();
+        install_canonical_fixture(&mut session, source);
+        session.last_dim = Some(source);
+        let before = session.doc().unwrap().model.clone();
+        let seed = session.doc().unwrap().handseed;
+        let error = session.execute(command, &json!({"points": [[10, 0]]})).unwrap_err();
+        assert!(error.to_string().contains("canonical"));
+        assert_eq!(session.doc().unwrap().model, before);
+        assert_eq!(session.doc().unwrap().handseed, seed);
+    }
+}
+
+#[test]
 fn typed_curve_tools_refuse_canonical_inputs_without_a_geometry_change() {
     let cases = [
         ("pline", json!({"points": [[0, 0], [10, 0], [10, 10]]}), "PEDIT 5,0 R\n\n"),
