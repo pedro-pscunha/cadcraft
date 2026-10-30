@@ -2,7 +2,7 @@
 
 use cadcraft_geom::{Mat3, Mat4};
 
-use super::{Common, Entity, EntityKind, GeometryRevision, MText, Text};
+use super::{Common, Entity, EntityKind, GeometryRevision, MText, Similarity, Text};
 use crate::{DocError, Result, has_finite_numbers};
 
 impl Entity {
@@ -128,7 +128,130 @@ impl Entity {
         Ok(candidate)
     }
 
+    /// Whether the kind of a canonical payload has a `transformed_canonical` hook.
+    fn has_canonical_transform(&self) -> bool {
+        matches!(
+            self.kind,
+            EntityKind::Text(_)
+                | EntityKind::MText(_)
+                | EntityKind::AttDef(_)
+                | EntityKind::Tolerance(_)
+                | EntityKind::Table(_)
+                | EntityKind::Wipeout(_)
+                | EntityKind::Helix(_)
+                | EntityKind::MLine(_)
+                | EntityKind::Hatch(_)
+                | EntityKind::Circle(_)
+                | EntityKind::Arc(_)
+                | EntityKind::LwPolyline(_)
+                | EntityKind::Solid(_)
+                | EntityKind::Trace(_)
+                | EntityKind::Spline(_)
+                | EntityKind::Leader(_)
+                | EntityKind::Dimension(_)
+        )
+    }
+
+    /// Transform a canonical payload through its family's hook: the payload, the plane normal (`Common.extrusion`) and the
+    /// thickness follow together, or the call fails with the entity as it was (the caller works on a candidate).
+    fn transform_canonical(&mut self, transform: &Mat4) -> Result<()> {
+        let normal = self.common.extrusion;
+        // Families that stay exact under a similarity also scale the thickness with it.
+        let scale = || Similarity::from_mat4(transform).map(|s| s.scale);
+        let new_normal = match &mut self.kind {
+            EntityKind::Text(t) => {
+                let (moved, n) = t.transformed_canonical(normal, transform)?;
+                *t = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::MText(t) => {
+                let (moved, n) = t.transformed_canonical(normal, transform)?;
+                *t = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::AttDef(a) => {
+                let (text, n) = a.text.transformed_canonical(normal, transform)?;
+                let multiline = a.multiline.as_ref().map(|m| m.transformed_canonical(transform)).transpose()?;
+                a.text = text;
+                a.multiline = multiline;
+                Some((n, scale()?))
+            }
+            EntityKind::Tolerance(t) => {
+                let (moved, n) = t.transformed_canonical(normal, transform)?;
+                *t = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Table(t) => {
+                let (moved, n) = t.transformed_canonical(normal, transform)?;
+                *t = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Wipeout(w) => {
+                *w = w.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::Helix(h) => {
+                *h = h.transformed_canonical(transform)?;
+                None
+            }
+            EntityKind::MLine(m) => {
+                let (moved, n) = m.transformed_canonical(normal, transform)?;
+                *m = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Hatch(h) => {
+                let (moved, n) = h.transformed_canonical(normal, transform)?;
+                *h = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Circle(c) => {
+                let (moved, n) = c.transformed_canonical(normal, transform)?;
+                *c = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Arc(a) => {
+                let (moved, n) = a.transformed_canonical(normal, transform)?;
+                *a = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::LwPolyline(p) => {
+                let (moved, n) = p.transformed_canonical(normal, transform)?;
+                *p = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Solid(s) | EntityKind::Trace(s) => {
+                let (moved, n) = s.transformed_canonical(normal, transform)?;
+                *s = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Spline(s) => {
+                let (moved, n) = super::spline_canonical::spline_transformed_canonical(s, normal, transform)?;
+                *s = moved;
+                Some((n, 1.0))
+            }
+            EntityKind::Leader(l) => {
+                let (moved, n) = l.transformed_canonical(normal, transform)?;
+                *l = moved;
+                Some((n, scale()?))
+            }
+            EntityKind::Dimension(d) => {
+                let (moved, n) = d.transformed_canonical(normal, transform)?;
+                *d = moved;
+                Some((n, scale()?))
+            }
+            _ => return Err(DocError::Invalid("This canonical entity has no supported geometry transform.".into())),
+        };
+        if let Some((n, k)) = new_normal {
+            self.common.extrusion = n;
+            self.common.thickness *= k;
+        }
+        Ok(())
+    }
+
     fn dispatch_transform(&mut self, transform: &Mat4) -> Result<()> {
+        if self.geometry_revision == GeometryRevision::CanonicalV2 && self.has_canonical_transform() {
+            return self.transform_canonical(transform);
+        }
         // Each canonical family replaces its own arm, never a catch-all legacy fallback.
         match &self.kind {
             EntityKind::Unknown(_) => return Err(DocError::Invalid("This entity has no supported geometry transform.".into())),
