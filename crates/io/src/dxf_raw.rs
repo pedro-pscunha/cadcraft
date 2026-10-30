@@ -480,17 +480,26 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
     }
+    if !entity && symbol_flag_mask(kind) != 0 {
+        x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
+    }
     if !entity && is_dictionary(kind) {
         x.subclass.extend(tags.iter().find(|t| t.code == 281).map(raw));
     }
     x
 }
 
-fn source_dictionary_group(t: &Tag, extra: Option<&ForeignExtra>, dictionary: bool) -> Tag {
-    if dictionary && t.code == 281 {
+fn symbol_flag_mask(kind: &str) -> i64 {
+    if matches!(kind, "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID") { 16 | 32 } else { 0 }
+}
+
+fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str) -> Tag {
+    if is_dictionary(kind) && t.code == 281 {
         return extra.and_then(|extra| first_group(&extra.subclass, 281)).map_or_else(|| t.clone(), tag);
     }
-    t.clone()
+    let mask = symbol_flag_mask(kind);
+    let source = extra.filter(|_| t.code == 70 && mask != 0).and_then(|x| first_group(&x.subclass, 70)).and_then(|t| t.value.parse::<i64>().ok());
+    source.map_or_else(|| t.clone(), |source| Tag::i(70, (t.i64() & !mask) | (source & mask)))
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
@@ -1754,8 +1763,11 @@ fn record(
     let h = head(b);
     // Header snap/grid edits belong only to the first active VPORT tile.
     let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
+    let flag_mask = symbol_flag_mask(&r.kind);
     let dictionary = is_dictionary(&r.kind);
-    let replay = |p: &RawTag| (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50));
+    let replay = |p: &RawTag| {
+        (flag_mask == 0 || p.code != 70) && (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
+    };
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
@@ -1802,7 +1814,7 @@ fn record(
         {
             continue;
         }
-        let mut t = source_dictionary_group(t, x, dictionary);
+        let mut t = source_record_group(t, x, &r.kind);
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
