@@ -18,7 +18,7 @@ fn dxf(src: &str) -> String {
     out
 }
 
-const FIXTURE: &str = "
+pub(super) const FIXTURE: &str = "
 0 SECTION
 2 HEADER
 9 $ACADVER
@@ -294,6 +294,16 @@ fn multiline_attributes_survive_a_save() {
     let again = read_dxf(out.as_bytes()).unwrap();
     assert_eq!(reference(&again).attribs[0], reference(&d).attribs[0]);
     assert_eq!(definition(&again), definition(&d));
+}
+
+#[test]
+fn a_left_justified_multiline_attribute_is_not_read_as_centred() {
+    // Left justification has no group 72 in the text part; the 72 after the attribute type is not the justification.
+    let left = FIXTURE.replacen("7 Standard\n72 1\n11 110\n21 53", "7 Standard\n11 110\n21 53", 1);
+    let d = read_dxf(dxf(&left).as_bytes()).unwrap();
+    assert_eq!(reference(&d).attribs[0].text.halign, cadcraft_doc::HAlign::Left, "read");
+    let again = read_dxf(save(&d).as_bytes()).unwrap();
+    assert_eq!(reference(&again).attribs[0].text.halign, cadcraft_doc::HAlign::Left, "after a save");
 }
 
 #[test]

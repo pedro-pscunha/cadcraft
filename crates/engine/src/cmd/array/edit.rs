@@ -8,9 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use cadcraft_doc::{
-    ArrayKind, ArrayParams, Block, Drawing, Entity, EntityKind, Handle, Insert, MAX_BLOCK_DEPTH, ReplacedItem, SourceEdit, entity_bounds,
-};
+use cadcraft_doc::{ArrayKind, ArrayParams, Block, Drawing, Entity, EntityKind, Handle, Insert, MAX_BLOCK_DEPTH, ReplacedItem, SourceEdit};
 use cadcraft_geom::{Bounds2, Mat3, Vec2};
 use serde_json::{Value, json};
 
@@ -183,24 +181,25 @@ fn centroid(d: &Drawing, hs: &[Handle]) -> Result<Vec2> {
     for entity in hs.iter().filter_map(|h| d.entity(*h)) {
         super::super::modify::check_block_expansion(d, entity, &Mat3::IDENTITY, 0)?;
     }
-    let b = hs.iter().filter_map(|h| d.entity(*h)).fold(Bounds2::EMPTY, |a, e| a.union(&entity_bounds(d, e, 0)));
+    let b = cadcraft_render::entities_extents(d, hs.iter().filter_map(|h| d.entity(*h)).map(|e| e.as_ref()), 0)?;
     Ok(Some(b.center()).filter(|c| c.is_finite()).unwrap_or_default())
 }
 
 /// The item of array `h` under world point `at` (the lowest level when levels overlap).
-fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Option<(u32, u32, u32)> {
-    let (ins, blk, p) = array_of(d, h).ok()?;
+fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Result<Option<(u32, u32, u32)>> {
+    let (ins, blk, p) = array_of(d, h)?;
     let w = ins.transform(blk.base.xy());
     let mut best: Option<((u32, u32, u32), f64)> = None;
     // Each block's own extents, measured once.
     let mut extents: HashMap<String, (Vec2, Bounds2)> = HashMap::new();
-    for it in p.items()? {
+    let Some(items) = p.items() else { return Ok(None) };
+    for it in items {
         let name = p.block_for(it.i, it.j, it.level);
         let (base, local) = match extents.get(name) {
             Some(x) => *x,
             None => {
-                let b = d.block(name)?;
-                let x = (b.base.xy(), b.entities.iter().fold(Bounds2::EMPTY, |a, e| a.union(&entity_bounds(d, e, 1))));
+                let b = d.block(name).ok_or_else(|| other("The array item block is missing."))?;
+                let x = (b.base.xy(), cadcraft_render::entities_extents(d, b.entities.iter().map(|e| e.as_ref()), 1)?);
                 extents.insert(name.to_string(), x);
                 x
             }
@@ -217,7 +216,7 @@ fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Option<(u32, u32, u32)
             best = Some(((it.i, it.j, it.level), dist));
         }
     }
-    best.map(|b| b.0)
+    Ok(best.map(|b| b.0))
 }
 
 /// Move the base point of array `h` to world point `base` without moving the items.
@@ -762,7 +761,7 @@ impl Interactive for EditM {
                 let d = s.doc()?;
                 let (ins, blk, p) = array_of(d, h)?;
                 let src = d.block(&p.source).ok_or_else(|| other("The array's source block is missing."))?;
-                let local = src.entities.iter().fold(Bounds2::EMPTY, |a, e| a.union(&entity_bounds(d, e, 1)));
+                let local = cadcraft_render::entities_extents(d, src.entities.iter().map(|e| e.as_ref()), 1)?;
                 let at = ins.transform(blk.base.xy()).then_before(Mat3::translate(-src.base.xy())).apply(local.center());
                 if at.is_finite() {
                     rebase(s, h, at)?;
@@ -896,7 +895,7 @@ impl Interactive for EditM {
             }
             (RepItems, Input::Point(at)) => {
                 let tol = s.pixel_size() * s.settings.pickbox;
-                let item = item_at(s.doc()?, h, *at, tol).ok_or_else(|| other("No array item there; select an item of the array."))?;
+                let item = item_at(s.doc()?, h, *at, tol)?.ok_or_else(|| other("No array item there; select an item of the array."))?;
                 let name = self.rep_block.clone().ok_or_else(|| other("No replacement objects."))?;
                 self.change(s, |p| {
                     p.replaced.push(ReplacedItem { i: item.0, j: item.1, level: item.2, block: name });
@@ -915,7 +914,7 @@ impl Interactive for EditM {
             (RepItems, Input::Enter) => Main,
             (SourceItem, Input::Point(at)) => {
                 let tol = s.pixel_size() * s.settings.pickbox;
-                let item = item_at(s.doc()?, h, *at, tol).ok_or_else(|| other("No array item there; select an item of the array."))?;
+                let item = item_at(s.doc()?, h, *at, tol)?.ok_or_else(|| other("No array item there; select an item of the array."))?;
                 open_source(s, h, item)?;
                 return Ok(Step::Done);
             }

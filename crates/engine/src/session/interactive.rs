@@ -30,7 +30,7 @@ impl Session {
             }
             // A bare system variable name (ORTHOMODE, GRIDMODE…) acts as SETVAR on that variable.
             let var = lower.to_ascii_uppercase();
-            if !name.starts_with(['_', '.', '-']) && sysvars::get(self, &var).is_some() {
+            if !name.starts_with(['_', '.', '-']) && sysvars::get(self, &var)?.is_some() {
                 self.start(if transparent { "'setvar" } else { "setvar" })?;
                 return self.input(Input::Text(var));
             }

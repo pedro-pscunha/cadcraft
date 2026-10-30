@@ -78,7 +78,7 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
         })
     };
     let Some(store) = d.space(&st.space) else { return Ok(empty()) };
-    let extents = d.extents(&st.space);
+    let extents = cadcraft_render::space_extents(d, &st.space)?;
     // No visible extents means no bound to compare an area against (`implausible` skips an
     // infinite bound).
     let extents_area = if extents.is_empty() { f64::INFINITY } else { extents.width() * extents.height() };

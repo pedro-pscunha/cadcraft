@@ -187,13 +187,13 @@ fn autosave_files_are_written_in_the_background_and_removed_on_exit() {
     assert!(std::fs::read(&path).unwrap().ends_with(b"EOF\n"));
     // While the app runs, its lock keeps its files out of recovery. SAVETIME and SAVEFILEPATH
     // are system variables (process-wide, so set in this test only).
-    assert_eq!(cadcraft_engine::sysvars::get(&s, "SAVETIME"), Some(json!(10)));
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "SAVETIME").unwrap(), Some(json!(10)));
     s.execute("setvar", &json!({"name": "SAVETIME", "value": 3})).unwrap();
     assert_eq!(autosave::savetime(), 3);
     assert!(s.execute("setvar", &json!({"name": "SAVETIME", "value": -1})).is_err());
     assert!(s.execute("setvar", &json!({"name": "SAVETIME", "value": 601})).is_err());
     s.execute("setvar", &json!({"name": "SAVEFILEPATH", "value": format!(" {} ", dir.display())})).unwrap();
-    assert_eq!(cadcraft_engine::sysvars::get(&s, "SAVEFILEPATH"), Some(json!(dir.to_string_lossy())));
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "SAVEFILEPATH").unwrap(), Some(json!(dir.to_string_lossy())));
     a.tick(&s);
     assert!(dir.join(format!("{}.lock", a.instance)).exists());
     assert!(autosave::recoverable(&dir, "someone-else").is_empty());

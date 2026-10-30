@@ -17,7 +17,8 @@ impl Session {
     /// Append a loaded drawing, fit the view to its model extents (aspect-corrected, minimum height 1e-6) when non-empty, end a running command, make it active, bump the epoch and return its index.
     pub fn open_drawing(&mut self, d: Drawing, title: &str, path: Option<String>) -> usize {
         let mut st = DocState::new(d, title, path);
-        let ext = st.doc.extents(&Space::Model);
+        let query = cadcraft_render::space_extents(&st.doc, &Space::Model);
+        let ext = self.report_extent_refusals(query);
         if !ext.is_empty() {
             st.set_view_quiet(View {
                 center: ext.center(),

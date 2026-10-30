@@ -38,7 +38,7 @@ fn tolerance_reads_draws_and_roundtrips() {
     // grows along +Y from it, its first line straddles x = 5 and the second lies at larger x.
     let list = cadcraft_render::build(&d, &Space::Model, &cadcraft_render::Options::default());
     assert!(list.prims.len() > 20, "{} prims", list.prims.len());
-    let b = d.extents(&Space::Model);
+    let b = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     let (h, _) = t.text_size(&d);
     assert!((b.min.y - 6.0).abs() < 1e-9 && b.max.y > 6.0 + 8.0 * h, "{b:?}");
     assert!((b.min.x - (5.0 - h)).abs() < 1e-9 && (b.max.x - (5.0 + 3.0 * h)).abs() < 1e-9, "{b:?}");
@@ -71,7 +71,7 @@ fn hostile_tolerance_does_not_panic() {
     ] {
         if let Ok(d) = read_dxf(dxf(text, dir).as_bytes()) {
             let _ = cadcraft_render::build(&d, &Space::Model, &cadcraft_render::Options::default());
-            let _ = d.extents(&Space::Model);
+            let _ = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
             let _ = read_dxf(write_dxf(&d).as_bytes());
         }
     }

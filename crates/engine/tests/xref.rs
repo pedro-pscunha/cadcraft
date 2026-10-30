@@ -117,7 +117,7 @@ fn attach_loads_the_file_and_saving_keeps_only_the_reference() {
     let d = s.doc().unwrap();
     assert_eq!(d.layer("site|Walls").map(|l| l.color), Some(Color::Index(1)), "layers come prefixed");
     assert!(d.block("site|Tree").is_some(), "its blocks too");
-    let ext = d.extents(&cadcraft_engine::doc::Space::Model);
+    let ext = cadcraft_render::space_extents(d, &cadcraft_engine::doc::Space::Model).unwrap();
     assert!(ext.max.x >= 110.0 - 1e-9, "the xref is drawn where it was placed: {ext:?}");
 
     // Saved: the xref block with its path and no objects, and none of its symbols but its layers

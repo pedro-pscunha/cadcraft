@@ -42,7 +42,7 @@ fn minsert(cols: u32, rows: u32) -> String {
 fn block_expansion_bombs_are_bounded() {
     for text in [self_referencing(4), self_referencing(12), fan_out(), minsert(10_000, 10_000)] {
         let d = read(&text);
-        let ext = d.extents(&Space::Model);
+        let ext = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
         assert!(!ext.is_empty() && ext.min.is_finite() && ext.max.is_finite(), "{ext:?}");
         let list = build(&d, &Space::Model, &Options::default());
         assert!(!list.prims.is_empty() && list.prims.len() <= MAX_BLOCK_EXPANSION, "{}", list.prims.len());
@@ -56,7 +56,7 @@ fn ordinary_nested_and_arrayed_blocks_are_drawn_whole() {
     // 3 x 2 copies of a one-line block: six lines, extents spanning all copies.
     let d = read(&minsert(3, 2));
     assert_eq!(build(&d, &Space::Model, &Options::default()).prims.len(), 6);
-    let ext = d.extents(&Space::Model);
+    let ext = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     assert_eq!((ext.min.x, ext.min.y, ext.max.x, ext.max.y), (0.0, 0.0, 5.0, 3.0));
     // A self-referencing block draws its line at every level down to MAX_BLOCK_DEPTH.
     let d = read(&self_referencing(1));

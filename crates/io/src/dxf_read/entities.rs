@@ -193,20 +193,26 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             k
         }
         "ACAD_TABLE" => EntityKind::Table(acad_table(tags, table_cells_left)),
-        "VIEWPORT" => EntityKind::Viewport(Viewport {
-            center: t.p(10),
-            width: t.fd(40, 1.0),
-            height: t.fd(41, 1.0),
-            view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
-            view_height: t.fd(45, 1.0),
-            id: t.i(69).unwrap_or(0) as u32,
-            locked: t.i(90).unwrap_or(0) & 16384 != 0,
-            frozen_layers: crate::dxf_ext::read_frozen(tags),
-            layer_colors: crate::dxf_ext::read_layer_colors(tags),
-            // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
-            clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
-            on: t.i(90).unwrap_or(0) & 131072 == 0,
-        }),
+        "VIEWPORT" => {
+            let flags = t.i(90).unwrap_or(32768);
+            let stacking = t.i(68).unwrap_or_else(|| if flags & 131072 == 0 { t.i(69).unwrap_or(0).clamp(1, 32767) } else { 0 });
+            let source_status = cadcraft_doc::ViewportStatus { stacking, flags };
+            EntityKind::Viewport(Viewport {
+                center: t.p(10),
+                width: t.fd(40, 1.0),
+                height: t.fd(41, 1.0),
+                view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
+                view_height: t.fd(45, 1.0),
+                id: t.i(69).unwrap_or(0) as u32,
+                locked: t.i(90).unwrap_or(0) & 16384 != 0,
+                frozen_layers: crate::dxf_ext::read_frozen(tags),
+                layer_colors: crate::dxf_ext::read_layer_colors(tags),
+                // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
+                clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
+                on: source_status.is_on(),
+                source_status: Some(source_status),
+            })
+        }
         "WIPEOUT" => {
             let o = t.p(10);
             let u = t.p(11);
@@ -527,6 +533,7 @@ pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
 /// needs the file's handle maps.
 pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx) {
     match (kind, k) {
+        ("ATTDEF", EntityKind::AttDef(a)) if rx.from_dwg => forget_dwg_type_72(a),
         ("DIMENSION", EntityKind::Dimension(dm)) => {
             dm.overrides = crate::dxf_ext::read_dstyle(tags, &rx.styles, &rx.brs, &rx.ltypes);
             dm.assoc = crate::dxf_ext::read_assoc(tags);
@@ -623,7 +630,7 @@ pub(super) fn polyline_entity_in(
             c.plot_style = style;
         }
         let handle = tt.s(5).and_then(|h| Handle::parse_hex(&h)).unwrap_or_else(|| d.new_handle());
-        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c }
+        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c, flags: None }
     };
     let mesh = flags & (16 | 64) != 0;
     let mut mesh_vertices = Vec::new();
@@ -676,6 +683,13 @@ pub(super) fn polyline_entity_in(
             seqend: records.seqend,
         })
     } else if flags & 8 != 0 {
+        // The vertex flags (32 plus 8 for a spline frame control point) are kept on the records, as read.
+        let vertices = fit_vertices
+            .iter()
+            .filter(|v| v.flags & 16 == 0)
+            .map(|v| cadcraft_doc::PolylineRecord { flags: Some(v.flags), ..v.record.clone() })
+            .collect();
+        let records = cadcraft_doc::PolylineRecords { vertices, ..records };
         EntityKind::Polyline3d(Polyline3d { records, points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
@@ -713,6 +727,13 @@ pub(super) fn polyline_entity_in(
     (c, k)
 }
 
+/// A multiline attribute's group 72 after its type is not in a DWG: the DWG reader writes a fixed value there.
+fn forget_dwg_type_72(a: &mut Attrib) {
+    if let Some(m) = &mut a.multiline {
+        m.type_72 = None;
+    }
+}
+
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
 pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_layer: &str, rx: &Rx) -> Vec<Attrib> {
     let mut attribs = Vec::new();
@@ -721,7 +742,10 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
             let tt = T(t2);
             // A multiline attribute has its text as embedded MTEXT after its own groups.
             let (own, embedded) = split_embedded(t2);
-            let multiline = multiline_attrib(embedded, &common(&tt));
+            let mut multiline = multiline_attrib(own, embedded, &common(&tt));
+            if rx.from_dwg {
+                multiline.iter_mut().for_each(|m| m.type_72 = None);
+            }
             let own = T(own);
             let mut text = text_from(&own);
             if let Some(m) = &multiline {

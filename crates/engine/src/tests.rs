@@ -542,10 +542,10 @@ fn setvar_point_variables_take_point_objects() {
     let mut s = Session::new();
     for name in ["SNAPBASE", "LIMMIN", "LIMMAX", "INSBASE"] {
         // GETVAR's own value (an object with z) writes back, and an {x, y} object equals the array form.
-        let got = sysvars::get(&s, name).unwrap();
+        let got = sysvars::get(&s, name).unwrap().unwrap();
         s.execute("setvar", &json!({"name": name, "value": got})).unwrap();
         s.execute("setvar", &json!({"name": name, "value": {"x": 5, "y": 7}})).unwrap();
-        assert_eq!(sysvars::get(&s, name), Some(json!({"x": 5.0, "y": 7.0, "z": 0.0})), "{name}");
+        assert_eq!(sysvars::get(&s, name).unwrap(), Some(json!({"x": 5.0, "y": 7.0, "z": 0.0})), "{name}");
         assert!(s.execute("setvar", &json!({"name": name, "value": {"x": "a", "y": 1}})).is_err());
     }
 }
@@ -558,14 +558,14 @@ fn sysvars_roundtrip() {
     s.execute("setvar", &json!({"name": "LTSCALE", "value": 2.5})).unwrap();
     assert_eq!(s.doc().unwrap().header.f64("LTSCALE", 0.0), 2.5);
     assert!(s.execute("setvar", &json!({"name": "ORTHOMODE", "value": "x"})).is_err());
-    assert_eq!(sysvars::get(&s, "orthomode"), Some(json!(0)));
+    assert_eq!(sysvars::get(&s, "orthomode").unwrap(), Some(json!(0)));
     // FONTALT is a process-wide font setting, not a drawing header variable.
     s.execute("setvar", &json!({"name": "FONTALT", "value": "no-such-font-130"})).unwrap();
-    assert_eq!(sysvars::get(&s, "fontalt"), Some(json!("no-such-font-130")));
+    assert_eq!(sysvars::get(&s, "fontalt").unwrap(), Some(json!("no-such-font-130")));
     assert!(s.doc().unwrap().header.get("FONTALT").is_none());
     assert!(s.execute("setvar", &json!({"name": "FONTALT", "value": 3})).is_err());
     s.execute("setvar", &json!({"name": "FONTALT", "value": "."})).unwrap();
-    assert_eq!(sysvars::get(&s, "FONTALT"), Some(json!("")));
+    assert_eq!(sysvars::get(&s, "FONTALT").unwrap(), Some(json!("")));
 }
 
 #[test]
@@ -573,19 +573,19 @@ fn setvar_clayer_keeps_numeric_layer_name() {
     let mut s = Session::new();
     s.execute("layer.new", &json!({"name": "10"})).unwrap();
     s.execute("setvar", &json!({"name": "CLAYER", "value": "10"})).unwrap();
-    assert_eq!(sysvars::get(&s, "CLAYER"), Some(json!("10")));
+    assert_eq!(sysvars::get(&s, "CLAYER").unwrap(), Some(json!("10")));
     let c = s.execute("circle", &json!({"center": [0, 0], "radius": 1})).unwrap();
     let h = cadcraft_doc::Handle::parse_hex(c["handle"].as_str().unwrap()).unwrap();
     assert_eq!(s.doc().unwrap().entity(h).unwrap().common.layer, "10");
     s.execute("setvar", &json!({"name": "CLAYER", "value": "0"})).unwrap();
-    assert_eq!(sysvars::get(&s, "CLAYER"), Some(json!("0")));
+    assert_eq!(sysvars::get(&s, "CLAYER").unwrap(), Some(json!("0")));
     // Typed at the command line too.
     s.cmdline("SETVAR CLAYER 10").unwrap();
     assert!(s.running.is_none());
-    assert_eq!(sysvars::get(&s, "CLAYER"), Some(json!("10")));
+    assert_eq!(sysvars::get(&s, "CLAYER").unwrap(), Some(json!("10")));
     // Numeric variables still parse typed text.
     s.execute("setvar", &json!({"name": "LUNITS", "value": "3"})).unwrap();
-    assert_eq!(sysvars::get(&s, "LUNITS"), Some(json!(3)));
+    assert_eq!(sysvars::get(&s, "LUNITS").unwrap(), Some(json!(3)));
 }
 
 #[test]
@@ -613,7 +613,7 @@ fn setvar_at_command_line() {
     s.cancel();
     // Unknown and read-only names end the command without creating or changing anything.
     s.cmdline("SETVAR NOSUCHVAR 1").unwrap();
-    assert!(sysvars::get(&s, "NOSUCHVAR").is_none());
+    assert!(sysvars::get(&s, "NOSUCHVAR").unwrap().is_none());
     s.cmdline("SETVAR DWGNAME").unwrap();
     assert!(s.running.is_none());
     assert!(s.execute("setvar", &json!({"name": "dbmod", "value": 0})).is_err());
@@ -647,8 +647,8 @@ fn setvar_rejects_out_of_range_units() {
 #[test]
 fn dynamic_input_pointer_settings() {
     let mut s = Session::new();
-    assert_eq!(sysvars::get(&s, "DYNPIFORMAT"), Some(json!(0)));
-    assert_eq!(sysvars::get(&s, "dynpicoords"), Some(json!(0)));
+    assert_eq!(sysvars::get(&s, "DYNPIFORMAT").unwrap(), Some(json!(0)));
+    assert_eq!(sysvars::get(&s, "dynpicoords").unwrap(), Some(json!(0)));
     s.execute("setvar", &json!({"name": "dynpiformat", "value": 1})).unwrap();
     s.execute("setvar", &json!({"name": "DYNPICOORDS", "value": 1})).unwrap();
     assert!(s.settings.dynpi_cartesian && s.settings.dynpi_absolute);
@@ -1294,7 +1294,7 @@ fn bare_variable_name_runs_setvar() {
     assert!(s.current_prompt().is_some());
     s.cmdline("0").unwrap();
     assert!(s.current_prompt().is_none());
-    assert_eq!(crate::sysvars::get(&s, "PICKADD"), Some(json!(0)));
+    assert_eq!(crate::sysvars::get(&s, "PICKADD").unwrap(), Some(json!(0)));
     // Not a command and not a variable: still an error.
     assert!(s.cmdline("nosuchthing").is_err());
     // A dash or dot prefix never means a variable.

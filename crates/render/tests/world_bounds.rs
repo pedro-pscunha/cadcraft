@@ -60,6 +60,7 @@ fn viewport() -> cadcraft_doc::Viewport {
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        source_status: None,
     }
 }
 

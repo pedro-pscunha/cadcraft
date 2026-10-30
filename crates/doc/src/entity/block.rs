@@ -100,6 +100,13 @@ pub struct MultilineAttrib {
     /// The plain text `mtext`'s contents read as: an attribute whose value differs was edited
     /// since, and its value replaces the contents.
     pub read_as: String,
+    /// Group 46 of the embedded text as a file gave it. `None` for an attribute made here (written 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedded_46: Option<f64>,
+    /// The group 72 that follows the attribute type (71) before the embedded object, as a file gave it. `None` for an attribute made
+    /// here (written 1 for an ATTRIB, 0 for an ATTDEF).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_72: Option<i64>,
 }
 
 impl MultilineAttrib {

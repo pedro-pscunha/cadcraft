@@ -3,7 +3,8 @@
 //! OBJECTSCALE, ANNOAUTOSCALE and ANNOUPDATE manage the scales.
 
 use cadcraft_engine::Session;
-use cadcraft_engine::doc::{AnnoDraw, Drawing, Entity, EntityKind, Handle, Space, entity_bounds};
+use cadcraft_engine::doc::{AnnoDraw, Drawing, Entity, EntityKind, Handle, Space};
+use cadcraft_render::entity_extents;
 use serde_json::{Value, json};
 
 fn setvar(s: &mut Session, name: &str, value: Value) {
@@ -29,7 +30,7 @@ fn scales(s: &Session, h: Handle) -> Vec<String> {
 
 fn height(d: &Drawing, h: Handle) -> f64 {
     let e = d.entity(h).unwrap();
-    entity_bounds(d, e, 0).height()
+    entity_extents(d, e, 0).unwrap().height()
 }
 
 /// Height of what the renderer draws for `h` in model space.
@@ -86,7 +87,7 @@ fn unsupported_scale_hides_unless_annoallvisible() {
     s.execute("annovisible.current", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().header.i64("ANNOALLVISIBLE", 1), 0);
     assert_eq!(drawn_height(s.doc().unwrap(), h), None);
-    assert!(entity_bounds(s.doc().unwrap(), &entity(&s, h), 0).is_empty());
+    assert!(entity_extents(s.doc().unwrap(), &entity(&s, h), 0).unwrap().is_empty());
     // Back at a supported scale it shows again.
     setvar(&mut s, "CANNOSCALE", json!("1:1"));
     assert!(drawn_height(s.doc().unwrap(), h).is_some());

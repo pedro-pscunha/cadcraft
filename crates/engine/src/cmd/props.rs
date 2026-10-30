@@ -100,9 +100,25 @@ pub(super) fn entity_props(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) 
     let geo = serde_json::to_value(&e.kind).unwrap_or(Value::Null);
     if let (Some(o), Some(g)) = (v.as_object_mut(), geo.as_object()) {
         o.insert("geometry".into(), Value::Object(g.clone()));
-        let b = cadcraft_doc::entity_bounds(d, e, 0);
-        if !b.is_empty() {
-            o.insert("bounds".into(), json!([[b.min.x, b.min.y], [b.max.x, b.max.y]]));
+        match cadcraft_render::entity_extents(d, e, 0) {
+            Ok(bounds) if !bounds.is_empty() => {
+                o.insert("bounds".into(), json!([[bounds.min.x, bounds.min.y], [bounds.max.x, bounds.max.y]]));
+            }
+            Ok(_) => {}
+            Err(refused) => {
+                o.insert(
+                    "extentRefusals".into(),
+                    json!(
+                        refused
+                            .refusals
+                            .iter()
+                            .map(|refusal| json!({
+                                "handle": refusal.handle.hex(), "reason": refusal.reason
+                            }))
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
         }
         match &e.kind {
             EntityKind::Line(l) => {

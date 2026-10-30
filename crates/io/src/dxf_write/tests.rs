@@ -1,4 +1,5 @@
 use super::*;
+use cadcraft_doc::Space;
 use std::cell::Cell;
 std::thread_local! { pub(super) static SCANNED: Cell<usize> = const { Cell::new(0) }; }
 

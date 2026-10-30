@@ -16,9 +16,22 @@ impl Session {
         Ok(Bounds2::new(lo, hi))
     }
 
+    /// Report every refused source object while retaining the extent query's available bounds.
+    pub fn report_extent_refusals(&mut self, query: std::result::Result<Bounds2, cadcraft_render::ExtentsRefusal>) -> Bounds2 {
+        match query {
+            Ok(bounds) => bounds,
+            Err(refused) => {
+                let bounds = refused.bounds;
+                self.echo(refused.to_string());
+                bounds
+            }
+        }
+    }
+
     pub fn zoom_extents(&mut self) -> Result<()> {
         let space = self.space();
-        let ext = self.doc()?.extents(&space);
+        let query = cadcraft_render::space_extents(self.doc()?, &space);
+        let ext = self.report_extent_refusals(query);
         let (w, h) = self.viewport_px;
         let ext = if ext.is_empty() { self.zoom_limits()? } else { ext };
         let st = self.state_mut()?;

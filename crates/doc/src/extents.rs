@@ -1,6 +1,6 @@
 //! Approximate entity bounds (used for extents, zoom and selection pre-filtering).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadcraft_geom::{Arc, Bounds2, EPS, Polyline, Vec2, bulge_to_arc};
 
@@ -75,19 +75,41 @@ fn mtext_box(t: &crate::MText) -> Bounds2 {
     Bounds2::from_points(pts)
 }
 
-pub fn entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> Bounds2 {
+pub fn legacy_entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> crate::Result<Bounds2> {
+    require_legacy_tree(d, e, depth, &mut HashSet::new())?;
     // A top-level annotative object measures as it draws at the current annotation scale.
     if depth == 0 {
         match d.anno_draw(e) {
             crate::AnnoDraw::Plain => {}
-            crate::AnnoDraw::Hidden => return Bounds2::EMPTY,
-            crate::AnnoDraw::Scaled(f) => return bounds_in(d, &crate::anno_scaled(e, f), 0, &mut HashMap::new()),
+            crate::AnnoDraw::Hidden => return Ok(Bounds2::EMPTY),
+            crate::AnnoDraw::Scaled(f) => return Ok(bounds_in(d, &crate::anno_scaled(e, f), 0, &mut HashMap::new())),
         }
     }
-    bounds_in(d, e, depth, &mut HashMap::new())
+    Ok(bounds_in(d, e, depth, &mut HashMap::new()))
 }
 
-/// [`entity_bounds`] with the bounds of block contents (in block coordinates) already computed,
+fn require_legacy_tree<'a>(drawing: &'a Drawing, entity: &Entity, depth: usize, seen: &mut HashSet<(&'a str, usize)>) -> crate::Result<()> {
+    entity.require_legacy_geometry().map_err(|_| crate::DocError::CanonicalExtent(entity.handle))?;
+    if depth >= MAX_BLOCK_DEPTH {
+        return Ok(());
+    }
+    let name = match &entity.kind {
+        EntityKind::Insert(insert) => Some(insert.block.as_str()),
+        EntityKind::MLeader(leader) => leader.block.as_ref().map(|block| block.block.as_str()),
+        EntityKind::Dimension(dimension) => dimension.block.as_deref(),
+        _ => None,
+    };
+    if let Some(block) = name.and_then(|name| drawing.block(name))
+        && seen.insert((block.name.as_str(), depth))
+    {
+        for child in block.entities.iter().filter(|child| in_block_visible(drawing, child)) {
+            require_legacy_tree(drawing, child, depth + 1, seen)?;
+        }
+    }
+    Ok(())
+}
+
+/// [`legacy_entity_bounds`] with the bounds of block contents (in block coordinates) already computed,
 /// by block name and depth: every further reference to a block at that depth reuses them instead of
 /// expanding the block again, so nested or self-referencing blocks cost at most one pass over each
 /// definition per depth instead of one per reference (which grows exponentially with the nesting
@@ -315,7 +337,7 @@ mod tests {
     }
 
     fn bounds(kind: EntityKind) -> Bounds2 {
-        entity_bounds(&Drawing::default(), &Entity::new(crate::Handle(1), kind), 0)
+        legacy_entity_bounds(&Drawing::default(), &Entity::new(crate::Handle(1), kind), 0).unwrap()
     }
 
     #[test]
@@ -357,6 +379,7 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         };
         let ml = crate::MLeader {
             roots: vec![crate::MLeaderRoot::new(Vec3::new(25.0, 0.0, 0.0), 0.45, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],

@@ -184,7 +184,8 @@ fn to_json_bounded(v: &Value, depth: usize, budget: &mut u64) -> Option<serde_js
 pub fn getvar(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     arity(&a, 1, 1)?;
     let name = string(&a[0])?;
-    Ok(Flow::Value(crate::sysvars::get(ctx.s, &name).map(|v| from_json(&v)).unwrap_or_default()))
+    let value = crate::sysvars::get(ctx.s, &name).map_err(|error| LispError::new(error.to_string()))?;
+    Ok(Flow::Value(value.map(|value| from_json(&value)).unwrap_or_default()))
 }
 
 /// Set a system variable after bounded JSON conversion, reporting invalid or oversized values as LISP errors.
@@ -344,7 +345,10 @@ fn entity_from_list(ctx: &Ctx<'_>, list: &Value) -> Result<(String, cadcraft_doc
     let (kind, mut tags) = list_to_groups(list)?;
     convert_angles(&kind, &mut tags, f64::to_degrees);
     if !tags.iter().any(|t| t.code == 8) {
-        let layer = crate::sysvars::get(ctx.s, "CLAYER").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "0".into());
+        let layer = crate::sysvars::get(ctx.s, "CLAYER")
+            .map_err(|error| LispError::new(error.to_string()))?
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| "0".into());
         tags.insert(0, Tag::s(8, layer));
     }
     match (codec()?.entity)(&kind, &tags) {
@@ -1000,7 +1004,7 @@ pub fn tblnext(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
 // ---------------- units ----------------
 
 fn int_var(s: &Session, name: &str, default: i64) -> i64 {
-    crate::sysvars::get(s, name).and_then(|v| v.as_i64()).unwrap_or(default)
+    crate::sysvars::scalar_value(s, name).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
 /// `(rtos number [mode [precision]])`: as LUNITS/LUPREC by default; decimal results honour

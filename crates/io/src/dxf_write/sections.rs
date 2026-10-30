@@ -7,7 +7,7 @@ use super::header::{code_page, header_vars};
 use super::layout::{paper_views, record_head, sheet_first, table_head, vport_table};
 use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
 use super::{
-    Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup, Space,
+    Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup,
     TableStyle, Tag, Vec2, Vec3, Version, W, dxf_ext,
 };
 
@@ -299,12 +299,10 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     w.s(1, version.code());
     w.s(9, "$DWGCODEPAGE");
     w.s(3, code_page(d, version));
-    let ext = d.extents(&Space::Model);
-    if !ext.is_empty() {
-        w.s(9, "$EXTMIN");
-        w.p(10, ext.min.to3(0.0));
-        w.s(9, "$EXTMAX");
-        w.p(10, ext.max.to3(0.0));
+    // Saving source records must not require a display adapter or replace their saved WCS extents.
+    for name in ["EXTMIN", "EXTMAX"] {
+        w.s(9, format!("${name}"));
+        w.p(10, d.header.point(name).unwrap_or(Vec3::ZERO));
     }
     header_vars(w, d, target);
     let seed_pos = w.t.len();
@@ -411,6 +409,7 @@ fn layout_obj(w: &mut W, context: LayoutWriteContext<'_>, data: LayoutWriteData<
         "display" => 0,
         "extents" => 1,
         "limits" => 2,
+        "view" => 3,
         "window" => 4,
         _ => 5,
     };
@@ -739,8 +738,9 @@ fn dimension_block_definitions(
     dim_plan: &super::blocks::DimBlockPlan,
     w: &mut W,
     cx: &mut Ctx,
-) -> Vec<(String, String, Vec<Entity>)> {
+) -> (Vec<(String, String, Vec<Entity>)>, HashMap<String, std::sync::Arc<Block>>) {
     let mut dim_defs = Vec::new();
+    let mut sources = HashMap::new();
     let mut n = 1;
     let mut reused_handles = std::collections::HashSet::new();
     for st in all_spaces {
@@ -781,11 +781,14 @@ fn dimension_block_definitions(
                 };
                 let brh = w.h();
                 cx.dim_blocks.insert(e.handle, name.clone());
+                if let Some(b) = reused {
+                    sources.insert(name.clone(), b.clone());
+                }
                 dim_defs.push((name, brh, ents));
             }
         }
     }
-    dim_defs
+    (dim_defs, sources)
 }
 
 fn arrow_block_definitions(
@@ -897,6 +900,11 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     // Xrefs are saved as references: without their objects and the symbols that came with them.
     let saved_view = crate::dxf_xref::saved_view(d);
     let d = saved_view.as_ref().unwrap_or(d);
+    let ext = d
+        .header
+        .point("EXTMIN")
+        .zip(d.header.point("EXTMAX"))
+        .map_or(cadcraft_geom::Bounds2::EMPTY, |(min, max)| cadcraft_geom::Bounds2::new(min.xy(), max.xy()));
     let ps_brs: Vec<(String, String, &Layout)> = paper_layouts
         .iter()
         .enumerate()
@@ -916,7 +924,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     cx.block_records = user_blocks.iter().map(|(n, h, _)| (n.to_ascii_uppercase(), h.clone())).collect();
     let all_spaces: Vec<&EntityStore> = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).collect();
     let dimension_stores: Vec<&EntityStore> = all_spaces.iter().copied().chain(user_blocks.iter().map(|(_, _, b)| &b.entities)).collect();
-    let mut dim_defs = dimension_block_definitions(d, &dimension_stores, &dim_plan, &mut w, &mut cx);
+    let (mut dim_defs, dim_sources) = dimension_block_definitions(d, &dimension_stores, &dim_plan, &mut w, &mut cx);
     // Every entity, including block contents (for arrows, tables and overrides).
     let every: Vec<&Entity> = all_spaces
         .iter()
@@ -994,7 +1002,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
 
     write_classes(&mut w, &cx, &every);
 
-    let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext: d.extents(&Space::Model) });
+    let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext });
 
     // BLOCK_RECORD
     let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());
@@ -1039,8 +1047,10 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     for (n, h, b) in &user_blocks {
         br_rec(&mut w, h, n, None, Some(b));
     }
-    for (n, h, _) in dim_defs.iter().chain(arrow_defs.iter()).chain(table_defs.iter()) {
-        br_rec(&mut w, h, n, None, None);
+    // A dimension that still uses the block it was read with writes that block's record settings as read.
+    let dim_records = dim_defs.iter().map(|(n, h, _)| (n, h, dim_sources.get(n).map(AsRef::as_ref)));
+    for (n, h, blk) in dim_records.chain(arrow_defs.iter().chain(table_defs.iter()).map(|(n, h, _)| (n, h, None))) {
+        br_rec(&mut w, h, n, None, blk);
     }
     w.s(0, "ENDTAB");
     w.s(0, "ENDSEC");
@@ -1101,7 +1111,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     }
     for (n, h, ents) in &dim_defs {
         // A dimension can use a named block (`DIMBLOCK1-…`): only a `*` name is anonymous.
-        block(&mut w, (n, ""), h, Vec3::ZERO, i64::from(n.starts_with('*')), &mut ents.iter(), false);
+        let (desc, base) = dim_sources.get(n).map_or(("", Vec3::ZERO), |b| (b.description.as_str(), b.base));
+        block(&mut w, (n, desc), h, base, i64::from(n.starts_with('*')), &mut ents.iter(), false);
     }
     for (n, h, ents) in &arrow_defs {
         block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut ents.iter(), false);

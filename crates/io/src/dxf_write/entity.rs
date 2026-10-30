@@ -260,7 +260,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                 let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
                 w.p(10, *q);
-                w.i(70, 32);
+                w.i(70, record.and_then(|r| r.flags).unwrap_or(32));
                 if let Some(record) = record {
                     plot_style_xdata(w, &record.common.plot_style, start);
                 }
@@ -369,7 +369,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             // The width of the reference rectangle: all the columns and their gutters, as AutoCAD writes it.
             w.f(41, t.columns.as_ref().map_or(t.width, |c| c.total_width(t.width)));
             w.i(71, i64::from(t.attach));
-            w.i(72, 1);
+            w.i(72, t.drawing_direction.map_or(1, i64::from));
             // Long contents go in 250-char 3-chunks, the remainder in 1.
             let chars: Vec<char> = crate::dxf_read::mtext_dxf::encode_contents(&t.contents).chars().collect();
             let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();
@@ -880,15 +880,19 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
         w.p(10, v.center);
         w.f(40, v.width);
         w.f(41, v.height);
-        // Status 68: a positive value is "on" (the stacking order; 1 is the active viewport), 0 off.
-        w.i(68, if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 });
+        // Keep source stacking status, including -1, until an ON/OFF edit changes it.
+        let source = v.source_status.filter(|s| v.on == s.is_on());
+        w.i(68, source.map(|s| s.stacking).unwrap_or_else(|| if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 }));
         w.i(69, i64::from(v.id));
         w.p2(12, v.view_center);
         w.f(45, v.view_height);
         // Status flags: 16384 = display locked, 32768 = always set, 65536 = clipped by the
         // 340 entity, 131072 = off.
         let clip = v.clip.filter(|h| *h != e.handle && d.entity(*h).is_some());
-        let flags = 32768 | if v.locked { 16384 } else { 0 } | if clip.is_some() { 65536 } else { 0 } | if v.on { 0 } else { 131072 };
+        let flags = (v.source_status.map_or(32768, |s| s.flags) & !(16384 | 65536 | 131072))
+            | if v.locked { 16384 } else { 0 }
+            | if clip.is_some() { 65536 } else { 0 }
+            | source.map_or_else(|| if v.on { 0 } else { 131072 }, |s| s.flags & 131072);
         w.i(90, flags);
         if let Some(h) = clip {
             w.s(340, h.hex());

@@ -86,7 +86,7 @@ fn helix_edits_grips_snaps_and_explode() {
     let hit = snap::osnap(d, &Space::Model, start + Vec2::new(0.05, 0.02), 0.3, mode::END, None, false).unwrap();
     assert!(hit.point.near(start, 1e-9));
     assert_eq!(cadcraft_engine::select::pick(d, &Space::Model, start, 0.1), Some(a));
-    let ext = d.extents(&Space::Model);
+    let ext = cadcraft_render::space_extents(d, &Space::Model).unwrap();
     assert!(ext.min.x > -14.2 && ext.max.x < -5.8 && ext.min.x < -13.9, "{ext:?}");
 
     // EXPLODE gives the spline; FLATTEN too.

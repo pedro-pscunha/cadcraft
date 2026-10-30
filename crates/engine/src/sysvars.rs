@@ -72,10 +72,21 @@ const SESSION_VARS: &[&str] = &[
     "SAVEFILEPATH",
 ];
 
-pub fn get(s: &Session, name: &str) -> Option<Value> {
-    let n = name.trim().to_ascii_uppercase();
+pub fn get(s: &Session, name: &str) -> Result<Option<Value>> {
+    let name = name.trim().to_ascii_uppercase();
+    if matches!(name.as_str(), "EXTMIN" | "EXTMAX") {
+        let bounds = cadcraft_render::space_extents(s.doc()?, &s.space())?;
+        let point = if name == "EXTMIN" { bounds.min } else { bounds.max };
+        return Ok(Some(json!([point.x, point.y, 0.0])));
+    }
+    Ok(scalar_value(s, &name))
+}
+
+pub(crate) fn scalar_value(s: &Session, name: &str) -> Option<Value> {
+    let normalized = name.trim().to_ascii_uppercase();
+    let n = normalized.as_str();
     let st = &s.settings;
-    let v = match n.as_str() {
+    let v = match n {
         "OSMODE" => json!(st.osmode),
         "OSNAPHATCH" => json!(i32::from(st.osnaphatch)),
         // AutoCAD's values: positive on, negative off (4 = every annotative object).
@@ -175,18 +186,12 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             json!([v.center.x, v.center.y, 0.0])
         }
         "VIEWSIZE" => json!(s.state().ok()?.view().height),
-        "EXTMIN" | "EXTMAX" => {
-            let d = s.doc().ok()?;
-            let e = d.extents(&s.space());
-            let p = if n == "EXTMIN" { e.min } else { e.max };
-            json!([p.x, p.y, 0.0])
-        }
         _ => {
-            if let Some(v) = table::get(s, &n) {
+            if let Some(v) = table::get(s, n) {
                 return Some(v);
             }
             let d = s.doc().ok()?;
-            match d.header.get(&n) {
+            match d.header.get(n) {
                 Some(h) => serde_json::to_value(h).ok()?,
                 // A dimension variable the header doesn't carry reads from the current style.
                 None => {
@@ -452,14 +457,14 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
 pub fn list(s: &Session) -> Value {
     let mut m = serde_json::Map::new();
     for n in SESSION_VARS {
-        if let Some(v) = get(s, n) {
+        if let Some(v) = scalar_value(s, n) {
             m.insert((*n).to_string(), v);
         }
     }
     if let Ok(d) = s.doc() {
         for (k, v) in &d.header.vars {
             if matches!(k.as_str(), "ANGBASE" | "SNAPUNIT" | "GRIDUNIT" | "CECOLOR") {
-                m.insert(k.clone(), get(s, k).unwrap_or(Value::Null));
+                m.insert(k.clone(), scalar_value(s, k).unwrap_or(Value::Null));
             } else if !k.starts_with("CADCRAFT_") {
                 m.insert(k.clone(), serde_json::to_value(v).unwrap_or(Value::Null));
             }

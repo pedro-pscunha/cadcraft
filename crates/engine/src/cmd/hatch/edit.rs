@@ -3,8 +3,9 @@
 //! boundaries of existing hatches.
 
 use cadcraft_color::Color;
-use cadcraft_doc::{Drawing, EntityKind, Gradient, Handle, Hatch, HatchLoop, entity_bounds};
+use cadcraft_doc::{Drawing, EntityKind, Gradient, Handle, Hatch, HatchLoop};
 use cadcraft_geom::{Bounds2, Polyline, Vec2, point_in_polygon};
+use cadcraft_render::entity_extents;
 use serde_json::{Value, json};
 
 use super::assoc::{detach, same_shape};
@@ -35,7 +36,7 @@ fn outline(l: &HatchLoop) -> Vec<Vec2> {
 
 /// Link the loops of `h` to closed objects of the same shape: the `boundary` objects when given,
 /// otherwise any in the hatch's space. Returns the number of loops left without an object.
-fn link(d: &Drawing, handle: Handle, h: &mut Hatch, boundary: Option<&[Handle]>, budget: &mut usize) -> usize {
+fn link(d: &Drawing, handle: Handle, h: &mut Hatch, boundary: Option<&[Handle]>, budget: &mut usize) -> Result<usize> {
     let space = d.space_of(handle);
     let store = space.as_ref().and_then(|sp| d.space(sp));
     let mut missing = 0;
@@ -50,17 +51,22 @@ fn link(d: &Drawing, handle: Handle, h: &mut Hatch, boundary: Option<&[Handle]>,
         *budget -= 1;
         let lb = Bounds2::from_points(outline(l));
         let eps = 1e-4 * (1.0 + lb.width() + lb.height());
-        let fits = |e: &cadcraft_doc::Entity| {
-            let eb = entity_bounds(d, e, 0);
-            e.handle != handle
-                && eb.min.dist(lb.min) <= eps
-                && eb.max.dist(lb.max) <= eps
-                && closed_loop(d, e).is_some_and(|vs| same_shape(&vs, &l.vertices))
-        };
-        let found = match boundary {
-            Some(hs) => hs.iter().filter_map(|h| d.entity(*h)).find(|e| fits(e)).map(|e| e.handle),
-            None => store.and_then(|st| st.iter().find(|e| fits(e)).map(|e| e.handle)),
-        };
+        let selected = boundary.into_iter().flatten().filter_map(|handle| d.entity(*handle));
+        let scanned = store.into_iter().flat_map(|store| store.iter()).filter(|_| boundary.is_none());
+        let mut found = None;
+        for entity in selected.chain(scanned) {
+            if entity.handle == handle {
+                continue;
+            }
+            let bounds = entity_extents(d, entity, 0)?;
+            if bounds.min.dist(lb.min) <= eps
+                && bounds.max.dist(lb.max) <= eps
+                && closed_loop(d, entity).is_some_and(|vertices| same_shape(&vertices, &l.vertices))
+            {
+                found = Some(entity.handle);
+                break;
+            }
+        }
         match found {
             Some(src) => l.sources = vec![src],
             None => missing += 1,
@@ -70,7 +76,7 @@ fn link(d: &Drawing, handle: Handle, h: &mut Hatch, boundary: Option<&[Handle]>,
     if !h.associative && missing == 0 {
         missing = h.loops.len();
     }
-    missing
+    Ok(missing)
 }
 
 /// The loops of `h` in groups that fill separate areas: each loop not inside another one
@@ -412,7 +418,7 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         let Some(EntityKind::Hatch(mut h)) = s.doc()?.entity(*handle).map(|e| e.kind.clone()) else { continue };
         edit_loops(&mut h, &added, &removed)?;
         if h.associative && h.loops.iter().any(|l| l.sources.is_empty()) && p.get("associative").and_then(Value::as_bool) != Some(false) {
-            let missing = link(s.doc()?, *handle, &mut h, None, &mut budget);
+            let missing = link(s.doc()?, *handle, &mut h, None, &mut budget)?;
             if missing != 0 {
                 detach(&mut h);
                 notes.push(format!("Hatch {}: {missing} new boundary loop(s) could not be linked; it is now non-associative.", handle.hex()));
@@ -433,7 +439,7 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
             Some(true) => {
                 // All loops or none: a hatch with loops left over keeps what it had.
                 let mut linked = h.clone();
-                let missing = link(s.doc()?, *handle, &mut linked, boundary.as_deref(), &mut budget);
+                let missing = link(s.doc()?, *handle, &mut linked, boundary.as_deref(), &mut budget)?;
                 if missing == 0 {
                     h = linked;
                 } else {

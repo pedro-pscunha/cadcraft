@@ -69,7 +69,7 @@ pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
     let name = name.as_ref();
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        let mut d = dxf_read::read_from_dwg(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
         d.read_notes.extend(notes);
         return Ok(d);
     }
@@ -179,6 +179,13 @@ pub fn check_window(w: &Bounds2) -> Result<()> {
         return Err(IoError::Format(format!("export window: width and height must be positive (got {width} x {height})")));
     }
     Ok(())
+}
+
+pub(crate) fn image_bounds(drawing: &Drawing, space: &Space, window: Option<Bounds2>) -> Result<Bounds2> {
+    match window {
+        Some(bounds) => Ok(bounds),
+        None => cadcraft_render::space_extents(drawing, space).map_err(|error| IoError::Format(error.to_string())),
+    }
 }
 
 /// Render a space to PNG, fitted to its extents.

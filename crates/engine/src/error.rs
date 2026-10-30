@@ -29,4 +29,10 @@ impl From<cadcraft_doc::DocError> for EngineError {
     }
 }
 
+impl From<cadcraft_render::ExtentsRefusal> for EngineError {
+    fn from(refusal: cadcraft_render::ExtentsRefusal) -> Self {
+        EngineError::Other(refusal.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, EngineError>;

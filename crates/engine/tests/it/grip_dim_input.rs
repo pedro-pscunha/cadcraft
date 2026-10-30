@@ -120,8 +120,8 @@ fn circle_radius_and_polyline_segments() {
 #[test]
 fn dyndigrip_and_dyndivis_are_checked_settings() {
     let mut s = Session::new();
-    assert_eq!(sysvars::get(&s, "DYNDIGRIP"), Some(json!(31)));
-    assert_eq!(sysvars::get(&s, "DYNDIVIS"), Some(json!(1)));
+    assert_eq!(sysvars::get(&s, "DYNDIGRIP").unwrap(), Some(json!(31)));
+    assert_eq!(sysvars::get(&s, "DYNDIVIS").unwrap(), Some(json!(1)));
     for (name, bad) in [("DYNDIGRIP", json!(32)), ("DYNDIGRIP", json!(-1)), ("DYNDIVIS", json!(3)), ("DYNDIVIS", json!("x"))] {
         assert!(s.execute("setvar", &json!({"name": name, "value": bad})).is_err(), "{name} {bad}");
     }

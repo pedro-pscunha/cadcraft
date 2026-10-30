@@ -63,6 +63,7 @@ fn sample() -> Drawing {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
     )
     .unwrap();
@@ -351,7 +352,7 @@ fn hostile_dxf_does_not_panic() {
     ] {
         if let Ok(d) = read(t.as_bytes(), "x.dxf") {
             let _ = cadcraft_render::build(&d, &Space::Model, &cadcraft_render::Options::default());
-            let _ = d.extents(&Space::Model);
+            let _ = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
         }
     }
 }
@@ -485,6 +486,7 @@ fn pdf_layout_one_to_one_with_viewport() {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            source_status: None,
         }),
     )
     .unwrap();
@@ -595,6 +597,7 @@ fn viewport_frozen_layers_roundtrip() {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            source_status: None,
         })
     };
     d.add(&paper, Common::default(), vp(2, vec!["Walls".into(), "A B".into()])).unwrap();
@@ -631,6 +634,7 @@ fn frozen_vp_dxf() -> (Drawing, Vec<(String, String)>) {
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        source_status: None,
     });
     d.add(&paper, Common::default(), vp).unwrap();
     let text = write_dxf(&d);
@@ -754,6 +758,7 @@ fn viewport_layer_colors_roundtrip() {
             layer_colors: colors,
             clip: None,
             on: true,
+            source_status: None,
         })
     };
     let colors = vec![("Walls".to_string(), Color::Index(5)), ("A B".to_string(), Color::True(cadcraft_color::Rgb(255, 128, 0)))];
@@ -1501,6 +1506,7 @@ fn intl_sample() -> Drawing {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
     )
     .unwrap();
@@ -1723,6 +1729,7 @@ fn mleader_is_written_as_multileader() {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let m = cadcraft_doc::MLeader {
         roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::new(10.0, 5.0, 0.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],
@@ -2077,12 +2084,12 @@ fn mirrored_insert_extrusion_maps_to_negative_x_scale() {
     assert!((ins.rotation + std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{}", ins.rotation);
     // In the OCS the line (0,0)-(2,0) turned by 90° runs from (-10,5) to (-10,7); mirrored into the WCS
     // that is (10,5)-(10,7). The same follows from T(10,5)·R(-90°)·S(-1,1): (2,0) → (-2,0) → (0,2) → (10,7).
-    let b = d.extents(&Space::Model);
+    let b = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     for (got, want) in [(b.min.x, 10.0), (b.min.y, 5.0), (b.max.x, 10.0), (b.max.y, 7.0)] {
         assert!((got - want).abs() < 1e-9, "extents {b:?}");
     }
     // Written back in the WCS (negative x scale, no extrusion), it reads back in the same place.
-    let b2 = roundtrip(&d).extents(&Space::Model);
+    let b2 = cadcraft_render::space_extents(&roundtrip(&d), &Space::Model).unwrap();
     assert!((b2.min - b.min).len() < 1e-9 && (b2.max - b.max).len() < 1e-9, "{b2:?} vs {b:?}");
 }
 
@@ -2093,7 +2100,7 @@ fn mirrored_ellipse_extrusion_reverses_parameters() {
     let text = "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n8\n0\n10\n0\n20\n0\n11\n2\n21\n0\n40\n0.5\n41\n0\n42\n1.5707963267948966\n\
                 210\n0\n220\n0\n230\n-1\n0\nENDSEC\n0\nEOF\n";
     let d = read(text.as_bytes(), "e.dxf").unwrap();
-    let b = d.extents(&Space::Model);
+    let b = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     for (got, want) in [(b.min.x, 0.0), (b.min.y, -1.0), (b.max.x, 2.0), (b.max.y, 0.0)] {
         assert!((got - want).abs() < 1e-6, "extents {b:?}");
     }
@@ -2117,7 +2124,7 @@ fn mirrored_hatch_extrusion_flips_boundary() {
     let text = "0\nSECTION\n2\nENTITIES\n0\nHATCH\n8\n0\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n-1\n2\nSOLID\n70\n1\n71\n0\n91\n1\n\
                 92\n2\n72\n0\n73\n1\n93\n4\n10\n1\n20\n0\n10\n3\n20\n0\n10\n3\n20\n2\n10\n1\n20\n2\n97\n0\n75\n0\n76\n1\n0\nENDSEC\n0\nEOF\n";
     let d = read(text.as_bytes(), "h.dxf").unwrap();
-    let b = d.extents(&Space::Model);
+    let b = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     for (got, want) in [(b.min.x, -3.0), (b.min.y, 0.0), (b.max.x, -1.0), (b.max.y, 2.0)] {
         assert!((got - want).abs() < 1e-9, "extents {b:?}");
     }
@@ -2130,7 +2137,7 @@ fn hatch_edge_extents(edges: &str) -> Bounds2 {
         "0\nSECTION\n2\nENTITIES\n0\nHATCH\n8\n0\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\nSOLID\n70\n1\n71\n0\n\
          91\n1\n92\n1\n93\n{n}\n{edges}97\n0\n75\n0\n76\n1\n98\n0\n0\nENDSEC\n0\nEOF\n"
     );
-    read(text.as_bytes(), "h.dxf").unwrap().extents(&Space::Model)
+    cadcraft_render::space_extents(&read(text.as_bytes(), "h.dxf").unwrap(), &Space::Model).unwrap()
 }
 
 /// Issues #492, #493, #494: a full-circle arc edge, spline edges (knots come before the control

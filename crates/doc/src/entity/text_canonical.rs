@@ -305,6 +305,7 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         };
         // Without a canonical direction the rotation is read in the plane.
         assert!(near(m.world_direction(Vec3::Z).unwrap(), Vec3::new(1.0, 0.0, 0.0)));
@@ -335,12 +336,15 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: Some(Vec3::new(1.0, 0.0, 0.0)),
+            drawing_direction: None,
         };
         a.multiline = Some(MultilineAttrib {
             geometry_revision: crate::GeometryRevision::CanonicalV2,
             normal: Vec3::new(0.0, 0.0, 2.0),
             mtext: embedded,
             read_as: String::new(),
+            embedded_46: None,
+            type_72: None,
         });
         let moved = a.transformed_canonical(&rotation_z(std::f64::consts::FRAC_PI_2)).unwrap();
         let ml = moved.multiline.unwrap();

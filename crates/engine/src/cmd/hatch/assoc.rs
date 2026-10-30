@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, EntityKind, Handle, Hatch, HatchLoop, entity_bounds};
+use cadcraft_doc::{Drawing, EntityKind, Handle, Hatch, HatchLoop};
 use cadcraft_geom::{Bounds2, PolyVertex, Polyline, Vec2, region, shoelace};
 
 use super::{closed_loop, gap_tolerance, object_polys};
@@ -48,12 +48,8 @@ fn exists(d: &Drawing, h: Handle) -> bool {
     d.entity(h).is_some_and(|e| !matches!(e.kind, EntityKind::Hatch(_)))
 }
 
-fn bounds_of(d: &Drawing, hs: &[Handle]) -> Bounds2 {
-    let mut b = Bounds2::EMPTY;
-    for e in hs.iter().filter_map(|h| d.entity(*h)) {
-        b = b.union(&entity_bounds(d, e, 0));
-    }
-    b
+fn bounds_of(d: &Drawing, hs: &[Handle]) -> Result<Bounds2, cadcraft_render::ExtentsRefusal> {
+    cadcraft_render::entities_extents(d, hs.iter().filter_map(|handle| d.entity(*handle)).map(|entity| entity.as_ref()), 0)
 }
 
 /// `p` moved from where it sat in `from` to the same place in `to` (per axis, so a move, a
@@ -72,19 +68,22 @@ fn outline_of(vs: &[PolyVertex], tol: f64) -> Vec<Vec2> {
 
 /// The loop traced again from its objects in `after`; `before` places the point the loop is
 /// found around (the drawing the loop's vertices belong to).
-fn refill(before: &Drawing, after: &Drawing, l: &HatchLoop) -> Refill {
+fn refill(before: &Drawing, after: &Drawing, l: &HatchLoop) -> crate::Result<Refill> {
     let live: Vec<Handle> = l.sources.iter().copied().filter(|h| exists(after, *h)).take(MAX_SOURCES).collect();
     if live.is_empty() {
-        return Refill::Erased;
+        return Ok(Refill::Erased);
+    }
+    for entity in live.iter().filter_map(|handle| after.entity(*handle)) {
+        entity.require_legacy_geometry().map_err(|error| crate::EngineError::Other(format!("Hatch boundary {}: {error}", entity.handle.hex())))?;
     }
     if let [h] = live.as_slice()
         && let Some(vs) = after.entity(*h).and_then(|e| closed_loop(after, e))
     {
-        return Refill::Loop(vs);
+        return Ok(Refill::Loop(vs));
     }
-    let nb = bounds_of(after, &live);
+    let nb = bounds_of(after, &live)?;
     if nb.is_empty() {
-        return Refill::Open;
+        return Ok(Refill::Open);
     }
     let tol = super::outline_tol(nb);
     let snap = ((nb.width() + nb.height()) * 1e-9).max(1e-9);
@@ -93,7 +92,7 @@ fn refill(before: &Drawing, after: &Drawing, l: &HatchLoop) -> Refill {
     let gap = gap_tolerance(after);
     let found = if l.outer {
         // The face around a point inside the old loop, carried along with the objects.
-        let ob = bounds_of(before, &live);
+        let ob = bounds_of(before, &live)?;
         let ob = if ob.is_empty() { nb } else { ob };
         let old = outline_of(&l.vertices, (ob.width() + ob.height()).max(1e-9) / 20000.0);
         region::interior_point(&old)
@@ -102,10 +101,10 @@ fn refill(before: &Drawing, after: &Drawing, l: &HatchLoop) -> Refill {
     } else {
         region::outline(&polys, snap, gap)
     };
-    match found {
+    Ok(match found {
         Some(pts) => Refill::Loop(pts.into_iter().map(PolyVertex::new).collect()),
         None => Refill::Open,
-    }
+    })
 }
 
 /// Two loops cover the same area (same extents and area, within a small tolerance).
@@ -140,14 +139,21 @@ fn reshaped(prev: &Hatch, h: &Hatch) -> bool {
 
 /// HATCHEDIT may add or remove whole loops without moving the ones it kept. New associative
 /// loops must still match their source objects; a hatch moved on its own must not keep its link.
-fn valid_loop_edit(prev: &Hatch, h: &Hatch, after: &Drawing) -> bool {
+fn valid_loop_edit(prev: &Hatch, h: &Hatch, after: &Drawing) -> crate::Result<bool> {
     if prev.loops.len().saturating_mul(h.loops.len()) > 4_000_000 {
-        return false;
+        return Ok(false);
     }
-    h.loops.iter().all(|l| {
-        prev.loops.iter().any(|old| old.vertices == l.vertices)
-            || (!l.sources.is_empty() && matches!(refill(after, after, l), Refill::Loop(vs) if same_shape(&vs, &l.vertices)))
-    })
+    for boundary in &h.loops {
+        if prev.loops.iter().any(|old| old.vertices == boundary.vertices) {
+            continue;
+        }
+        if boundary.sources.is_empty()
+            || !matches!(refill(after, after, boundary)?, Refill::Loop(vertices) if same_shape(&vertices, &boundary.vertices))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// What happens to one associative hatch after a command; `None` when nothing changes.
@@ -166,8 +172,12 @@ fn follow(before: &Drawing, after: &Drawing, handle: Handle, h: &Hatch, checked:
         }
         match prev {
             // Moved or reshaped on its own: no longer tied to the boundary.
-            Some(p) if reshaped(p, h) && !valid_loop_edit(p, h, after) => {
-                detach(&mut nh);
+            Some(p) if reshaped(p, h) => {
+                match valid_loop_edit(p, h, after) {
+                    Ok(true) => return None,
+                    Ok(false) => detach(&mut nh),
+                    Err(refused) => return Some((h.clone(), Some(refused.to_string()))),
+                }
                 return Some((nh, None));
             }
             Some(_) => return None,
@@ -175,10 +185,16 @@ fn follow(before: &Drawing, after: &Drawing, handle: Handle, h: &Hatch, checked:
                 // A new hatch (a copy, a paste, an exploded block) keeps its link only when its
                 // loops are where its objects are.
                 *checked += 1;
-                let fits = *checked <= MAX_NEW_CHECKED
-                    && h.loops
-                        .iter()
-                        .all(|l| l.sources.is_empty() || matches!(refill(after, after, l), Refill::Loop(vs) if same_shape(&vs, &l.vertices)));
+                let mut fits = *checked <= MAX_NEW_CHECKED;
+                if fits {
+                    for boundary in h.loops.iter().filter(|boundary| !boundary.sources.is_empty()) {
+                        match refill(after, after, boundary) {
+                            Ok(Refill::Loop(vertices)) if same_shape(&vertices, &boundary.vertices) => {}
+                            Ok(_) => fits = false,
+                            Err(refused) => return Some((h.clone(), Some(refused.to_string()))),
+                        }
+                    }
+                }
                 if fits {
                     return None;
                 }
@@ -194,7 +210,11 @@ fn follow(before: &Drawing, after: &Drawing, handle: Handle, h: &Hatch, checked:
             continue;
         }
         let from = if prev.is_some() { before } else { after };
-        match refill(from, after, l) {
+        let refilled = match refill(from, after, l) {
+            Ok(refilled) => refilled,
+            Err(refused) => return Some((h.clone(), Some(refused.to_string()))),
+        };
+        match refilled {
             Refill::Loop(vertices) => {
                 let sources = l.sources.iter().copied().filter(|s| exists(after, *s)).take(MAX_SOURCES).collect();
                 loops.push(HatchLoop { vertices, outer: l.outer, sources, ..Default::default() });
@@ -230,8 +250,19 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> Vec<String> {
                 if !h.associative || h.loops.iter().all(|l| l.sources.is_empty()) {
                     continue;
                 }
+                if let Err(error) = e.require_legacy_geometry() {
+                    if before.entity(e.handle).is_none()
+                        || changed(before, d, e.handle)
+                        || h.loops.iter().flat_map(|boundary| &boundary.sources).any(|handle| changed(before, d, *handle))
+                    {
+                        notes.push(format!("Hatch {} association: {error}", e.handle.hex()));
+                    }
+                    continue;
+                }
                 if let Some((nh, note)) = follow(before, d, e.handle, h, &mut checked) {
-                    changes.push((e.handle, nh));
+                    if nh != *h {
+                        changes.push((e.handle, nh));
+                    }
                     notes.extend(note);
                 }
             }
@@ -242,7 +273,9 @@ pub fn update(after: &mut Arc<Drawing>, before: &Drawing) -> Vec<String> {
     }
     let d = Arc::make_mut(after);
     for (h, nh) in changes {
-        let _ = d.modify_entity(h, |e| e.kind = EntityKind::Hatch(nh));
+        if let Err(error) = d.modify_entity(h, |e| e.kind = EntityKind::Hatch(nh)) {
+            notes.push(format!("Hatch {} association: {error}", h.hex()));
+        }
     }
     notes
 }

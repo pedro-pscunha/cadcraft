@@ -212,13 +212,14 @@ fn placed(parent: &Entity, child: &Entity, m: &Mat3) -> Result<Entity> {
     Ok(ne)
 }
 
-fn bounds(d: &Drawing, hs: &[Handle]) -> Bounds2 {
-    hs.iter().filter_map(|h| d.entity(*h).map(|e| cadcraft_doc::entity_bounds(d, e, 0))).fold(Bounds2::EMPTY, |a, b| a.union(&b))
+fn bounds(d: &Drawing, hs: &[Handle]) -> Result<Bounds2> {
+    Ok(cadcraft_render::entities_extents(d, hs.iter().filter_map(|h| d.entity(*h)).map(|e| e.as_ref()), 0)?)
 }
 
 /// The centre of the first object (the point a non-rotated polar copy is moved by).
-fn first_center(d: &Drawing, hs: &[Handle]) -> Option<Vec2> {
-    hs.first().and_then(|h| d.entity(*h)).map(|e| cadcraft_doc::entity_bounds(d, e, 0).center()).filter(|c| c.is_finite())
+fn first_center(d: &Drawing, hs: &[Handle]) -> Result<Option<Vec2>> {
+    let Some(entity) = hs.first().and_then(|h| d.entity(*h)) else { return Ok(None) };
+    Ok(Some(cadcraft_render::entity_extents(d, entity, 0)?.center()).filter(|center| center.is_finite()))
 }
 
 /// MAXARRAY: refuse an array of `items` copies of `objs` objects that would exceed the limit
@@ -351,7 +352,7 @@ fn run_arrayrect(s: &mut Session, p: &Value) -> Result<Value> {
     let rs = f64_or(p, "rowSpacing", 1.0);
     let base = match point_param(p, "base") {
         Some(b) => b,
-        None => Some(bounds(s.doc()?, &hs).center()).filter(|c| c.is_finite()).unwrap_or_default(),
+        None => Some(bounds(s.doc()?, &hs)?.center()).filter(|c| c.is_finite()).unwrap_or_default(),
     };
     let p2 = params(kind, levels, f64_or(p, "levelSpacing", rs));
     let associative = bool_or(p, "associative", assoc_default(s));
@@ -365,7 +366,10 @@ fn run_arraypolar(s: &mut Session, p: &Value) -> Result<Value> {
     let rows = count_or("arraypolar", p, "rows", 1)?;
     let levels = count_or("arraypolar", p, "levels", 1)?;
     check_size(s, n.saturating_mul(rows).saturating_mul(levels), hs.len())?;
-    let base = point_param(p, "base").or_else(|| s.doc().ok().and_then(|d| first_center(d, &hs))).unwrap_or(c);
+    let base = match point_param(p, "base") {
+        Some(base) => base,
+        None => first_center(s.doc()?, &hs)?.unwrap_or(c),
+    };
     let row_spacing = f64_or(p, "rowSpacing", 1.0);
     let kind = ArrayKind::Polar(PolarArray {
         center: c - base,
@@ -434,7 +438,7 @@ impl Interactive for ArrayM {
             "PAth" => (Box::new(super::modify2::PathArrayM::with_objects(objs)), Step::Continue),
             "POlar" => {
                 let mut m = PolarM::with_objects(objs);
-                let step = m.ready(s);
+                let step = m.ready(s)?;
                 (Box::new(m), step)
             }
             _ => {
@@ -514,7 +518,7 @@ impl RectM {
 
     /// Objects are selected: set the defaults (4 columns × 3 rows, 1.5 × the selection size apart).
     fn ready(&mut self, s: &mut Session) -> Result<Step> {
-        let b = bounds(s.doc()?, &self.objs);
+        let b = bounds(s.doc()?, &self.objs)?;
         let (w, h) = (b.width(), b.height());
         let size = |v: f64, o: f64| match (v.is_finite() && v > 1e-9, o.is_finite() && o > 1e-9) {
             (true, _) => v * 1.5,
@@ -880,19 +884,19 @@ impl PolarM {
         PolarM { sel: SelectPhase { picked: objs.clone(), done: true, ..SelectPhase::default() }, objs, ..PolarM::default() }
     }
 
-    fn ready(&mut self, s: &mut Session) -> Step {
+    fn ready(&mut self, s: &mut Session) -> Result<Step> {
         self.stage = PStage::Center;
         self.assoc = assoc_default(s);
         // Rows and levels default to 1.5 × the selection's size apart.
         if let Ok(d) = s.doc() {
-            let b = bounds(d, &self.objs);
+            let b = bounds(d, &self.objs)?;
             let size = b.width().max(b.height());
             if size.is_finite() && size > 1e-9 {
                 (self.rs, self.ls) = (size * 1.5, size * 1.5);
             }
         }
         s.echo(format!("Type = Polar  Associative = {}", yes(self.assoc)));
-        Step::Continue
+        Ok(Step::Continue)
     }
 
     fn full(&self) -> bool {
@@ -909,8 +913,11 @@ impl PolarM {
     }
 
     /// The base point: picked, else the first object's centre, else the centre of the array.
-    fn base_point(&self, s: &Session, center: Vec2) -> Vec2 {
-        self.base.or_else(|| s.doc().ok().and_then(|d| first_center(d, &self.objs))).unwrap_or(center)
+    fn base_point(&self, s: &Session, center: Vec2) -> Result<Vec2> {
+        match self.base {
+            Some(base) => Ok(base),
+            None => Ok(first_center(s.doc()?, &self.objs)?.unwrap_or(center)),
+        }
     }
 
     fn params(&self, base: Vec2, center: Vec2) -> ArrayParams {
@@ -932,7 +939,7 @@ impl PolarM {
         if !self.assoc && self.levels > 1 {
             s.echo(FLAT_LEVELS);
         }
-        let base = self.base_point(s, self.center);
+        let base = self.base_point(s, self.center)?;
         create(s, &self.objs.clone(), base, self.params(base, self.center), self.assoc)?;
         s.set_selection(Vec::new());
         Ok(Step::Done)
@@ -980,7 +987,7 @@ impl Interactive for PolarM {
         self.sel = SelectPhase::begin(s);
         if self.sel.done {
             self.objs = self.sel.picked.clone();
-            return Ok(self.ready(s));
+            return self.ready(s);
         }
         Ok(Step::Continue)
     }
@@ -1018,7 +1025,7 @@ impl Interactive for PolarM {
                 SelOutcome::Empty => Ok(Step::Done),
                 SelOutcome::Done(hs) => {
                     self.objs = hs;
-                    Ok(self.ready(s))
+                    self.ready(s)
                 }
             };
         }
@@ -1166,7 +1173,7 @@ impl Interactive for PolarM {
             PStage::Center | PStage::CenterBase => cursor,
             _ => self.center,
         };
-        let base = self.base_point(s, center);
+        let Ok(base) = self.base_point(s, center) else { return Vec::new() };
         preview_copies(s, &self.objs, item_mats(&self.params(base, center), base).into_iter())
     }
 }

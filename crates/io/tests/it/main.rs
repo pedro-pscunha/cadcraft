@@ -15,6 +15,7 @@ mod bridge_object_groups;
 mod closed_spline;
 mod codepages;
 mod curve_canonical;
+mod dim_block_record_roundtrip;
 mod dim_block_resave_roundtrip;
 mod dim_block_text;
 mod dim_clone_insert_point;
@@ -87,6 +88,7 @@ mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
+mod polyline3d_vertex_flags;
 #[cfg(not(target_arch = "wasm32"))]
 mod polyline_fit;
 mod polyline_owned_vertices;
@@ -114,6 +116,7 @@ mod tablestyle_border_dwg;
 mod tablestyle_cell_order;
 mod tablestyle_true_colors;
 mod text_canonical;
+mod text_direction_roundtrip;
 mod text_generation_flags;
 mod text_left_justify;
 mod tolerance_roundtrip;
@@ -126,5 +129,11 @@ mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
 #[cfg(not(target_arch = "wasm32"))]
+mod writer_plot_fields;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer_view_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_viewport_status;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_vport_snap;
 mod xref_roundtrip;

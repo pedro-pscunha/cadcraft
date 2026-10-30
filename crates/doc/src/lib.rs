@@ -31,7 +31,7 @@ pub use cadcraft_color as color;
 pub use cadcraft_geom as geom;
 pub use constraint::*;
 pub use entity::*;
-pub use extents::{MAX_BLOCK_DEPTH, entity_bounds};
+pub use extents::{MAX_BLOCK_DEPTH, legacy_entity_bounds};
 pub use finite::has_finite_numbers;
 pub use format::Format;
 pub use gdt::*;
@@ -57,6 +57,8 @@ pub enum DocError {
     NoEntity(Handle),
     #[error("{0}")]
     Invalid(String),
+    #[error("Canonical geometry of object {0:?} requires a revision-aware extent query.")]
+    CanonicalExtent(Handle),
     /// An edit would give the entity (its handle; 0 for a copy not yet in a drawing) infinite or undefined coordinates.
     #[error("The geometry result of {0:?} has infinite or undefined coordinates.")]
     NonFinite(Handle),
@@ -472,16 +474,16 @@ impl Drawing {
     }
 
     /// Bounds of all visible entities in a space.
-    pub fn extents(&self, space: &Space) -> cadcraft_geom::Bounds2 {
+    pub fn legacy_extents(&self, space: &Space) -> Result<cadcraft_geom::Bounds2> {
         let mut b = cadcraft_geom::Bounds2::EMPTY;
         if let Some(store) = self.space(space) {
             for e in store.iter() {
                 if self.is_visible(e) {
-                    b = b.union(&entity_bounds(self, e, 0));
+                    b = b.union(&legacy_entity_bounds(self, e, 0)?);
                 }
             }
         }
-        b
+        Ok(b)
     }
 
     /// Total entity count across model and paper space.

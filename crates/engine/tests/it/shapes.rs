@@ -268,7 +268,7 @@ fn self_check_has_no_area_bound_without_visible_extents() {
     let mut s = Session::new();
     square(&mut s);
     hide_last(&mut s);
-    assert!(s.doc().unwrap().extents(&Space::Model).is_empty());
+    assert!(cadcraft_render::space_extents(s.doc().unwrap(), &Space::Model).unwrap().is_empty());
     let r = shapes(&mut s, json!({}));
     assert_eq!(r["count"], 1);
     assert_eq!(r["selfCheck"]["implausible"], json!([]), "no extents means no area bound: {r}");

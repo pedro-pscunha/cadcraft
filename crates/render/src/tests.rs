@@ -139,6 +139,7 @@ fn vp(center: Vec2, w: f64, h: f64, view_center: Vec2, view_height: f64, id: u32
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        source_status: None,
     }
 }
 
@@ -344,6 +345,7 @@ fn truetype_mtext_and_dimension_text() {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
     )
     .unwrap();
@@ -900,6 +902,7 @@ fn mtext_exact_spacing_ignores_taller_lines() {
         line_spacing_exact,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let d = Drawing::new_imperial();
     let height = |contents: &str, ls: f64, exact: bool| layout_mtext_entity(&d, &mtext(contents, ls, exact)).bounds.height();

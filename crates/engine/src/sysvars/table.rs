@@ -201,7 +201,7 @@ pub(super) fn list(s: &Session, m: &mut serde_json::Map<String, Value>) {
     let names = SETTINGS.iter().map(|(n, _, _)| *n).chain(HEADER.iter().map(|(n, _, _)| *n));
     for n in names.chain(cadcraft_doc::DIMVARS.iter().map(|(n, _)| *n)) {
         if !m.contains_key(n)
-            && let Some(v) = super::get(s, n)
+            && let Some(v) = super::scalar_value(s, n)
         {
             m.insert(n.to_string(), v);
         }
