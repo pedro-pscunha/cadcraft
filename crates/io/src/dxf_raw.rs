@@ -1275,6 +1275,23 @@ impl Map<'_> {
     }
 }
 
+/// The reactors the writer listed for a record (an associative hatch's boundary has its hatch) keep the ones the file had besides:
+/// at the end of the `ACAD_REACTORS` group (`t` is its closing `102`), those of `x` that still exist and are not listed.
+/// `listed` holds the handles of the group being read.
+fn add_kept_reactors(t: &Tag, x: Option<&ForeignExtra>, map: &Map, listed: &mut Option<HashSet<String>>, out: &mut Vec<Tag>) {
+    if t.code == 102 {
+        if t.str().trim() == "{ACAD_REACTORS" {
+            *listed = Some(HashSet::new());
+        } else if let (Some(seen), Some(x)) = (listed.take(), x) {
+            out.extend(x.reactors.iter().filter_map(|r| map.get(&r.hex())).filter(|r| r != "0" && !seen.contains(r)).map(|r| Tag::s(330, r)));
+        }
+    } else if let Some(seen) = listed.as_mut()
+        && is_pointer(t.code)
+    {
+        seen.insert(norm(&t.str()));
+    }
+}
+
 /// Keep the raw dictionary's metadata but give modelled keys their newly written values.
 /// The raw dictionary is aliased to this written handle, so every child/foreign pointer shares
 /// the same owner. Values here are already remapped: generated references must not be remapped twice.
@@ -2024,21 +2041,8 @@ fn record(
             continue;
         }
         let mut t = source_record_group(t, x, &r.kind, attributes);
-        // The reactors the writer listed (an associative hatch's boundary has its hatch) keep the ones the file had besides.
-        if t.code == 102 && i < xdata_at {
-            if t.str().trim() == "{ACAD_REACTORS" {
-                listed = Some(HashSet::new());
-            } else if let Some(seen) = listed.take()
-                && let Some(x) = x
-            {
-                for reactor in x.reactors.iter().filter_map(|r| map.get(&r.hex())).filter(|r| r != "0" && !seen.contains(r)) {
-                    out.push(Tag::s(330, reactor));
-                }
-            }
-        } else if let Some(seen) = listed.as_mut()
-            && is_pointer(t.code)
-        {
-            seen.insert(norm(&t.str()));
+        if i < xdata_at {
+            add_kept_reactors(&t, x, map, &mut listed, out);
         }
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {

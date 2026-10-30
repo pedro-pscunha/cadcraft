@@ -711,10 +711,10 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             // From AutoCAD 2010 on the arrowhead flag and the path type are written only when they are not their defaults
             // (arrowhead on, straight path); a DWG's own writer needs both.
             let defaults_left_out = cx.target >= Version::R2010 && !cx.dwg_bridge;
-            if !(defaults_left_out && l.arrow) {
+            if !defaults_left_out || !l.arrow {
                 w.i(71, i64::from(l.arrow));
             }
-            if !(defaults_left_out && !l.spline) {
+            if !defaults_left_out || l.spline {
                 w.i(72, i64::from(l.spline));
             }
             // The annotation type and hookline settings of the record, then its annotation size, plane, direction and offsets as
