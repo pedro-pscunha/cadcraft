@@ -159,6 +159,25 @@ fn an_insert_attribute_uses_its_own_plane_and_only_the_enclosing_parent() {
 }
 
 #[test]
+fn multileader_block_content_uses_the_builders_complete_block_matrix() {
+    let mut drawing = Drawing::new_metric();
+    let mut block = Block::new("B");
+    block.base = Vec3::new(1.0, 2.0, 3.0);
+    block.entities.push(canonical(0x172, EntityKind::Line(Line { a: Vec3::new(2.0, 4.0, 6.0), b: Vec3::new(3.0, 5.0, 7.0) }), Vec3::Z));
+    drawing.blocks.insert("B".into(), Arc::new(block));
+    let mut leader = cadcraft_doc::MLeader::single(Vec3::ZERO, 0.0, false, Vec::new(), None);
+    leader.context.geometry_revision = GeometryRevision::CanonicalV2;
+    leader.context.block_normal = Vec3::new(0.0, 1.0, 0.0);
+    leader.block = Some(Insert { insert: Vec3::new(10.0, 20.0, 30.0), scale: Vec3::new(2.0, 3.0, 4.0), ..reference("B") });
+    let entity = canonical(0x173, EntityKind::MLeader(leader), Vec3::Z);
+    let parent = Mat4 { m: [[1.0, 0.0, 2.0, 5.0], [0.0, -1.0, 0.0, 7.0], [0.5, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    let geometry = entity_world_geometry(&drawing, &entity, &parent).unwrap();
+    let [WorldPrimitive::Line { a, b }] = geometry.primitives() else { panic!("not the content line") };
+    assert!((*a - Vec3::new(85.0, -25.0, 40.0)).len() < 1e-10);
+    assert!((*b - Vec3::new(89.0, -29.0, 42.0)).len() < 1e-10);
+}
+
+#[test]
 fn canonical_block_traversal_refuses_cycles_and_legacy_children() {
     let mut drawing = Drawing::new_metric();
     let root = canonical(0x160, EntityKind::Insert(reference("B")), Vec3::Z);

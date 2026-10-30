@@ -22,6 +22,11 @@ pub(crate) fn draw(
     if let EntityKind::Insert(insert) = &entity.kind {
         return super::blocks::canonical_insert(builder, context, entity, insert, color);
     }
+    if let EntityKind::MLeader(leader) = &entity.kind
+        && leader.block.is_some()
+    {
+        return Err(unsupported("multileader block-content paint roles"));
+    }
     if entity.common.thickness != 0.0
         && matches!(
             entity.kind,
