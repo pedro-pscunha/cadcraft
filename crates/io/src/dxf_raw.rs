@@ -495,7 +495,7 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
-        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
+        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 40, 41, 361]),
         "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
         "UCS" => ("AcDbUCSTableRecord", &[2, 70, 10, 20, 30, 11, 21, 31, 12, 22, 32, 79]),
         _ => return Vec::new(),
@@ -1740,6 +1740,9 @@ fn record(
         None => b,
     };
     let h = head(b);
+    // Header snap/grid edits belong only to the first active VPORT tile.
+    let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
+    let replay = |p: &RawTag| !active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50);
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
@@ -1774,14 +1777,14 @@ fn record(
         if i == xdata_at
             && let Some(x) = x
         {
-            out.extend(x.subclass.iter().map(|p| map.group(p)));
+            out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
         // Kept table fields replace the defaults the writer wrote.
         if !entity
             && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS")
             && i < xdata_at
-            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code))
+            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code && replay(p)))
             && !matches!(t.code, 0 | 5 | 100 | 330)
         {
             continue;
@@ -1821,7 +1824,7 @@ fn record(
             out.extend(x.props.iter().map(|p| map.group(p)));
         }
         if xdata_at == b.len() {
-            out.extend(x.subclass.iter().map(|p| map.group(p)));
+            out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
     }

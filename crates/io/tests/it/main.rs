@@ -126,4 +126,6 @@ mod vx_table;
 mod writer_plot_fields;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_view_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_vport_snap;
 mod xref_roundtrip;
