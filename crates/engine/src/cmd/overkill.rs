@@ -195,6 +195,7 @@ fn overkill(s: &mut Session, hs: Option<Vec<Handle>>, o: &Opts) -> Result<Report
         if only.as_ref().is_some_and(|set| !set.contains(&e.handle)) || d.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
+        e.require_legacy_geometry()?;
         let key = o.prop_key(&e.common);
         let n = props.len() as u32;
         let prop = *props.entry(key).or_insert(n);

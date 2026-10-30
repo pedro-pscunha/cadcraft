@@ -41,6 +41,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 /// use).
 fn array_of(d: &Drawing, h: Handle) -> Result<(Insert, Arc<Block>, ArrayParams)> {
     let e = d.entity(h).ok_or_else(|| other("No such object."))?;
+    super::super::modify::check_block_expansion(d, e, &Mat3::IDENTITY, 0)?;
     let p = d.array_params(e).ok_or_else(|| other("The object is not an associative array."))?;
     let EntityKind::Insert(ins) = &e.kind else { return Err(other("The object is not an associative array.")) };
     let blk = d.block(&ins.block).cloned().ok_or_else(|| other("The array's block is missing."))?;
@@ -163,7 +164,7 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
         return Err(other(format!("The objects nest block references too deeply (more than {MAX_BLOCK_DEPTH} levels).")));
     }
     for entity in &ents {
-        crate::cmd::modify::check_ellipse_transform(entity, &inv)?;
+        crate::cmd::modify::check_block_expansion(d, entity, &inv, 0)?;
     }
     let d = s.doc_mut()?;
     let name = d.anonymous_block_name("*U");
@@ -178,9 +179,12 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
 }
 
 /// The centre of objects `hs` (world).
-fn centroid(d: &Drawing, hs: &[Handle]) -> Vec2 {
+fn centroid(d: &Drawing, hs: &[Handle]) -> Result<Vec2> {
+    for entity in hs.iter().filter_map(|h| d.entity(*h)) {
+        super::super::modify::check_block_expansion(d, entity, &Mat3::IDENTITY, 0)?;
+    }
     let b = hs.iter().filter_map(|h| d.entity(*h)).fold(Bounds2::EMPTY, |a, e| a.union(&entity_bounds(d, e, 0)));
-    Some(b.center()).filter(|c| c.is_finite()).unwrap_or_default()
+    Ok(Some(b.center()).filter(|c| c.is_finite()).unwrap_or_default())
 }
 
 /// The item of array `h` under world point `at` (the lowest level when levels overlap).
@@ -475,7 +479,10 @@ fn run_arrayedit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(r) = p.get("replace").filter(|v| !v.is_null()) {
         let hs = targets(s, r)?;
-        let base = point_param(r, "base").unwrap_or_else(|| s.doc().map(|d| centroid(d, &hs)).unwrap_or_default());
+        let base = match point_param(r, "base") {
+            Some(base) => base,
+            None => centroid(s.doc()?, &hs)?,
+        };
         let name = block_from(s, h, &hs, base)?;
         let (_, _, mut a) = array_of(s.doc()?, h)?;
         match r.get("items") {
@@ -882,7 +889,7 @@ impl Interactive for EditM {
             (RepBase, Input::Point(_) | Input::Enter) => {
                 let base = match &i {
                     Input::Point(p) => *p,
-                    _ => centroid(s.doc()?, &self.rep_objs),
+                    _ => centroid(s.doc()?, &self.rep_objs)?,
                 };
                 self.rep_block = Some(block_from(s, h, &self.rep_objs.clone(), base)?);
                 RepItems

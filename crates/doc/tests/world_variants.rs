@@ -32,6 +32,19 @@ fn similarity() -> Mat4 {
 }
 
 #[test]
+fn an_unrepresentable_projected_parameter_span_refuses_instead_of_becoming_full() {
+    for axis_u in [Vec3::new(1e18, 0.0, 0.0), Vec3::new(0.0, 0.0, 1e18)] {
+        let geometry = WorldGeometry::from_primitives(
+            Handle(0x124),
+            vec![WorldPrimitive::Conic { center: Vec3::ZERO, axis_u, axis_v: Vec3::new(0.0, 2e18, 0.0), start: 0.0, end: 1e-18 }],
+        )
+        .unwrap();
+        let error = geometry.project_xy().unwrap_err();
+        assert!(error.to_string().contains("124") && error.to_string().contains("span"), "{error}");
+    }
+}
+
+#[test]
 fn an_arc_stays_exact_under_any_affine_parent() {
     let (c, x, y) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0));
     let arc = WorldPrimitive::Conic { center: c, axis_u: x, axis_v: y, start: 0.3, end: 2.0 };
@@ -55,6 +68,37 @@ fn a_spline_moves_its_controls_only() {
     let WorldPrimitive::Spline { degree, knots, control, weights } = spline.transformed(&shear()).unwrap() else { panic!("not a spline") };
     assert_eq!((degree, knots, weights), (2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![1.0, 0.5, 1.0]));
     assert!(near(control[1], shear().apply(Vec3::new(1.0, 2.0, 0.0))));
+}
+
+#[test]
+fn hostile_spline_degree_refuses_without_arithmetic_overflow() {
+    let spline = WorldPrimitive::Spline { degree: usize::MAX, knots: Vec::new(), control: vec![Vec3::ZERO], weights: Vec::new() };
+    assert!(spline.validate().is_err());
+}
+
+#[test]
+fn nonfinite_fill_payloads_and_source_frames_are_refused() {
+    let WorldFillKind::Pattern(mut p) = pattern() else { panic!("not pattern") };
+    p.lines.push(cadcraft_doc::library::PatternLine { angle: 0.0, origin: (0.0, 0.0), delta: (1.0, 1.0), dashes: vec![f64::NAN] });
+    let gradient = WorldGradient {
+        gradient: Gradient {
+            name: "LINEAR".into(),
+            color1: cadcraft_color::Color::Index(1),
+            color2: cadcraft_color::Color::Index(5),
+            angle: f64::NAN,
+            centered: false,
+        },
+        origin: Vec3::ZERO,
+        x_axis: X,
+        y_axis: Y,
+    };
+    for primitive in [fill(WorldFillKind::Pattern(p)), fill(WorldFillKind::Gradient(gradient))] {
+        assert!(primitive.validate().is_err());
+        assert!(WorldGeometry::from_primitives(Handle(0), vec![primitive]).is_err());
+    }
+    let WorldPrimitive::Text(mut text) = text() else { panic!("not text") };
+    text.frame.normal.x = f64::NAN;
+    assert!(WorldPrimitive::Text(text).transformed(&Mat4::IDENTITY).is_err());
 }
 
 #[test]
