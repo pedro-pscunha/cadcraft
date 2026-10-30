@@ -335,6 +335,26 @@ mod native {
         }
     }
 
+    /// How AutoCAD stores a spline in an R2013 or later DWG, measured on the 3,885 splines of the DWGs it saved (DPInc,
+    /// Citycon, Planeta-Toulouse), without an exception: a spline of control points (no fit points) has knot parameterization
+    /// "custom" (15), none of the creation-method flags (`flags1` bits 1, 4 and 8) and no periodic bit, even where AutoCAD's own DXF
+    /// of it says periodic (group 70 bit 2: 35 splines). A DXF has no field for the first two, so acadrust left 0 (chord) and, for
+    /// group 70's bit 1024, the method flags: a DXF from AutoCAD gives 8 where the DWG reads 264. The periodic bit is the one the
+    /// DXF text carries. A spline with fit points keeps what the reader made of it.
+    fn spline_flags(doc: &mut acadrust::CadDocument) {
+        if doc.version < acadrust::DxfVersion::AC1027 {
+            return;
+        }
+        for e in doc.entities_mut() {
+            let acadrust::entities::EntityType::Spline(s) = e else { continue };
+            if s.fit_points.is_empty() && !s.control_points.is_empty() {
+                s.knot_parameterization = 15;
+                s.dwg_flags1 &= !(1 | 4 | 8);
+                s.flags.periodic = false;
+            }
+        }
+    }
+
     /// Leave out DGN line style components (`LS*COMPONENT`) that no line style definition uses
     /// (#1482). A drawing that once came from MicroStation can carry hundreds of thousands of
     /// them, orphaned copies piled up by earlier DGN imports and copy-pastes (AutoCAD's PURGE
@@ -560,6 +580,7 @@ mod native {
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
+        spline_flags(&mut doc);
         add_variable_dictionary(&mut doc);
         current_layer(&mut doc);
         std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
@@ -742,6 +763,64 @@ mod tests {
         let detail = doc.dim_styles.iter().find(|style| style.name == "Detail").map(|style| style.handle);
         assert!(detail.is_some());
         assert_eq!(Some(doc.header.current_dimstyle_handle), detail);
+    }
+
+    /// A SPLINE record: group 70 `flags`, degree 3, the clamped uniform knots of `control` points and `fit` points.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spline_record(handle: &str, flags: i64, control: &[[f64; 3]], fit: &[[f64; 3]]) -> String {
+        let n = control.len();
+        let mut knots = vec![0.0; 4];
+        knots.extend((1..n - 3).map(|k| k as f64));
+        knots.extend(vec![(n - 3) as f64; 4]);
+        let mut s = format!("  0\nSPLINE\n  5\n{handle}\n100\nAcDbEntity\n  8\n0\n100\nAcDbSpline\n210\n0\n220\n0\n230\n1\n 70\n{flags}\n 71\n3\n");
+        s += &format!(" 72\n{}\n 73\n{n}\n 74\n{}\n 42\n0.0000001\n 43\n0.0000000001\n", knots.len(), fit.len());
+        for k in &knots {
+            s += &format!(" 40\n{k}\n");
+        }
+        for p in control {
+            s += &format!(" 10\n{}\n 20\n{}\n 30\n{}\n", p[0], p[1], p[2]);
+        }
+        for p in fit {
+            s += &format!(" 11\n{}\n 21\n{}\n 31\n{}\n", p[0], p[1], p[2]);
+        }
+        s
+    }
+
+    /// AutoCAD writes a control-point spline of an R2013 or later DWG with knot parameterization 15 and no creation-method flags,
+    /// and a fit-point spline with the method flags (1 and 8) and chord parameterization (measured on 3,885 splines of AutoCAD
+    /// DWGs). A DXF carries none of it: acadrust left 0 and, for group 70's bit 1024, the method flags on a control-point record.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn splines_reach_the_dwg_with_the_flags_autocad_gives_their_storage() {
+        let control: Vec<[f64; 3]> = (0..6).map(|i| [f64::from(i) * 10.0, f64::from(i * i), 0.0]).collect();
+        let fit: Vec<[f64; 3]> = (0..4).map(|i| [f64::from(i) * 10.0, f64::from(i % 2) * 5.0, 0.0]).collect();
+        let mut dxf = String::from("  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1032\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n");
+        // Group 70: planar; planar + linear; closed, periodic and the fit-point creation bits of a record whose fit points the DXF
+        // left out (as AutoCAD's DXF does); and a fit-point spline.
+        dxf += &spline_record("A1", 8, &control, &[]);
+        dxf += &spline_record("A2", 24, &control, &[]);
+        dxf += &spline_record("A3", 1 | 2 | 8 | 32 | 1024 | 2048, &control, &[]);
+        dxf += &spline_record("A4", 8 | 32 | 1024, &control, &fit);
+        dxf += "  0\nENDSEC\n  0\nEOF\n";
+        let dwg = dxf_to_dwg(dxf.as_bytes()).unwrap();
+        let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(&dwg)).read().unwrap();
+        let mut seen = Vec::new();
+        for e in doc.entities() {
+            let acadrust::entities::EntityType::Spline(s) = e else { continue };
+            seen.push((s.dwg_scenario, s.dwg_flags1, s.knot_parameterization, s.fit_points.len(), s.flags.closed, s.flags.periodic));
+        }
+        // The three control-point records: scenario 1, flags1 0, knot parameterization 15. The fit-point record: scenario 2, flags1
+        // 9 (method fit points + use knot parameter), chord. Fields: scenario, flags1, knot parameterization, fit points, closed, periodic.
+        assert_eq!(
+            seen,
+            vec![
+                (Some(1), 0, 15, 0, false, false),
+                (Some(1), 0, 15, 0, false, false),
+                // Closed stays; periodic is not stored, as AutoCAD does not store it.
+                (Some(1), 0, 15, 0, true, false),
+                (Some(2), 9, 0, 4, false, false)
+            ]
+        );
     }
 
     #[test]
