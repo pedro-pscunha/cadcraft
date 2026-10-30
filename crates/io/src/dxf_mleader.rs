@@ -13,8 +13,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cadcraft_doc::{
-    Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderRoot,
-    MLeaderStyle, MText,
+    Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext,
+    MLeaderContextGroups, MLeaderEntityGroups, MLeaderGroups, MLeaderRoot, MLeaderRootGroups, MLeaderStyle, MText,
 };
 use cadcraft_dxf::Tag;
 use cadcraft_geom::{OcsFrame, Vec3};
@@ -129,6 +129,10 @@ struct Parsed {
     /// 174, 175, 176.
     ctx_codes: [Option<i64>; 4],
     entity_codes: [Option<i64>; 5],
+    /// The other numeric groups of the context, the entity and the first root, as the file has them.
+    ctx_groups: MLeaderContextGroups,
+    entity_groups: MLeaderEntityGroups,
+    root_groups: MLeaderRootGroups,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -160,6 +164,13 @@ fn parse(tags: &[Tag]) -> Parsed {
     let mut attrib: Option<String> = None;
     for t in tags.get(start..).unwrap_or(&[]) {
         let (c, f) = (t.code, t.f64());
+        // The numeric groups the model keeps as read, whatever else reads them.
+        match lvl {
+            Level::Entity => drop(p.entity_groups.set(c, f)),
+            Level::Context => drop(p.ctx_groups.set(c, f)),
+            Level::Root if root_kept && p.roots.len() == 1 => drop(p.root_groups.set(c, f)),
+            _ => {}
+        }
         match lvl {
             Level::Entity => match c {
                 300 if t.str().trim_start().starts_with("CONTEXT_DATA") => lvl = Level::Context,
@@ -467,6 +478,7 @@ fn read_as(tags: &[Tag], canonical: bool) -> (MLeader, bool) {
             angle_type: p.entity_codes[2],
             alignment: p.entity_codes[3],
             block_attachment: p.entity_codes[4],
+            groups: Box::new(MLeaderGroups { ctx: p.ctx_groups, entity: p.entity_groups, root: p.root_groups }),
         },
     };
     let leader = MLeader {
@@ -648,16 +660,20 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     };
     let align = i64::from((attach - 1) % 3);
     // The codes the file gave apply while the text keeps the attachment point they were read with; the block connection always.
-    let codes = m.context.codes;
+    let codes = &m.context.codes;
+    let (cg, eg, rg) = (codes.groups.ctx, codes.groups.entity, codes.groups.root);
+    // The numeric groups the file gave (`None`: the default of a multileader made in CADCraft).
+    let fnum = |t: &mut Vec<Tag>, c: i32, v: Option<f64>, d: f64| t.push(Tag::f(c, v.unwrap_or(d)));
+    let inum = |t: &mut Vec<Tag>, c: i32, v: Option<f64>, d: i64| t.push(Tag::i(c, v.map_or(d, |x| x as i64)));
     let same = codes.derived_attach == text.map(|x| x.attach);
     let pick = |code: Option<i64>, derived: i64| if same { code.unwrap_or(derived) } else { derived };
     i(&mut t, 270, 2);
     s(&mut t, 300, "CONTEXT_DATA{");
-    f(&mut t, 40, 1.0);
+    fnum(&mut t, 40, cg.scale, 1.0);
     p(&mut t, 10, first.dogleg_end());
-    f(&mut t, 41, text.map_or(style.text_height, |x| x.height));
+    f(&mut t, 41, text.map_or(cg.text_height.unwrap_or(style.text_height), |x| x.height));
     f(&mut t, 140, m.arrow_size);
-    f(&mut t, 145, style.landing_gap);
+    fnum(&mut t, 145, cg.landing_gap, style.landing_gap);
     i(&mut t, 174, pick(codes.ctx_left, vert));
     i(&mut t, 175, pick(codes.ctx_right, vert));
     i(&mut t, 176, pick(codes.ctx_alignment, align));
@@ -688,23 +704,23 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
         });
         f(&mut t, 42, rotation);
         f(&mut t, 43, x.width);
-        f(&mut t, 44, 0.0);
+        fnum(&mut t, 44, cg.column_height, 0.0);
         f(&mut t, 45, x.line_spacing);
         i(&mut t, 170, if x.line_spacing_exact { 2 } else { 1 });
-        i(&mut t, 90, BYBLOCK);
+        inum(&mut t, 90, cg.text_color, BYBLOCK);
         i(&mut t, 171, align + 1);
-        i(&mut t, 172, 1);
-        i(&mut t, 91, NO_COLOR);
-        f(&mut t, 141, 1.5);
-        i(&mut t, 92, 0);
-        i(&mut t, 291, 0);
-        i(&mut t, 292, 0);
-        i(&mut t, 173, 0);
-        i(&mut t, 293, 0);
-        f(&mut t, 142, 0.0);
-        f(&mut t, 143, 0.0);
-        i(&mut t, 294, 0);
-        i(&mut t, 295, 0);
+        inum(&mut t, 172, cg.flow_direction, 1);
+        inum(&mut t, 91, cg.background_color, NO_COLOR);
+        fnum(&mut t, 141, cg.background_scale, 1.5);
+        inum(&mut t, 92, cg.background_transparency, 0);
+        inum(&mut t, 291, cg.background_fill, 0);
+        inum(&mut t, 292, cg.mask_fill, 0);
+        inum(&mut t, 173, cg.column_type, 0);
+        inum(&mut t, 293, cg.height_automatic, 0);
+        fnum(&mut t, 142, cg.column_width, 0.0);
+        fnum(&mut t, 143, cg.column_gutter, 0.0);
+        inum(&mut t, 294, cg.column_flow_reversed, 0);
+        inum(&mut t, 295, cg.word_break, 0);
     }
     i(&mut t, 296, i64::from(block.is_some()));
     if let Some((b, h)) = block {
@@ -713,7 +729,7 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
         p(&mut t, 15, b.insert);
         p(&mut t, 16, b.scale);
         f(&mut t, 46, b.rotation);
-        i(&mut t, 93, BYBLOCK);
+        inum(&mut t, 93, cg.block_color, BYBLOCK);
         // Block → world, row by row.
         let base = d.block(&b.block).map_or(Vec3::ZERO, |x| x.base);
         let exact = if canonical { m.block_world_transform(base).ok().flatten() } else { None };
@@ -732,13 +748,13 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     p(&mut t, 110, m.context.origin);
     p(&mut t, 111, m.context.x_axis);
     p(&mut t, 112, m.context.y_axis);
-    i(&mut t, 297, 0);
+    inum(&mut t, 297, cg.normal_reversed, 0);
     if lined {
         let mut line = 0;
         for (n, root) in m.roots.iter().enumerate() {
             s(&mut t, 302, "LEADER{");
-            i(&mut t, 290, 1);
-            i(&mut t, 291, 1);
+            inum(&mut t, 290, rg.last_point_set, 1);
+            inum(&mut t, 291, rg.dogleg_set, 1);
             p(&mut t, 10, root.landing);
             p(&mut t, 11, root.dogleg_dir);
             i(&mut t, 90, ids.get(n).copied().unwrap_or(0));
@@ -752,19 +768,21 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
                 line += 1;
                 s(&mut t, 305, "}");
             }
-            i(&mut t, 271, 0);
+            inum(&mut t, 271, rg.attach_direction, 0);
             s(&mut t, 303, "}");
         }
     }
-    i(&mut t, 272, 9);
-    i(&mut t, 273, 9);
+    inum(&mut t, 272, cg.attach_top, 9);
+    inum(&mut t, 273, cg.attach_bottom, 9);
     s(&mut t, 301, "}");
     s(&mut t, 340, &r.style);
     // Overridden properties: leader type, landing and dogleg, arrowhead size, content type,
     // text style and height, block content (the entity holds its own values).
     // An own arrowhead (342) is the 0x100 override.
     let arrow_flag = if r.arrow.is_some() { 0x100 } else { 0 };
-    i(&mut t, 90, 0x1 | 0x10 | 0x40 | 0x80 | arrow_flag | 0x200 | 0x400 | 0x800 | 0x1_0000 | 0x8_0000);
+    // The override flags as read, with the own-arrowhead bit following the multileader.
+    let overrides = eg.override_flags.map_or(0x1 | 0x10 | 0x40 | 0x80 | 0x200 | 0x400 | 0x800 | 0x1_0000 | 0x8_0000, |x| (x as i64) & !0x100);
+    i(&mut t, 90, overrides | arrow_flag);
     i(
         &mut t,
         170,
@@ -776,10 +794,10 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
             1
         },
     );
-    i(&mut t, 91, BYBLOCK);
-    i(&mut t, 171, -2);
-    i(&mut t, 290, 1);
-    i(&mut t, 291, i64::from(first.dogleg > 0.0));
+    inum(&mut t, 91, eg.line_color, BYBLOCK);
+    inum(&mut t, 171, eg.line_weight, -2);
+    inum(&mut t, 290, eg.landing_enabled, 1);
+    inum(&mut t, 291, eg.dogleg_enabled, i64::from(first.dogleg > 0.0));
     f(&mut t, 41, first.dogleg);
     if let Some(h) = &r.arrow {
         s(&mut t, 342, h);
@@ -803,11 +821,11 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     i(&mut t, 95, pick(codes.right, vert));
     i(&mut t, 174, pick(codes.angle_type, 1));
     i(&mut t, 175, pick(codes.alignment, align));
-    i(&mut t, 92, BYBLOCK);
-    i(&mut t, 292, 0);
+    inum(&mut t, 92, eg.text_color, BYBLOCK);
+    inum(&mut t, 292, eg.text_frame, 0);
     if let Some((b, h)) = block {
         s(&mut t, 344, h);
-        i(&mut t, 93, BYBLOCK);
+        inum(&mut t, 93, eg.block_color, BYBLOCK);
         p(&mut t, 10, b.scale);
         f(&mut t, 43, b.rotation);
         i(&mut t, 176, codes.block_attachment.unwrap_or(1));
@@ -831,14 +849,14 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
             n += 1;
         }
     }
-    i(&mut t, 293, 0);
-    i(&mut t, 294, 0);
-    i(&mut t, 178, 0);
-    i(&mut t, 179, 1);
-    f(&mut t, 45, 1.0);
-    i(&mut t, 271, 0);
-    i(&mut t, 272, 9);
-    i(&mut t, 273, 9);
+    inum(&mut t, 293, eg.annotation_scale, 0);
+    inum(&mut t, 294, eg.text_direction_negative, 0);
+    inum(&mut t, 178, eg.text_align_in_editor, 0);
+    inum(&mut t, 179, eg.attachment_point, 1);
+    fnum(&mut t, 45, eg.scale, 1.0);
+    inum(&mut t, 271, eg.attach_direction, 0);
+    inum(&mut t, 272, eg.attach_top, 9);
+    inum(&mut t, 273, eg.attach_bottom, 9);
     t
 }
 
