@@ -166,7 +166,7 @@ pub fn geometry_key(kind: &EntityKind, common: &Common) -> Option<String> {
             let _ = write!(s, "WIPEOUT{:?}{plane:?}", (&w.boundary, &w.frame));
         }
         EntityKind::Spline(c) => {
-            let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts));
+            let _ = write!(s, "SPLINE{:?}{plane:?}", (c.degree, &c.knots, &c.control, &c.weights, &c.fit, c.closed, &c.fit_opts, &c.space));
         }
         EntityKind::Leader(l) => {
             let _ = write!(s, "LEADER{:?}{plane:?}", l.vertices);

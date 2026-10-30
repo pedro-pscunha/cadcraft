@@ -266,36 +266,7 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         EntityKind::Spline(s) => {
             w.s(0, "SPLINE");
             common(w, e, owner, paper, "AcDbSpline");
-            let flags = 8 | i64::from(s.closed) | if s.is_periodic() { 2 } else { 0 } | if s.weights.is_empty() { 0 } else { 4 };
-            w.i(70, flags);
-            w.i(71, s.degree as i64);
-            w.i(72, s.knots.len() as i64);
-            w.i(73, s.control.len() as i64);
-            w.i(74, s.fit.len() as i64);
-            w.f(42, 1e-10);
-            w.f(43, 1e-10);
-            // Fit data: tolerance and end tangents (the knot parametrisation is implied by the knots).
-            if !s.fit.is_empty() {
-                w.f(44, s.fit_opts.tolerance);
-                if let Some(t) = s.fit_opts.start_tangent {
-                    w.p(12, t.to3(0.0));
-                }
-                if let Some(t) = s.fit_opts.end_tangent {
-                    w.p(13, t.to3(0.0));
-                }
-            }
-            for k in &s.knots {
-                w.f(40, *k);
-            }
-            for (i, c) in s.control.iter().enumerate() {
-                w.p(10, c.to3(0.0));
-                if let Some(wt) = s.weights.get(i) {
-                    w.f(41, *wt);
-                }
-            }
-            for f in &s.fit {
-                w.p(11, f.to3(0.0));
-            }
+            spline_tags(w, s, canonical_plane(e));
         }
         EntityKind::Helix(h) => {
             // A cubic spline through points on the helix, then the helix data (DXF Reference). A canonical helix writes
@@ -1050,6 +1021,52 @@ fn gradient_xdata(w: &mut W, g: &Gradient) {
     w.i(1070, i64::from(g.centered));
     w.s(1000, g.color1.name());
     w.s(1000, g.color2.name());
+}
+
+/// The groups of a SPLINE after its subclass marker. A canonical spatial spline (`plane` is its normal) writes its Z
+/// values, its tangents' Z and the planar flag only when its points lie in that plane; a planar spline writes Z = 0.
+fn spline_tags(w: &mut W, s: &cadcraft_geom::Spline, plane: Option<Vec3>) {
+    if let Some(normal) = plane {
+        w.p(210, normal);
+    }
+    let z = |zs: Option<&Vec<f64>>, i: usize| zs.and_then(|v| v.get(i)).copied().unwrap_or(0.0);
+    let space = s.space.as_ref().filter(|_| plane.is_some() && s.space_is_consistent());
+    let planar = plane.filter(|_| space.is_some()).is_none_or(|normal| {
+        let points = s.control3().unwrap_or_default();
+        let n = normal.normalized();
+        let base = points.first().copied().unwrap_or(Vec3::ZERO);
+        points.iter().all(|p| ((*p - base).dot(n)).abs() <= 1e-9 * (1.0 + p.len()))
+    });
+    let flags = if planar { 8 } else { 0 } | i64::from(s.closed) | if s.is_periodic() { 2 } else { 0 } | if s.weights.is_empty() { 0 } else { 4 };
+    w.i(70, flags);
+    w.i(71, s.degree as i64);
+    w.i(72, s.knots.len() as i64);
+    w.i(73, s.control.len() as i64);
+    w.i(74, s.fit.len() as i64);
+    w.f(42, 1e-10);
+    w.f(43, 1e-10);
+    // Fit data: tolerance and end tangents (the knot parametrisation is implied by the knots).
+    if !s.fit.is_empty() {
+        w.f(44, s.fit_opts.tolerance);
+        if let Some(t) = s.fit_opts.start_tangent {
+            w.p(12, t.to3(space.map_or(0.0, |z| z.start_tangent)));
+        }
+        if let Some(t) = s.fit_opts.end_tangent {
+            w.p(13, t.to3(space.map_or(0.0, |z| z.end_tangent)));
+        }
+    }
+    for k in &s.knots {
+        w.f(40, *k);
+    }
+    for (i, c) in s.control.iter().enumerate() {
+        w.p(10, c.to3(z(space.map(|z| &z.control), i)));
+        if let Some(wt) = s.weights.get(i) {
+            w.f(41, *wt);
+        }
+    }
+    for (i, f) in s.fit.iter().enumerate() {
+        w.p(11, f.to3(z(space.map(|z| &z.fit), i)));
+    }
 }
 
 /// Group 210 of a canonical entity: its normal, kept as read. A legacy entity writes none.

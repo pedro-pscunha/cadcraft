@@ -6,7 +6,7 @@
 //! and patterns a parent that is not a similarity. Projection to the view happens only after this, in
 //! `WorldGeometry::project_xy`.
 
-use cadcraft_geom::{Mat4, OcsFrame, Vec2, Vec3, bulge_to_arc};
+use cadcraft_geom::{Mat4, OcsFrame, Spline, Vec2, Vec3, bulge_to_arc};
 
 use super::block::Attrib;
 use super::curves::{Arc, Circle, LwPolyline, Solid};
@@ -157,6 +157,13 @@ pub fn lwpolyline_primitives(polyline: &LwPolyline, normal: Vec3, parent: &Mat4)
         out.extend(strip(f, v.p, w.p, v.bulge, wa, wb, z));
     }
     finish(out, parent)
+}
+
+/// A canonical spatial spline: its rational B-spline in WCS, from the control points and weights it holds. A planar
+/// payload (no Z values) has no spatial control points and is refused.
+pub fn spline_primitives(spline: &Spline, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    let control = spline.control3().ok_or_else(|| DocError::Invalid("A canonical spline needs its Z values.".into()))?;
+    finish(vec![WorldPrimitive::Spline { degree: spline.degree, knots: spline.knots.clone(), control, weights: spline.weights.clone() }], parent)
 }
 
 /// A canonical helix: its rational B-spline in WCS.
@@ -962,5 +969,28 @@ mod tests {
         legacy.vertices[0].frame = None;
         assert!(mline_primitives(&legacy, Vec3::Z, &Mat4::IDENTITY).is_err());
         assert!(mline_primitives(&mline(|v| v, &[]), Vec3::ZERO, &Mat4::IDENTITY).is_err());
+    }
+
+    #[test]
+    fn a_spatial_spline_is_a_world_spline_through_its_xyz_controls() {
+        use cadcraft_geom::{FitOptions, SplineSpace};
+        let sp = Spline {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            control: vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0)],
+            weights: vec![1.0, 0.5, 1.0],
+            fit: Vec::new(),
+            closed: false,
+            fit_opts: FitOptions::default(),
+            space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+        };
+        let got = spline_primitives(&sp, &parent()).unwrap();
+        let WorldPrimitive::Spline { degree, knots, control, weights } = &got[0] else { panic!("not a spline") };
+        assert_eq!((*degree, knots.len(), weights.clone()), (2, 6, vec![1.0, 0.5, 1.0]));
+        assert!(near(control[1], parent().apply(Vec3::new(1.0, 2.0, 4.0))) && near(control[2], parent().apply(Vec3::new(3.0, 0.0, 1.0))));
+        assert!(spline_primitives(&Spline { space: None, ..sp.clone() }, &parent()).is_err());
+        let mut perspective = Mat4::IDENTITY;
+        perspective.m[3][0] = 0.1;
+        assert!(spline_primitives(&sp, &perspective).is_err());
     }
 }

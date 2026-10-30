@@ -97,7 +97,7 @@ fn spline(t: &T) -> Spline {
         cadcraft_geom::FitOptions { knots: Default::default(), start_tangent: tangent(12), end_tangent: tangent(13), tolerance: t.fd(44, 0.0) }
             .sanitized();
     let closed = t.i(70).unwrap_or(0) & 1 != 0;
-    let mut sp = Spline { degree, knots, control, weights, fit: fit.clone(), closed, fit_opts };
+    let mut sp = Spline { degree, knots, control, weights, fit: fit.clone(), closed, fit_opts, space: None };
     if !sp.is_valid() && fit.len() >= 2 {
         sp = Spline::fit_with(&fit, sp.closed, fit_opts);
     } else if !sp.is_valid() && sp.control.len() >= 2 {

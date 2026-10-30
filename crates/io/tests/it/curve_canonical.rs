@@ -299,3 +299,142 @@ fn the_canonical_reader_returns_solids_and_traces_in_the_ocs() {
     let EntityKind::Solid(s) = read else { panic!("solid") };
     assert_eq!(s.corners[3], s.corners[2]);
 }
+
+fn spline() -> cadcraft_geom::Spline {
+    use cadcraft_geom::{FitOptions, Spline, SplineSpace};
+    Spline {
+        degree: 2,
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        control: vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0)],
+        weights: vec![1.0, 0.5, 1.0],
+        fit: Vec::new(),
+        closed: false,
+        fit_opts: FitOptions::default(),
+        space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+    }
+}
+
+/// A spline with fit points: DWG stores either the control scenario or the fit scenario, so its DWG leg checks the fit data.
+fn fit_spline() -> cadcraft_geom::Spline {
+    use cadcraft_geom::FitOptions;
+    cadcraft_geom::Spline {
+        fit: vec![Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0)],
+        fit_opts: FitOptions {
+            start_tangent: Some(Vec2::new(1.0, 1.0)),
+            end_tangent: Some(Vec2::new(1.0, -1.0)),
+            tolerance: 0.25,
+            ..FitOptions::default()
+        },
+        space: Some(cadcraft_geom::SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.5], start_tangent: 0.5, end_tangent: -0.5 }),
+        ..spline()
+    }
+}
+
+type SplineMutation = fn(&mut cadcraft_geom::Spline, &mut Vec3);
+
+/// Each mutation alone changes the DXF, comes back from the canonical reader as written, and `dwg` holds for the DWG spline.
+fn check_splines(
+    base: cadcraft_geom::Spline,
+    cases: Vec<(&str, SplineMutation)>,
+    dwg: impl Fn(&str, &cadcraft_geom::Spline, &acadrust::entities::Spline),
+) {
+    let make = |mutate: SplineMutation| {
+        let (mut s, mut n) = (base.clone(), NORMAL);
+        mutate(&mut s, &mut n);
+        (drawing(EntityKind::Spline(s.clone()), n, 0.0), s, n)
+    };
+    let base_groups = groups(&dxf(&make(|_, _| {}).0), "SPLINE");
+    for (name, mutate) in cases {
+        let (d, s, n) = make(mutate);
+        let out = dxf(&d);
+        assert_ne!(groups(&out, "SPLINE"), base_groups, "{name}");
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups("SPLINE", &record(&out, "SPLINE")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        assert_eq!(c.extrusion, n, "{name}");
+        let EntityKind::Spline(read) = kind else { panic!("not a spline") };
+        assert_eq!(
+            (&read.knots, &read.control, &read.weights, &read.fit, read.degree),
+            (&s.knots, &s.control, &s.weights, &s.fit, s.degree),
+            "{name}"
+        );
+        assert_eq!(read.space, s.space, "{name}: the Z values");
+        assert_eq!(
+            (read.fit_opts.start_tangent, read.fit_opts.end_tangent, read.fit_opts.tolerance),
+            (s.fit_opts.start_tangent, s.fit_opts.end_tangent, s.fit_opts.tolerance),
+            "{name}"
+        );
+        let stored = dwg_entities(&d)
+            .into_iter()
+            .find_map(|e| if let EntityType::Spline(x) = e { Some(x) } else { None })
+            .unwrap_or_else(|| panic!("{name}: a SPLINE in the DWG"));
+        dwg(name, &s, &stored);
+    }
+}
+
+#[test]
+fn each_control_spline_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    let cases: Vec<(&str, SplineMutation)> = vec![
+        ("control x", |s, _| s.control[1].x = 1.5),
+        ("control z", |s, _| s.space.as_mut().unwrap().control[1] = 4.5),
+        ("weight", |s, _| s.weights[1] = 0.75),
+        ("knot", |s, _| s.knots[3] = 0.9),
+        ("degree", |s, _| {
+            s.degree = 1;
+            s.knots = vec![0.0, 0.0, 0.5, 1.0, 1.0];
+        }),
+    ];
+    check_splines(spline(), cases, |name, s, stored| {
+        let zs = s.space.as_ref().unwrap();
+        assert_eq!(stored.control_points.len(), s.control.len(), "{name}");
+        for (i, p) in stored.control_points.iter().enumerate() {
+            assert!(near(v3(*p), Vec3::new(s.control[i].x, s.control[i].y, zs.control[i])), "{name}: DWG control {i}: {p:?}");
+        }
+        assert_eq!((stored.knots.clone(), stored.weights.clone(), stored.degree as usize), (s.knots.clone(), s.weights.clone(), s.degree), "{name}");
+    });
+}
+
+#[test]
+fn each_fit_spline_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
+    let cases: Vec<(&str, SplineMutation)> = vec![
+        ("fit point z", |s, _| s.space.as_mut().unwrap().fit[1] = 2.0),
+        ("fit point x", |s, _| s.fit[1].x = 3.5),
+        ("start tangent z", |s, _| s.space.as_mut().unwrap().start_tangent = 0.75),
+        ("end tangent x", |s, _| s.fit_opts.end_tangent = Some(Vec2::new(2.0, -1.0))),
+        ("tolerance", |s, _| s.fit_opts.tolerance = 0.5),
+        ("normal x", |_, n| n.x = 0.25),
+    ];
+    check_splines(fit_spline(), cases, |name, s, stored| {
+        let zs = s.space.as_ref().unwrap();
+        assert_eq!(stored.fit_points.len(), s.fit.len(), "{name}");
+        for (i, p) in stored.fit_points.iter().enumerate() {
+            assert!(near(v3(*p), Vec3::new(s.fit[i].x, s.fit[i].y, zs.fit[i])), "{name}: DWG fit point {i}: {p:?}");
+        }
+        let (t0, t1) = (s.fit_opts.start_tangent.unwrap(), s.fit_opts.end_tangent.unwrap());
+        assert!(near(v3(stored.begin_tangent), Vec3::new(t0.x, t0.y, zs.start_tangent)), "{name}: DWG start tangent {:?}", stored.begin_tangent);
+        assert!(near(v3(stored.end_tangent), Vec3::new(t1.x, t1.y, zs.end_tangent)), "{name}: DWG end tangent {:?}", stored.end_tangent);
+        assert!((stored.fit_tolerance - s.fit_opts.tolerance).abs() < 1e-12, "{name}: DWG fit tolerance {}", stored.fit_tolerance);
+    });
+}
+
+#[test]
+fn a_spatial_spline_is_not_flagged_planar_and_a_flat_one_is() {
+    let flags = |s: cadcraft_geom::Spline| num(&groups(&dxf(&drawing(EntityKind::Spline(s), Vec3::Z, 0.0)), "SPLINE"), 70).unwrap() as i64;
+    assert_eq!(flags(spline()) & 8, 0, "the controls leave the XY plane");
+    let mut flat = spline();
+    flat.space.as_mut().unwrap().control = vec![2.0, 2.0, 2.0];
+    assert_eq!(flags(flat) & 8, 8, "the controls lie in a plane parallel to the normal's plane");
+}
+
+#[test]
+fn the_canonical_spline_reader_refuses_mismatched_data() {
+    let out = dxf(&drawing(EntityKind::Spline(spline()), Vec3::Z, 0.0));
+    let mut tags = record(&out, "SPLINE");
+    // Drop a Z value: the counts no longer match.
+    let at = tags.iter().position(|t| t.code == 30).unwrap();
+    tags.remove(at);
+    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags).is_none());
+    // Knots that do not fit the control points.
+    let mut tags = record(&out, "SPLINE");
+    let at = tags.iter().position(|t| t.code == 40).unwrap();
+    tags.remove(at);
+    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags).is_none());
+}

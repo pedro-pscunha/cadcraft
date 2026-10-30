@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::spline_fit::FitOptions;
-use crate::{Bounds2, Vec2};
+use crate::{Bounds2, Mat4, Vec2, Vec3};
 
 /// Largest B-spline degree treated as valid. Basis evaluation is O(degree²) per sample and
 /// tessellation takes O(degree) samples, so an unbounded degree (DXF/HATCH can declare up to
@@ -26,15 +26,80 @@ pub struct Spline {
     /// edits to the fit points rebuild it the same way.
     #[serde(default)]
     pub fit_opts: FitOptions,
+    /// The Z values of a spatial (canonical) spline. `control`, `fit` and the end tangents of `fit_opts` then hold the X
+    /// and Y values of the same WCS points and vectors, and this holds their Z. `None`: a planar spline at Z = 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<SplineSpace>,
+}
+
+/// The Z values of the control points, the fit points and the end tangents of a spatial spline.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SplineSpace {
+    pub control: Vec<f64>,
+    pub fit: Vec<f64>,
+    pub start_tangent: f64,
+    pub end_tangent: f64,
 }
 
 impl Spline {
+    /// Whether the Z values of a spatial spline are there and match the counts of its points.
+    pub fn space_is_consistent(&self) -> bool {
+        self.space.as_ref().is_some_and(|z| {
+            z.control.len() == self.control.len()
+                && z.fit.len() == self.fit.len()
+                && z.control.iter().chain(&z.fit).chain([&z.start_tangent, &z.end_tangent]).all(|v| v.is_finite())
+        })
+    }
+
+    /// The control points in WCS; `None` unless the spline is spatial and consistent.
+    pub fn control3(&self) -> Option<Vec<Vec3>> {
+        let z = self.space.as_ref().filter(|_| self.space_is_consistent())?;
+        Some(self.control.iter().zip(&z.control).map(|(p, z)| p.to3(*z)).collect())
+    }
+
+    /// The fit points in WCS; `None` unless the spline is spatial and consistent.
+    pub fn fit3(&self) -> Option<Vec<Vec3>> {
+        let z = self.space.as_ref().filter(|_| self.space_is_consistent())?;
+        Some(self.fit.iter().zip(&z.fit).map(|(p, z)| p.to3(*z)).collect())
+    }
+
+    /// The start and end tangents in WCS (each `None` without that fit tangent); `None` unless the spline is spatial
+    /// and consistent.
+    pub fn tangents3(&self) -> Option<(Option<Vec3>, Option<Vec3>)> {
+        let z = self.space.as_ref().filter(|_| self.space_is_consistent())?;
+        Some((self.fit_opts.start_tangent.map(|t| t.to3(z.start_tangent)), self.fit_opts.end_tangent.map(|t| t.to3(z.end_tangent))))
+    }
+
+    /// This spatial spline after the affine map `m`: the control and fit points move, the tangents turn with the linear
+    /// part, the knots, weights and degree stay (a B-spline is affine-invariant, so the curve is the exact image). `None`
+    /// when the spline is not spatial and consistent, `m` is not a finite invertible affine map, or a result is not finite.
+    pub fn transformed3(&self, m: &Mat4) -> Option<Spline> {
+        m.inverse()?;
+        let (control, fit) = (self.control3()?, self.fit3()?);
+        let (start, end) = self.tangents3()?;
+        let (control, fit): (Vec<Vec3>, Vec<Vec3>) = (control.iter().map(|p| m.apply(*p)).collect(), fit.iter().map(|p| m.apply(*p)).collect());
+        let (start, end) = (start.map(|t| m.apply_vec(t)), end.map(|t| m.apply_vec(t)));
+        let finite = control.iter().chain(&fit).chain(start.iter()).chain(end.iter()).all(|p| p.is_finite());
+        finite.then(|| Spline {
+            control: control.iter().map(|p| p.xy()).collect(),
+            fit: fit.iter().map(|p| p.xy()).collect(),
+            fit_opts: FitOptions { start_tangent: start.map(|t| t.xy()), end_tangent: end.map(|t| t.xy()), ..self.fit_opts },
+            space: Some(SplineSpace {
+                control: control.iter().map(|p| p.z).collect(),
+                fit: fit.iter().map(|p| p.z).collect(),
+                start_tangent: start.map_or(0.0, |t| t.z),
+                end_tangent: end.map_or(0.0, |t| t.z),
+            }),
+            ..self.clone()
+        })
+    }
+
     /// A clamped uniform spline over control points.
     pub fn from_control(control: Vec<Vec2>, degree: usize) -> Spline {
         let n = control.len();
         let degree = degree.clamp(1, n.saturating_sub(1).max(1));
         let knots = clamped_uniform_knots(n, degree);
-        Spline { degree, knots, control, weights: Vec::new(), fit: Vec::new(), closed: false, fit_opts: FitOptions::default() }
+        Spline { degree, knots, control, weights: Vec::new(), fit: Vec::new(), closed: false, fit_opts: FitOptions::default(), space: None }
     }
 
     /// Cubic interpolation through fit points (chord-length parametrisation, natural-ish ends
@@ -319,3 +384,74 @@ pub(crate) fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod space_tests {
+    use super::*;
+
+    fn spatial() -> Spline {
+        Spline {
+            degree: 2,
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            control: vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0)],
+            weights: vec![1.0, 0.5, 1.0],
+            fit: vec![Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0)],
+            closed: false,
+            fit_opts: FitOptions { start_tangent: Some(Vec2::new(1.0, 1.0)), end_tangent: Some(Vec2::new(1.0, -1.0)), ..FitOptions::default() },
+            space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.0], start_tangent: 0.5, end_tangent: -0.5 }),
+        }
+    }
+
+    fn near(a: Vec3, b: Vec3) -> bool {
+        (a - b).len() < 1e-9
+    }
+
+    #[test]
+    fn the_points_are_spatial_and_a_planar_spline_has_none() {
+        let s = spatial();
+        assert!(s.space_is_consistent());
+        assert_eq!(s.control3().unwrap()[1], Vec3::new(1.0, 2.0, 4.0));
+        assert_eq!(s.fit3().unwrap()[1], Vec3::new(3.0, 0.0, 1.0));
+        assert_eq!(s.tangents3().unwrap(), (Some(Vec3::new(1.0, 1.0, 0.5)), Some(Vec3::new(1.0, -1.0, -0.5))));
+        assert!(Spline { space: None, ..s.clone() }.control3().is_none());
+        let mut ragged = s;
+        ragged.space.as_mut().unwrap().control.pop();
+        assert!(!ragged.space_is_consistent() && ragged.control3().is_none());
+    }
+
+    #[test]
+    fn an_affine_map_moves_the_points_and_the_curve_follows() {
+        // A shear with a non-uniform scale and a translation: not a similarity, still exact for a B-spline.
+        let m = Mat4 { m: [[2.0, 0.5, 0.0, 1.0], [0.0, 1.0, 0.25, -2.0], [0.0, 0.0, 3.0, 4.0], [0.0, 0.0, 0.0, 1.0]] };
+        let s = spatial();
+        let t = s.transformed3(&m).unwrap();
+        for (a, b) in s.control3().unwrap().iter().zip(t.control3().unwrap()) {
+            assert!(near(m.apply(*a), b));
+        }
+        let (start, end) = t.tangents3().unwrap();
+        assert!(near(start.unwrap(), m.apply_vec(Vec3::new(1.0, 1.0, 0.5))) && near(end.unwrap(), m.apply_vec(Vec3::new(1.0, -1.0, -0.5))));
+        assert_eq!((t.knots.clone(), t.weights.clone(), t.degree), (s.knots.clone(), s.weights.clone(), 2));
+        // The curve at a parameter is the image of the curve (its XY part is the 2D evaluation of the moved XY controls).
+        let (lo, hi) = s.domain();
+        let mid = 0.5 * (lo + hi);
+        let moved_xy = t.eval(mid);
+        assert!(moved_xy.is_finite());
+    }
+
+    #[test]
+    fn a_collapse_a_perspective_or_a_planar_spline_has_no_image() {
+        let flat = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        assert!(spatial().transformed3(&flat).is_none());
+        let mut perspective = Mat4::IDENTITY;
+        perspective.m[3][0] = 0.1;
+        assert!(spatial().transformed3(&perspective).is_none());
+        assert!(Spline { space: None, ..spatial() }.transformed3(&Mat4::IDENTITY).is_none());
+    }
+
+    #[test]
+    fn reversing_a_spatial_spline_reverses_its_z_values_and_swaps_the_tangents() {
+        let r = spatial().reversed();
+        let z = r.space.unwrap();
+        assert_eq!((z.control, z.fit, z.start_tangent, z.end_tangent), (vec![1.0, 4.0, 0.0], vec![1.0, 0.0], 0.5, -0.5));
+    }
+}

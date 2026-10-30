@@ -107,3 +107,52 @@ fn each_solid_field_alone_changes_the_key() {
     keys.push(key(&solid, &c));
     distinct(&keys);
 }
+
+fn spline() -> cadcraft_geom::Spline {
+    use cadcraft_geom::{FitOptions, Spline, SplineSpace};
+    Spline {
+        degree: 2,
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        control: vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0)],
+        weights: vec![1.0, 0.5, 1.0],
+        fit: vec![Vec2::new(0.0, 0.0), Vec2::new(3.0, 0.0)],
+        closed: false,
+        fit_opts: FitOptions {
+            start_tangent: Some(Vec2::new(1.0, 1.0)),
+            end_tangent: Some(Vec2::new(1.0, -1.0)),
+            tolerance: 0.25,
+            ..FitOptions::default()
+        },
+        space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.5], start_tangent: 0.5, end_tangent: -0.5 }),
+    }
+}
+
+#[test]
+fn each_spatial_spline_field_alone_changes_the_key() {
+    let key = |s: &cadcraft_geom::Spline, c: &Common| geometry_key(&EntityKind::Spline(s.clone()), c).unwrap();
+    let base = key(&spline(), &common());
+    type Mutation = fn(&mut cadcraft_geom::Spline, &mut Common);
+    let mutations: Vec<(&str, Mutation)> = vec![
+        ("control x", |s, _| s.control[1].x += 0.5),
+        ("control z", |s, _| s.space.as_mut().unwrap().control[1] += 0.5),
+        ("fit point z", |s, _| s.space.as_mut().unwrap().fit[1] += 0.5),
+        ("start tangent z", |s, _| s.space.as_mut().unwrap().start_tangent += 0.5),
+        ("end tangent z", |s, _| s.space.as_mut().unwrap().end_tangent += 0.5),
+        ("tangent x", |s, _| s.fit_opts.end_tangent = Some(Vec2::new(2.0, -1.0))),
+        ("tolerance", |s, _| s.fit_opts.tolerance = 0.5),
+        ("weight", |s, _| s.weights[1] = 0.75),
+        ("knot", |s, _| s.knots[3] = 0.9),
+        ("closed", |s, _| s.closed = true),
+        ("normal y", |_, c| c.extrusion.y += 0.5),
+    ];
+    let mut keys = vec![base.clone()];
+    for (name, mutate) in mutations {
+        let (mut s, mut c) = (spline(), common());
+        mutate(&mut s, &mut c);
+        let k = key(&s, &c);
+        assert_ne!(k, base, "{name}");
+        keys.push(k);
+    }
+    distinct(&keys);
+    assert_ne!(base, key(&cadcraft_geom::Spline { space: None, ..spline() }, &common()), "a planar spline is not the spatial one");
+}

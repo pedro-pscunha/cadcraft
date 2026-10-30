@@ -305,6 +305,12 @@ impl Spline {
                 end_tangent: self.fit_opts.start_tangent.map(|t| -t),
                 ..self.fit_opts
             },
+            space: self.space.as_ref().map(|z| crate::SplineSpace {
+                control: z.control.iter().rev().copied().collect(),
+                fit: z.fit.iter().rev().copied().collect(),
+                start_tangent: -z.end_tangent,
+                end_tangent: -z.start_tangent,
+            }),
         }
     }
 

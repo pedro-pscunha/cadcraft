@@ -57,14 +57,17 @@ mod layout_canonical;
 mod mesh;
 mod mleader;
 mod mline_canonical;
+mod spline_canonical;
 mod text;
 mod text_canonical;
 mod world;
 mod world_families;
+pub use spline_canonical::spline_transformed_canonical;
 pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
     TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives, hatch_primitives, helix_primitives, lwpolyline_primitives,
-    mline_primitives, mtext_primitives, solid_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
+    mline_primitives, mtext_primitives, solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives,
+    wipeout_primitives,
 };
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
