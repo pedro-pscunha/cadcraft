@@ -63,10 +63,10 @@ pub fn solid_primitives(solid: &Solid, normal: Vec3, parent: &Mat4) -> Result<Ve
 /// An arc or a line between two OCS points: a bulge makes a conic arc in the plane of `f`.
 fn segment(f: OcsFrame, a: Vec2, b: Vec2, bulge: f64, z: f64) -> WorldPrimitive {
     match bulge_to_arc(a, b, bulge) {
-        Some((arc, _ccw)) => WorldPrimitive::Arc {
+        Some((arc, _ccw)) => WorldPrimitive::Conic {
             center: f.to_world(arc.center.to3(z)),
-            x_axis: f.to_world(Vec3::new(arc.radius, 0.0, 0.0)),
-            y_axis: f.to_world(Vec3::new(0.0, arc.radius, 0.0)),
+            axis_u: f.to_world(Vec3::new(arc.radius, 0.0, 0.0)),
+            axis_v: f.to_world(Vec3::new(0.0, arc.radius, 0.0)),
             start: arc.start,
             end: arc.end,
         },
@@ -81,10 +81,10 @@ fn finish(primitives: Vec<WorldPrimitive>, parent: &Mat4) -> Result<Vec<WorldPri
 /// The conic arc of a circle or arc: radii along the OCS axes of the plane.
 fn round(f: OcsFrame, center: Vec3, radius: f64, start: f64, end: f64, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
     finish(
-        vec![WorldPrimitive::Arc {
+        vec![WorldPrimitive::Conic {
             center: f.to_world(center),
-            x_axis: f.to_world(Vec3::new(radius, 0.0, 0.0)),
-            y_axis: f.to_world(Vec3::new(0.0, radius, 0.0)),
+            axis_u: f.to_world(Vec3::new(radius, 0.0, 0.0)),
+            axis_v: f.to_world(Vec3::new(0.0, radius, 0.0)),
             start,
             end,
         }],
@@ -214,17 +214,17 @@ fn hatch_edge(f: OcsFrame, edge: &HatchEdge, z: f64) -> Result<Vec<WorldPrimitiv
         HatchEdge::Arc { center, radius, start, end, ccw } => {
             // A clockwise edge holds the angles negated: the same arc, counter-clockwise from -end to -start.
             let (start, end) = if *ccw { (*start, *end) } else { (-end, -start) };
-            vec![WorldPrimitive::Arc {
+            vec![WorldPrimitive::Conic {
                 center: at(*center),
-                x_axis: vector(Vec2::new(*radius, 0.0)),
-                y_axis: vector(Vec2::new(0.0, *radius)),
+                axis_u: vector(Vec2::new(*radius, 0.0)),
+                axis_v: vector(Vec2::new(0.0, *radius)),
                 start,
                 end,
             }]
         }
         HatchEdge::Ellipse { center, major, ratio, start, end, ccw } => {
             let (start, end) = if *ccw { (*start, *end) } else { (-end, -start) };
-            vec![WorldPrimitive::Arc { center: at(*center), x_axis: vector(*major), y_axis: vector(major.perp() * *ratio), start, end }]
+            vec![WorldPrimitive::Conic { center: at(*center), axis_u: vector(*major), axis_v: vector(major.perp() * *ratio), start, end }]
         }
         HatchEdge::Spline(sp) => {
             if sp.control.is_empty() {
@@ -340,17 +340,17 @@ pub fn tolerance_primitives(tolerance: &Tolerance, normal: Vec3, layout: &GdtLay
     for prim in layout.frame.iter().chain(&layout.symbols) {
         match prim {
             GdtPrim::Line(points) => out.extend(points.windows(2).map(|w| WorldPrimitive::Line { a: local(&frame, w[0]), b: local(&frame, w[1]) })),
-            GdtPrim::Circle { center, radius } => out.push(WorldPrimitive::Arc {
+            GdtPrim::Circle { center, radius } => out.push(WorldPrimitive::Conic {
                 center: local(&frame, *center),
-                x_axis: frame.x_axis * *radius,
-                y_axis: frame.y_axis * *radius,
+                axis_u: frame.x_axis * *radius,
+                axis_v: frame.y_axis * *radius,
                 start: 0.0,
                 end: std::f64::consts::TAU,
             }),
-            GdtPrim::Arc { center, radius, start, end } => out.push(WorldPrimitive::Arc {
+            GdtPrim::Arc { center, radius, start, end } => out.push(WorldPrimitive::Conic {
                 center: local(&frame, *center),
-                x_axis: frame.x_axis * *radius,
-                y_axis: frame.y_axis * *radius,
+                axis_u: frame.x_axis * *radius,
+                axis_v: frame.y_axis * *radius,
                 start: *start,
                 end: *start + cadcraft_geom::ccw_sweep(*start, *end),
             }),
@@ -482,8 +482,8 @@ pub fn mline_primitives(mline: &MLine, normal: Vec3, parent: &Mat4) -> Result<Ve
                     }
                     // A half circle from one outer element to the other, behind the start or ahead of the end.
                     let (c, from) = ((a + b) * 0.5, if start { a } else { b });
-                    let x_axis = from - c;
-                    out.push(WorldPrimitive::Arc { center: c, x_axis, y_axis: unit_normal.cross(x_axis), start: 0.0, end: std::f64::consts::PI });
+                    let axis_u = from - c;
+                    out.push(WorldPrimitive::Conic { center: c, axis_u, axis_v: unit_normal.cross(axis_u), start: 0.0, end: std::f64::consts::PI });
                 }
             }
         }
@@ -613,14 +613,14 @@ mod tests {
     /// The point of a conic arc primitive at the parameter `t`.
     fn arc_at(p: &WorldPrimitive, t: f64) -> Vec3 {
         match p {
-            WorldPrimitive::Arc { center, x_axis, y_axis, .. } => *center + *x_axis * t.cos() + *y_axis * t.sin(),
+            WorldPrimitive::Conic { center, axis_u, axis_v, .. } => *center + *axis_u * t.cos() + *axis_v * t.sin(),
             other => panic!("not an arc: {other:?}"),
         }
     }
 
     fn arc_range(p: &WorldPrimitive) -> (f64, f64) {
         match p {
-            WorldPrimitive::Arc { start, end, .. } => (*start, *end),
+            WorldPrimitive::Conic { start, end, .. } => (*start, *end),
             other => panic!("not an arc: {other:?}"),
         }
     }
@@ -911,8 +911,8 @@ mod tests {
             let at = |x: f64, y: f64| insert + xa * x + ya * y;
             let WorldPrimitive::Line { a, b } = &got[1] else { panic!("line") };
             assert!(near(*a, at(4.0, 0.0)) && near(*b, at(4.0, -2.0)), "plane {plane}");
-            let WorldPrimitive::Arc { center, x_axis, y_axis, .. } = &got[2] else { panic!("circle") };
-            assert!(near(*center, at(1.0, -1.0)) && near(*x_axis, xa * 0.5) && near(*y_axis, ya * 0.5), "plane {plane}");
+            let WorldPrimitive::Conic { center, axis_u, axis_v, .. } = &got[2] else { panic!("circle") };
+            assert!(near(*center, at(1.0, -1.0)) && near(*axis_u, xa * 0.5) && near(*axis_v, ya * 0.5), "plane {plane}");
             assert!(near(arc_at(&got[3], 0.5), at(2.0 + 0.25 * f64::cos(0.5), -1.0 + 0.25 * f64::sin(0.5))), "plane {plane}");
             let WorldPrimitive::Fill(f) = &got[4] else { panic!("fill") };
             assert!(matches!(&f.loops[0][1], WorldPrimitive::Line { a, .. } if near(*a, at(1.0, 0.0))), "plane {plane}");
@@ -987,7 +987,7 @@ mod tests {
         m.def.fill = Some(cadcraft_color::Color::Index(1));
         let got = mline_primitives(&m, normal, &parent()).unwrap();
         assert!(lines(&got).iter().any(|(a, b)| near(*a, p(0.0, 1.0)) && near(*b, p(0.0, -1.0))), "the start cap line");
-        let arc = got.iter().find(|g| matches!(g, WorldPrimitive::Arc { .. })).expect("the end cap arc");
+        let arc = got.iter().find(|g| matches!(g, WorldPrimitive::Conic { .. })).expect("the end cap arc");
         // A half circle from the lower end point round the end: ahead of the multiline, through (11, 0).
         assert!(near(arc_at(arc, 0.0), p(10.0, -1.0)) && near(arc_at(arc, std::f64::consts::PI), p(10.0, 1.0)));
         assert!(near(arc_at(arc, std::f64::consts::FRAC_PI_2), p(11.0, 0.0)), "{:?}", arc_at(arc, std::f64::consts::FRAC_PI_2));

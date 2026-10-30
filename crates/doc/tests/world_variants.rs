@@ -1,6 +1,8 @@
 //! The arc, spline, text and fill world primitives: validation, the complete parent transform and the XY projection.
 
-use cadcraft_doc::{Prim, Text, TextFrame, WorldFill, WorldFillKind, WorldGeometry, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
+use cadcraft_doc::{
+    Handle, Prim, Text, TextFrame, WorldFill, WorldFillKind, WorldGeometry, WorldPattern, WorldPrimitive, WorldText, WorldTextContent,
+};
 use cadcraft_geom::{Mat4, Segment, Vec3};
 
 const X: Vec3 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
@@ -31,12 +33,12 @@ fn similarity() -> Mat4 {
 #[test]
 fn an_arc_stays_exact_under_any_affine_parent() {
     let (c, x, y) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0));
-    let arc = WorldPrimitive::Arc { center: c, x_axis: x, y_axis: y, start: 0.3, end: 2.0 };
+    let arc = WorldPrimitive::Conic { center: c, axis_u: x, axis_v: y, start: 0.3, end: 2.0 };
     for parent in [similarity(), shear()] {
-        let WorldPrimitive::Arc { center, x_axis, y_axis, start, end } = arc.transformed(&parent).unwrap() else { panic!("not an arc") };
+        let WorldPrimitive::Conic { center, axis_u, axis_v, start, end } = arc.transformed(&parent).unwrap() else { panic!("not an arc") };
         assert_eq!((start, end), (0.3, 2.0));
         for t in [0.3, 0.9, 1.7, 2.0] {
-            assert!(near(arc_point(center, x_axis, y_axis, t), parent.apply(arc_point(c, x, y, t))), "t = {t}");
+            assert!(near(arc_point(center, axis_u, axis_v, t), parent.apply(arc_point(c, x, y, t))), "t = {t}");
         }
     }
 }
@@ -58,10 +60,10 @@ fn a_spline_moves_its_controls_only() {
 fn malformed_primitives_are_refused() {
     let bad_knots = WorldPrimitive::Spline { degree: 2, knots: vec![0.0, 1.0], control: vec![Vec3::ZERO; 3], weights: Vec::new() };
     let bad_weights = WorldPrimitive::Spline { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], control: vec![Vec3::ZERO; 2], weights: vec![1.0] };
-    let nan = WorldPrimitive::Arc { center: Vec3::new(f64::NAN, 0.0, 0.0), x_axis: X, y_axis: Y, start: 0.0, end: 1.0 };
+    let nan = WorldPrimitive::Conic { center: Vec3::new(f64::NAN, 0.0, 0.0), axis_u: X, axis_v: Y, start: 0.0, end: 1.0 };
     for bad in [bad_knots, bad_weights, nan] {
         assert!(bad.validate().is_err(), "{bad:?}");
-        assert!(WorldGeometry::from_primitives(vec![bad]).is_err());
+        assert!(WorldGeometry::from_primitives(Handle(0), vec![bad]).is_err());
     }
     let mut perspective = Mat4::IDENTITY;
     perspective.m[3][0] = 0.1;
@@ -99,7 +101,7 @@ fn a_text_follows_a_similarity_and_refuses_anything_else() {
     let mirror = matrix([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]);
     assert!(text().transformed(&mirror).is_err());
     // A text has no 2D primitive: the frame stays in the geometry.
-    assert!(WorldGeometry::from_primitives(vec![text()]).unwrap().project_xy().is_empty());
+    assert!(WorldGeometry::from_primitives(Handle(0), vec![text()]).unwrap().project_xy().unwrap().is_empty());
 }
 
 fn square() -> Vec<WorldPrimitive> {
@@ -139,18 +141,18 @@ fn solid_and_wipeout_fills_accept_any_affine_but_patterns_need_a_similarity() {
 
 #[test]
 fn a_fill_projects_to_a_polygon_per_loop() {
-    let prims = WorldGeometry::from_primitives(vec![fill(WorldFillKind::Solid)]).unwrap().project_xy();
+    let prims = WorldGeometry::from_primitives(Handle(0), vec![fill(WorldFillKind::Solid)]).unwrap().project_xy().unwrap();
     assert!(matches!(prims.as_slice(), [Prim::Fill(points)] if points.len() >= 4));
 }
 
 #[test]
 fn an_arc_projects_to_an_ellipse_and_an_edge_on_circle_to_a_segment() {
     let circle =
-        |y: Vec3| WorldPrimitive::Arc { center: Vec3::ZERO, x_axis: Vec3::new(2.0, 0.0, 0.0), y_axis: y, start: 0.0, end: std::f64::consts::TAU };
-    let flat = WorldGeometry::from_primitives(vec![circle(Vec3::new(0.0, 2.0, 0.0))]).unwrap().project_xy();
+        |y: Vec3| WorldPrimitive::Conic { center: Vec3::ZERO, axis_u: Vec3::new(2.0, 0.0, 0.0), axis_v: y, start: 0.0, end: std::f64::consts::TAU };
+    let flat = WorldGeometry::from_primitives(Handle(0), vec![circle(Vec3::new(0.0, 2.0, 0.0))]).unwrap().project_xy().unwrap();
     assert!(matches!(flat.as_slice(), [Prim::Ellipse(e)] if (e.major.len() - 2.0).abs() < 1e-9 && (e.ratio - 1.0).abs() < 1e-9));
     // The same circle seen edge-on (its Y radius along Z): a segment of length 4 on the X axis.
-    let edge = WorldGeometry::from_primitives(vec![circle(Vec3::new(0.0, 0.0, 2.0))]).unwrap().project_xy();
+    let edge = WorldGeometry::from_primitives(Handle(0), vec![circle(Vec3::new(0.0, 0.0, 2.0))]).unwrap().project_xy().unwrap();
     let [Prim::Seg(Segment::Line(l))] = edge.as_slice() else { panic!("{edge:?}") };
     assert!((l.a.dist(l.b) - 4.0).abs() < 1e-9 && l.a.y == 0.0 && l.b.y == 0.0);
 }

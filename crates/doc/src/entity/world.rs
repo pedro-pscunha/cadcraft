@@ -1,9 +1,9 @@
 //! Transient WCS geometry. Projection never becomes persisted drawing truth.
 
-use cadcraft_geom::{Ellipse as GEllipse, Line as GLine, Mat4, Segment, Spline as GSpline, Vec2, Vec3};
+use cadcraft_geom::{Ellipse as GEllipse, Line as GLine, Mat4, OcsFrame, Segment, Spline as GSpline, TAU, Vec2, Vec3};
 
 use super::text_canonical::Similarity;
-use super::{Entity, EntityKind, GeometryRevision, Gradient, MText, Prim, Text, TextFrame};
+use super::{Entity, EntityKind, GeometryRevision, Gradient, Handle, MText, Prim, Text, TextFrame};
 use crate::library::PatternLine;
 use crate::{DocError, Result, has_finite_numbers};
 
@@ -15,13 +15,13 @@ pub enum WorldPrimitive {
         b: Vec3,
     },
     Point(Vec3),
-    /// A conic arc: `center + x_axis * cos t + y_axis * sin t` for `t` from `start` to `end` (counter-clockwise by
+    /// A conic arc: `center + axis_u * cos t + axis_v * sin t` for `t` from `start` to `end` (counter-clockwise by
     /// increasing `t`; a full circle is `0` to `TAU`). The axes are conjugate radii, so every affine parent keeps the arc
     /// exact: a circle has equal orthogonal radii, an ellipse any conjugate pair.
-    Arc {
+    Conic {
         center: Vec3,
-        x_axis: Vec3,
-        y_axis: Vec3,
+        axis_u: Vec3,
+        axis_v: Vec3,
         start: f64,
         end: f64,
     },
@@ -115,10 +115,10 @@ impl WorldPrimitive {
         match self {
             WorldPrimitive::Line { a, b } => finite(&[*a, *b]).then_some(()).ok_or_else(|| invalid("A world line needs finite points.")),
             WorldPrimitive::Point(p) => finite(&[*p]).then_some(()).ok_or_else(|| invalid("A world point needs finite coordinates.")),
-            WorldPrimitive::Arc { center, x_axis, y_axis, start, end } => {
-                (finite(&[*center, *x_axis, *y_axis]) && start.is_finite() && end.is_finite())
+            WorldPrimitive::Conic { center, axis_u, axis_v, start, end } => {
+                (finite(&[*center, *axis_u, *axis_v]) && start.is_finite() && end.is_finite())
                     .then_some(())
-                    .ok_or_else(|| invalid("A world arc needs a finite center, finite radii and finite parameters."))
+                    .ok_or_else(|| invalid("A world conic needs a finite center, finite radii and finite parameters."))
             }
             WorldPrimitive::Spline { degree, knots, control, weights } => {
                 let shaped = *degree >= 1
@@ -137,12 +137,12 @@ impl WorldPrimitive {
                     .ok_or_else(|| invalid("A world text needs a finite frame and payload."))
             }
             WorldPrimitive::Fill(fill) => {
-                let pattern_ok = match &fill.kind {
+                let placement_ok = match &fill.kind {
                     WorldFillKind::Pattern(p) => finite(&[p.origin, p.x_axis, p.y_axis]) && p.scale.is_finite() && p.angle.is_finite(),
                     WorldFillKind::Gradient(g) => finite(&[g.origin, g.x_axis, g.y_axis]),
                     _ => true,
                 };
-                if !pattern_ok {
+                if !placement_ok {
                     return Err(invalid("A world fill needs a finite pattern or gradient placement."));
                 }
                 fill.loops.iter().flatten().try_for_each(WorldPrimitive::validate)
@@ -159,13 +159,7 @@ impl WorldPrimitive {
         let moved = match self {
             WorldPrimitive::Line { a, b } => WorldPrimitive::Line { a: parent.apply(*a), b: parent.apply(*b) },
             WorldPrimitive::Point(p) => WorldPrimitive::Point(parent.apply(*p)),
-            WorldPrimitive::Arc { center, x_axis, y_axis, start, end } => WorldPrimitive::Arc {
-                center: parent.apply(*center),
-                x_axis: parent.apply_vec(*x_axis),
-                y_axis: parent.apply_vec(*y_axis),
-                start: *start,
-                end: *end,
-            },
+            WorldPrimitive::Conic { center, axis_u, axis_v, start, end } => transformed_conic(parent, *center, *axis_u, *axis_v, *start, *end),
             WorldPrimitive::Spline { degree, knots, control, weights } => WorldPrimitive::Spline {
                 degree: *degree,
                 knots: knots.clone(),
@@ -230,59 +224,60 @@ impl WorldPrimitive {
 
     /// The primitive in the XY view, after the complete parent. A text has no 2D primitive here: its frame stays in
     /// [`WorldGeometry::primitives`] for the consumer. A conic seen edge-on becomes the line between its extreme points.
-    fn project_xy(&self) -> Vec<Prim> {
-        match self {
-            WorldPrimitive::Line { a, b } => vec![Prim::Seg(Segment::Line(GLine::new(a.xy(), b.xy())))],
-            WorldPrimitive::Point(point) => vec![Prim::Point(point.xy())],
-            WorldPrimitive::Arc { center, x_axis, y_axis, start, end } => {
-                let ellipse = GEllipse::from_conjugate(center.xy(), x_axis.xy(), y_axis.xy(), *start, *end);
-                if ellipse.ratio > 1e-9 && ellipse.major.len() > 0.0 {
-                    return vec![Prim::Ellipse(ellipse)];
-                }
-                // Edge-on: the arc lies on a line; keep the segment between its extreme points along it.
-                let at = |t: f64| (*center + *x_axis * t.cos() + *y_axis * t.sin()).xy();
-                let (dx, dy) = (x_axis.xy(), y_axis.xy());
-                let along = if dx.len() >= dy.len() { dx } else { dy };
-                let dir = if along.len() > 0.0 { along.normalized() } else { Vec2::X };
-                let full = (end - start).abs() >= std::f64::consts::TAU - 1e-9;
-                let sweep = if full { std::f64::consts::TAU } else { cadcraft_geom::ccw_sweep(*start, *end) };
-                let mut points = vec![at(*start), at(*start + sweep)];
-                // The parameters where the position along the line turns back.
-                let t_max = dy.dot(dir).atan2(dx.dot(dir));
-                for t in [t_max, t_max + std::f64::consts::PI] {
-                    if full || cadcraft_geom::ccw_sweep(*start, t) <= sweep {
-                        points.push(at(t));
-                    }
-                }
-                let key = |p: &Vec2| p.dot(dir);
-                let lo = points.iter().copied().min_by(|a, b| key(a).total_cmp(&key(b))).unwrap_or(Vec2::ZERO);
-                let hi = points.iter().copied().max_by(|a, b| key(a).total_cmp(&key(b))).unwrap_or(Vec2::ZERO);
-                vec![Prim::Seg(Segment::Line(GLine::new(lo, hi)))]
-            }
-            WorldPrimitive::Spline { degree, knots, control, weights } => {
-                let spline = GSpline {
-                    degree: *degree,
-                    knots: knots.clone(),
-                    control: control.iter().map(|c| c.xy()).collect(),
-                    weights: weights.clone(),
-                    ..GSpline::default()
-                };
-                vec![Prim::Spline(spline)]
-            }
-            WorldPrimitive::Text(_) => Vec::new(),
-            WorldPrimitive::Fill(fill) => fill.loops.iter().map(|l| Prim::Fill(loop_polygon(l))).collect(),
-        }
+    fn project_xy(&self, owner: Handle) -> Result<Vec<Prim>> {
+        Ok(match self {
+            Self::Line { a, b } => vec![Prim::Seg(Segment::Line(GLine::new(a.xy(), b.xy())))],
+            Self::Point(point) => vec![Prim::Point(point.xy())],
+            Self::Conic { center, axis_u, axis_v, start, end } => vec![project_conic(owner, *center, *axis_u, *axis_v, *start, *end)?],
+            Self::Spline { degree, knots, control, weights } => vec![Prim::Spline(GSpline {
+                degree: *degree,
+                knots: knots.clone(),
+                control: control.iter().map(|c| c.xy()).collect(),
+                weights: weights.clone(),
+                ..GSpline::default()
+            })],
+            Self::Text(_) => Vec::new(),
+            Self::Fill(fill) => fill.loops.iter().map(|l| loop_polygon(l, owner).map(Prim::Fill)).collect::<Result<Vec<_>>>()?,
+        })
     }
 }
 
-/// A loop of primitives as a polygon in the XY view: its lines by their points, its arcs and splines sampled.
-fn loop_polygon(loop_: &[WorldPrimitive]) -> Vec<Vec2> {
+/// The XY view of a conic: an ellipse, a segment when the view is edge-on (rank one), a point when it is a point.
+fn project_conic(owner: Handle, center: Vec3, axis_u: Vec3, axis_v: Vec3, start: f64, end: f64) -> Result<Prim> {
+    if axis_u.xy() == Vec2::ZERO && axis_v.xy() == Vec2::ZERO {
+        return Ok(Prim::Point(center.xy()));
+    }
+    let ellipse = GEllipse::from_conjugate(center.xy(), axis_u.xy(), axis_v.xy(), start, end);
+    if !has_finite_numbers(&ellipse) {
+        return Err(DocError::NonFinite(owner));
+    }
+    if ellipse.ratio == 0.0 {
+        let mut lo = ellipse.start.cos().min(ellipse.end.cos());
+        let mut hi = ellipse.start.cos().max(ellipse.end.cos());
+        if cadcraft_geom::angle_in_sweep(0.0, ellipse.start, ellipse.end) {
+            hi = 1.0;
+        }
+        if cadcraft_geom::angle_in_sweep(cadcraft_geom::PI, ellipse.start, ellipse.end) {
+            lo = -1.0;
+        }
+        let a = ellipse.center + ellipse.major * lo;
+        let b = ellipse.center + ellipse.major * hi;
+        if !a.is_finite() || !b.is_finite() {
+            return Err(DocError::NonFinite(owner));
+        }
+        return Ok(Prim::Seg(Segment::Line(GLine::new(a, b))));
+    }
+    Ok(Prim::Ellipse(ellipse))
+}
+
+/// A loop of primitives as a polygon in the XY view: its lines by their points, its conics and splines sampled.
+fn loop_polygon(loop_: &[WorldPrimitive], owner: Handle) -> Result<Vec<Vec2>> {
     let mut out: Vec<Vec2> = Vec::new();
     for primitive in loop_ {
         match primitive {
             WorldPrimitive::Line { a, b } => out.extend([a.xy(), b.xy()]),
-            WorldPrimitive::Arc { .. } => {
-                for prim in primitive.project_xy() {
+            WorldPrimitive::Conic { .. } | WorldPrimitive::Spline { .. } => {
+                for prim in primitive.project_xy(owner)? {
                     match prim {
                         Prim::Ellipse(e) => {
                             let mut pts = Vec::new();
@@ -290,14 +285,8 @@ fn loop_polygon(loop_: &[WorldPrimitive]) -> Vec<Vec2> {
                             out.extend(pts);
                         }
                         Prim::Seg(Segment::Line(l)) => out.extend([l.a, l.b]),
+                        Prim::Spline(s) => out.extend(s.tessellate(1e-3)),
                         _ => {}
-                    }
-                }
-            }
-            WorldPrimitive::Spline { .. } => {
-                for prim in primitive.project_xy() {
-                    if let Prim::Spline(s) = prim {
-                        out.extend(s.tessellate(1e-3));
                     }
                 }
             }
@@ -305,33 +294,58 @@ fn loop_polygon(loop_: &[WorldPrimitive]) -> Vec<Vec2> {
         }
     }
     out.dedup();
-    out
+    Ok(out)
 }
 
 /// Finite spatial geometry, kept separate from its view projection and the source payload.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldGeometry {
+    owner: Handle,
     primitives: Vec<WorldPrimitive>,
 }
 
 impl WorldGeometry {
-    /// Geometry from primitives that are finite and well formed.
-    pub fn from_primitives(primitives: Vec<WorldPrimitive>) -> Result<WorldGeometry> {
+    /// Geometry owned by `owner` from primitives that are finite and well formed.
+    pub fn from_primitives(owner: Handle, primitives: Vec<WorldPrimitive>) -> Result<WorldGeometry> {
         primitives.iter().try_for_each(WorldPrimitive::validate)?;
-        Ok(WorldGeometry { primitives })
+        Ok(WorldGeometry { owner, primitives })
     }
 
     pub fn primitives(&self) -> &[WorldPrimitive] {
         &self.primitives
     }
 
-    /// Project the completed WCS result into the current XY view.
-    pub fn project_xy(&self) -> Vec<Prim> {
-        self.primitives.iter().flat_map(WorldPrimitive::project_xy).collect()
+    /// Project the completed WCS result into XY, or refuse an unrepresentable projection.
+    pub fn project_xy(&self) -> Result<Vec<Prim>> {
+        let mut out = Vec::new();
+        for primitive in &self.primitives {
+            out.extend(primitive.project_xy(self.owner)?);
+        }
+        Ok(out)
     }
 }
 
+fn transformed_conic(parent: &Mat4, center: Vec3, axis_u: Vec3, axis_v: Vec3, start: f64, end: f64) -> WorldPrimitive {
+    WorldPrimitive::Conic { center: parent.apply(center), axis_u: parent.apply_vec(axis_u), axis_v: parent.apply_vec(axis_v), start, end }
+}
+
 impl Entity {
+    fn world_ocs_frame(&self) -> Result<OcsFrame> {
+        OcsFrame::new(self.common.extrusion).ok_or_else(|| DocError::Invalid(format!("Entity {} has no valid source plane.", self.handle.hex())))
+    }
+
+    fn ocs_conic(&self, parent: &Mat4, center: Vec3, radius: f64, start: f64, end: f64) -> Result<WorldPrimitive> {
+        let frame = self.world_ocs_frame()?;
+        Ok(transformed_conic(
+            parent,
+            frame.to_world(center),
+            frame.to_world(Vec3::new(radius, 0.0, 0.0)),
+            frame.to_world(Vec3::new(0.0, radius, 0.0)),
+            start,
+            end,
+        ))
+    }
+
     /// Resolve canonical geometry in WCS before any display, pick, or spatial-query projection.
     pub fn world_geometry(&self, parent: &Mat4) -> Result<WorldGeometry> {
         if self.geometry_revision == GeometryRevision::LegacyProjectedV1 {
@@ -347,10 +361,21 @@ impl Entity {
         let primitive = match &self.kind {
             EntityKind::Line(line) => WorldPrimitive::Line { a: parent.apply(line.a), b: parent.apply(line.b) },
             EntityKind::Point(point) => WorldPrimitive::Point(parent.apply(point.p)),
-            EntityKind::Circle(_)
-            | EntityKind::Arc(_)
-            | EntityKind::Ellipse(_)
-            | EntityKind::LwPolyline(_)
+            EntityKind::Circle(circle) => self.ocs_conic(parent, circle.center, circle.radius, 0.0, TAU)?,
+            EntityKind::Arc(arc) => self.ocs_conic(parent, arc.center, arc.radius, arc.start, arc.end)?,
+            EntityKind::Ellipse(ellipse) => {
+                let normal = self.world_ocs_frame()?.to_world(Vec3::Z);
+                let major_direction = ellipse.major.try_normalized().ok_or_else(|| DocError::Invalid("An ellipse has no major axis.".into()))?;
+                let minor_direction = normal
+                    .cross(major_direction)
+                    .try_normalized()
+                    .ok_or_else(|| DocError::Invalid("An ellipse axis is parallel to its source normal.".into()))?;
+                let scale = ellipse.major.x.abs().max(ellipse.major.y.abs()).max(ellipse.major.z.abs());
+                let scaled_major = Vec3::new(ellipse.major.x / scale, ellipse.major.y / scale, ellipse.major.z / scale);
+                let minor = minor_direction * (scaled_major.len() * ellipse.ratio) * scale;
+                transformed_conic(parent, ellipse.center, ellipse.major, minor, ellipse.start, ellipse.end)
+            }
+            EntityKind::LwPolyline(_)
             | EntityKind::Polyline3d(_)
             | EntityKind::PolylineMesh(_)
             | EntityKind::Spline(_)
@@ -382,6 +407,6 @@ impl Entity {
         if primitive.validate().is_err() {
             return Err(DocError::NonFinite(self.handle));
         }
-        Ok(WorldGeometry { primitives: vec![primitive] })
+        Ok(WorldGeometry { owner: self.handle, primitives: vec![primitive] })
     }
 }
