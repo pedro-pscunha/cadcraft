@@ -349,7 +349,7 @@ pub(crate) fn draw_dimension(
     lt: Option<&cadcraft_doc::Linetype>,
     ltscale: f64,
 ) -> cadcraft_doc::Result<()> {
-    let local = dm.localized(e.common.extrusion)?;
+    let local = dm.localized_for_revision(e.common.extrusion, e.geometry_revision)?;
     let plane = ctx.world.mul(&cadcraft_geom::Mat4::ocs(e.common.extrusion));
     let picture = plane.mul(&super::world_roles::translation(cadcraft_geom::Vec3::new(0.0, 0.0, local.local_picture_elevation())));
     if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))

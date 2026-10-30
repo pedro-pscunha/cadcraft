@@ -109,6 +109,46 @@ fn edited_tilted_dimension_blocks_use_local_ocs_in_dxf_and_dwg() {
 }
 
 #[test]
+fn a_negative_z_dimension_midpoint_keeps_its_ocs_value_after_a_point_edit() {
+    let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nDIMENSION\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbDimension\n10\n0\n20\n5\n30\n0\n11\n2\n21\n7\n31\n0\n70\n160\n210\n0\n220\n0\n230\n-1\n100\nAcDbAlignedDimension\n13\n0\n23\n0\n33\n0\n14\n6\n24\n8\n34\n0\n50\n0\n100\nAcDbRotatedDimension\n0\nENDSEC\n0\nEOF\n";
+    let mut base = cadcraft_io::read_dxf(source).unwrap();
+    base.modify_entity(Handle(0x200), |e| {
+        let EntityKind::Dimension(dm) = &mut e.kind else { panic!("dimension") };
+        assert_eq!(dm.text_mid, Vec3::new(-2.0, 7.0, 0.0));
+        dm.p14.x += 1.0;
+    })
+    .unwrap();
+    let mut painted = None;
+    for revision in [GeometryRevision::LegacyProjectedV1, GeometryRevision::CanonicalV2] {
+        let mut d = base.clone();
+        let mut entity = d.entity(Handle(0x200)).unwrap().as_ref().clone();
+        entity.geometry_revision = revision;
+        if revision == GeometryRevision::CanonicalV2 {
+            let EntityKind::Dimension(dm) = &mut entity.kind else { panic!("dimension") };
+            dm.text_mid = Vec3::new(2.0, 7.0, 0.0);
+        }
+        d.model.replace(entity);
+        let list = cadcraft_render::build(&d, &Space::Model, &Default::default());
+        assert!(list.geometry_refusals.is_empty());
+        let geometry = (list.verts, list.tris);
+        if let Some(expected) = &painted {
+            assert_eq!(&geometry, expected, "legacy and canonical midpoint display");
+        } else {
+            painted = Some(geometry);
+        }
+        for name in ["midpoint.dxf", "midpoint.dwg"] {
+            let bytes = cadcraft_io::write(&d, name).unwrap();
+            let reopened = cadcraft_io::read(&bytes, name).unwrap();
+            let EntityKind::Dimension(dm) = &reopened.entity(Handle(0x200)).unwrap().kind else { panic!("dimension") };
+            assert_eq!(dm.text_mid, Vec3::new(-2.0, 7.0, 0.0), "{name} {revision:?}: group 11");
+            let block = reopened.block(dm.block.as_ref().unwrap()).unwrap();
+            let text = block.entities.iter().find_map(|e| if let EntityKind::MText(text) = &e.kind { Some(text) } else { None }).unwrap();
+            assert_eq!(text.insert, Vec3::new(2.0, 7.0, 0.0), "{name} {revision:?}: block midpoint");
+        }
+    }
+}
+
+#[test]
 fn an_angular_picture_uses_the_arc_elevation_not_the_definition_line_elevation() {
     for revision in [GeometryRevision::LegacyProjectedV1, GeometryRevision::CanonicalV2] {
         let mut d = edited(DimKind::Angular, revision);

@@ -766,13 +766,13 @@ fn dimension_block_definitions(
                         b.name.clone()
                     }
                     Some(b) => {
-                        let mut fresh = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion);
+                        let mut fresh = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion, e.geometry_revision);
                         reuse_handles(&mut fresh, b, &mut reused_handles);
                         ents = fresh;
                         b.name.clone()
                     }
                     None => {
-                        ents = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion);
+                        ents = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion, e.geometry_revision);
                         let mut name = format!("*D{n}");
                         while d.block(&name).is_some() {
                             n += 1;
