@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cadcraft_doc::{EntityKind, Handle};
+use cadcraft_doc::{Entity, EntityKind, Handle};
 use cadcraft_geom::{Arc as GeoArc, EPS, Vec2};
 use serde_json::{Value, json};
 
@@ -103,7 +103,7 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let Some(store) = d.space(&st.space) else {
         return Ok(empty_report(offset, tol, 0, 0, pair_limit, false, skipped));
     };
-    let pieces: Vec<Piece> = store.iter().filter_map(|e| chainable(e.handle, &e.kind, &mut skipped)).collect();
+    let pieces: Vec<Piece> = store.iter().filter_map(|e| chainable(e, &mut skipped)).collect();
     let mut ends: Vec<End> = Vec::with_capacity(pieces.len().saturating_mul(2));
     for (i, piece) in pieces.iter().enumerate() {
         ends.push(End { piece: i, at: piece.start });
@@ -274,9 +274,19 @@ fn skip(skipped: &mut Skipped, ty: &'static str, why: &'static str) {
     entry.1.insert(why);
 }
 
-/// The piece for a LINE or ARC, or `None` when the entity is not chainable.
-fn chainable(handle: Handle, kind: &EntityKind, skipped: &mut Skipped) -> Option<Piece> {
-    match kind {
+/// The piece for a LINE or ARC, or `None` when the entity is not chainable. A canonical LINE or ARC is skipped by name: its fields are not
+/// plan-view ends, and chaining them would join lines that do not meet.
+fn chainable(e: &Entity, skipped: &mut Skipped) -> Option<Piece> {
+    let handle = e.handle;
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+        match &e.kind {
+            EntityKind::Line(_) => skip(skipped, "Line", "canonical geometry is not chained"),
+            EntityKind::Arc(_) => skip(skipped, "Arc", "canonical geometry is not chained"),
+            _ => {}
+        }
+        return None;
+    }
+    match &e.kind {
         EntityKind::Line(l) => {
             let (a, b) = (l.a.xy(), l.b.xy());
             if !a.is_finite() || !b.is_finite() || a.dist(b) <= EPS {
