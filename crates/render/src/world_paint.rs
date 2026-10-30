@@ -81,8 +81,8 @@ pub(crate) fn draw(
     {
         return super::world_roles::point_marker(builder, context, entity, point, color, lineweight);
     }
-    // A line pattern runs along the curve in WCS. The kinds the legacy painter strokes one primitive at a time have it; a polyline
-    // with generation on strokes its vertices as one line, which has no per-primitive form here.
+    // A line pattern runs along the curve in WCS. The kinds the legacy painter strokes get it; any other kind with a linetype that
+    // the legacy painter would not ignore refuses.
     let patterned = matches!(
         entity.kind,
         EntityKind::Line(_)
@@ -93,6 +93,7 @@ pub(crate) fn draw(
             | EntityKind::Polyline3d(_)
             | EntityKind::Spline(_)
             | EntityKind::Helix(_)
+            | EntityKind::Leader(_)
     );
     if linetype.is_some()
         && !patterned
@@ -103,26 +104,32 @@ pub(crate) fn draw(
     {
         return Err(unsupported("spatial line patterns"));
     }
-    if linetype.is_some() && matches!(&entity.kind, EntityKind::LwPolyline(p) if p.plinegen) {
-        return Err(unsupported("polyline linetype generation"));
-    }
     let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
     let projected = Ctx { xf: Mat3::IDENTITY, ..context.clone() };
     if let (true, Some(lt)) = (patterned, linetype) {
         let pattern =
             super::world_roles::Pattern { linetype: lt, scale: linetype_scale * context.xf.scale_factor().max(1e-12), min: builder.opts.min_dash };
-        for primitive in geometry.primitives() {
-            if let Some(result) = super::world_roles::dashed(builder, &projected, color, lineweight, &pattern, primitive) {
-                result?;
-            } else {
-                paint_geometry(
-                    builder,
-                    &projected,
-                    &WorldGeometry::from_primitives(entity.handle, vec![primitive.clone()])?,
-                    entity.handle,
-                    color,
-                    lineweight,
-                )?;
+        let plane = cadcraft_geom::OcsFrame::new(entity.common.extrusion);
+        let primitives = geometry.primitives();
+        // One pattern over the whole line for a leader (its vertices, then its arrowhead plain) and for a polyline with generation
+        // on; one per primitive otherwise.
+        let chained = match &entity.kind {
+            EntityKind::Leader(leader) => leader.vertices.len().saturating_sub(1),
+            EntityKind::LwPolyline(p) if p.plinegen => primitives.len(),
+            _ => 0,
+        };
+        let (chain, rest) = primitives.split_at(chained.min(primitives.len()));
+        let mut groups: Vec<Vec<&WorldPrimitive>> = Vec::new();
+        if !chain.is_empty() {
+            groups.push(chain.iter().collect());
+        }
+        groups.extend(rest.iter().map(|p| vec![p]));
+        for group in groups {
+            if !super::world_roles::dashed(builder, &projected, color, lineweight, &pattern, plane, &group) {
+                for primitive in group {
+                    let one = WorldGeometry::from_primitives(entity.handle, vec![primitive.clone()])?;
+                    paint_geometry(builder, &projected, &one, entity.handle, color, lineweight)?;
+                }
             }
         }
         return Ok(());
