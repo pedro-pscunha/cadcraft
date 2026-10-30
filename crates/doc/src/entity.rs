@@ -538,7 +538,11 @@ impl EntityKind {
                 let mn = projected.minor();
                 vec![c, c + mj, c + mn, c - mj, c - mn]
             }
+            // A spline-fit polyline is edited by its frame control points, not by the vertices of the curve it draws.
             EntityKind::LwPolyline(p) => {
+                if let Some(frame) = p.spline_frame() {
+                    return frame;
+                }
                 let mut g: Vec<Vec2> = Vec::new();
                 let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
                 // Compute the segments once, not once per vertex: rebuilding the whole segment
@@ -552,7 +556,7 @@ impl EntityKind {
                 }
                 g
             }
-            EntityKind::Polyline3d(p) => p.points.iter().map(|q| q.xy()).collect(),
+            EntityKind::Polyline3d(p) => p.grip_points(),
             EntityKind::PolylineMesh(mesh) => mesh.vertices.iter().filter(|v| !v.is_face()).map(|v| v.vertex.position.xy()).collect(),
             EntityKind::Spline(s) => {
                 if s.fit.is_empty() {

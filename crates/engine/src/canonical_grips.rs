@@ -25,6 +25,8 @@ pub(crate) enum Role {
     ArcPoint(usize),
     PolyVertex(usize),
     PolyMid(usize),
+    /// A frame control point of a spline-fit polyline: the curve is refit.
+    PolyFrame(usize),
     SplineControl(usize),
     /// A grip with no stretch: dragging it refuses.
     Fixed,
@@ -89,6 +91,7 @@ fn kind_grips(e: &Entity) -> Option<Vec<KindGrip>> {
                         let role = match crate::grips::poly_grip(p, i) {
                             Some(PolyGrip::Vertex(v)) => Role::PolyVertex(v),
                             Some(PolyGrip::Mid(m)) => Role::PolyMid(m),
+                            Some(PolyGrip::Frame(k)) => Role::PolyFrame(k),
                             None => Role::Fixed,
                         };
                         grip(f.to_world(q.to3(p.elevation)), role)
@@ -171,6 +174,15 @@ pub(crate) fn stretch(d: &Drawing, e: &Entity, index: usize, to: Vec2) -> Result
             let mut polyline = p.clone();
             let Some(v) = polyline.vertices.get_mut(i) else { return Ok(None) };
             v.p = at;
+            Ok(with(EntityKind::LwPolyline(polyline)))
+        }
+        (Role::PolyFrame(k), EntityKind::LwPolyline(p)) => {
+            let Some(f) = frame(e.common.extrusion) else { return Ok(None) };
+            let at = f.to_ocs(onto_plane(to, grip.world, f.to_world(Vec3::Z))?).xy();
+            let mut polyline = p.clone();
+            if polyline.drag_frame(k, at, crate::grips::splinesegs(d), crate::cmd::curves::MAX_GEN).is_none() {
+                return Ok(None);
+            }
             Ok(with(EntityKind::LwPolyline(polyline)))
         }
         (Role::PolyMid(i), EntityKind::LwPolyline(p)) => {

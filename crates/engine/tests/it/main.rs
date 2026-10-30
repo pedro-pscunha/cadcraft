@@ -130,6 +130,7 @@ mod snap_tracking;
 mod snaps_more;
 mod space_is_enter;
 mod spline_degree;
+mod spline_fit_edit;
 mod spline_options;
 mod stretch;
 mod stretch_select;

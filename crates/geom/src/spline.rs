@@ -420,6 +420,50 @@ pub(crate) fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
     Some(x)
 }
 
+/// The points of the B-spline curve of `degree` 2 (quadratic) or 3 (cubic) whose control points are `frame`, as a spline-fit
+/// polyline draws it with `segs` segments per frame span (SPLINESEGS), at most `max` points. An open curve starts at the first
+/// frame point and ends at the last (clamped ends); a closed one is the uniform periodic curve and does not repeat its first
+/// point. Fewer than 3 frame points, or another degree, give the frame itself.
+pub fn frame_curve(frame: &[Vec3], closed: bool, degree: usize, segs: usize, max: usize) -> Vec<Vec3> {
+    let n = frame.len();
+    if n < 3 || !(2..=3).contains(&degree) {
+        return frame.to_vec();
+    }
+    let segs = segs.clamp(1, 64).min((max / n).max(1));
+    if closed {
+        let at = |i: usize| frame.get(i % n).copied().unwrap_or_default();
+        return (0..n)
+            .flat_map(|i| {
+                (0..segs).map(move |k| {
+                    let t = k as f64 / segs as f64;
+                    let (t2, t3) = (t * t, t * t * t);
+                    if degree == 3 {
+                        let (p0, p1, p2, p3) = (at(i + n - 1), at(i), at(i + 1), at(i + 2));
+                        let b0 = (1.0 - t).powi(3) / 6.0;
+                        let b1 = (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0;
+                        let b2 = (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0;
+                        p0 * b0 + p1 * b1 + p2 * b2 + p3 * (t3 / 6.0)
+                    } else {
+                        let (p0, p1, p2) = (at(i), at(i + 1), at(i + 2));
+                        p0 * ((1.0 - t).powi(2) / 2.0) + p1 * ((-2.0 * t2 + 2.0 * t + 1.0) / 2.0) + p2 * (t2 / 2.0)
+                    }
+                })
+            })
+            .collect();
+    }
+    // The X and Y values and the Z values are three one-dimensional B-splines on the same knots.
+    let xy = Spline::from_control(frame.iter().map(|p| p.xy()).collect(), degree);
+    let z = Spline::from_control(frame.iter().map(|p| Vec2::new(p.z, 0.0)).collect(), degree);
+    let (lo, hi) = xy.domain();
+    let m = (segs * (n - 1)).min(max);
+    (0..=m)
+        .map(|k| {
+            let u = lo + (hi - lo) * k as f64 / m as f64;
+            xy.eval(u).to3(z.eval(u).x)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;
 

@@ -11,16 +11,7 @@ fn reverse_kind(k: &EntityKind) -> Option<EntityKind> {
     Some(match k {
         EntityKind::Line(l) => EntityKind::Line(cadcraft_doc::Line { a: l.b, b: l.a }),
         EntityKind::LwPolyline(p) => EntityKind::LwPolyline(curves::reverse_polyline(p)),
-        EntityKind::Polyline3d(p) => {
-            let mut records = p.records.clone();
-            records.vertices.reverse();
-            EntityKind::Polyline3d(cadcraft_doc::Polyline3d {
-                records,
-                points: p.points.iter().rev().copied().collect(),
-                closed: p.closed,
-                fit: None,
-            })
-        }
+        EntityKind::Polyline3d(p) => EntityKind::Polyline3d(p.reversed()),
         EntityKind::Spline(sp) => EntityKind::Spline(curves::reverse_spline(sp)),
         _ => return None,
     })
