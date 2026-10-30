@@ -170,8 +170,19 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
         (v, d.p14.xy(), d.p15.xy(), d.p16.xy())
     };
     let r = vertex.dist(arc_pt).max(1e-9);
-    let s = vertex.angle_to(a1);
-    let e = vertex.angle_to(a2);
+    let (s, e) = if matches!(d.kind, DimKind::Angular) {
+        // Each line supplies two rays. The arc point chooses the signs of its coordinates
+        // in this oblique basis, including when a source endpoint is the intersection itself.
+        let u = (d.p14.xy() - d.p13.xy()).normalized();
+        let v = (d.p15.xy() - d.defpt.xy()).normalized();
+        let det = u.cross(v);
+        let target = arc_pt - vertex;
+        let flip_u = target.cross(v) * det < 0.0;
+        let flip_v = u.cross(target) * det < 0.0;
+        ((if flip_u { -u } else { u }).angle(), (if flip_v { -v } else { v }).angle())
+    } else {
+        (vertex.angle_to(a1), vertex.angle_to(a2))
+    };
     let arc = if cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e) { Arc::new(vertex, r, s, e) } else { Arc::new(vertex, r, e, s) };
     let sweep = ccw_sweep(arc.start, arc.end);
     g.measurement = sweep;

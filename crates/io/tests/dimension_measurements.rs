@@ -72,6 +72,28 @@ fn edited_legacy_dimensions_measure_in_their_tilted_plane() {
 }
 
 #[test]
+fn an_edited_tilted_angular_dimension_keeps_its_45_degree_quadrant() {
+    let mut drawing = source();
+    drawing
+        .modify_entity(Handle(0x11B2), |entity| {
+            let cadcraft_doc::EntityKind::Dimension(dim) = &mut entity.kind else { panic!("dimension") };
+            dim.defpt = dim.defpt * 2.0;
+            dim.p13 = dim.p13 * 2.0;
+            dim.p14 = dim.p14 * 2.0;
+            dim.p15 = dim.p15 * 2.0;
+            dim.p16 = dim.p16 * 2.0;
+            dim.block = None;
+        })
+        .unwrap();
+    for name in ["angular.dxf", "angular.dwg"] {
+        let bytes = cadcraft_io::write(&drawing, name).unwrap();
+        let reopened = cadcraft_io::read(&bytes, name).unwrap();
+        let actual = measurement(&reopened, 0x11B2);
+        assert!((actual - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "{name}: {actual}");
+    }
+}
+
+#[test]
 fn unchanged_tilted_dimensions_keep_the_source_measurement_in_dxf_and_dwg() {
     let drawing = source();
     for name in ["unchanged.dxf", "unchanged.dwg"] {
