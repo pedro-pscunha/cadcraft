@@ -485,6 +485,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     if matches!(kind, "BLOCK" | "ENDBLK") {
         x.props.extend(tags.iter().find(|t| t.code == 8).map(raw));
+        x.props.extend(entity_groups(tags).iter().filter(|t| matches!(t.code, 48 | 62)).map(raw));
     }
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
@@ -1885,7 +1886,7 @@ fn record(
             && (!dictionary || p.code != 281)
             && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50))
     };
-    let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
+    let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS");
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
     // Where unmodelled properties go: the end of AcDbEntity, else before the xdata. The groups of
