@@ -30,6 +30,34 @@ pub struct Spline {
     /// and Y values of the same WCS points and vectors, and this holds their Z. `None`: a planar spline at Z = 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<SplineSpace>,
+    /// The groups of a SPLINE record that the other fields do not hold, as a file gave them; `None` when they have the values
+    /// of a spline made here (see [`Spline::source`]). Boxed to keep the spline small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Box<SplineSource>>,
+}
+
+/// The tolerances (DXF 42 and 43) and the linear flag (bit 16 of group 70) of a SPLINE record. The defaults are what a spline
+/// made here is written with.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SplineSource {
+    pub knot_tolerance: f64,
+    pub control_tolerance: f64,
+    /// A linear spline (a degree 1 spline that AutoCAD marks with bit 16, with the planar bit).
+    pub linear: bool,
+}
+
+impl Spline {
+    /// The tolerances and the linear flag of the record this spline was read from, or those of a spline made here.
+    pub fn source(&self) -> SplineSource {
+        self.source.as_deref().copied().unwrap_or_default()
+    }
+}
+
+impl Default for SplineSource {
+    fn default() -> Self {
+        SplineSource { knot_tolerance: 1e-10, control_tolerance: 1e-10, linear: false }
+    }
 }
 
 /// The Z values of the control points, the fit points and the end tangents of a spatial spline.
@@ -99,7 +127,17 @@ impl Spline {
         let n = control.len();
         let degree = degree.clamp(1, n.saturating_sub(1).max(1));
         let knots = clamped_uniform_knots(n, degree);
-        Spline { degree, knots, control, weights: Vec::new(), fit: Vec::new(), closed: false, fit_opts: FitOptions::default(), space: None }
+        Spline {
+            degree,
+            knots,
+            control,
+            weights: Vec::new(),
+            fit: Vec::new(),
+            closed: false,
+            fit_opts: FitOptions::default(),
+            space: None,
+            source: Default::default(),
+        }
     }
 
     /// Cubic interpolation through fit points (chord-length parametrisation, natural-ish ends
@@ -399,6 +437,7 @@ mod space_tests {
             closed: false,
             fit_opts: FitOptions { start_tangent: Some(Vec2::new(1.0, 1.0)), end_tangent: Some(Vec2::new(1.0, -1.0)), ..FitOptions::default() },
             space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.0], start_tangent: 0.5, end_tangent: -0.5 }),
+            source: Default::default(),
         }
     }
 

@@ -86,6 +86,17 @@ pub(super) fn lwpolyline(tags: &[Tag], c: &Common, t: &T) -> Option<EntityKind> 
     crate::dxf_region::from_polyline(tags, pl)
 }
 
+/// The tolerances (42, 43) and the linear flag (bit 16 of 70) of a SPLINE record; what a group lacks takes the value of a spline made here.
+pub(super) fn spline_source(t: &T) -> Option<Box<cadcraft_geom::SplineSource>> {
+    let d = cadcraft_geom::SplineSource::default();
+    let source = cadcraft_geom::SplineSource {
+        knot_tolerance: t.f(42).filter(|v| v.is_finite()).unwrap_or(d.knot_tolerance),
+        control_tolerance: t.f(43).filter(|v| v.is_finite()).unwrap_or(d.control_tolerance),
+        linear: t.i(70).unwrap_or(0) & 16 != 0,
+    };
+    (source != d).then(|| Box::new(source))
+}
+
 fn spline(t: &T) -> Spline {
     let degree = t.i(71).unwrap_or(3).clamp(1, 10) as usize;
     let knots = t.all_f(40);
@@ -97,7 +108,7 @@ fn spline(t: &T) -> Spline {
         cadcraft_geom::FitOptions { knots: Default::default(), start_tangent: tangent(12), end_tangent: tangent(13), tolerance: t.fd(44, 0.0) }
             .sanitized();
     let closed = t.i(70).unwrap_or(0) & 1 != 0;
-    let mut sp = Spline { degree, knots, control, weights, fit: fit.clone(), closed, fit_opts, space: None };
+    let mut sp = Spline { degree, knots, control, weights, fit: fit.clone(), closed, fit_opts, space: None, source: spline_source(t) };
     if !sp.is_valid() && fit.len() >= 2 {
         sp = Spline::fit_with(&fit, sp.closed, fit_opts);
     } else if !sp.is_valid() && sp.control.len() >= 2 {
@@ -106,6 +117,8 @@ fn spline(t: &T) -> Spline {
         // DXF keeps the knots, not how they were spaced: recover it for later refits.
         sp.fit_opts.knots = sp.infer_knot_param();
     }
+    // A spline rebuilt from its fit or control points keeps the record's tolerances.
+    sp.source = spline_source(t);
     sp
 }
 

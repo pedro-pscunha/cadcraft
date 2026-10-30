@@ -124,6 +124,7 @@ fn spline() -> cadcraft_geom::Spline {
             ..FitOptions::default()
         },
         space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.5], start_tangent: 0.5, end_tangent: -0.5 }),
+        source: Default::default(),
     }
 }
 

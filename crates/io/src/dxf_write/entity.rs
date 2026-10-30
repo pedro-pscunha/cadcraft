@@ -1104,14 +1104,21 @@ fn spline_tags(w: &mut W, s: &cadcraft_geom::Spline, plane: Option<Vec3>) {
         let base = points.first().copied().unwrap_or(Vec3::ZERO);
         points.iter().all(|p| ((*p - base).dot(n)).abs() <= 1e-9 * (1.0 + p.len()))
     });
-    let flags = if planar { 8 } else { 0 } | i64::from(s.closed) | if s.is_periodic() { 2 } else { 0 } | if s.weights.is_empty() { 0 } else { 4 };
+    // A linear spline (bit 16, with the planar bit) stays linear while it is degree 1.
+    let source = s.source();
+    let linear = source.linear && s.degree == 1;
+    let flags = if planar || linear { 8 } else { 0 }
+        | i64::from(s.closed)
+        | if s.is_periodic() { 2 } else { 0 }
+        | if s.weights.is_empty() { 0 } else { 4 }
+        | if linear { 16 } else { 0 };
     w.i(70, flags);
     w.i(71, s.degree as i64);
     w.i(72, s.knots.len() as i64);
     w.i(73, s.control.len() as i64);
     w.i(74, s.fit.len() as i64);
-    w.f(42, 1e-10);
-    w.f(43, 1e-10);
+    w.f(42, source.knot_tolerance);
+    w.f(43, source.control_tolerance);
     // Fit data: tolerance and end tangents (the knot parametrisation is implied by the knots).
     if !s.fit.is_empty() {
         w.f(44, s.fit_opts.tolerance);

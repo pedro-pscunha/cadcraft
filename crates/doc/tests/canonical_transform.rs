@@ -177,6 +177,7 @@ fn spline() -> Spline {
         closed: false,
         fit_opts: FitOptions::default(),
         space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+        source: Default::default(),
     }
 }
 

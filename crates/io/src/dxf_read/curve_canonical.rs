@@ -89,6 +89,7 @@ fn spatial_spline(t: &T) -> Option<cadcraft_geom::Spline> {
         closed: t.i(70).unwrap_or(0) & 1 != 0,
         fit_opts,
         space: Some(SplineSpace { control: control_z, fit: fit_z, start_tangent: start.map_or(0.0, |v| v.z), end_tangent: end.map_or(0.0, |v| v.z) }),
+        source: super::entities::spline_source(t),
     };
     if !spline.is_valid() || !spline.space_is_consistent() || !(spline.weights.is_empty() || spline.weights.len() == spline.control.len()) {
         return None;
