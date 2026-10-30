@@ -186,7 +186,8 @@ pub fn grip_dims(s: &Session) -> Vec<GripDim> {
     }
     let Some((h, i)) = s.current_prompt().and_then(|p| p.grip) else { return Vec::new() };
     let Some(e) = s.doc().ok().and_then(|d| d.entity(h)) else { return Vec::new() };
-    let all = dims_of(&e.kind, i);
+    // A canonical object has no dimension to type for a grip: its grips are WCS points, not its 2D reading.
+    let all = if e.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1 { dims_of(&e.kind, i) } else { Vec::new() };
     let st = &s.settings;
     match st.dyndivis {
         0 => all.into_iter().take(1).collect(),

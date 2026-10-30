@@ -18,6 +18,7 @@ mod break_closed_polyline;
 mod break_join_locked_layers;
 mod break_keeps_z;
 mod burst;
+mod canonical_grips;
 mod canonical_pick_snap;
 mod compare_export;
 mod constraint_geometry;

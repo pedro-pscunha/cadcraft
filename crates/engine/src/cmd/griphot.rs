@@ -15,7 +15,7 @@ use super::gripcmds::stretch_grips;
 use super::helpers::line;
 use super::machines::number;
 use super::modify::transform_entities;
-use crate::grips::{GripAction, GripMode, grip_action, grip_actions, mode_matrix};
+use crate::grips::{GripAction, GripMode, grip_action, grip_actions, grip_points, mode_matrix};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Running, Session, Step};
 
 /// At most this many grips are hot at once (input-derived: a cap on the work per edit).
@@ -114,7 +114,7 @@ impl GripEdit {
                 continue;
             }
             let Some(e) = d.entity(h) else { continue };
-            let gs = e.kind.grips();
+            let gs = grip_points(d, e);
             // The nearest grip of this object within the tolerance.
             let best = gs
                 .iter()
@@ -163,9 +163,13 @@ impl GripEdit {
     /// The multifunctional options of the hot grip (one hot grip, in STRETCH mode).
     fn actions(&self, s: &Session) -> Vec<GripAction> {
         match self.hot.as_slice() {
-            [(h, i)] if self.mode == GripMode::Stretch => {
-                s.doc().ok().and_then(|d| d.entity(*h)).map(|e| grip_actions(&e.kind, *i)).unwrap_or_default()
-            }
+            [(h, i)] if self.mode == GripMode::Stretch => s
+                .doc()
+                .ok()
+                .and_then(|d| d.entity(*h))
+                .filter(|e| e.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1)
+                .map(|e| grip_actions(&e.kind, *i))
+                .unwrap_or_default(),
             _ => Vec::new(),
         }
     }
