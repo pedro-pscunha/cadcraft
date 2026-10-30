@@ -64,6 +64,7 @@ pub(crate) fn check_ellipse_transform(entity: &cadcraft_doc::Entity, m: &Mat3) -
 }
 
 pub(crate) fn check_block_expansion(d: &cadcraft_doc::Drawing, entity: &cadcraft_doc::Entity, m: &Mat3, depth: usize) -> Result<()> {
+    entity.require_legacy_geometry()?;
     if depth > cadcraft_doc::MAX_BLOCK_DEPTH {
         return Err(bad("transform", "The block references nest too deeply to expand."));
     }
