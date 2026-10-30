@@ -552,6 +552,10 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
     }
+    // The text of group 1 of a BLOCK that is not an external reference ("Acad:XRef" on the blocks AutoCAD makes of one).
+    if kind == "BLOCK" && !tags.iter().any(|t| t.code == 70 && t.i64() & 4 != 0) {
+        x.subclass.extend(tags.iter().find(|t| t.code == 1 && !t.str().trim().is_empty()).map(raw));
+    }
     if !entity && is_dictionary(kind) {
         x.subclass.extend(tags.iter().find(|t| t.code == 281).map(raw));
     }
@@ -2031,6 +2035,10 @@ fn record(
             && let Some(x) = x
         {
             xdata(map, x, &own_apps, out);
+        }
+        // The kept text of a block replaces the empty one the writer wrote.
+        if r.kind == "BLOCK" && t.code == 1 && i < xdata_at && x.is_some_and(|x| x.subclass.iter().any(|p| p.code == 1)) {
+            continue;
         }
         // Kept table fields replace the defaults the writer wrote.
         if !entity

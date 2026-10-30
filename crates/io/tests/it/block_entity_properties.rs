@@ -33,3 +33,36 @@ fn block_and_endblk_keep_their_line_properties() {
         }
     }
 }
+
+#[test]
+fn the_text_of_group_1_of_a_block_comes_back() {
+    let groups = [
+        (0, "SECTION"),
+        (2, "BLOCKS"),
+        (0, "BLOCK"),
+        (5, "A0"),
+        (330, "A1"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbBlockBegin"),
+        (2, "G$C1"),
+        (70, "1"),
+        (10, "0"),
+        (20, "0"),
+        (30, "0"),
+        (3, "G$C1"),
+        (1, "Acad:XRef"),
+        (0, "ENDBLK"),
+        (5, "A2"),
+        (330, "A1"),
+        (100, "AcDbEntity"),
+        (8, "0"),
+        (100, "AcDbBlockEnd"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    let d = cadcraft_io::read_dxf(dxf(&groups).as_bytes()).unwrap();
+    let text = cadcraft_io::write_dxf(&d);
+    let (_, block) = section(&text, "BLOCKS").into_iter().find(|(k, t)| k == "BLOCK" && val(t, 2) == "G$C1").unwrap();
+    assert_eq!(block.iter().filter(|t| t.code == 1).map(|t| t.str()).collect::<Vec<_>>(), ["Acad:XRef"]);
+}
