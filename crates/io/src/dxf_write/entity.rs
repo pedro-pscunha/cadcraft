@@ -603,9 +603,9 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                 let covered = cov.get(r).and_then(|x| x.get(c)).copied().unwrap_or(false);
                 let merge = cell.and_then(|x| x.merged).filter(|&(a, b)| a >= 1 && b >= 1 && (a, b) != (1, 1));
                 let cell_ref = cell.unwrap_or(&blank);
-                // A text cell: the generated block holds the text only, so a source block cell (171 = 2, with its block, scale and
-                // attributes) is not carried.
-                w.i(171, 1);
+                // A block cell (171 = 2) holds a block of the file; one whose block is gone is a text cell.
+                let block = cell_ref.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).map(|h| (b, h)));
+                w.i(171, if block.is_some() { 2 } else { 1 });
                 w.i(172, i64::from(cell_ref.flag_value));
                 w.i(173, i64::from(covered || merge.is_some()));
                 w.i(174, i64::from(cell_ref.auto_fit));
@@ -619,6 +619,18 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                     w.f(140, h);
                 }
                 w.t.extend(cell_ref.style_groups.iter().map(crate::dxf_raw::tag));
+                if let Some((b, record)) = block {
+                    w.f(144, b.scale);
+                    w.s(340, record);
+                    if !b.attribs.is_empty() {
+                        w.i(179, b.attribs.len() as i64);
+                        for (definition, value) in &b.attribs {
+                            w.s(331, definition.hex());
+                            w.s(300, value);
+                        }
+                    }
+                    continue;
+                }
                 // Long text: 250-character code-2 chunks, the rest in code 1.
                 let chars: Vec<char> = cell.map(|x| x.text.chars().collect()).unwrap_or_default();
                 let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();

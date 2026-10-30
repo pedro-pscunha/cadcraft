@@ -107,6 +107,7 @@ mod split_entities_section;
 mod style_typeface;
 mod svg_arc_budget;
 mod svg_tiny_extents;
+mod table_cell_blocks;
 mod table_cellstyle_roundtrip;
 mod table_codes;
 mod table_style_codes;

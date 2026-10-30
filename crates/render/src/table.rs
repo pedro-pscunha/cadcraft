@@ -43,12 +43,21 @@ pub struct TableText {
     pub text: String,
 }
 
+/// A block a cell holds, as the reference that draws it in the cell.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableBlock {
+    pub row: usize,
+    pub col: usize,
+    pub insert: cadcraft_doc::Insert,
+}
+
 /// Everything a table draws, in world coordinates.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableGeom {
     pub fills: Vec<TableFill>,
     pub lines: Vec<TableLine>,
     pub texts: Vec<TableText>,
+    pub blocks: Vec<TableBlock>,
 }
 
 /// Which cells are covered by a merge (and so not drawn on their own).
@@ -160,9 +169,13 @@ pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
         for tx in &mut pg.texts {
             tx.row = p.rows.get(tx.row).copied().unwrap_or(tx.row);
         }
+        for b in &mut pg.blocks {
+            b.row = p.rows.get(b.row).copied().unwrap_or(b.row);
+        }
         g.fills.extend(pg.fills);
         g.lines.extend(pg.lines);
         g.texts.extend(pg.texts);
+        g.blocks.extend(pg.blocks);
     }
     g
 }
@@ -207,6 +220,29 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
         data_link: None,
         overrides: Default::default(),
     }
+}
+
+/// The reference of a cell's block, placed so that its extents sit on the cell's alignment point `at` by the cell's alignment
+/// `attach` (MTEXT numbering).
+fn place_block(d: &Drawing, content: &cadcraft_doc::TableCellBlock, rotation: f64, at: Vec2, attach: u8) -> cadcraft_doc::Insert {
+    let origin = content.insert(d, cadcraft_geom::Vec3::ZERO, rotation);
+    let bounds = cadcraft_doc::entity_bounds(d, &cadcraft_doc::Entity::new(cadcraft_doc::Handle(0), cadcraft_doc::EntityKind::Insert(origin)), 0);
+    let anchor = if bounds.is_empty() {
+        Vec2::ZERO
+    } else {
+        let x = match (attach - 1) % 3 {
+            0 => bounds.min.x,
+            1 => (bounds.min.x + bounds.max.x) / 2.0,
+            _ => bounds.max.x,
+        };
+        let y = match (attach - 1) / 3 {
+            0 => bounds.max.y,
+            1 => (bounds.min.y + bounds.max.y) / 2.0,
+            _ => bounds.min.y,
+        };
+        Vec2::new(x, y)
+    };
+    content.insert(d, (at - anchor).to3(0.0), rotation)
 }
 
 /// Lay out one part.
@@ -340,7 +376,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
     }
     // Texts at their alignment point inside the margins.
     for a in &anchors {
-        let Some(cell) = t.cells.get(a.row).and_then(|row| row.get(a.col)).filter(|c| !c.text.is_empty()) else { continue };
+        let Some(cell) = t.cells.get(a.row).and_then(|row| row.get(a.col)).filter(|c| !c.text.is_empty() || c.block.is_some()) else { continue };
         let Some(cs) = styles.get(a.style) else { continue };
         let (x0, x1, y0, y1) = (x_at(a.col), x_at(a.col + a.cols), y_at(a.row), y_at(a.row + a.rows));
         let attach = cs.align.clamp(1, 9);
@@ -354,6 +390,11 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             1 => (y0 + y1) / 2.0,
             _ => y1 - cs.margin_v,
         };
+        if let Some(content) = &cell.block {
+            let insert = place_block(d, content, cell.rotation, p(x, y), attach);
+            g.blocks.push(TableBlock { row: a.row, col: a.col, insert });
+            continue;
+        }
         g.texts.push(TableText {
             row: a.row,
             col: a.col,
@@ -377,7 +418,7 @@ fn style_ink(c: Color, table: Ink) -> Ink {
 }
 
 /// Draw a table into the display list.
-pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
+pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Table, rgb: Ink, lw: f32) {
     let g = table_geometry(ctx.d, t);
     if b.opts.fill {
         for f in &g.fills {
@@ -392,6 +433,9 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
             Lineweight::ByBlock | Lineweight::ByLayer => lw,
         };
         b.polyline(ctx, style_ink(l.color, rgb), w, &[l.a, l.b]);
+    }
+    for block in &g.blocks {
+        crate::blocks::insert(b, ctx, e, &block.insert, rgb);
     }
     if !b.opts.text {
         return;

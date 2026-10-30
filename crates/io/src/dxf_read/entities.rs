@@ -374,8 +374,39 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
                 _ => {}
             }
         }
+        // A block cell (171 = 2): its block record handle (resolved to the name once the records are known), scale (144) and the
+        // attribute values by their ATTDEF handle (331, 300).
+        let block = (t0.i64() == 2).then(|| {
+            let mut attribs: Vec<(cadcraft_doc::Handle, String)> = Vec::new();
+            let mut open = false;
+            for x in cell.iter().filter(|x| matches!(x.code, 331 | 300)) {
+                match x.code {
+                    331 => {
+                        open = true;
+                        if let Some(h) = cadcraft_doc::Handle::parse_hex(x.str().trim()) {
+                            attribs.push((h, String::new()));
+                        } else {
+                            open = false;
+                        }
+                    }
+                    _ if open => {
+                        if let Some(a) = attribs.last_mut() {
+                            a.1 = x.str();
+                        }
+                        open = false;
+                    }
+                    _ => {}
+                }
+            }
+            cadcraft_doc::TableCellBlock {
+                block: c.s(340).unwrap_or_default().trim().to_string(),
+                scale: c.f(144).filter(|v| v.is_finite()).unwrap_or(1.0),
+                attribs,
+            }
+        });
         flat.push(TableCell {
             text,
+            block,
             merged,
             text_height,
             flag_value: flag_value.unwrap_or(0),
@@ -528,7 +559,19 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
                 dm.marks.oblique = Some(cadcraft_geom::norm_angle(base + o.to_radians()));
             }
         }
-        ("ACAD_TABLE", EntityKind::Table(_)) => {
+        ("ACAD_TABLE", EntityKind::Table(table)) => {
+            // The blocks the cells hold, by their BLOCK_RECORD handles; a cell whose block is unknown is a text cell.
+            for cell in table.cells.iter_mut().flatten() {
+                if let Some(content) = &mut cell.block {
+                    match rx.brs.get(&content.block.to_ascii_uppercase()).filter(|n| !n.is_empty()) {
+                        Some(name) => {
+                            content.block = name.clone();
+                            rx.inserted.insert(name.to_ascii_uppercase());
+                        }
+                        None => cell.block = None,
+                    }
+                }
+            }
             let t = T(tags);
             if let Some(b) = t.s(2) {
                 rx.table_blocks.insert(b.to_ascii_uppercase());

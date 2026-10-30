@@ -172,6 +172,9 @@ pub struct TableCell {
     /// The cell has a virtual edge (group 178).
     #[serde(default, skip_serializing_if = "is_zero_i32")]
     pub virtual_edge: i32,
+    /// The block the cell holds instead of text (DXF cell type 171 = 2); `text` is then not drawn or written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<TableCellBlock>,
     /// The cell's own style groups (alignment 170, fill 283 and 63, text colour 64, text style 7, border colours, lineweights and
     /// visibilities 65 to 69, 275 to 279 and 285 to 289), as the file gave them: the values the cell flag (91) says are overridden.
     /// The text height (140) is `text_height`.
@@ -180,6 +183,48 @@ pub struct TableCell {
     /// The rotation of the cell's content (group 145), as the file gave it.
     #[serde(default, skip_serializing_if = "is_zero_f64")]
     pub rotation: f64,
+}
+
+/// The block a table cell holds: its name, scale (DXF 144) and attribute values, each by the handle of its ATTDEF in the block
+/// definition (331) and the value (300).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableCellBlock {
+    pub block: String,
+    pub scale: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribs: Vec<(Handle, String)>,
+}
+
+impl TableCellBlock {
+    /// The reference that draws the block at `at`, turned by `rotation`, at the cell's block scale. Each attribute value is
+    /// placed like its definition in the block (an attribute whose definition is gone is dropped).
+    pub fn insert(&self, d: &crate::Drawing, at: Vec3, rotation: f64) -> super::Insert {
+        let mut insert = super::Insert {
+            block: self.block.clone(),
+            insert: at,
+            scale: Vec3::new(self.scale, self.scale, self.scale),
+            rotation,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        };
+        let Some(block) = d.block(&self.block) else { return insert };
+        let matrix = super::Mat4::from_mat3(&insert.transform(block.base.xy()));
+        for (handle, value) in &self.attribs {
+            let Some(super::EntityKind::AttDef(def)) = block.entities.get(*handle).map(|e| &e.kind) else { continue };
+            let mut placed = super::Entity::new(Handle(0), super::EntityKind::Text(def.text.clone()));
+            if placed.try_transform(&matrix).is_err() {
+                continue;
+            }
+            let super::EntityKind::Text(mut text) = placed.kind else { continue };
+            text.value = value.clone();
+            insert.attribs.push(super::Attrib { invisible: def.invisible, ..super::Attrib::new(def.tag.clone(), text) });
+        }
+        insert
+    }
 }
 
 fn is_zero_i32(v: &i32) -> bool {

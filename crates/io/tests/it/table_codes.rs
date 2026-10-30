@@ -14,6 +14,9 @@ use super::table_style_codes::{at, dwg_saves, dxf, groups};
 
 fn overridden_cell(rows: usize, cols: usize) -> RTable {
     let mut t = RTable::new(Vector3::new(1.0, 2.0, 0.0), rows, cols);
+    for (r, c) in (0..rows).flat_map(|r| (0..cols).map(move |c| (r, c))) {
+        t.set_cell_text(r, c, "x");
+    }
     t.value_flags = 2;
     t.override_flag = true;
     t.legacy_style_override = Some(LegacyTableStyleOverride {
@@ -35,6 +38,7 @@ fn overridden_cell(rows: usize, cols: usize) -> RTable {
             let mut style = acadrust::entities::CellStyle::new();
             style.override_flags = 0x01 | 0x08;
             style.legacy_override_bits = true;
+            style.property_flags |= acadrust::entities::table::legacy_override_properties(style.override_flags);
             style.alignment = 5;
             style.content_color = RColor::Index(2);
             c.style = Some(style);
@@ -143,8 +147,9 @@ fn table_fields(doc: &CadDocument) -> TableFields {
 
 #[test]
 fn a_table_keeps_its_masks_values_and_cell_codes_through_a_dwg_save() {
-    // R2007 holds every field. R2010 and later keep the table as table content, with none of the legacy fields (acadrust's own
-    // DWG of the table holds none): a CADCraft save must keep what acadrust's own DWG holds.
+    // R2007 holds every field. R2010 and later keep the table as table content, which holds the value flags, the flow direction
+    // and the margins of the overrides, and per cell the rotation and auto-fit; the title suppression, the border colour mask and
+    // the cell flags have no place there. A CADCraft save must keep what acadrust's own DWG holds.
     for (version, source) in [(Version::R2007, DxfVersion::AC1021), (Version::R2018, DxfVersion::AC1032)] {
         let mut doc = CadDocument::with_version(source);
         doc.add_entity(EntityType::Table(Box::new(overridden_cell(2, 2)))).unwrap();
@@ -154,6 +159,12 @@ fn a_table_keeps_its_masks_values_and_cell_codes_through_a_dwg_save() {
             let cells = (0..4).map(|i| (3, true, 5, 2, 0.5 + f64::from(i % 2), Some((5, RColor::Index(2))))).collect();
             let overrides = (13, Some(true), Some(1), Some(0.2));
             assert_eq!(held, (2, Some(overrides), Some((3, vec![RColor::Index(1), RColor::Index(3)])), cells), "the source");
+        }
+        if version == Version::R2018 {
+            let rotations: Vec<f64> = held.3.iter().map(|c| c.4).collect();
+            assert_eq!((held.0, held.1), (2, Some((12, None, Some(1), Some(0.2)))), "R2018: the table fields");
+            assert_eq!(rotations, [0.5, 1.5, 0.5, 1.5], "R2018: the cell rotations");
+            assert!(held.3.iter().all(|c| c.1), "R2018: auto-fit");
         }
         assert_eq!(first, held, "{version:?}: first save");
         assert_eq!(second, held, "{version:?}: second save");
