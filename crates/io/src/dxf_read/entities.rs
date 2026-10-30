@@ -451,7 +451,9 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
         // Their text height is resolved to the table style's once the styles are read (`apply`).
         None => (cols > 1 && cells.first().and_then(|r| r.first()).and_then(|c| c.merged) == Some((1, cols as u32)), false, 0.0, "Standard".into()),
     };
-    let overrides = table_overrides(tail.get(..first_cell).unwrap_or(&[]));
+    let mut overrides = table_overrides(tail.get(..first_cell).unwrap_or(&[]));
+    // The flags a table of this state gets when it is written need not be kept.
+    overrides.value_flags = overrides.value_flags.filter(|f| *f != cadcraft_doc::TableOverrides::default_value_flags(title));
     let mut t = Table { insert: T(tags).p(10), col_widths, row_heights, cells, style, text_height, title, header, overrides, ..Table::default() };
     crate::dxf_table::read_table_xdata(tags, &mut t);
     t
@@ -469,7 +471,7 @@ fn table_overrides(head: &[Tag]) -> cadcraft_doc::TableOverrides {
         .map(|t| cadcraft_doc::RawTag { code: t.code, value: t.str() })
         .collect();
     cadcraft_doc::TableOverrides {
-        value_flags: int(90),
+        value_flags: head.iter().find(|t| t.code == 90).and_then(|t| i32::try_from(t.i64()).ok()),
         style: int(93),
         border_color: int(94),
         border_lineweight: int(95),

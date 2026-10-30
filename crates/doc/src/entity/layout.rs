@@ -245,7 +245,9 @@ fn is_zero_f64(v: &f64) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableOverrides {
-    pub value_flags: i32,
+    /// Group 90 as the file gave it; `None` for a table made here, which gets the flags of its own state when it is written.
+    #[serde(default)]
+    pub value_flags: Option<i32>,
     pub style: i32,
     pub border_color: i32,
     pub border_lineweight: i32,
@@ -289,6 +291,12 @@ pub struct Table {
 }
 
 impl TableOverrides {
+    /// The value flags (group 90) AutoCAD writes for a table: 0x06 (it has a block), 0x10 (rows run down), and 0x20 when the title row is
+    /// suppressed. A table with a title has 0x16 = 22, as AutoCAD LT 2025 writes for a -TABLE.
+    pub fn default_value_flags(title: bool) -> i32 {
+        0x06 | 0x10 | if title { 0 } else { 0x20 }
+    }
+
     fn is_default(&self) -> bool {
         *self == TableOverrides::default()
     }

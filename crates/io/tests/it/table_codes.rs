@@ -66,7 +66,7 @@ fn plan_table() -> Table {
         style: "Standard".into(),
         text_height: 0.2,
         overrides: TableOverrides {
-            value_flags: 2,
+            value_flags: Some(2),
             style: 0x1 | 0x4 | 0x8,
             border_color: 3,
             border_lineweight: 1,
@@ -112,9 +112,11 @@ fn a_table_made_here_keeps_the_old_groups() {
     };
     d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
     let g = groups(&dxf(&d), "ACAD_TABLE");
-    for code in [90, 93, 94, 95, 96, 172, 174, 178] {
+    for code in [93, 94, 95, 96, 172, 174, 178] {
         assert_eq!(at(&g, code), ["0".to_string()], "group {code}");
     }
+    // No title row: 0x06 (has a block) + 0x10 (rows run down) + 0x20 (title suppressed).
+    assert_eq!(at(&g, 90), ["54".to_string()], "group 90");
     assert_eq!((at(&g, 171), at(&g, 145)), (["1".into()].to_vec(), ["0.0".into()].to_vec()));
 }
 
@@ -169,4 +171,24 @@ fn a_table_keeps_its_masks_values_and_cell_codes_through_a_dwg_save() {
         assert_eq!(first, held, "{version:?}: first save");
         assert_eq!(second, held, "{version:?}: second save");
     }
+}
+
+#[test]
+fn a_table_made_here_writes_the_value_flags_autocad_writes_and_a_file_value_is_kept() {
+    // AutoCAD LT 2025 writes 90 = 22 (0x16: has a block, rows run down) for a -TABLE with a title and a header row; the ODA spec adds
+    // 0x20 when the title row is suppressed.
+    let made = |title: bool, flags: Option<i32>| {
+        let mut t = plan_table();
+        t.title = title;
+        t.overrides = TableOverrides { value_flags: flags, ..TableOverrides::default() };
+        let mut d = Drawing::new_metric();
+        d.add(&Space::Model, Common::default(), EntityKind::Table(t)).unwrap();
+        d
+    };
+    let flags = |d: &Drawing| at(&groups(&dxf(d), "ACAD_TABLE"), 90).first().cloned();
+    assert_eq!(flags(&made(true, None)).as_deref(), Some("22"));
+    assert_eq!(flags(&made(false, None)).as_deref(), Some("54"));
+    // A value read from a file stays as read, whatever the table's own state (the first 90 is the table's, the next are cells').
+    assert_eq!(flags(&made(true, Some(2))).as_deref(), Some("2"));
+    assert_eq!(flags(&made(false, Some(0))).as_deref(), Some("0"));
 }
