@@ -656,6 +656,8 @@ fn symbol_flag_mask(kind: &str) -> i64 {
         "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID" => 16 | 32,
         "STYLE" => 1,
         "BLOCK" => 2,
+        // The bit that says the dimension's block is its own (32) is the file's: AutoCAD sets it on some dimensions of a block.
+        "DIMENSION" => 32,
         _ => 0,
     }
 }
@@ -693,7 +695,7 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     let (marker, codes): (&str, &[i32]) = match kind {
         // The reference column height (46) and the background fill: its setting (90), colour (63, 421), box scale (45) and transparency (441).
         "MTEXT" => ("AcDbMText", &[46, 90, 63, 421, 45, 441]),
-        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
+        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280, 12, 22, 32]),
         // The clip mode of an image (290) and the null pointers a wipeout has where an image has its definition (340, 360).
         "IMAGE" => ("AcDbRasterImage", &[290]),
         "WIPEOUT" => ("AcDbWipeout", &[290, 340, 360]),
