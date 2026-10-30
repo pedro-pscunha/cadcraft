@@ -1,4 +1,4 @@
-use cadcraft_doc::Insert;
+use cadcraft_doc::{Attrib, GeometryRevision, Insert, Text};
 use cadcraft_geom::{Mat4, Vec3};
 
 fn insert() -> Insert {
@@ -47,6 +47,76 @@ fn collapsed_scales_remain_valid_display_matrices() {
     source.scale = Vec3::ZERO;
     let matrix = source.world_transform(Vec3::Z, Vec3::new(4.0, 5.0, 6.0), 0, 0).unwrap();
     near(matrix.apply(Vec3::new(100.0, 200.0, 300.0)), source.insert);
+}
+
+#[test]
+fn a_persisted_insert_accepts_axis_aligned_nonuniform_scale() {
+    let source = insert();
+    let normal = Vec3::new(0.0, 2.0, 0.0);
+    let matrix = Mat4 { m: [[2.0, 0.0, 0.0, 0.0], [0.0, 3.0, 0.0, 0.0], [0.0, 0.0, 4.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    let (moved, plane) = source.transformed_canonical(normal, &matrix).unwrap();
+    near(moved.insert, Vec3::new(20.0, 80.0, 90.0));
+    near(moved.scale, Vec3::new(-8.0, 6.0, -12.0));
+    assert_eq!((moved.col_spacing, moved.row_spacing), (20.0, 14.0));
+    near(moved.world_transform(plane, Vec3::new(1.0, 2.0, 3.0), 1, 1).unwrap().apply(Vec3::new(2.0, 4.0, 6.0)), Vec3::new(6.0, 54.0, 92.0));
+}
+
+#[test]
+fn translation_keeps_insert_plane_scale_rotation_and_spacing_bits() {
+    let source = insert();
+    let normal = Vec3::new(-0.0, 2.0, 0.0);
+    let matrix = Mat4 { m: [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 3.0], [0.0, 0.0, 0.0, 1.0]] };
+    let (moved, plane) = source.transformed_canonical(normal, &matrix).unwrap();
+    near(moved.insert, Vec3::new(9.0, 23.0, 32.0));
+    assert_eq!([plane.x.to_bits(), plane.y.to_bits(), plane.z.to_bits()], [normal.x.to_bits(), normal.y.to_bits(), normal.z.to_bits()]);
+    assert_eq!(moved.scale, source.scale);
+    assert_eq!(moved.rotation.to_bits(), source.rotation.to_bits());
+    assert_eq!(moved.col_spacing.to_bits(), source.col_spacing.to_bits());
+    assert_eq!(moved.row_spacing.to_bits(), source.row_spacing.to_bits());
+}
+
+#[test]
+fn a_reflection_is_representable_but_a_sheared_insert_frame_refuses() {
+    let source = insert();
+    let normal = Vec3::new(0.0, 2.0, 0.0);
+    let mirror = Mat4 { m: [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    let (moved, plane) = source.transformed_canonical(normal, &mirror).unwrap();
+    near(moved.world_transform(plane, Vec3::new(1.0, 2.0, 3.0), 1, 1).unwrap().apply(Vec3::new(2.0, 4.0, 6.0)), Vec3::new(-3.0, 18.0, 23.0));
+    let shear = Mat4 { m: [[1.0, 0.5, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    assert!(source.transformed_canonical(normal, &shear).is_err());
+    assert_eq!(source, insert());
+}
+
+#[test]
+fn persisted_attributes_keep_their_own_planes_and_refuse_as_one_candidate() {
+    let text = Text {
+        insert: Vec3::new(1.0, 2.0, 3.0),
+        align_pt: None,
+        height: 1.0,
+        value: "A".into(),
+        rotation: 0.0,
+        width_factor: 1.0,
+        oblique: 0.0,
+        style: "Standard".into(),
+        halign: Default::default(),
+        valign: Default::default(),
+        backward: false,
+        upside_down: false,
+    };
+    let mut source = insert();
+    source.attribs.push(Attrib::new("A", text));
+    let normal = Vec3::new(0.0, 2.0, 0.0);
+    let translation = Mat4 { m: [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 3.0], [0.0, 0.0, 0.0, 1.0]] };
+    let before = source.clone();
+    assert!(source.transformed_canonical(normal, &translation).is_err(), "legacy attributes must not enter the canonical edit");
+    assert_eq!(source, before);
+    source.attribs.first_mut().unwrap().geometry_revision = GeometryRevision::CanonicalV2;
+    let (moved, _) = source.transformed_canonical(normal, &translation).unwrap();
+    near(moved.attribs.first().unwrap().text.insert, Vec3::new(2.0, 4.0, 6.0));
+    let scale = Mat4 { m: [[2.0, 0.0, 0.0, 0.0], [0.0, 3.0, 0.0, 0.0], [0.0, 0.0, 4.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    let before = source.clone();
+    assert!(source.transformed_canonical(normal, &scale).is_err(), "the attribute must independently support the edit");
+    assert_eq!(source, before);
 }
 
 #[test]
