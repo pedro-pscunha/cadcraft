@@ -753,7 +753,7 @@ fn forget_dwg_type_72(a: &mut Attrib) {
 }
 
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
-pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_layer: &str, rx: &Rx) -> Vec<Attrib> {
+pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, rx: &Rx) -> Vec<Attrib> {
     let mut attribs = Vec::new();
     while let Some((k2, t2)) = recs.get(*i) {
         if k2 == "ATTRIB" {
@@ -772,7 +772,7 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
             attribs.push(Attrib {
                 handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
                 invisible: own.i(70).unwrap_or(0) & 1 != 0,
-                props: attrib_props(&tt, ins_layer, entity_plot_style(t2, rx)),
+                props: attrib_props(&tt, entity_plot_style(t2, rx)),
                 multiline,
                 modes: attrib_modes(own.0),
                 plane: AttribPlane { thickness: own.fd(39, 0.0), ..AttribPlane::default() },

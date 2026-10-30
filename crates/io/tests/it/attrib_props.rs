@@ -100,7 +100,8 @@ fn attributes_without_properties_stay_without() {
     let (d, h) = drawing(vec![attrib("OWN", 0.0, AttribProps::default()), attrib("NODEF", 10.0, AttribProps::default())]);
     let a = reopened_attribs(&d, h);
     assert_eq!(a.len(), 2);
-    assert!(a.iter().all(|a| a.props.is_empty()), "{a:?}");
+    // The layer is always the attribute's own as the file has it; nothing else is set.
+    assert!(a.iter().all(|a| AttribProps { layer: None, ..a.props.clone() }.is_empty()), "{a:?}");
 }
 
 #[test]
@@ -139,4 +140,34 @@ fn an_attribute_on_layer_zero_and_one_hidden_by_itself_keep_both_in_dxf_and_dwg(
         assert_eq!((reopened[0].props.layer.as_deref(), reopened[0].props.visible), (Some("0"), Some(false)), "{:?}", reopened[0].props);
         assert_eq!(reopened[1].props.visible, None);
     }
+}
+
+/// The layer (group 8) of the first ATTRIB of the DXF text.
+fn attrib_layer(text: &str) -> Option<String> {
+    let tags = cadcraft_dxf::parse(text.as_bytes()).expect("parse");
+    let section = cadcraft_dxf::sections(&tags).into_iter().find(|s| s.name == "ENTITIES")?;
+    let records = cadcraft_dxf::records(&section.tags);
+    let (_, attrib) = records.iter().find(|(k, _)| k == "ATTRIB")?;
+    attrib.iter().find(|g| g.code == 8).map(|g| g.str())
+}
+
+#[test]
+fn an_attribute_on_its_references_layer_keeps_it_when_its_definition_is_on_another_layer() {
+    // The reference and the attribute are on INS; the definition (DEFLAYER) is on TXT. The file's layer is the attribute's own.
+    let own = AttribProps { layer: Some("INS".into()), ..AttribProps::default() };
+    let (d, h) = drawing(vec![attrib("DEFLAYER", 0.0, own)]);
+    assert_eq!(attrib_layer(&write_dxf(&d)).as_deref(), Some("INS"));
+    // Read from the file and saved again, in DXF and in DWG: the layer stays INS, not the definition's TXT.
+    let from_dxf = read_dxf(write_dxf(&d).as_bytes()).expect("reopen");
+    let from_dwg = cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
+    for (what, back) in [("DXF", from_dxf), ("DWG", from_dwg)] {
+        let EntityKind::Insert(i) = &back.model.iter().next().expect("insert").kind else { panic!("not an insert") };
+        assert_eq!(i.attribs[0].props.layer.as_deref(), Some("INS"), "{what}: read");
+        let again = write_dxf(&back);
+        assert_eq!(attrib_layer(&again).as_deref(), Some("INS"), "{what}: saved again");
+        let again_dwg = cadcraft_io::read(&cadcraft_io::write(&back, "y.dwg").unwrap(), "y.dwg").unwrap();
+        let EntityKind::Insert(i) = &again_dwg.model.iter().next().expect("insert").kind else { panic!("not an insert") };
+        assert_eq!(i.attribs[0].props.layer.as_deref(), Some("INS"), "{what}: saved again to a DWG");
+    }
+    let _ = h;
 }
