@@ -125,3 +125,37 @@ fn the_dogleg_length_of_the_entity_is_kept_beside_the_roots_own() {
     assert_eq!(mleader(&back).context.codes.groups.entity.dogleg_length, Some(0.1));
     assert!((mleader(&back).roots[0].dogleg - 0.009).abs() < 1e-9);
 }
+
+/// The arrowhead size of the entity (42) is the file's while the size is the one read: AutoCAD scales the context's (140) by the annotation
+/// scale and keeps its own unscaled, so one written from the other makes the arrow 35 times too small at the next regeneration. A size
+/// that was edited is written to both.
+#[test]
+fn the_entity_arrowhead_size_is_kept_beside_the_contexts() {
+    let mut d = drawing("_DOT");
+    let h = d.model.iter().next().unwrap().handle;
+    d.modify_entity(h, |e| {
+        if let EntityKind::MLeader(m) = &mut e.kind {
+            m.arrow_size = 0.3;
+            m.context.codes.groups.ctx.arrow_size = Some(0.3);
+            m.context.codes.groups.entity.arrow_size = Some(9.0);
+        }
+    })
+    .unwrap();
+    let sizes = |d: &Drawing| -> (Vec<f64>, Vec<f64>) {
+        let p = pairs(&save(d));
+        let start = p.iter().position(|(c, v)| *c == 0 && v == "MULTILEADER").unwrap();
+        let rec: Vec<(i32, String)> = p[start + 1..].iter().take_while(|(c, _)| *c != 0).cloned().collect();
+        let ctx_end = rec.iter().position(|(c, v)| *c == 301 && v == "}").unwrap();
+        let of =
+            |part: &[(i32, String)], code: i32| part.iter().filter(|(c, _)| *c == code).filter_map(|(_, v)| v.parse().ok()).collect::<Vec<f64>>();
+        (of(&rec[..ctx_end], 140), of(&rec[ctx_end..], 42))
+    };
+    assert_eq!(sizes(&d), (vec![0.3], vec![9.0]));
+    d.modify_entity(h, |e| {
+        if let EntityKind::MLeader(m) = &mut e.kind {
+            m.arrow_size = 0.5;
+        }
+    })
+    .unwrap();
+    assert_eq!(sizes(&d), (vec![0.5], vec![0.5]));
+}

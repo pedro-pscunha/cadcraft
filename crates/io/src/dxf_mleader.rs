@@ -822,7 +822,12 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool, t
     if let Some(h) = &r.arrow {
         s(&mut t, 342, h);
     }
-    f(&mut t, 42, m.arrow_size);
+    // The entity's own arrowhead size, unscaled where the context's (140) is scaled by the annotation scale, while the size is still the one read.
+    let arrow = match (cg.arrow_size, eg.arrow_size) {
+        (Some(read), Some(own)) if cadcraft_doc::same_factor(read, m.arrow_size) => own,
+        _ => m.arrow_size,
+    };
+    f(&mut t, 42, arrow);
     i(
         &mut t,
         172,

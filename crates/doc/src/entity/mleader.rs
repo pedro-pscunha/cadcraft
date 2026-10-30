@@ -82,6 +82,8 @@ numeric_groups! {
         text_height = 41,
         landing_gap = 145,
         column_height = 44,
+        /// The arrowhead size of the context (140), which is the entity's own (42) scaled by the annotation scale.
+        arrow_size = 140,
         /// Text flow direction (172), text colour (90), background fill colour (91), scale factor (141), transparency (92),
         /// fill switch (291) and mask fill (292).
         flow_direction = 172,
@@ -111,7 +113,7 @@ numeric_groups! {
     /// 92, 93), lineweight (171), landing and dogleg switches (290, 291), text frame (292), annotation scale switch (293), text
     /// direction negative (294), alignment in the in-place editor (178), attachment point (179), scale factor (45) and the
     /// attachment direction and top and bottom attachments (271, 272, 273); the dogleg length of the entity (41, which differs from the
-    /// roots' own when AutoCAD scales them); the block rotation of the entity (43), which AutoCAD
+    /// roots' own when AutoCAD scales them) and its arrowhead size (42, which differs from the context's 140 in the same way); the block rotation of the entity (43), which AutoCAD
     /// leaves as it was when the multileader is rotated (the rotation lives in the context's 46), and the group 295 that ends an
     /// AutoCAD 2018 entity.
     MLeaderEntityGroups {
@@ -129,6 +131,7 @@ numeric_groups! {
         attachment_point = 179,
         scale = 45,
         dogleg_length = 41,
+        arrow_size = 42,
         attach_direction = 271,
         attach_top = 272,
         attach_bottom = 273,
