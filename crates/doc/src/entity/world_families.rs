@@ -9,7 +9,7 @@ use cadcraft_geom::{Mat4, OcsFrame, Spline, Vec2, Vec3, bulge_to_arc};
 
 use super::block::Attrib;
 use super::curves::{Arc, Circle, LwPolyline, Solid};
-use super::dim::Leader;
+use super::dim::{Dimension, Leader};
 use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop, Wipeout};
 use super::helix::Helix;
 use super::layout::Table;
@@ -155,6 +155,72 @@ pub fn lwpolyline_primitives(polyline: &LwPolyline, normal: Vec3, parent: &Mat4)
         out.push(segment(f, v.p, w.p, v.bulge, z));
         let (wa, wb) = if polyline.const_width > 0.0 { (polyline.const_width, polyline.const_width) } else { (v.start_width, v.end_width) };
         out.extend(strip(f, v.p, w.p, v.bulge, wa, wb, z));
+    }
+    finish(out, parent)
+}
+
+/// A dimension laid out in the OCS of its plane, as the renderer draws it: the lines (dimension and extension lines,
+/// open arrowheads, ticks) as polylines, the filled triangles (three points each), the background of the text, and the
+/// text. Every point is a local 2D point; `elevation` is the Z of the plane in the OCS.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DimensionLayout {
+    pub lines: Vec<Vec<Vec2>>,
+    pub fills: Vec<Vec<Vec2>>,
+    /// The corners of the text background (DIMTFILL), empty without one.
+    pub text_fill: Vec<Vec2>,
+    pub text: Option<DimensionLayoutText>,
+    pub elevation: f64,
+}
+
+/// The text of a laid-out dimension: its middle, its OCS angle, its height, its text style and its MTEXT contents.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimensionLayoutText {
+    pub at: Vec2,
+    pub angle: f64,
+    pub height: f64,
+    pub style: String,
+    pub contents: String,
+}
+
+/// A canonical dimension as it is drawn: the lines, the filled arrowheads, the text background and the text of `layout`
+/// (laid out in the plane by the renderer, see `DimensionLayout`) placed in WCS on the plane of `normal`.
+pub fn dimension_primitives(dimension: &Dimension, normal: Vec3, layout: &DimensionLayout, parent: &Mat4) -> Result<Vec<WorldPrimitive>> {
+    affine(parent)?;
+    let f = frame(normal)?;
+    dimension.localized(normal)?;
+    let z = layout.elevation;
+    let at = |p: Vec2| f.to_world(p.to3(z));
+    let polygon = |points: &[Vec2]| -> Vec<WorldPrimitive> {
+        (0..points.len()).map(|i| WorldPrimitive::Line { a: at(points[i]), b: at(points[(i + 1) % points.len()]) }).collect()
+    };
+    let mut out: Vec<WorldPrimitive> =
+        layout.lines.iter().flat_map(|l| l.windows(2).map(|w| WorldPrimitive::Line { a: at(w[0]), b: at(w[1]) })).collect();
+    out.extend(layout.fills.iter().map(|tri| WorldPrimitive::Fill(WorldFill { loops: vec![polygon(tri)], kind: WorldFillKind::Solid, style: 0 })));
+    if layout.text_fill.len() > 2 {
+        out.push(WorldPrimitive::Fill(WorldFill { loops: vec![polygon(&layout.text_fill)], kind: WorldFillKind::Wipeout, style: 0 }));
+    }
+    if let Some(t) = &layout.text {
+        let origin = at(t.at);
+        let x_axis = f.to_world(Vec3::new(t.angle.cos(), t.angle.sin(), 0.0));
+        let unit_normal = f.to_world(Vec3::Z);
+        let content = MText {
+            insert: origin,
+            height: t.height,
+            width: 0.0,
+            attach: 5,
+            rotation: t.angle,
+            style: t.style.clone(),
+            contents: t.contents.clone(),
+            line_spacing: 1.0,
+            line_spacing_exact: false,
+            columns: None,
+            direction: Some(x_axis),
+        };
+        out.push(WorldPrimitive::Text(WorldText {
+            frame: TextFrame { origin, x_axis, y_axis: unit_normal.cross(x_axis), normal: unit_normal },
+            align: None,
+            content: WorldTextContent::MText(content),
+        }));
     }
     finish(out, parent)
 }

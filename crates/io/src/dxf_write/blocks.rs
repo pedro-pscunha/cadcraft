@@ -75,15 +75,32 @@ pub(super) fn reuse_handles(ents: &mut [Entity], old: &Block, taken: &mut std::c
 }
 
 /// Anonymous dimension blocks (`*D1`…) with the rendered geometry, as consumers expect.
-pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
+///
+/// A canonical dimension (`plane` is its normal) is drawn in its plane: its geometry is laid out in the OCS of the plane and
+/// the block holds WCS lines, and solids and text that carry the plane themselves.
+pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str, plane: Option<Vec3>) -> Vec<Entity> {
+    let frame = plane.and_then(cadcraft_geom::OcsFrame::new);
+    let local = plane.filter(|_| frame.is_some()).and_then(|n| dm.localized(n).ok());
+    let drawn = local.as_ref().unwrap_or(dm);
+    // The elevation of the plane the layout is in.
+    let z = if local.is_some() { drawn.defpt.z } else { 0.0 };
+    let (canonical, geometry_revision) = match (&local, plane) {
+        (Some(_), Some(normal)) => (Some(normal), cadcraft_doc::GeometryRevision::CanonicalV2),
+        _ => (None, Default::default()),
+    };
     // The dimension as drawn: its overrides, DIMSCALE (0 = the drawing's) and text font.
     let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
-    let g = cadcraft_render::dimension_in(d, dm);
+    let g = cadcraft_render::dimension_in(d, drawn);
+    let world = |p: Vec2| match frame.filter(|_| local.is_some()) {
+        Some(f) => f.to_world(p.to3(z)),
+        None => p.to3(0.0),
+    };
+    let ocs = |p: Vec2| p.to3(z);
     let mut out = Vec::new();
     // Each part in its style colour (DIMCLRD, DIMCLRE, DIMCLRT), ByBlock when the style says so,
     // as AutoCAD writes them: readers that draw the block drew every part ByBlock, i.e. in the
     // dimension's own colour (#1052).
-    let in_color = |color: Color| Common { layer: layer.into(), color, ..Common::default() };
+    let in_color = |color: Color| Common { layer: layer.into(), color, extrusion: canonical.unwrap_or(Vec3::Z), ..Common::default() };
     let (dim_c, ext_c, text_c) = (in_color(style.dim_line_color), in_color(style.ext_line_color), in_color(style.text_color));
     let line_entities = |i: usize, l: &[Vec2]| -> Vec<Entity> {
         let c = match g.line_roles.get(i) {
@@ -95,8 +112,8 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
                 [a, b] => Some(Entity {
                     geometry_revision: Default::default(),
                     handle: Handle(0),
-                    common: c.clone(),
-                    kind: EntityKind::Line(Line { a: a.to3(0.0), b: b.to3(0.0) }),
+                    common: Common { extrusion: Vec3::Z, ..c.clone() },
+                    kind: EntityKind::Line(Line { a: world(*a), b: world(*b) }),
                 }),
                 _ => None,
             })
@@ -109,10 +126,10 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
     for t in &g.fills {
         if let [a, b, cc] = t.as_slice() {
             out.push(Entity {
-                geometry_revision: Default::default(),
+                geometry_revision,
                 handle: Handle(0),
                 common: dim_c.clone(),
-                kind: EntityKind::Solid(Solid { corners: [a.to3(0.0), b.to3(0.0), cc.to3(0.0), cc.to3(0.0)] }),
+                kind: EntityKind::Solid(Solid { corners: [ocs(*a), ocs(*b), ocs(*cc), ocs(*cc)] }),
             });
         }
     }
@@ -122,22 +139,24 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
         && let [p0, p1, p2, p3] = g.text_fill.as_slice()
     {
         out.push(Entity {
-            geometry_revision: Default::default(),
+            geometry_revision,
             handle: Handle(0),
             common: in_color(style.text_fill_color),
-            kind: EntityKind::Solid(Solid { corners: [p0.to3(0.0), p1.to3(0.0), p3.to3(0.0), p2.to3(0.0)] }),
+            kind: EntityKind::Solid(Solid { corners: [ocs(*p0), ocs(*p1), ocs(*p3), ocs(*p2)] }),
         });
     }
     for (i, l) in g.lines.iter().enumerate().filter(|(i, _)| g.text_marks.contains(i)) {
         out.extend(line_entities(i, l));
     }
     if !g.value.is_empty() {
+        // A canonical text has its insertion and its full direction in WCS.
+        let direction = frame.filter(|_| local.is_some()).map(|f| f.to_world(Vec3::new(g.text_angle.cos(), g.text_angle.sin(), 0.0)));
         out.push(Entity {
-            geometry_revision: Default::default(),
+            geometry_revision,
             handle: Handle(0),
             common: text_c,
             kind: EntityKind::MText(MText {
-                insert: g.text_pos.to3(0.0),
+                insert: world(g.text_pos),
                 height: g.text_height,
                 width: 0.0,
                 attach: 5,
@@ -147,7 +166,7 @@ pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Ve
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
-                direction: None,
+                direction,
             }),
         });
     }

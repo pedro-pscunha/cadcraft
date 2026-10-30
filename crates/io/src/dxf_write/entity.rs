@@ -479,8 +479,11 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         w.s(2, bname);
         w.p(10, dm.defpt);
         let style = d.dim_style(&dm.style).cloned().unwrap_or_default();
-        let g = cadcraft_render::dimension_geometry(dm, &style, d.header.f64("DIMSCALE", 1.0));
-        w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(0.0) });
+        // A canonical dimension is measured and laid out in its plane; its text midpoint is an OCS point with its Z.
+        let plane = canonical_plane(e);
+        let Some(drawn) = plane.map_or(Some(dm.clone()), |n| dm.localized(n).ok()) else { return };
+        let g = cadcraft_render::dimension_geometry(&drawn, &style, d.header.f64("DIMSCALE", 1.0));
+        w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(if plane.is_some() { dm.text_mid.z } else { 0.0 }) });
         let ty: i64 = match dm.kind {
             DimKind::Linear { .. } => 0,
             DimKind::Aligned => 1,
@@ -502,6 +505,7 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         if dm.text_rotation != 0.0 {
             w.f(53, dm.text_rotation.to_degrees());
         }
+        canonical_normal(w, e);
         match dm.kind {
             DimKind::Linear { rotation } => {
                 w.s(100, "AcDbAlignedDimension");
@@ -516,7 +520,7 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
                 w.p(13, dm.p13);
                 w.p(14, dm.p14);
                 if matches!(dm.kind, DimKind::Aligned) {
-                    oblique_52(w, dm, (dm.p14.xy() - dm.p13.xy()).angle());
+                    oblique_52(w, dm, (drawn.p14.xy() - drawn.p13.xy()).angle());
                 }
             }
             DimKind::Radius => {
@@ -1088,7 +1092,7 @@ fn canonical_normal(w: &mut W, e: &Entity) {
 }
 
 /// The plane of a canonical text-family entity: its normal, kept as read. Legacy text has none.
-fn canonical_plane(e: &Entity) -> Option<Vec3> {
+pub(super) fn canonical_plane(e: &Entity) -> Option<Vec3> {
     (e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2).then_some(e.common.extrusion)
 }
 

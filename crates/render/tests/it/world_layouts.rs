@@ -211,3 +211,78 @@ fn a_plus_z_leader_gives_the_world_arrowhead_the_renderer_draws() {
     }
     assert!(!fills.is_empty() || !outline.is_empty(), "the style draws an arrowhead");
 }
+
+fn linear_dimension() -> cadcraft_doc::Dimension {
+    cadcraft_doc::Dimension {
+        kind: cadcraft_doc::DimKind::Linear { rotation: 0.0 },
+        defpt: Vec3::new(10.0, 3.0, 2.0),
+        text_mid: Vec3::new(5.0, 3.0, 2.0),
+        p13: Vec3::new(0.0, 0.0, 2.0),
+        p14: Vec3::new(10.0, 0.0, 2.0),
+        p15: Vec3::ZERO,
+        p16: Vec3::ZERO,
+        text: String::new(),
+        style: "Standard".into(),
+        measurement: 10.0,
+        text_rotation: 0.0,
+        user_text_pos: true,
+        block: None,
+        overrides: Default::default(),
+        assoc: Vec::new(),
+        marks: Default::default(),
+    }
+}
+
+#[test]
+fn a_plus_z_dimension_gives_the_world_lines_fills_and_text_the_renderer_draws() {
+    use cadcraft_doc::dimension_primitives;
+    use cadcraft_render::{dimension_in, dimension_layout};
+    let d = Drawing::new_metric();
+    let dm = linear_dimension();
+    let drawn = dimension_in(&d, &dm);
+    let layout = dimension_layout(&d, &dm, Vec3::Z).unwrap();
+    assert_eq!(layout.elevation, 2.0);
+    assert_eq!((layout.lines.clone(), layout.fills.clone()), (drawn.lines.clone(), drawn.fills.clone()));
+    let prims = dimension_primitives(&dm, Vec3::Z, &layout, &Mat4::IDENTITY).unwrap();
+    let lines: Vec<(Vec3, Vec3)> = prims.iter().filter_map(|p| if let WorldPrimitive::Line { a, b } = p { Some((*a, *b)) } else { None }).collect();
+    let expected: Vec<(Vec2, Vec2)> = drawn.lines.iter().flat_map(|l| l.windows(2).map(|w| (w[0], w[1]))).collect();
+    // The text background (DIMTFILL) outline comes after the lines as part of the wipeout fill; the lines are the first ones.
+    assert!(lines.len() >= expected.len());
+    for ((a, b), (e0, e1)) in lines.iter().zip(&expected) {
+        assert!(near3(*a, e0.to3(2.0)) && near3(*b, e1.to3(2.0)), "{a:?} {b:?} vs {e0:?} {e1:?}");
+    }
+    let text = prims.iter().find_map(|p| if let WorldPrimitive::Text(t) = p { Some(t) } else { None }).expect("the text");
+    assert!(near3(text.frame.origin, drawn.text_pos.to3(2.0)) && !drawn.value.is_empty());
+    let fills = prims.iter().filter(|p| matches!(p, WorldPrimitive::Fill(f) if f.kind == cadcraft_doc::WorldFillKind::Solid)).count();
+    assert_eq!(fills, drawn.fills.len());
+}
+
+#[test]
+fn a_tilted_dimension_is_the_planar_one_moved_rigidly() {
+    use cadcraft_doc::dimension_primitives;
+    use cadcraft_render::dimension_layout;
+    let d = Drawing::new_metric();
+    let dm = linear_dimension();
+    // A turn of 0.9 about X with a translation: scale 1, so the arrowheads and text keep their size.
+    let (s, c) = 0.9f64.sin_cos();
+    let motion = Mat4 { m: [[1.0, 0.0, 0.0, 4.0], [0.0, c, -s, -2.0], [0.0, s, c, 1.0], [0.0, 0.0, 0.0, 1.0]] };
+    let (moved, normal) = dm.transformed_canonical(Vec3::Z, &motion).unwrap();
+    let planar = dimension_primitives(&dm, Vec3::Z, &dimension_layout(&d, &dm, Vec3::Z).unwrap(), &Mat4::IDENTITY).unwrap();
+    let tilted = dimension_primitives(&moved, normal, &dimension_layout(&d, &moved, normal).unwrap(), &Mat4::IDENTITY).unwrap();
+    assert_eq!(planar.len(), tilted.len());
+    for (p, q) in planar.iter().zip(&tilted) {
+        match (p, q) {
+            (WorldPrimitive::Line { a, b }, WorldPrimitive::Line { a: qa, b: qb }) => {
+                assert!(near3(motion.apply(*a), *qa) && near3(motion.apply(*b), *qb), "{a:?} {b:?} vs {qa:?} {qb:?}");
+            }
+            (WorldPrimitive::Text(t), WorldPrimitive::Text(u)) => {
+                assert!(near3(motion.apply(t.frame.origin), u.frame.origin));
+                assert!(near3(motion.apply_vec(t.frame.x_axis), u.frame.x_axis), "the text direction turns with the plane");
+            }
+            (WorldPrimitive::Fill(f), WorldPrimitive::Fill(g)) => assert_eq!(f.loops.len(), g.loops.len()),
+            other => panic!("different primitives: {other:?}"),
+        }
+    }
+    // The measurement is the same: the plane carries the dimension, not the XY view.
+    assert!((moved.measurement - dm.measurement).abs() < 1e-12);
+}
