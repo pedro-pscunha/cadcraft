@@ -11,6 +11,7 @@ mod mline;
 pub use mline::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "legacy_recovery::SerializedEntity")]
 pub struct Entity {
     #[serde(default, rename = "geometryRevision")]
     pub geometry_revision: GeometryRevision,
@@ -68,7 +69,7 @@ mod world;
 mod world_families;
 pub use legacy_recovery::{Promotion, promote_legacy_spline_leader};
 pub use spline_canonical::spline_transformed_canonical;
-pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
+pub use world::{WorldFill, WorldFillKind, WorldGeometry, WorldGradient, WorldLayout, WorldPattern, WorldPrimitive, WorldText, WorldTextContent};
 pub use world_families::{
     DimensionLayout, DimensionLayoutText, LeaderArrowLayout, TableLayout, TableLayoutText, arc_primitives, attrib_primitives, circle_primitives,
     dimension_primitives, hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives,
