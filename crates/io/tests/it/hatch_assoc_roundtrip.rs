@@ -176,3 +176,70 @@ fn a_hatch_in_a_block_keeps_its_boundary_and_the_boundary_its_reactor() {
         assert_eq!(sources, vec![vec![outline]], "{what}");
     }
 }
+
+#[test]
+fn a_polyline_that_is_a_hatch_boundary_and_a_dimension_link_lists_both_reactors() {
+    let mut d = Drawing::new_imperial();
+    let outer = poly(&mut d, square(0.0, 20.0));
+    let loops = vec![HatchLoop { vertices: square(0.0, 20.0), outer: true, sources: vec![outer], ..Default::default() }];
+    let hatch = d.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops, true))).expect("add");
+    let links = vec![
+        DimAssoc { point: "p13".into(), handle: outer, snap: AssocSnap::Start },
+        DimAssoc { point: "p14".into(), handle: outer, snap: AssocSnap::Vertex { index: 2 } },
+    ];
+    let dimension = Dimension {
+        kind: DimKind::Linear { rotation: 0.0 },
+        defpt: geom_vec(20.0, 0.0),
+        text_mid: geom_vec(0.0, 0.0),
+        p13: geom_vec(0.0, 0.0),
+        p14: geom_vec(20.0, 20.0),
+        p15: geom_vec(0.0, 0.0),
+        p16: geom_vec(0.0, 0.0),
+        text: String::new(),
+        style: "Standard".into(),
+        measurement: 0.0,
+        text_rotation: 0.0,
+        user_text_pos: false,
+        block: None,
+        overrides: Default::default(),
+        assoc: links,
+        marks: Default::default(),
+        leader_length: 0.0,
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(dimension)).expect("add");
+    let text = write_dxf(&d);
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 5 && t.str() == outer.hex()).unwrap();
+    let body: Vec<_> = tags[start..].iter().take_while(|t| t.code != 0).collect();
+    let open = body.iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS").unwrap();
+    let reactors: Vec<String> = body[open + 1..].iter().take_while(|t| t.code == 330).map(|t| t.str()).collect();
+    assert!(reactors.contains(&hatch.hex()), "the hatch: {reactors:?}");
+    assert_eq!(reactors.len(), 2, "the hatch and the DIMASSOC: {reactors:?}");
+}
+
+fn geom_vec(x: f64, y: f64) -> cadcraft_geom::Vec3 {
+    cadcraft_geom::Vec3::new(x, y, 0.0)
+}
+
+#[test]
+fn a_hatch_boundary_keeps_the_reactors_the_file_had() {
+    let mut groups: Vec<(i32, &str)> = vec![(0, "SECTION"), (2, "ENTITIES"), (0, "LWPOLYLINE"), (5, "30")];
+    groups.extend([(102, "{ACAD_REACTORS"), (330, "50"), (102, "}"), (100, "AcDbEntity"), (8, "0"), (100, "AcDbPolyline"), (90, "4"), (70, "1")]);
+    groups.extend([(10, "0"), (20, "0"), (10, "20"), (20, "0"), (10, "20"), (20, "20"), (10, "0"), (20, "20")]);
+    groups.extend([(0, "ENDSEC"), (0, "SECTION"), (2, "OBJECTS"), (0, "DICTIONARY"), (5, "C"), (330, "0"), (100, "AcDbDictionary")]);
+    groups.extend([(3, "KEEPME"), (350, "50"), (0, "XRECORD"), (5, "50"), (330, "C"), (100, "AcDbXrecord"), (280, "1"), (1, "x")]);
+    groups.extend([(0, "ENDSEC"), (0, "EOF")]);
+    let text: String = groups.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect();
+    let mut d = read_dxf(text.as_bytes()).unwrap();
+    let outer = d.model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_))).map(|e| e.handle).unwrap();
+    let loops = vec![HatchLoop { vertices: square(0.0, 20.0), outer: true, sources: vec![outer], ..Default::default() }];
+    let hatch = d.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops, true))).expect("add");
+    let saved = write_dxf(&d);
+    let tags = cadcraft_dxf::parse(saved.as_bytes()).unwrap();
+    let start = tags.iter().position(|t| t.code == 5 && t.str() == outer.hex()).unwrap();
+    let body: Vec<_> = tags[start..].iter().take_while(|t| t.code != 0).collect();
+    let open = body.iter().position(|t| t.code == 102 && t.str() == "{ACAD_REACTORS").unwrap();
+    let reactors: Vec<String> = body[open + 1..].iter().take_while(|t| t.code == 330).map(|t| t.str()).collect();
+    assert!(reactors.contains(&hatch.hex()), "the hatch: {reactors:?}");
+    assert_eq!(reactors.len(), 2, "the hatch and the file's own: {reactors:?}");
+}

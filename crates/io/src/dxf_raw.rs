@@ -1991,6 +1991,7 @@ fn record(
     let has_book = b.iter().take(xdata_at).any(|t| t.code == 430);
     let handle_at = b.iter().position(|t| matches!(t.code, 5 | 105));
     let mut seen_owner = false;
+    let mut listed: Option<HashSet<String>> = None;
     for (i, t) in b.iter().enumerate() {
         if i == props_at
             && let Some(x) = x
@@ -2023,6 +2024,22 @@ fn record(
             continue;
         }
         let mut t = source_record_group(t, x, &r.kind, attributes);
+        // The reactors the writer listed (an associative hatch's boundary has its hatch) keep the ones the file had besides.
+        if t.code == 102 && i < xdata_at {
+            if t.str().trim() == "{ACAD_REACTORS" {
+                listed = Some(HashSet::new());
+            } else if let Some(seen) = listed.take()
+                && let Some(x) = x
+            {
+                for reactor in x.reactors.iter().filter_map(|r| map.get(&r.hex())).filter(|r| r != "0" && !seen.contains(r)) {
+                    out.push(Tag::s(330, reactor));
+                }
+            }
+        } else if let Some(seen) = listed.as_mut()
+            && is_pointer(t.code)
+        {
+            seen.insert(norm(&t.str()));
+        }
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
