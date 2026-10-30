@@ -32,7 +32,15 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
             let block = leader.block.as_ref().and_then(|insert| drawing.block(&insert.block));
             let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
             let arrow = crate::mleader_arrow_layout(drawing, leader);
-            let world = cadcraft_doc::mleader_primitives(leader, base, &arrow, parent)?;
+            let mode = drawing.header.i64("ATTMODE", 1);
+            let shown = |attribute: &cadcraft_doc::Attrib| mode != 0 && (!attribute.invisible || mode == 2);
+            let mut visible = std::borrow::Cow::Borrowed(leader);
+            if leader.block.as_ref().is_some_and(|block| block.attribs.iter().any(|attribute| !shown(attribute)))
+                && let Some(content) = &mut visible.to_mut().block
+            {
+                content.attribs.retain(shown);
+            }
+            let world = cadcraft_doc::mleader_primitives(&visible, base, &arrow, parent)?;
             let mut primitives = world.primitives;
             if let (Some(block), Some(matrix)) = (block, world.block) {
                 spend(remaining, 1, entity.handle)?;
