@@ -564,6 +564,10 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     if symbol_flag_mask(kind) != 0 {
         x.subclass.extend(tags.iter().find(|t| t.code == 70).map(raw));
     }
+    // A TrueType style AutoCAD makes has an empty font file (3) and the typeface in its ACAD xdata.
+    if kind == "STYLE" && typeface(&x.xdata).is_some() {
+        x.subclass.extend(tags.iter().find(|t| t.code == 3 && t.str().trim().is_empty()).map(raw));
+    }
     // The text of group 1 of a BLOCK that is not an external reference ("Acad:XRef" on the blocks AutoCAD makes of one).
     if kind == "BLOCK" && !tags.iter().any(|t| t.code == 70 && t.i64() & 4 != 0) {
         x.subclass.extend(tags.iter().find(|t| t.code == 1 && !t.str().trim().is_empty()).map(raw));
@@ -574,10 +578,20 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
+/// The typeface a style's `ACAD` xdata names (its first string), as a text style of a TrueType font has it.
+fn typeface(xdata: &[RawTag]) -> Option<&str> {
+    let at = xdata.iter().position(|t| t.code == 1001 && t.value.trim().eq_ignore_ascii_case("ACAD"))?;
+    xdata.get(at + 1).filter(|t| t.code == 1000).map(|t| t.value.trim()).filter(|v| !v.is_empty())
+}
+
 /// Whether the group `t` the writer wrote for a record of `kind` is replaced by one the file had: the fields of a table record (not
 /// its marker, handle and owner), and the empty text (group 1) of a BLOCK that the file gave a text of its own.
 fn replaced_by_kept(kind: &str, entity: bool, t: &Tag, x: Option<&ForeignExtra>, replay: &dyn Fn(&RawTag) -> bool) -> bool {
     let Some(x) = x else { return false };
+    // The empty font file of such a style stays empty while the style's font is still the typeface of the xdata.
+    if kind == "STYLE" && t.code == 3 {
+        return x.subclass.iter().any(|p| p.code == 3) && typeface(&x.xdata).is_some_and(|face| face == t.str().trim());
+    }
     if kind == "BLOCK" {
         return t.code == 1 && x.subclass.iter().any(|p| p.code == 1);
     }

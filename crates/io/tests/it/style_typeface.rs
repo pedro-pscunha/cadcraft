@@ -1,27 +1,51 @@
-//! A TrueType text style without a font file takes its family from the style's `ACAD` xdata.
+//! A TrueType text style as AutoCAD writes it has an empty font file (group 3) and its typeface in the ACAD xdata; the save keeps the
+//! group empty while the font is still that typeface, and names the new font when it changes.
 
-fn style(name: &str, file: &str, xdata: &[(&str, &str)]) -> String {
-    let mut s = format!("  0\nSTYLE\n  2\n{name}\n 70\n0\n 40\n0.0\n 41\n1.0\n 50\n0.0\n 71\n0\n 42\n0.2\n  3\n{file}\n  4\n\n");
-    if !xdata.is_empty() {
-        s.push_str("1001\nACAD\n");
-        for (c, v) in xdata {
-            s.push_str(&format!("{c}\n{v}\n"));
-        }
-    }
-    s
+use super::foreign_passthrough::{dxf, section, val};
+
+fn source() -> String {
+    dxf(&[
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "STYLE"),
+        (5, "3"),
+        (70, "1"),
+        (0, "STYLE"),
+        (5, "639E8"),
+        (330, "3"),
+        (100, "AcDbSymbolTableRecord"),
+        (100, "AcDbTextStyleTableRecord"),
+        (2, "R80-50"),
+        (70, "0"),
+        (40, "0.1015"),
+        (41, "1.0"),
+        (50, "0.0"),
+        (71, "0"),
+        (42, "0.1015"),
+        (3, ""),
+        (4, ""),
+        (1001, "ACAD"),
+        (1000, "Hind Regular"),
+        (1071, "2"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ])
+}
+
+fn font_file(text: &str) -> String {
+    let (_, tags) = section(text, "TABLES").into_iter().find(|(k, t)| k == "STYLE" && val(t, 2) == "R80-50").unwrap();
+    val(&tags, 3)
 }
 
 #[test]
-fn style_without_a_font_file_uses_the_xdata_typeface() {
-    let dxf = format!(
-        "  0\nSECTION\n  2\nTABLES\n  0\nTABLE\n  2\nSTYLE\n 70\n3\n{}{}{}  0\nENDTAB\n  0\nENDSEC\n  0\nEOF\n",
-        style("TT", "", &[("1000", "GOST type A"), ("1071", "2")]),
-        style("File", "arial.ttf", &[("1000", "Other"), ("1071", "2")]),
-        style("Empty", "", &[]),
-    );
-    let d = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
-    let font = |n: &str| d.text_styles.iter().find(|s| s.name == n).map(|s| s.font.clone());
-    assert_eq!(font("TT").as_deref(), Some("GOST type A"));
-    assert_eq!(font("File").as_deref(), Some("arial.ttf"), "a font file wins over the typeface");
-    assert_eq!(font("Empty").as_deref(), Some(""));
+fn the_font_file_stays_empty_while_the_font_is_the_typeface() {
+    let mut d = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
+    assert_eq!(d.text_style("R80-50").map(|s| s.font.clone()).as_deref(), Some("Hind Regular"));
+    assert_eq!(font_file(&cadcraft_io::write_dxf(&d)), "");
+    if let Some(s) = d.text_styles.iter_mut().find(|s| s.name == "R80-50") {
+        s.font = "arial.ttf".into();
+    }
+    assert_eq!(font_file(&cadcraft_io::write_dxf(&d)), "arial.ttf");
 }
