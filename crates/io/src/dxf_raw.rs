@@ -956,7 +956,19 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // that name kept objects or other entities of the file (a hatch that lists its boundary).
     let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
+    let mut insert_of: Option<Handle> = None;
     for (kind, _, t) in blocks.iter().chain(&entities) {
+        // The SEQEND after the ATTRIBs of an INSERT is the INSERT's.
+        match kind.as_str() {
+            "INSERT" => insert_of = head(t).handle.and_then(|h| handle(&h)),
+            "ATTRIB" => {}
+            "SEQEND" => {
+                if let Some(parent) = insert_of.take() {
+                    f.entities.entry(parent).or_default().insert_seqend = Some(crate::dxf_read::seqend_record(t));
+                }
+            }
+            _ => insert_of = None,
+        }
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
             continue;
         }

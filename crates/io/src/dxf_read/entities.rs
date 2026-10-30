@@ -796,6 +796,12 @@ fn forget_dwg_type_72(a: &mut Attrib) {
     }
 }
 
+/// The handle and common properties of the SEQEND record `tags` (the one that closes the ATTRIBs of an INSERT).
+pub(crate) fn seqend_record(tags: &[Tag]) -> cadcraft_doc::PolylineRecord {
+    let tt = T(tags);
+    cadcraft_doc::PolylineRecord { handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0), common: common(&tt) }
+}
+
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
 pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, rx: &Rx) -> Vec<Attrib> {
     let mut attribs = Vec::new();
