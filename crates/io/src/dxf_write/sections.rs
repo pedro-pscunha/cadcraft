@@ -169,7 +169,15 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let apps = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    let mut apps = vec!["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    if cx.target < Version::R2007
+        && std::iter::once(&d.model)
+            .chain(d.layouts.iter().map(|l| &l.entities))
+            .chain(d.blocks.values().map(|b| &b.entities))
+            .any(|s| s.iter().any(|e| matches!(e.kind, EntityKind::MLeader(_))))
+    {
+        apps.push("ACAD_MLEADERVER");
+    }
     let th = table_head(w, "APPID", apps.len());
     for app in apps {
         record_head(w, "APPID", &th, "AcDbRegAppTableRecord");
@@ -334,7 +342,7 @@ fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
     if !cx.assoc.is_empty() {
         classes.push(("DIMASSOC", "AcDbDimAssoc", 0, false));
     }
-    if cx.native_mleader() && every.iter().any(|e| matches!(e.kind, EntityKind::MLeader(_))) {
+    if every.iter().any(|e| matches!(e.kind, EntityKind::MLeader(_))) {
         classes.push(("MULTILEADER", "AcDbMLeader", 1025, true));
     }
     if every.iter().any(|e| matches!(e.kind, EntityKind::Wipeout(_))) {
@@ -1166,6 +1174,16 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         *t = Tag::s(5, seed);
     }
     crate::dxf_raw::finish(&mut w.t, d, dwg_bridge);
+    // Source replay can restore newer attachment fields. Gate the final records, including bridge DXF.
+    if target < Version::R2010 {
+        let mut mleader = false;
+        w.t.retain(|tag| {
+            if tag.code == 0 {
+                mleader = matches!(tag.str().as_str(), "MULTILEADER" | "MLEADER");
+            }
+            !mleader || !matches!(tag.code, 271..=273)
+        });
+    }
     if !dwg_bridge {
         let release = |v: Version| v.code().trim_start_matches("AC").parse().unwrap_or(0);
         let source = Version::for_acadver(&d.header.str("ACADVER", "")).unwrap_or(version);

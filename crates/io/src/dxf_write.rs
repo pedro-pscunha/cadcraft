@@ -1,15 +1,14 @@
-//! Drawing → DXF (AC1015 / R2000 structure, readable by every DXF consumer since 2000). Later
-//! versions keep that structure (the groups they add are optional, DXF Reference) and differ in
-//! `$ACADVER`, from 2004 in the newer DIMSTYLE groups, and from 2007 in UTF-8 text (the caller
-//! picks the text encoding) and MULTILEADER entities (older files get LEADER + MTEXT).
+//! Drawing → DXF, from AC1015 / R2000 onward. The target selects the available groups and text encoding.
+//! MULTILEADER stays native at every target. Pre-R2007 records carry ACAD_MLEADERVER xdata and replay an
+//! eligible source graphics cache. A save note identifies each old-target multileader without a cache.
 
 use std::collections::{HashMap, HashSet};
 
 use cadcraft_color::Color;
 use cadcraft_doc::{
     AssocSnap, Attrib, Block, Common, DimAssoc, DimKind, DimStyle, Dimension, Drawing, Entity, EntityKind, EntityStore, Gradient, Group, HAlign,
-    HVal, Handle, Hatch, Insert, Layout, Leader, Line, Lineweight, LwPolyline, MLeader, MLeaderStyle, MText, PageSetup, Point, Solid, Table,
-    TableStyle, Text, Transparency, VAlign, VportConfig, VportTile,
+    HVal, Handle, Hatch, Insert, Layout, Line, Lineweight, LwPolyline, MLeaderStyle, MText, PageSetup, Point, Solid, Table, TableStyle, Text,
+    Transparency, VAlign, VportConfig, VportTile,
 };
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_geom::{Bounds2, Vec2, Vec3};
@@ -224,8 +223,7 @@ fn save_extents(d: &Drawing) -> SaveExtents {
     result
 }
 
-/// Save notes for repaired handles, refused extents, and block attributes lost when canonical multileaders split
-/// before R2007: a non-uniform block scale places no attribute text exactly.
+/// Save notes for repaired handles, refused extents, and pre-R2007 multileaders without a valid source graphics cache.
 pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
         .committed()
@@ -251,33 +249,18 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
         let action = if extents.min.is_some() { "growth incomplete" } else { "omitted" };
         notes.push(format!("EXTMIN/EXTMAX {action}: the legacy extent query refused object {} ({error}).", handle.hex()));
     }
-    if target >= Version::R2007 {
-        return notes;
-    }
-    let style = d.header.str("DIMSTYLE", "Standard");
     let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
-    let attributes = spaces
-        .flat_map(|s| s.iter())
-        .filter(|e| e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2)
-        .filter_map(|e| {
-            let EntityKind::MLeader(m) = &e.kind else { return None };
-            let base = m.block.as_ref().and_then(|b| d.block(&b.block)).map_or(cadcraft_geom::Vec3::ZERO, |b| b.base);
-            let parts = m.split_canonical(&style, base).ok()?;
-            let kept = parts.block.as_ref().map_or(0, |(i, _)| i.attribs.len());
-            let left_out = m.block.as_ref().map_or(0, |b| b.attribs.len()).saturating_sub(kept);
-            (left_out > 0).then(|| {
-                format!(
-                    "MULTILEADER {}: {left_out} block attribute(s) left out of the file: its block scale is not uniform, so no attribute text is exact before AutoCAD 2007.",
-                    e.handle.hex()
-                )
-            })
-        });
-    notes.extend(attributes);
+    for entity in spaces.flat_map(|space| space.iter()).filter(|e| matches!(e.kind, EntityKind::MLeader(_))) {
+        let source_cache = d.foreign.entities.get(&entity.handle).is_some_and(|extra| extra.proxy_graphics.is_some());
+        if (target < Version::R2007 || source_cache) && crate::dxf_mleader_proxy::eligible(d, entity).is_none() {
+            notes.push(format!("MULTILEADER {}: no proxy graphics cache was written. The native MULTILEADER is preserved. An application that needs proxy graphics requires a regenerated cache to display it.", entity.handle.hex()));
+        }
+    }
     notes
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
-/// version's (MULTILEADER from 2007). Its text is in the Windows single-byte page it declares,
+/// version's. Its text is in the Windows single-byte page it declares,
 /// so the bridge stores representable characters rather than their literal Unicode escapes.
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> Vec<u8> {
     let mut tags = tags_for(d, Version::R2000, dwg, true);
