@@ -58,6 +58,7 @@ fn dynamic_manual_heights_and_rotation_round_trip() {
         heights: vec![5.0, 3.0, 4.0],
         flow_reversed: true,
         extents: None,
+        negated_heights: Vec::new(),
     };
     let (t, _) = round_trip(mtext("a b c", 0.5, Some(c.clone())));
     assert_eq!(t.columns, Some(c));
