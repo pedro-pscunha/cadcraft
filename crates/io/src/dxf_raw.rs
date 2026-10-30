@@ -1755,17 +1755,16 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
     };
     let br = |name: &str| roles.get(&("BLOCK_RECORD".to_string(), up(name))).cloned();
     let first_at = |s: &cadcraft_doc::EntityStore| s.iter().find_map(|e| at.get(&e.handle.hex()).copied());
-    let layouts = d.paper_space_layouts();
+    let layouts = d.paper_space_blocks();
     // (entities, owner, paper space, end of the space, section)
     let mut stores: Vec<(&cadcraft_doc::EntityStore, Option<String>, bool, Option<usize>, &str)> = Vec::new();
-    let model_end = layouts.first().and_then(|l| first_at(&l.entities)).or(ents_end);
+    let model_end = layouts.first().and_then(|(_, l)| first_at(&l.entities)).or(ents_end);
     stores.push((&d.model, br("*Model_Space"), false, model_end, "ENTITIES"));
-    for (i, l) in layouts.iter().enumerate() {
+    for (i, (name, l)) in layouts.iter().enumerate() {
         if i == 0 {
-            stores.push((&l.entities, br("*Paper_Space"), true, ents_end, "ENTITIES"));
+            stores.push((&l.entities, br(name), true, ents_end, "ENTITIES"));
         } else {
-            let name = format!("*Paper_Space{}", i - 1);
-            stores.push((&l.entities, br(&name), true, endblk(&name), "BLOCKS"));
+            stores.push((&l.entities, br(name), true, endblk(name), "BLOCKS"));
         }
     }
     for b in d.blocks.values() {

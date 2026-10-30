@@ -21,6 +21,7 @@ pub mod library;
 mod plotstyle;
 mod plotter;
 mod refedit;
+mod source_symbols;
 mod store;
 mod tables;
 
@@ -40,6 +41,7 @@ pub use header::{HVal, Header};
 pub use plotstyle::*;
 pub use plotter::*;
 pub use refedit::{RefEdit, WorkItem};
+pub use source_symbols::SourceSymbols;
 pub use store::EntityStore;
 pub use tables::*;
 
@@ -150,6 +152,9 @@ pub struct Drawing {
     /// Records of the file this drawing was read from that the reader could not place (a damaged
     /// file), counted by the section they came from. Never written to a file.
     pub skipped_records: BTreeMap<String, usize>,
+    /// The order of the blocks and the names of the layout blocks of the file this drawing was read
+    /// from, written back on save.
+    pub source_symbols: std::sync::Arc<SourceSymbols>,
 }
 
 impl Default for Drawing {
@@ -212,6 +217,7 @@ impl Drawing {
             read_notes: Vec::new(),
             refedit: None,
             skipped_records: BTreeMap::new(),
+            source_symbols: std::sync::Arc::default(),
         }
     }
 
@@ -324,7 +330,7 @@ impl Drawing {
     }
 
     /// The layouts in the order their paper space blocks are named in a file: the active one
-    /// (`*Paper_Space`) first, then the others by tab order (`*Paper_Space0`, `*Paper_Space1`, …).
+    /// (`*Paper_Space`) first, then the others by tab order.
     pub fn paper_space_layouts(&self) -> Vec<&Layout> {
         let mut ls: Vec<&Layout> = self.layouts.iter().collect();
         ls.sort_by_key(|l| l.tab_order);
@@ -333,6 +339,44 @@ impl Drawing {
             ls.insert(0, active);
         }
         ls
+    }
+
+    /// The paper space block of each layout, in the order of [`Drawing::paper_space_layouts`]: the
+    /// first is `*Paper_Space`, the others keep the block the file gave them, or take the first
+    /// `*Paper_SpaceN` (from 0) no other layout has.
+    pub fn paper_space_blocks(&self) -> Vec<(String, &Layout)> {
+        let layouts = self.paper_space_layouts();
+        let mut taken: Vec<String> = vec!["*PAPER_SPACE".into()];
+        let mut names: Vec<Option<String>> = vec![Some("*Paper_Space".into())];
+        for l in layouts.iter().skip(1) {
+            let kept = self
+                .source_symbols
+                .layout_blocks
+                .get(&l.name.to_ascii_uppercase())
+                .filter(|b| b.to_ascii_uppercase().starts_with("*PAPER_SPACE") && !taken.contains(&b.to_ascii_uppercase()));
+            if let Some(b) = kept {
+                taken.push(b.to_ascii_uppercase());
+            }
+            names.push(kept.cloned());
+        }
+        let mut next = 0usize;
+        layouts
+            .into_iter()
+            .zip(names)
+            .map(|(l, name)| {
+                let name = name.unwrap_or_else(|| {
+                    loop {
+                        let candidate = format!("*Paper_Space{next}");
+                        next += 1;
+                        if !taken.contains(&candidate.to_ascii_uppercase()) {
+                            taken.push(candidate.to_ascii_uppercase());
+                            break candidate;
+                        }
+                    }
+                });
+                (name, l)
+            })
+            .collect()
     }
 
     pub fn space(&self, space: &Space) -> Option<&EntityStore> {

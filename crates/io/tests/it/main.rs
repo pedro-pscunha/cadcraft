@@ -11,6 +11,7 @@ mod attrib_handles;
 mod attrib_modes;
 mod attrib_props;
 mod block_expansion;
+mod block_order;
 mod block_references;
 mod bridge_header_groups;
 mod bridge_object_groups;

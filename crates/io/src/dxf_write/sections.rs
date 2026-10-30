@@ -913,13 +913,44 @@ fn block_references(every: &[&Entity]) -> HashMap<String, Vec<Handle>> {
     refs
 }
 
+/// A block record the writer emits, by its index in the list it comes from.
+#[derive(Clone, Copy)]
+enum BlockSlot {
+    Layout(usize),
+    User(usize),
+    Dim(usize),
+    Arrow(usize),
+    Table(usize),
+}
+
+/// The block records in the order of the file the drawing came from, since an anonymous block's
+/// number is its place among them. `*Paper_Space` stays first; blocks the file did not have follow
+/// in the order the lists give.
+fn block_slots(
+    d: &Drawing,
+    layouts: &[(String, String, &Layout)],
+    users: &[(String, String, &Block)],
+    dims: &[(String, String, Vec<Entity>)],
+    arrows: &[(String, String, Vec<Entity>)],
+    tables: &[(String, String, Vec<Entity>)],
+) -> Vec<BlockSlot> {
+    let named = |slot: BlockSlot, name: &str| (slot, d.source_symbols.block_rank(name));
+    let mut rest: Vec<(BlockSlot, Option<usize>)> = Vec::new();
+    rest.extend(layouts.iter().enumerate().skip(1).map(|(i, (n, ..))| named(BlockSlot::Layout(i), n)));
+    rest.extend(users.iter().enumerate().map(|(i, (n, ..))| named(BlockSlot::User(i), n)));
+    rest.extend(dims.iter().enumerate().map(|(i, (n, ..))| named(BlockSlot::Dim(i), n)));
+    rest.extend(arrows.iter().enumerate().map(|(i, (n, ..))| named(BlockSlot::Arrow(i), n)));
+    rest.extend(tables.iter().enumerate().map(|(i, (n, ..))| named(BlockSlot::Table(i), n)));
+    rest.sort_by_key(|(_, rank)| rank.unwrap_or(usize::MAX));
+    layouts.iter().take(1).map(|_| BlockSlot::Layout(0)).chain(rest.into_iter().map(|(slot, _)| slot)).collect()
+}
+
 pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> Vec<Tag> {
     let committed = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
     let mut w = W { reactors: hatch_reactors(d), dwg_bridge, ..W::new(d) };
     // Pre-allocate handles for block records.
-    let paper_layouts = d.paper_space_layouts();
     let ms_br = w.h();
     // Xrefs are saved as references: without their objects and the symbols that came with them.
     let saved_view = crate::dxf_xref::saved_view(d);
@@ -929,11 +960,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         .point("EXTMIN")
         .zip(d.header.point("EXTMAX"))
         .map_or(cadcraft_geom::Bounds2::EMPTY, |(min, max)| cadcraft_geom::Bounds2::new(min.xy(), max.xy()));
-    let ps_brs: Vec<(String, String, &Layout)> = paper_layouts
-        .iter()
-        .enumerate()
-        .map(|(i, l)| (if i == 0 { "*Paper_Space".to_string() } else { format!("*Paper_Space{}", i - 1) }, String::new(), *l))
-        .collect();
+    let ps_brs: Vec<(String, String, &Layout)> = d.paper_space_blocks().into_iter().map(|(n, l)| (n, String::new(), l)).collect();
     let ps_brs: Vec<(String, String, &Layout)> = ps_brs.into_iter().map(|(n, _, l)| (n, w.h(), l)).collect();
     let dim_plan = dim_block_plan(d);
     let mut user_blocks: Vec<(String, String, &Block)> = d
@@ -1069,16 +1096,19 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         }
     };
     br_rec(&mut w, &ms_br, "*Model_Space", Some(&model_layout), None);
-    for (i, (n, h, _)) in ps_brs.iter().enumerate() {
-        br_rec(&mut w, h, n, layout_handles.get(i).map(String::as_str), None);
-    }
-    for (n, h, b) in &user_blocks {
-        br_rec(&mut w, h, n, None, Some(b));
-    }
-    // A dimension that still uses the block it was read with writes that block's record settings as read.
-    let dim_records = dim_defs.iter().map(|(n, h, _)| (n, h, dim_sources.get(n).map(AsRef::as_ref)));
-    for (n, h, blk) in dim_records.chain(arrow_defs.iter().chain(table_defs.iter()).map(|(n, h, _)| (n, h, None))) {
-        br_rec(&mut w, h, n, None, blk);
+    let slots = block_slots(d, &ps_brs, &user_blocks, &dim_defs, &arrow_defs, &table_defs);
+    for slot in &slots {
+        match *slot {
+            BlockSlot::Layout(i) => br_rec(&mut w, &ps_brs[i].1, &ps_brs[i].0, layout_handles.get(i).map(String::as_str), None),
+            BlockSlot::User(i) => br_rec(&mut w, &user_blocks[i].1, &user_blocks[i].0, None, Some(user_blocks[i].2)),
+            // A dimension that still uses the block it was read with writes that block's record settings as read.
+            BlockSlot::Dim(i) => {
+                let (n, h, _) = &dim_defs[i];
+                br_rec(&mut w, h, n, None, dim_sources.get(n).map(AsRef::as_ref));
+            }
+            BlockSlot::Arrow(i) => br_rec(&mut w, &arrow_defs[i].1, &arrow_defs[i].0, None, None),
+            BlockSlot::Table(i) => br_rec(&mut w, &table_defs[i].1, &table_defs[i].0, None, None),
+        }
     }
     w.s(0, "ENDTAB");
     w.s(0, "ENDSEC");
@@ -1120,16 +1150,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         w.s(100, "AcDbBlockEnd");
     };
     block(&mut w, ("*Model_Space", ""), &ms_br, Vec3::ZERO, 0, &mut std::iter::empty(), false);
-    for (i, (n, h, l)) in ps_brs.iter().enumerate() {
-        if i == 0 {
-            block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut std::iter::empty(), true);
-        } else {
-            block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut sheet_first(l).into_iter(), true);
-        }
-    }
-    for (n, h, b) in &user_blocks {
-        block(&mut w, (n, &b.description), h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
-    }
     // Generated geometry entities (dimension, arrowhead and table blocks) need handles.
     for (_, _, ents) in dim_defs.iter_mut().chain(arrow_defs.iter_mut()).chain(table_defs.iter_mut()) {
         for e in ents.iter_mut().filter(|e| e.handle.0 == 0) {
@@ -1137,16 +1157,32 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             w.next = w.next.saturating_add(1);
         }
     }
-    for (n, h, ents) in &dim_defs {
-        // A dimension can use a named block (`DIMBLOCK1-…`): only a `*` name is anonymous.
-        let (desc, base) = dim_sources.get(n).map_or(("", Vec3::ZERO), |b| (b.description.as_str(), b.base));
-        block(&mut w, (n, desc), h, base, i64::from(n.starts_with('*')), &mut ents.iter(), false);
-    }
-    for (n, h, ents) in &arrow_defs {
-        block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut ents.iter(), false);
-    }
-    for (n, h, ents) in &table_defs {
-        block(&mut w, (n, ""), h, Vec3::ZERO, 1, &mut ents.iter(), false);
+    for slot in &slots {
+        match *slot {
+            BlockSlot::Layout(0) => block(&mut w, (&ps_brs[0].0, ""), &ps_brs[0].1, Vec3::ZERO, 0, &mut std::iter::empty(), true),
+            BlockSlot::Layout(i) => {
+                let (n, h, l) = &ps_brs[i];
+                block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut sheet_first(l).into_iter(), true);
+            }
+            BlockSlot::User(i) => {
+                let (n, h, b) = &user_blocks[i];
+                block(&mut w, (n, &b.description), h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
+            }
+            BlockSlot::Dim(i) => {
+                let (n, h, ents) = &dim_defs[i];
+                // A dimension can use a named block (`DIMBLOCK1-…`): only a `*` name is anonymous.
+                let (desc, base) = dim_sources.get(n).map_or(("", Vec3::ZERO), |b| (b.description.as_str(), b.base));
+                block(&mut w, (n, desc), h, base, i64::from(n.starts_with('*')), &mut ents.iter(), false);
+            }
+            BlockSlot::Arrow(i) => {
+                let (n, h, ents) = &arrow_defs[i];
+                block(&mut w, (n, ""), h, Vec3::ZERO, 0, &mut ents.iter(), false);
+            }
+            BlockSlot::Table(i) => {
+                let (n, h, ents) = &table_defs[i];
+                block(&mut w, (n, ""), h, Vec3::ZERO, 1, &mut ents.iter(), false);
+            }
+        }
     }
     w.s(0, "ENDSEC");
 

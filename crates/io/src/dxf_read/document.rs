@@ -142,6 +142,7 @@ pub(super) fn setup_layouts(d: &mut Drawing, layout_objs: &mut [LayoutDef], rx: 
         d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
         if let Some(bname) = rx.brs.get(br) {
             paper_block_for.insert(bname.to_ascii_uppercase(), name.clone());
+            std::sync::Arc::make_mut(&mut d.source_symbols).layout_blocks.insert(name.to_ascii_uppercase(), bname.clone());
         }
     }
     if d.layouts.is_empty() {
@@ -160,6 +161,10 @@ pub(super) fn setup_layouts(d: &mut Drawing, layout_objs: &mut [LayoutDef], rx: 
 /// Place the BLOCKS entities: model and paper space blocks go to their space, the rest become
 /// block definitions.
 pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, paper_block_for: &HashMap<String, String>, first_layout: &str) {
+    let source = std::sync::Arc::make_mut(&mut d.source_symbols);
+    for (place, (name, ..)) in blocks.iter().enumerate() {
+        source.block_order.entry(name.to_ascii_uppercase()).or_insert(place);
+    }
     for (name, base, description, ents, xref) in blocks {
         let up = name.to_ascii_uppercase();
         if up == "*MODEL_SPACE" {
