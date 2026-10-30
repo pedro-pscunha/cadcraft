@@ -708,8 +708,15 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.s(0, "LEADER");
             common(w, e, owner, paper, "AcDbLeader");
             w.s(3, &l.style);
-            w.i(71, i64::from(l.arrow));
-            w.i(72, i64::from(l.spline));
+            // From AutoCAD 2010 on the arrowhead flag and the path type are written only when they are not their defaults
+            // (arrowhead on, straight path); a DWG's own writer needs both.
+            let defaults_left_out = cx.target >= Version::R2010 && !cx.dwg_bridge;
+            if !(defaults_left_out && l.arrow) {
+                w.i(71, i64::from(l.arrow));
+            }
+            if !(defaults_left_out && !l.spline) {
+                w.i(72, i64::from(l.spline));
+            }
             // The annotation type and hookline settings of the record, then its annotation size, plane, direction and offsets as
             // the leader holds them (a leader made here has none of them).
             for (code, value) in [(73, l.links.creation), (74, l.links.hookline_direction), (75, l.links.hookline)] {
