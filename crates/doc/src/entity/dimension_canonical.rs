@@ -18,12 +18,13 @@
 
 use cadcraft_geom::{Mat4, OcsFrame, Vec3, norm_angle};
 
+use super::GeometryRevision;
 use super::dim::{DimKind, Dimension};
 use super::text_canonical::Similarity;
 use crate::{DocError, Result};
 
 fn frame(normal: Vec3) -> Result<OcsFrame> {
-    OcsFrame::new(normal).ok_or_else(|| DocError::Invalid("A canonical dimension needs a plane with a finite, non-zero normal.".into()))
+    OcsFrame::new(normal).ok_or_else(|| DocError::Invalid("A dimension needs a plane with a finite, non-zero normal.".into()))
 }
 
 impl Dimension {
@@ -47,6 +48,16 @@ impl Dimension {
         }
         d.marks.breaks.iter_mut().for_each(|b| b.at = local(b.at));
         Ok(d)
+    }
+
+    /// The local layout of a source payload. The legacy reader stores a negative-normal text
+    /// midpoint in WCS; recover its OCS coordinates without changing that reader contract.
+    pub fn localized_for_revision(&self, normal: Vec3, revision: GeometryRevision) -> Result<Dimension> {
+        let mut local = self.localized(normal)?;
+        if revision == GeometryRevision::LegacyProjectedV1 && normal.z < 0.0 {
+            local.text_mid = frame(normal)?.to_ocs(self.text_mid);
+        }
+        Ok(local)
     }
 
     /// The picture elevation of an already-localized dimension. A two-line angular dimension's

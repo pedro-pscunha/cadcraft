@@ -78,8 +78,8 @@ pub(super) fn reuse_handles(ents: &mut [Entity], old: &Block, taken: &mut std::c
 ///
 /// AutoCAD stores the picture in the dimension's OCS. The DIMENSION's extrusion places the whole block,
 /// so the block entities use the local axes, not a second copy of that extrusion.
-pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str, normal: Vec3) -> Vec<Entity> {
-    let Ok(local) = dm.localized(normal) else { return Vec::new() };
+pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str, normal: Vec3, revision: cadcraft_doc::GeometryRevision) -> Vec<Entity> {
+    let Ok(local) = dm.localized_for_revision(normal, revision) else { return Vec::new() };
     let drawn = &local;
     let z = local.local_picture_elevation();
     let geometry_revision = Default::default();
