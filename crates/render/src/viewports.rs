@@ -104,9 +104,12 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             return true;
         }
-        // shortcut: Skip the legacy prefilter for canonical payloads until the shared world-bounds switch.
         if me.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
-            return true;
+            return match crate::entity_world_bounds(d, me, &cadcraft_geom::Mat4::IDENTITY) {
+                Ok(bounds) => bounds.is_empty() || bounds.intersects(&win),
+                // Keep refused geometry in the render pass so its diagnostic reaches the canvas or export.
+                Err(_) => true,
+            };
         }
         let eb = cadcraft_doc::entity_bounds(d, me, 0);
         eb.is_empty() || eb.intersects(&win)
