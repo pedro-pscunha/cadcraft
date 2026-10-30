@@ -488,11 +488,11 @@ pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
     }
 }
 
-/// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 280 and 281), in order.
+/// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 91, 280 and 281), in order.
 fn keep_classes(d: &mut Drawing, classes: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
     for (_, _, t) in classes.iter().filter(|(kind, _, _)| kind == "CLASS").take(MAX_OBJECTS) {
-        let groups: Vec<RawTag> = t.iter().filter(|g| matches!(g.code, 1 | 2 | 3 | 90 | 280 | 281)).map(raw).collect();
+        let groups: Vec<RawTag> = t.iter().filter(|g| matches!(g.code, 1 | 2 | 3 | 90 | 91 | 280 | 281)).map(raw).collect();
         if groups.iter().any(|g| g.code == 1) {
             source.classes.push(groups);
         }
