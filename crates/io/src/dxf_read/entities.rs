@@ -644,7 +644,7 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
             rx.inserted.insert(ins.block.to_ascii_uppercase());
         }
         ("MULTILEADER" | "MLEADER", EntityKind::MLeader(m)) => {
-            let pending = crate::dxf_mleader::resolve(tags, m, &rx.styles, &rx.brs);
+            let pending = crate::dxf_mleader::resolve(tags, m, &rx.styles, &rx.brs, &rx.ltypes);
             if let Some(b) = &m.block {
                 rx.inserted.insert(b.block.to_ascii_uppercase());
             }

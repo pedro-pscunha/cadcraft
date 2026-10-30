@@ -168,6 +168,9 @@ pub struct MLeaderCodes {
     pub alignment: Option<i64>,
     /// Block attachment type of the entity (176): 0 centre extents, 1 insertion point.
     pub block_attachment: Option<i64>,
+    /// The leader line type (group 341 of the entity) by the linetype's name, as the file gave it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_type: Option<String>,
     /// The other numeric groups of the context, the entity and its first root (boxed: the multileader is one of the larger
     /// entity kinds).
     #[serde(default)]

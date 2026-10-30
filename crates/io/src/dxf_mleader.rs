@@ -88,6 +88,8 @@ struct Parsed {
     arrow: Option<f64>,
     /// Arrowhead block record (342).
     arrow_block: Option<String>,
+    /// Leader line type record (341 of the entity).
+    line_type: Option<String>,
     content: Option<i64>,
     text_style: Option<String>,
     block: Option<String>,
@@ -180,6 +182,7 @@ fn parse(tags: &[Tag]) -> Parsed {
                 41 => p.dogleg = finite(f),
                 42 => p.arrow = finite(f),
                 342 => p.arrow_block = handle(t),
+                341 => p.line_type = handle(t),
                 172 => p.content = Some(t.i64()),
                 343 => p.text_style = handle(t),
                 344 => p.block = handle(t),
@@ -479,6 +482,7 @@ fn read_as(tags: &[Tag], canonical: bool) -> (MLeader, bool) {
             angle_type: p.entity_codes[2],
             alignment: p.entity_codes[3],
             block_attachment: p.entity_codes[4],
+            line_type: None,
             groups: Box::new(MLeaderGroups { ctx: p.ctx_groups, entity: p.entity_groups, root: p.root_groups }),
         },
     };
@@ -510,7 +514,13 @@ fn attach_point(p: &Parsed, text_left_of_landing: bool) -> u8 {
 
 /// Text style, block and arrowhead names from the file's STYLE and BLOCK_RECORD handles (upper case →
 /// name); block content whose block is unknown is dropped. Returns what needs the objects.
-pub(crate) fn resolve(tags: &[Tag], m: &mut MLeader, styles: &HashMap<String, String>, brs: &HashMap<String, String>) -> Pending {
+pub(crate) fn resolve(
+    tags: &[Tag],
+    m: &mut MLeader,
+    styles: &HashMap<String, String>,
+    brs: &HashMap<String, String>,
+    ltypes: &HashMap<String, String>,
+) -> Pending {
     let p = parse(tags);
     if let Some(t) = &mut m.text
         && let Some(n) = p.text_style_ctx.iter().chain(&p.text_style).find_map(|h| styles.get(h)).filter(|n| !n.is_empty())
@@ -530,6 +540,7 @@ pub(crate) fn resolve(tags: &[Tag], m: &mut MLeader, styles: &HashMap<String, St
     if let Some(n) = p.arrow_block.as_ref().and_then(|h| brs.get(h)).filter(|n| !n.is_empty()) {
         m.arrow_block = n.clone();
     }
+    m.context.codes.line_type = p.line_type.as_ref().and_then(|h| ltypes.get(h)).cloned();
     Pending { style: p.style, attribs: p.attribs }
 }
 
@@ -627,6 +638,8 @@ pub(crate) struct Refs {
     pub block: Option<String>,
     /// BLOCK_RECORD handle of the entity's own arrowhead (none: the style's).
     pub arrow: Option<String>,
+    /// LTYPE record handle of the leader line type the file gave.
+    pub line_type: Option<String>,
 }
 
 /// The groups of a MULTILEADER record after its `AcDbMLeader` marker.
@@ -779,8 +792,11 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool, t
     s(&mut t, 340, &r.style);
     // Overridden properties: leader type, landing and dogleg, arrowhead size, content type,
     // text style and height, block content (the entity holds its own values).
-    // An own arrowhead (342) is the 0x100 override.
-    let arrow_flag = if r.arrow.is_some() { 0x100 } else { 0 };
+    // An own arrowhead (342) different from the style's is the 0x100 override; one the file gave without the bit (AutoCAD writes the
+    // style's arrowhead there too) stays without it, so a change of the style still reaches the multileader.
+    let source_bit = eg.override_flags.is_some_and(|x| (x as i64) & 0x100 != 0);
+    let differs = !m.arrow_block.eq_ignore_ascii_case(&style.arrow_block);
+    let arrow_flag = if r.arrow.is_some() && (eg.override_flags.is_none() || source_bit || differs) { 0x100 } else { 0 };
     // The override flags as read, with the own-arrowhead bit following the multileader.
     let overrides = eg.override_flags.map_or(0x1 | 0x10 | 0x40 | 0x80 | 0x200 | 0x400 | 0x800 | 0x1_0000 | 0x8_0000, |x| (x as i64) & !0x100);
     i(&mut t, 90, overrides | arrow_flag);
@@ -796,6 +812,9 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool, t
         },
     );
     inum(&mut t, 91, eg.line_color, BYBLOCK);
+    if let Some(h) = &r.line_type {
+        s(&mut t, 341, h);
+    }
     inum(&mut t, 171, eg.line_weight, -2);
     inum(&mut t, 290, eg.landing_enabled, 1);
     inum(&mut t, 291, eg.dogleg_enabled, i64::from(first.dogleg > 0.0));
