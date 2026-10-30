@@ -62,6 +62,7 @@ fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<H
             locked += 1;
             continue;
         }
+        e.require_legacy_geometry()?;
         items.push((*h, e.kind.clone(), entity_bounds(d, e, 0)));
     }
     if !o.combine {
