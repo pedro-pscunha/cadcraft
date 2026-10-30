@@ -229,6 +229,9 @@ fn project_conic(owner: Handle, center: Vec3, axis_u: Vec3, axis_v: Vec3, start:
     if !has_finite_numbers(&ellipse) {
         return Err(DocError::NonFinite(owner));
     }
+    if cadcraft_geom::ccw_sweep(start, end) != TAU && ellipse.is_full() {
+        return Err(DocError::Invalid(format!("Entity {} has a parameter span too small for this projected conic basis.", owner.hex())));
+    }
     if ellipse.ratio == 0.0 {
         let mut lo = ellipse.start.cos().min(ellipse.end.cos());
         let mut hi = ellipse.start.cos().max(ellipse.end.cos());

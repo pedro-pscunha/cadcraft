@@ -32,6 +32,19 @@ fn similarity() -> Mat4 {
 }
 
 #[test]
+fn an_unrepresentable_projected_parameter_span_refuses_instead_of_becoming_full() {
+    for axis_u in [Vec3::new(1e18, 0.0, 0.0), Vec3::new(0.0, 0.0, 1e18)] {
+        let geometry = WorldGeometry::from_primitives(
+            Handle(0x124),
+            vec![WorldPrimitive::Conic { center: Vec3::ZERO, axis_u, axis_v: Vec3::new(0.0, 2e18, 0.0), start: 0.0, end: 1e-18 }],
+        )
+        .unwrap();
+        let error = geometry.project_xy().unwrap_err();
+        assert!(error.to_string().contains("124") && error.to_string().contains("span"), "{error}");
+    }
+}
+
+#[test]
 fn an_arc_stays_exact_under_any_affine_parent() {
     let (c, x, y) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0));
     let arc = WorldPrimitive::Conic { center: c, axis_u: x, axis_v: y, start: 0.3, end: 2.0 };
