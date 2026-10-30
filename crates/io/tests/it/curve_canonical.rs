@@ -953,3 +953,41 @@ fn a_3dface_a_3d_polyline_and_a_mesh_keep_their_wcs_positions() {
     let EntityKind::Polyline3d(read) = kind else { panic!("not a 3D polyline") };
     assert_eq!((read.points, read.closed), (poly.points, poly.closed));
 }
+
+#[test]
+fn a_ray_a_construction_line_and_an_image_keep_their_wcs_frames() {
+    let ray = cadcraft_doc::RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) };
+    for (kind, canonical) in [("RAY", EntityKind::Ray(ray.clone())), ("XLINE", EntityKind::XLine(ray.clone()))] {
+        let d = drawing(canonical.clone(), NORMAL, 0.0);
+        let out = dxf(&d);
+        let g = groups(&out, kind);
+        assert!(near(point(&g, 10).unwrap(), ray.base) && near(point(&g, 11).unwrap(), ray.dir), "{kind}");
+        let (_, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        assert_eq!(read, canonical, "{kind}");
+        let stored = dwg_entities(&d);
+        let (base, dir) = stored
+            .iter()
+            .find_map(|e| match e {
+                EntityType::Ray(x) => Some((x.base_point, x.direction)),
+                EntityType::XLine(x) => Some((x.base_point, x.direction)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a {kind} in the DWG"));
+        assert!(near(v3(base), ray.base) && near(v3(dir), ray.dir), "{kind}: DWG");
+    }
+    // An image: the insertion point and the pixel vectors keep their Z, the clip stays in pixels.
+    let image = cadcraft_doc::Image {
+        insert: Vec3::new(1.0, 2.0, 3.0),
+        u: Vec3::new(0.5, 0.0, 0.25),
+        v: Vec3::new(0.0, 0.5, 0.25),
+        size: Vec2::new(100.0, 50.0),
+        clip: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)],
+        clipping: true,
+        ..cadcraft_doc::Image::default()
+    };
+    let d = drawing(EntityKind::Image(image.clone()), NORMAL, 0.0);
+    let out = dxf(&d);
+    let (_, read) = cadcraft_io::canonical_curve_from_groups("IMAGE", &record(&out, "IMAGE")).unwrap();
+    let EntityKind::Image(read) = read else { panic!("image") };
+    assert_eq!((read.insert, read.u, read.v, read.size, read.clip), (image.insert, image.u, image.v, image.size, image.clip));
+}

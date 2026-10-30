@@ -10,6 +10,9 @@
 //!   the thickness grows with the length of that image.
 //! - A POINT moves; its angle (the direction of the OCS X axis turned by it) follows the map and is read in the OCS of the
 //!   new extrusion. A map that takes that direction out of the new plane refuses.
+//! - A RAY or XLINE moves with its base point and its direction follows the linear part (kept as long as it was). An IMAGE
+//!   frame (insertion point, pixel vectors U and V) is an affine frame, so the clip and the size stay in pixels and the frame
+//!   maps exactly; a map that makes U and V parallel refuses.
 //! - The vertices of a 3D polyline, the position records of a mesh and the corners of a 3DFACE move; a polyface face
 //!   record holds vertex numbers, not positions, and stays as it is.
 
@@ -17,7 +20,8 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use cadcraft_geom::{Mat4, OcsFrame, Vec3, norm_angle};
 
-use super::curves::{Ellipse, Face3d, Line, Point, Polyline3d};
+use super::curves::{Ellipse, Face3d, Line, Point, Polyline3d, RayLine};
+use super::layout::Image;
 use super::mesh::PolylineMesh;
 use crate::{DocError, Result};
 
@@ -109,6 +113,33 @@ impl Point {
         let angle = norm_angle(local.y.atan2(local.x));
         // An angle of exactly 0 stays 0 when nothing turned it.
         Ok((Point { p: m.apply(self.p), angle: if (angle - self.angle).abs() < 1e-14 { self.angle } else { angle } }, extrusion, factor))
+    }
+}
+
+impl RayLine {
+    /// This ray or construction line after the invertible affine map `m`.
+    pub fn transformed_canonical(&self, m: &Mat4) -> Result<RayLine> {
+        invertible(m)?;
+        let source = self.dir.len();
+        let image = m.apply_vec(self.dir);
+        if !(source.is_finite() && source > 0.0 && image.len() > 0.0) {
+            return Err(invalid("A ray needs a direction that the map keeps."));
+        }
+        Ok(RayLine { base: m.apply(self.base), dir: image * (source / image.len()) })
+    }
+}
+
+impl Image {
+    /// This image after the invertible affine map `m`: the insertion point and the pixel vectors map, the clip and the size
+    /// stay in pixels.
+    pub fn transformed_canonical(&self, m: &Mat4) -> Result<Image> {
+        invertible(m)?;
+        let moved = Image { insert: m.apply(self.insert), u: m.apply_vec(self.u), v: m.apply_vec(self.v), ..self.clone() };
+        let area = moved.u.cross(moved.v).len();
+        if !crate::has_finite_numbers(&moved) || area <= 1e-12 * moved.u.len() * moved.v.len() || area <= 0.0 {
+            return Err(invalid("The pixel vectors of an image must span a plane after the map."));
+        }
+        Ok(moved)
     }
 }
 
@@ -262,5 +293,29 @@ mod tests {
         let moved = face.transformed_canonical(&affine()).unwrap();
         assert!(near(moved.corners[2], affine().apply(face.corners[2])) && moved.hidden_edges == 3);
         assert!(face.transformed_canonical(&Mat4 { m: [[0.0; 4], [0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, 1.0]] }).is_err());
+    }
+
+    #[test]
+    fn a_ray_keeps_the_length_of_its_direction_and_an_image_maps_its_frame() {
+        let ray = RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.0, 1.0) };
+        let moved = ray.transformed_canonical(&affine()).unwrap();
+        assert!(near(moved.base, affine().apply(ray.base)) && (moved.dir.len() - 1.0).abs() < 1e-12);
+        assert!(near(moved.dir.normalized(), affine().apply_vec(ray.dir).normalized()));
+        assert!(RayLine { dir: Vec3::ZERO, ..ray }.transformed_canonical(&Mat4::IDENTITY).is_err());
+        let image = Image {
+            insert: Vec3::new(1.0, 2.0, 3.0),
+            u: Vec3::new(0.5, 0.0, 0.0),
+            v: Vec3::new(0.0, 0.5, 0.25),
+            size: cadcraft_geom::Vec2::new(100.0, 50.0),
+            clip: vec![cadcraft_geom::Vec2::new(0.0, 0.0), cadcraft_geom::Vec2::new(10.0, 10.0)],
+            clipping: true,
+            ..Image::default()
+        };
+        let m = rotation_x(0.8, Vec3::new(1.0, 2.0, 3.0));
+        let moved = image.transformed_canonical(&m).unwrap();
+        assert!(near(moved.insert, m.apply(image.insert)) && near(moved.u, m.apply_vec(image.u)) && near(moved.v, m.apply_vec(image.v)));
+        assert_eq!((moved.size, moved.clip.clone(), moved.clipping), (image.size, image.clip.clone(), true));
+        let fold = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        assert!(image.transformed_canonical(&fold).is_err());
     }
 }

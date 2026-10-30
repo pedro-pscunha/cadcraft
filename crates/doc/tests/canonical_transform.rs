@@ -12,6 +12,7 @@ use cadcraft_doc::{
     hatch_primitives, helix_primitives, leader_primitives, lwpolyline_primitives, mline_primitives, mtext_primitives, solid_primitives,
     spline_primitives, table_primitives, text_primitives, tolerance_primitives, wipeout_primitives,
 };
+use cadcraft_doc::{Image, RayLine};
 use cadcraft_geom::{FitOptions, Mat4, PolyVertex, Spline, SplineSpace, Vec2, Vec3};
 
 fn near(a: Vec3, b: Vec3) -> bool {
@@ -319,6 +320,23 @@ fn fixtures() -> Vec<(&'static str, Entity)> {
         ),
         ("3DFACE", entity(EntityKind::Face3d(Face3d { corners, hidden_edges: 2 }), NORMAL)),
         ("MESH", entity(EntityKind::PolylineMesh(mesh()), NORMAL)),
+        ("RAY", entity(EntityKind::Ray(RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) }), NORMAL)),
+        ("XLINE", entity(EntityKind::XLine(RayLine { base: Vec3::new(1.0, 2.0, 3.0), dir: Vec3::new(0.0, 0.6, 0.8) }), NORMAL)),
+        (
+            "IMAGE",
+            entity(
+                EntityKind::Image(Image {
+                    insert: Vec3::new(1.0, 2.0, 3.0),
+                    u: Vec3::new(0.5, 0.0, 0.0),
+                    v: Vec3::new(0.0, 0.5, 0.25),
+                    size: Vec2::new(100.0, 50.0),
+                    clip: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)],
+                    clipping: true,
+                    ..Image::default()
+                }),
+                NORMAL,
+            ),
+        ),
     ]
 }
 
@@ -450,7 +468,14 @@ fn a_canonical_move_and_a_tilted_rotation_give_the_hooks_result_for_every_family
             // The plane follows the motion (a rigid one: the normal turns, its magnitude and the thickness stay).
             if !matches!(
                 e.kind,
-                EntityKind::Wipeout(_) | EntityKind::Helix(_) | EntityKind::Polyline3d(_) | EntityKind::Face3d(_) | EntityKind::PolylineMesh(_)
+                EntityKind::Wipeout(_)
+                    | EntityKind::Helix(_)
+                    | EntityKind::Polyline3d(_)
+                    | EntityKind::Face3d(_)
+                    | EntityKind::PolylineMesh(_)
+                    | EntityKind::Ray(_)
+                    | EntityKind::XLine(_)
+                    | EntityKind::Image(_)
             ) {
                 assert!(near(moved.common.extrusion, m.apply_vec(e.common.extrusion)), "{name} {what}: normal {:?}", moved.common.extrusion);
             }
@@ -485,6 +510,9 @@ fn a_scale_scales_the_thickness_with_the_similarity_families() {
                 | EntityKind::Polyline3d(_)
                 | EntityKind::Face3d(_)
                 | EntityKind::PolylineMesh(_)
+                | EntityKind::Ray(_)
+                | EntityKind::XLine(_)
+                | EntityKind::Image(_)
         );
         let expected = if unscaled { 0.5 } else { 1.0 };
         assert_eq!(moved.common.thickness, expected, "{name}");
@@ -508,6 +536,9 @@ fn a_mirror_refuses_with_the_entity_unchanged_where_the_family_is_a_similarity()
                 | EntityKind::Polyline3d(_)
                 | EntityKind::Face3d(_)
                 | EntityKind::PolylineMesh(_)
+                | EntityKind::Ray(_)
+                | EntityKind::XLine(_)
+                | EntityKind::Image(_)
         ) {
             assert!(result.is_ok(), "{name}");
         } else {
@@ -559,5 +590,29 @@ fn a_legacy_payload_keeps_the_legacy_path() {
         moved.try_transform(&translation(Vec3::new(5.0, 0.0, 0.0))).unwrap_or_else(|err| panic!("{name}: {err}"));
         assert_ne!(moved, before, "{name}: the legacy move happened");
         assert_eq!(moved.geometry_revision, GeometryRevision::LegacyProjectedV1, "{name}");
+    }
+}
+
+#[test]
+fn rays_construction_lines_and_images_follow_the_map() {
+    for (name, e) in fixtures().into_iter().filter(|(n, _)| matches!(*n, "RAY" | "XLINE" | "IMAGE")) {
+        for (what, m) in moves() {
+            let moved = e.transformed(&m).unwrap_or_else(|err| panic!("{name} {what}: {err}"));
+            match (&e.kind, &moved.kind) {
+                (EntityKind::Ray(a) | EntityKind::XLine(a), EntityKind::Ray(b) | EntityKind::XLine(b)) => {
+                    assert!(near(b.base, m.apply(a.base)) && near(b.dir, m.apply_vec(a.dir)), "{name} {what}");
+                }
+                (EntityKind::Image(a), EntityKind::Image(b)) => {
+                    assert!(near(b.insert, m.apply(a.insert)) && near(b.u, m.apply_vec(a.u)) && near(b.v, m.apply_vec(a.v)), "{name} {what}");
+                    assert_eq!((&b.clip, b.size, b.clipping), (&a.clip, a.size, true), "the clip stays in pixels");
+                }
+                _ => panic!("{name}: kind changed"),
+            }
+        }
+        // A collapse refuses with the entity unchanged.
+        let fold = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        let mut candidate = e.clone();
+        assert!(candidate.try_transform(&fold).is_err(), "{name}");
+        assert_eq!(candidate, e);
     }
 }
