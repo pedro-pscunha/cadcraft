@@ -15,10 +15,6 @@ pub(crate) struct Pattern<'a> {
     pub min: f64,
 }
 
-fn unsupported(feature: &str) -> DocError {
-    DocError::Invalid(format!("Canonical display does not support {feature} yet. The source geometry remains unchanged."))
-}
-
 /// The WCS points of a line, conic or spline primitive, sampled so that a chord is within `tolerance` of the curve.
 fn sample(primitive: &WorldPrimitive, tolerance: f64) -> Option<Vec<Vec3>> {
     match primitive {
@@ -69,19 +65,41 @@ fn along(points: &[Vec3], lengths: &[f64], s: f64) -> Vec3 {
     if s1 - s0 <= 0.0 { *a } else { *a + (*b - *a) * ((s - s0) / (s1 - s0)).clamp(0.0, 1.0) }
 }
 
-/// Draw one curve primitive with a line pattern: the pattern runs along the length of the curve in WCS (not its projection), then
-/// each dash is projected for display. `None` when the primitive is not a curve.
+/// The point at the distance `s` along the polyline `points` and the unit direction of its segment (the last segment extends a
+/// little past the end).
+fn along_with_direction(points: &[Vec3], lengths: &[f64], s: f64) -> Option<(Vec3, Vec3)> {
+    let i = lengths.partition_point(|l| *l < s).clamp(1, lengths.len().saturating_sub(1).max(1));
+    // A zero-length segment has no direction: look to the next one that has.
+    (1..points.len()).filter(|k| *k >= i).chain((1..i).rev()).find_map(|k| {
+        let (a, b) = (*points.get(k - 1)?, *points.get(k)?);
+        let t = (b - a).try_normalized()?;
+        Some((along(points, lengths, s), t))
+    })
+}
+
+/// Draw curve primitives as one line with a line pattern: the pattern runs along the length of the chain in WCS (not its
+/// projection), then each dash and each text of the linetype is projected for display. The texts lie in the plane of the entity
+/// (`plane`: its OCS), turned to the direction of the curve. `false` when a primitive is not a curve.
 pub(crate) fn dashed(
     builder: &mut Builder,
     context: &Ctx,
     color: Ink,
     lineweight: f32,
     pattern: &Pattern,
-    primitive: &WorldPrimitive,
-) -> Option<cadcraft_doc::Result<()>> {
-    let points = sample(primitive, builder.opts.tolerance)?;
-    if builder.opts.text && pattern.linetype.pattern.iter().any(|e| e.text.as_deref().is_some_and(|t| !t.trim().is_empty())) {
-        return Some(Err(unsupported("line patterns with embedded text")));
+    plane: Option<OcsFrame>,
+    chain: &[&WorldPrimitive],
+) -> bool {
+    let mut points: Vec<Vec3> = Vec::new();
+    for primitive in chain {
+        let Some(mut piece) = sample(primitive, builder.opts.tolerance) else { return false };
+        // A piece runs from the end of the one before it: arcs are laid out counter-clockwise whatever the polyline direction.
+        if let (Some(last), Some(first), Some(end)) = (points.last(), piece.first(), piece.last())
+            && (*end - *last).len() < (*first - *last).len()
+        {
+            piece.reverse();
+        }
+        let joined = points.last().zip(piece.first()).is_some_and(|(a, b)| (*a - *b).len() < 1e-9 * (1.0 + a.len()));
+        points.extend(piece.into_iter().skip(usize::from(joined)));
     }
     let mut lengths = vec![0.0];
     for w in points.windows(2) {
@@ -97,7 +115,28 @@ pub(crate) fn dashed(
             _ => builder.polyline(context, color, lineweight, &placed),
         }
     }
-    Some(Ok(()))
+    if builder.opts.text
+        && let (Some(frame), Some(&total)) = (plane, lengths.last())
+    {
+        for el in super::linetype_text::placed(context.d, pattern.linetype, pattern.scale, pattern.min, total) {
+            let Some((at, tangent)) = along_with_direction(&points, &lengths, el.s) else { break };
+            // In the plane of the entity: the direction across the curve is the plane normal crossed into the tangent.
+            let normal = frame.to_world(Vec3::Z);
+            let Some(across) = normal.cross(tangent).try_normalized() else { continue };
+            let direction = if el.absolute {
+                frame.to_world(Vec3::new(el.rotation.cos(), el.rotation.sin(), 0.0))
+            } else {
+                tangent * el.rotation.cos() + across * el.rotation.sin()
+            };
+            let Some(direction) = direction.try_normalized() else { continue };
+            let up = normal.cross(direction);
+            let origin = at + tangent * el.offset.x + across * el.offset.y;
+            let mut shaped = el.local;
+            shaped.map(|q| (origin + direction * q.x + up * q.y).xy());
+            builder.shaped(context, color, lineweight, &shaped);
+        }
+    }
+    true
 }
 
 /// The matrix from the local 2D coordinates of an entity's plane (OCS at the height `z`) to WCS after the parent, and the context

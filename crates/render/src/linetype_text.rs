@@ -31,17 +31,25 @@ struct Element {
     offset: Vec2,
 }
 
-/// The texts of `lt` along the polyline `pts`, in the coordinates of `pts`. Empty when the
-/// linetype has no text or its scaled pattern is drawn continuous (shorter than `min_pattern`,
-/// or repeating too often).
-pub fn texts(d: &Drawing, pts: &[Vec2], lt: &Linetype, scale: f64, min_pattern: f64) -> Vec<Shaped> {
+/// One text of a pattern placed along a line of length `len`: the distance along the line to its anchor, and the element it is.
+pub(crate) struct Placed {
+    pub s: f64,
+    pub local: Shaped,
+    pub rotation: f64,
+    pub absolute: bool,
+    /// The shift along and across the line.
+    pub offset: Vec2,
+}
+
+/// The texts of `lt` along a line of length `len`, in order, each at its anchor: none when the linetype has no text or its scaled
+/// pattern is drawn continuous (shorter than `min_pattern`, or repeating too often).
+pub(crate) fn placed(d: &Drawing, lt: &Linetype, scale: f64, min_pattern: f64, len: f64) -> Vec<Placed> {
     let mut out = Vec::new();
-    if pts.len() < 2 || !lt.pattern.iter().any(|e| e.text.as_deref().is_some_and(|t| !t.trim().is_empty())) {
+    if !lt.pattern.iter().any(|e| e.text.as_deref().is_some_and(|t| !t.trim().is_empty())) {
         return out;
     }
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
     let total = lt.pattern_length() * scale;
-    let len: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
     if !(total.is_finite() && total > 1e-12 && len.is_finite()) || total < min_pattern || len / total > 50_000.0 {
         return out;
     }
@@ -49,7 +57,6 @@ pub fn texts(d: &Drawing, pts: &[Vec2], lt: &Linetype, scale: f64, min_pattern: 
     if elements.is_empty() {
         return out;
     }
-    let mut walk = Walk { pts, i: 0, start: 0.0 };
     let mut base = 0.0;
     'repeats: while base <= len {
         for el in &elements {
@@ -57,14 +64,30 @@ pub fn texts(d: &Drawing, pts: &[Vec2], lt: &Linetype, scale: f64, min_pattern: 
             if s > len + 1e-9 || out.len() >= MAX_TEXTS {
                 break 'repeats;
             }
-            let Some((p, dir)) = walk.at(s) else { break 'repeats };
-            let origin = p + dir * el.offset.x + dir.perp() * el.offset.y;
-            let rot = if el.absolute { el.rotation } else { dir.angle() + el.rotation };
-            let mut sh = el.local.clone();
-            sh.map(|q| origin + q.rotate(rot));
-            out.push(sh);
+            out.push(Placed { s, local: el.local.clone(), rotation: el.rotation, absolute: el.absolute, offset: el.offset });
         }
         base += total;
+    }
+    out
+}
+
+/// The texts of `lt` along the polyline `pts`, in the coordinates of `pts`. Empty when the
+/// linetype has no text or its scaled pattern is drawn continuous (shorter than `min_pattern`,
+/// or repeating too often).
+pub fn texts(d: &Drawing, pts: &[Vec2], lt: &Linetype, scale: f64, min_pattern: f64) -> Vec<Shaped> {
+    let mut out = Vec::new();
+    if pts.len() < 2 {
+        return out;
+    }
+    let len: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
+    let mut walk = Walk { pts, i: 0, start: 0.0 };
+    for el in placed(d, lt, scale, min_pattern, len) {
+        let Some((p, dir)) = walk.at(el.s) else { break };
+        let origin = p + dir * el.offset.x + dir.perp() * el.offset.y;
+        let rot = if el.absolute { el.rotation } else { dir.angle() + el.rotation };
+        let mut sh = el.local;
+        sh.map(|q| origin + q.rotate(rot));
+        out.push(sh);
     }
     out
 }
