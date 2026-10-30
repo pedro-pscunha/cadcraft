@@ -18,8 +18,8 @@ use cadcraft_dxf::Tag;
 type Spec = &'static [(&'static str, &'static [i32])];
 
 /// The geometry groups of a DIMENSION's own `AcDbDimension` subclass: definition point, text point,
-/// text rotation, plane and the horizontal direction.
-const DIMENSION: &[i32] = &[10, 20, 30, 11, 21, 31, 53, 51, 210, 220, 230];
+/// text rotation, plane, horizontal direction and source measurement (recomputed only after a geometry edit).
+const DIMENSION: &[i32] = &[10, 20, 30, 11, 21, 31, 42, 53, 51, 210, 220, 230];
 const INSERT: &[i32] = &[10, 20, 30, 41, 42, 43, 50, 70, 71, 44, 45, 210, 220, 230];
 
 /// The geometry groups of the types that keep a snapshot, by subclass in record order.
@@ -55,7 +55,7 @@ fn spec(kind: &str, tags: &[Tag]) -> Option<Spec> {
         // flags and the brightness are the model's.
         "WIPEOUT" => &[("AcDbWipeout", &[10, 20, 30, 11, 21, 31, 12, 22, 32, 13, 23, 71, 91, 14, 24])],
         // The definition point, text position and rotation, the plane and the definition points of the kind
-        // of dimension. The block, the text, the style and the measurement stay what the writer makes.
+        // of dimension, with the source measurement. The block, the text and the style stay what the writer makes.
         "DIMENSION" if has("AcDbAlignedDimension") && has("AcDbRotatedDimension") => {
             &[("AcDbDimension", DIMENSION), ("AcDbAlignedDimension", &[13, 23, 33, 14, 24, 34, 50, 52]), ("AcDbRotatedDimension", &[])]
         }
