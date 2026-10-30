@@ -588,81 +588,6 @@ pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
     None
 }
 
-/// Dimension overrides and associativity, table references: data of an entity record that
-/// needs the file's handle maps.
-pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx) {
-    match (kind, k) {
-        ("ATTDEF", EntityKind::AttDef(a)) if rx.from_dwg => forget_dwg_type_72(a),
-        ("DIMENSION", EntityKind::Dimension(dm)) => {
-            dm.overrides = crate::dxf_ext::read_dstyle(tags, &rx.styles, &rx.brs, &rx.ltypes);
-            dm.assoc = crate::dxf_ext::read_assoc(tags);
-            if let Some(center) = crate::dxf_ext::read_arclen(tags) {
-                dm.kind = DimKind::ArcLength;
-                dm.p15 = center;
-            }
-            dm.marks = crate::dxf_ext::read_marks(tags);
-            // Group 12 (in OCS) shifts the `*D` block: a dimension copied inside a block keeps
-            // its old graphics and records the shift here.
-            let t = T(tags);
-            let shift = super::common::ocs_n(Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0)), t.p(12)).xy();
-            if let Some(name) = dm.block.as_ref().filter(|_| shift.is_finite() && (shift.x != 0.0 || shift.y != 0.0)) {
-                rx.dim_block_shifts.push((name.to_ascii_uppercase(), shift));
-            }
-            // Group 52: the extension lines' angle relative to the dimension line (DIMEDIT Oblique).
-            let base = match dm.kind {
-                DimKind::Linear { rotation } => Some(rotation),
-                DimKind::Aligned => Some((dm.p14.xy() - dm.p13.xy()).angle()),
-                _ => None,
-            };
-            if let (Some(base), Some(o)) = (base, T(tags).f(52).filter(|o| o.is_finite() && o.rem_euclid(180.0) != 0.0)) {
-                dm.marks.oblique = Some(cadcraft_geom::norm_angle(base + o.to_radians()));
-            }
-        }
-        ("ACAD_TABLE", EntityKind::Table(table)) => {
-            // The blocks the cells hold, by their BLOCK_RECORD handles; a cell whose block is unknown is a text cell.
-            for cell in table.cells.iter_mut().flatten() {
-                if let Some(content) = &mut cell.block {
-                    match rx.brs.get(&content.block.to_ascii_uppercase()).filter(|n| !n.is_empty()) {
-                        Some(name) => {
-                            content.block = name.clone();
-                            rx.inserted.insert(name.to_ascii_uppercase());
-                        }
-                        None => cell.block = None,
-                    }
-                }
-            }
-            let t = T(tags);
-            if let Some(b) = t.s(2) {
-                rx.table_blocks.insert(b.to_ascii_uppercase());
-            }
-            let ours = crate::dxf_ext::xdata(tags, crate::dxf_ext::APP).iter().any(|t| t.code == 1000 && t.str() == "TABLE");
-            if !ours {
-                rx.table_style_fix.push((h, t.s(342).map(|sh| sh.trim().to_ascii_uppercase()).unwrap_or_default()));
-            }
-        }
-        ("INSERT", EntityKind::Insert(ins)) => {
-            rx.inserted.insert(ins.block.to_ascii_uppercase());
-        }
-        ("MULTILEADER" | "MLEADER", EntityKind::MLeader(m)) => {
-            let pending = crate::dxf_mleader::resolve(tags, m, &rx.styles, &rx.brs, &rx.ltypes);
-            if let Some(b) = &m.block {
-                rx.inserted.insert(b.block.to_ascii_uppercase());
-            }
-            rx.mleader_fix.push((h, pending));
-        }
-        // CADCraft's VPFROZEN xdata wins; otherwise AutoCAD's group 331 layer handles.
-        ("VIEWPORT", EntityKind::Viewport(v)) if v.frozen_layers.is_empty() => {
-            v.frozen_layers = tags
-                .iter()
-                .take_while(|t| t.code < 1000)
-                .filter(|t| t.code == 331)
-                .filter_map(|t| rx.layers.get(&t.str().trim().to_ascii_uppercase()).cloned())
-                .collect();
-        }
-        _ => {}
-    }
-}
-
 /// A POLYLINE and its child records, advancing `i` past the VERTEX and SEQEND records.
 pub(super) fn polyline_entity(recs: &[(String, Vec<Tag>)], i: &mut usize, t: &T, d: &mut super::Drawing, rx: &Rx) -> (Common, EntityKind) {
     polyline_entity_in(recs, i, t, d, rx, false)
@@ -787,13 +712,6 @@ pub(super) fn polyline_entity_in(
         })
     };
     (c, k)
-}
-
-/// A multiline attribute's group 72 after its type is not in a DWG: the DWG reader writes a fixed value there.
-fn forget_dwg_type_72(a: &mut Attrib) {
-    if let Some(m) = &mut a.multiline {
-        m.type_72 = None;
-    }
 }
 
 /// The handle and common properties of the SEQEND record `tags` (the one that closes the ATTRIBs of an INSERT).

@@ -20,6 +20,9 @@ mod curve_canonical;
 pub(crate) mod dimassoc;
 mod document;
 mod entities;
+mod extras;
+#[cfg(test)]
+mod extras_tests;
 mod fill_canonical;
 mod hatch;
 mod mleader_canonical;
