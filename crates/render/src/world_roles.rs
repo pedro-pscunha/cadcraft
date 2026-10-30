@@ -214,14 +214,17 @@ pub(crate) fn translation(v: Vec3) -> Mat4 {
 /// (SHX-like) font; AutoCAD gives TrueType text no thickness, so an outline font draws flat.
 pub(crate) fn swept(d: &cadcraft_doc::Drawing, entity: &Entity) -> bool {
     use cadcraft_doc::EntityKind as K;
-    let text_font = |style: &str| super::text_entity::text_style(d, style).font;
-    let stroke = |style: &str| matches!(cadcraft_fonts::TextFont::resolve(&text_font(style)), cadcraft_fonts::TextFont::Stroke);
     match &entity.kind {
-        K::Text(t) => stroke(&t.style),
-        K::AttDef(a) => stroke(&a.text.style),
+        K::Text(t) => stroke_font(d, &t.style),
+        K::AttDef(a) => stroke_font(d, &a.text.style),
         K::Line(_) | K::Point(_) | K::Circle(_) | K::Arc(_) | K::Ellipse(_) | K::LwPolyline(_) | K::Solid(_) | K::Trace(_) => true,
         _ => false,
     }
+}
+
+/// Whether the text style `style` is set in a stroke (SHX-like) font, the only text AutoCAD extrudes.
+pub(crate) fn stroke_font(d: &cadcraft_doc::Drawing, style: &str) -> bool {
+    matches!(cadcraft_fonts::TextFont::resolve(&super::text_entity::text_style(d, style).font), cadcraft_fonts::TextFont::Stroke)
 }
 
 /// The vector from an outline to its far copy: the thickness along the normal of the entity's plane, carried by the parent.
@@ -247,8 +250,23 @@ pub(crate) fn side_edges(
         return Ok(());
     }
     let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
+    side_edges_of(builder, context, geometry.primitives(), offset, color, lineweight)
+}
+
+/// The side edges of an extrusion of the WCS `primitives` by `offset` (see [`side_edges`]).
+pub(crate) fn side_edges_of(
+    builder: &mut Builder,
+    context: &Ctx,
+    primitives: &[WorldPrimitive],
+    offset: Vec3,
+    color: Ink,
+    lineweight: f32,
+) -> cadcraft_doc::Result<()> {
+    if offset.xy().len() <= 0.0 {
+        return Ok(());
+    }
     let mut vertices: Vec<Vec3> = Vec::new();
-    for primitive in geometry.primitives() {
+    for primitive in primitives {
         match primitive {
             WorldPrimitive::Line { a, b } => vertices.extend([*a, *b]),
             WorldPrimitive::Point(p) => vertices.push(*p),

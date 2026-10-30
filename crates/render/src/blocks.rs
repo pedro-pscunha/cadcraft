@@ -2,6 +2,7 @@ use super::draw::entity;
 use super::props::{resolve, resolve_common, transparency};
 use super::text_entity::{mtext, place_text_entity};
 use super::{Builder, Color, Ctx, Entity, EntityKind, Ink, Lineweight, Mat3, Vec2};
+use cadcraft_geom::OcsFrame;
 
 pub(crate) fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     let layer = if e.common.layer == "0" { ctx.block_layer.clone() } else { Some(e.common.layer.clone()) };
@@ -173,15 +174,23 @@ fn canonical_attributes(
         {
             return Err(DocError::Invalid("A canonical INSERT cannot display a legacy attribute payload.".into()));
         }
-        if attribute.plane.thickness != 0.0 {
-            return Err(DocError::Invalid("Canonical attribute extrusion display is not available yet.".into()));
-        }
         let owner = attribute.handle.unwrap_or(e.handle);
-        let geometry = WorldGeometry::from_primitives(owner, attrib_primitives(attribute, placement)?)?;
+        let primitives = attrib_primitives(attribute, placement)?;
+        let geometry = WorldGeometry::from_primitives(owner, primitives.clone())?;
         let projected = Ctx { xf: Mat3::IDENTITY, ..ctx.clone() };
         b.transparency = transparency;
         let lineweight = if b.opts.lineweights { lineweight } else { 0.0 };
         super::world_paint::paint_geometry(b, &projected, &geometry, owner, ink, lineweight)?;
+        // A thickness extrudes the text of a stroke font along the attribute's own normal, as for a TEXT; an outline font has none.
+        if attribute.plane.thickness != 0.0 && super::world_roles::stroke_font(ctx.d, &attribute.text.style) {
+            let normal = OcsFrame::new(attribute.plane.normal)
+                .ok_or_else(|| DocError::Invalid("A canonical attribute needs a plane with a direction.".into()))?
+                .to_world(cadcraft_geom::Vec3::Z);
+            let offset = placement.apply_vec(normal * attribute.plane.thickness);
+            let far = WorldGeometry::from_primitives(owner, attrib_primitives(attribute, &super::world_roles::translation(offset).mul(placement))?)?;
+            super::world_paint::paint_geometry(b, &projected, &far, owner, ink, lineweight)?;
+            super::world_roles::side_edges_of(b, &projected, &primitives, offset, ink, lineweight)?;
+        }
     }
     b.transparency = reference;
     Ok(())
