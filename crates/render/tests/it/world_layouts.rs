@@ -234,6 +234,21 @@ fn linear_dimension() -> cadcraft_doc::Dimension {
 }
 
 #[test]
+fn the_drawing_aware_world_adapter_resolves_dimension_layouts() {
+    let drawing = Drawing::new_metric();
+    let dimension = linear_dimension();
+    let mut entity = cadcraft_doc::Entity::new(cadcraft_doc::Handle(0x170), cadcraft_doc::EntityKind::Dimension(dimension.clone()));
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+    let parent = Mat4 { m: [[1.0, 0.5, 1.0, 2.0], [0.0, 2.0, 0.0, 3.0], [0.0, 0.0, 1.0, 4.0], [0.0, 0.0, 0.0, 1.0]] };
+    let expected =
+        cadcraft_doc::dimension_primitives(&dimension, Vec3::Z, &cadcraft_render::dimension_layout(&drawing, &dimension, Vec3::Z).unwrap(), &parent)
+            .unwrap();
+    let geometry = cadcraft_render::entity_world_geometry(&drawing, &entity, &parent).unwrap();
+    assert_eq!(geometry.primitives(), expected);
+    assert!(entity.world_geometry(&parent).is_err(), "a dimension cannot invent a layout without its style context");
+}
+
+#[test]
 fn a_plus_z_dimension_gives_the_world_lines_fills_and_text_the_renderer_draws() {
     use cadcraft_doc::dimension_primitives;
     use cadcraft_render::{dimension_in, dimension_layout};
