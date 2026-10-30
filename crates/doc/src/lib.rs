@@ -405,6 +405,26 @@ impl Drawing {
         self.commit_entity_candidate(candidate)
     }
 
+    /// Commit a canonical `candidate` for the existing entity with its handle: the entity and the candidate are both canonical
+    /// and of the same kind, the candidate's nested payloads (a multileader's context and block attributes, a block
+    /// reference's attributes) are canonical too, and its numbers are finite. Anything else refuses and leaves the drawing as
+    /// it was. It replaces the entity in its space the way [`Drawing::transform_entity`] does.
+    pub fn commit_canonical_entity(&mut self, candidate: Entity) -> Result<()> {
+        let h = candidate.handle;
+        let current = self.entity(h).ok_or(DocError::NoEntity(h))?;
+        if current.geometry_revision != entity::GeometryRevision::CanonicalV2 {
+            return Err(DocError::Invalid("A canonical edit needs an entity with a canonical payload.".into()));
+        }
+        if std::mem::discriminant(&current.kind) != std::mem::discriminant(&candidate.kind) {
+            return Err(DocError::Invalid("A canonical edit cannot change the kind of an entity.".into()));
+        }
+        candidate.require_canonical_geometry()?;
+        if !has_finite_numbers(&candidate) {
+            return Err(DocError::NonFinite(h));
+        }
+        self.commit_entity_candidate(candidate)
+    }
+
     fn commit_entity_candidate(&mut self, candidate: Entity) -> Result<()> {
         let h = candidate.handle;
         let space = self.space_of(h).ok_or(DocError::NoEntity(h))?;

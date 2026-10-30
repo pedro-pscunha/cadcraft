@@ -56,6 +56,25 @@ impl Entity {
         Ok(())
     }
 
+    /// Refuse a payload that is not canonical, nested payloads included (the inverse of [`Entity::require_legacy_geometry`]).
+    pub fn require_canonical_geometry(&self) -> Result<()> {
+        let refuse = || DocError::Invalid("This geometry payload is not canonical.".into());
+        if self.geometry_revision != GeometryRevision::CanonicalV2 {
+            return Err(refuse());
+        }
+        let attribute_ok = |a: &super::Attrib| {
+            a.geometry_revision == GeometryRevision::CanonicalV2
+                && a.multiline.as_ref().is_none_or(|m| m.geometry_revision == GeometryRevision::CanonicalV2)
+        };
+        let nested = match &self.kind {
+            EntityKind::AttDef(a) => attribute_ok(a),
+            EntityKind::Insert(i) => i.attribs.iter().all(attribute_ok),
+            EntityKind::MLeader(m) => m.require_canonical().is_ok(),
+            _ => true,
+        };
+        if nested { Ok(()) } else { Err(refuse()) }
+    }
+
     /// Run an unmigrated edit only on legacy payloads and commit a finite candidate atomically.
     pub fn try_legacy_edit<F, T>(&mut self, edit: F) -> Result<T>
     where
