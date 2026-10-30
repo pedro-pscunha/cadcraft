@@ -32,6 +32,68 @@ fn measurement(drawing: &Drawing, handle: u64) -> f64 {
 }
 
 #[test]
+fn edited_legacy_dimensions_measure_in_their_tilted_plane() {
+    use cadcraft_doc::{DimKind, EntityKind, GeometryRevision};
+    use cadcraft_geom::Vec3;
+    let mut drawing = source();
+    let world = |x: f64, y: f64| Vec3::new(y * std::f64::consts::FRAC_1_SQRT_2, -x, y * std::f64::consts::FRAC_1_SQRT_2);
+    for handle in [0x1182, 0x119A, 0x11B2] {
+        drawing
+            .modify_entity(Handle(handle), |entity| {
+                assert_eq!(entity.geometry_revision, GeometryRevision::LegacyProjectedV1);
+                let EntityKind::Dimension(dim) = &mut entity.kind else { panic!("dimension") };
+                dim.block = None;
+                dim.defpt = world(0.0, 0.0);
+                dim.p13 = world(0.0, 0.0);
+                dim.measurement = 999.0;
+                match handle {
+                    0x1182 => {
+                        dim.kind = DimKind::Linear { rotation: 0.0 };
+                        dim.p14 = world(6.0, 8.0);
+                    }
+                    0x119A => dim.p14 = world(3.0, 4.0),
+                    _ => {
+                        dim.p14 = world(10.0, 0.0);
+                        dim.p15 = world(5.0, 5.0);
+                        dim.p16 = Vec3::new(3.0, 1.0, 0.0);
+                    }
+                }
+            })
+            .unwrap();
+    }
+    for name in ["edited.dxf", "edited.dwg"] {
+        let bytes = cadcraft_io::write(&drawing, name).unwrap();
+        let reopened = cadcraft_io::read(&bytes, name).unwrap();
+        for (handle, expected) in [(0x1182, 6.0), (0x119A, 5.0), (0x11B2, std::f64::consts::FRAC_PI_4)] {
+            let actual = measurement(&reopened, handle);
+            assert!((actual - expected).abs() < 1e-12, "{name}: {handle:X} measured {actual}, expected {expected}");
+        }
+    }
+}
+
+#[test]
+fn an_edited_tilted_angular_dimension_keeps_its_45_degree_quadrant() {
+    let mut drawing = source();
+    drawing
+        .modify_entity(Handle(0x11B2), |entity| {
+            let cadcraft_doc::EntityKind::Dimension(dim) = &mut entity.kind else { panic!("dimension") };
+            dim.defpt = dim.defpt * 2.0;
+            dim.p13 = dim.p13 * 2.0;
+            dim.p14 = dim.p14 * 2.0;
+            dim.p15 = dim.p15 * 2.0;
+            dim.p16 = dim.p16 * 2.0;
+            dim.block = None;
+        })
+        .unwrap();
+    for name in ["angular.dxf", "angular.dwg"] {
+        let bytes = cadcraft_io::write(&drawing, name).unwrap();
+        let reopened = cadcraft_io::read(&bytes, name).unwrap();
+        let actual = measurement(&reopened, 0x11B2);
+        assert!((actual - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "{name}: {actual}");
+    }
+}
+
+#[test]
 fn unchanged_tilted_dimensions_keep_the_source_measurement_in_dxf_and_dwg() {
     let drawing = source();
     for name in ["unchanged.dxf", "unchanged.dwg"] {

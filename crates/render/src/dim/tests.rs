@@ -34,6 +34,29 @@ fn bbox(pts: &[Vec<Vec2>]) -> cadcraft_geom::Bounds2 {
 }
 
 #[test]
+fn two_line_angular_measurements_follow_the_quadrant_with_the_arc_point() {
+    for (arc_degrees, expected_degrees) in [(22.5_f64, 45.0_f64), (112.5, 135.0), (202.5, 45.0), (292.5, 135.0)] {
+        let mut d = lin((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), 0.0);
+        d.kind = DimKind::Angular;
+        d.p15 = Vec3::ZERO;
+        let angle = arc_degrees.to_radians();
+        d.p16 = Vec3::new(5.0 * angle.cos(), 5.0 * angle.sin(), 0.0);
+        let g = dimension_geometry(&d, &DimStyle::default(), 1.0);
+        assert!((g.measurement - expected_degrees.to_radians()).abs() < 1e-12, "arc={arc_degrees}: measured {}", g.measurement.to_degrees());
+    }
+}
+
+#[test]
+fn two_line_angular_measurement_uses_a_nonzero_ray_when_an_endpoint_is_the_vertex() {
+    let mut d = lin((0.0, 0.0), (-6.0, 6.0), (0.0, 10.0), 0.0);
+    d.kind = DimKind::Angular;
+    d.p15 = Vec3::ZERO;
+    d.p16 = Vec3::new(-2.692582403567251, 4.663689526544413, 0.0);
+    let g = dimension_geometry(&d, &DimStyle::default(), 1.0);
+    assert!((g.measurement - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "{}", g.measurement);
+}
+
+#[test]
 fn horizontal_measures_dx() {
     let g = dimension_geometry(&lin((0.0, 0.0), (10.0, 3.0), (0.0, 5.0), 0.0), &DimStyle::default(), 1.0);
     assert_eq!(g.value, "10.0000");

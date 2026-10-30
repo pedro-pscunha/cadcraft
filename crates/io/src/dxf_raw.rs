@@ -535,7 +535,9 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
 /// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
 /// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
-    let (marker, modelled): (&str, &[i32]) = match kind {
+    let retain_listed = kind == "MTEXT";
+    let (marker, codes): (&str, &[i32]) = match kind {
+        "MTEXT" => ("AcDbMText", &[46]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
@@ -552,9 +554,10 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
     for t in tags.iter().take_while(|t| t.code < 1000) {
         match t.code {
             100 => in_subclass = t.str().trim() == marker,
+            101 => in_subclass = false,
             // An application group (reactors, extension dictionary).
             102 => in_group = t.str().trim().starts_with('{'),
-            c if in_subclass && !in_group && !modelled.contains(&c) => out.push(raw(t)),
+            c if in_subclass && !in_group && codes.contains(&c) == retain_listed => out.push(raw(t)),
             _ => {}
         }
     }
@@ -1896,6 +1899,8 @@ fn record(
         None
     }
     .unwrap_or(xdata_at);
+    // MTEXT's own fields precede the embedded column object, whose codes have other meanings.
+    let subclass_at = if r.kind == "MTEXT" { b.iter().position(|t| t.code == 101).unwrap_or(xdata_at) } else { xdata_at };
     let rgb = b.iter().take(xdata_at).find(|t| t.code == 420).map(Tag::str);
     let has_book = b.iter().take(xdata_at).any(|t| t.code == 430);
     let handle_at = b.iter().position(|t| matches!(t.code, 5 | 105));
@@ -1912,10 +1917,14 @@ fn record(
             }
             out.extend(x.props.iter().filter(|p| replay(p)).map(|p| map.group(p)));
         }
-        if i == xdata_at
+        if i == subclass_at
             && let Some(x) = x
         {
             out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
+        }
+        if i == xdata_at
+            && let Some(x) = x
+        {
             xdata(map, x, &own_apps, out);
         }
         // Kept table fields replace the defaults the writer wrote.
@@ -1961,8 +1970,10 @@ fn record(
             }
             out.extend(x.props.iter().filter(|p| replay(p)).map(|p| map.group(p)));
         }
-        if xdata_at == b.len() {
+        if subclass_at == b.len() {
             out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
+        }
+        if xdata_at == b.len() {
             xdata(map, x, &own_apps, out);
         }
     }
