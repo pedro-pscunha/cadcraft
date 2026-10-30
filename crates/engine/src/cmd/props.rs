@@ -78,6 +78,65 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// The coordinate frame the payload of a canonical entity is in, from its family's contract (the `*_canonical.rs` modules of
+/// `cadcraft-doc`): WCS points and vectors, OCS points of the plane of `Common.extrusion`, or both (per field).
+enum PayloadFrame {
+    Wcs,
+    Ocs,
+    /// Field names of the `geometry` object and the frame of each.
+    Mixed(&'static [(&'static str, &'static str)]),
+    /// The family has no canonical contract that names one.
+    Unspecified,
+}
+
+fn payload_frame(kind: &EntityKind) -> PayloadFrame {
+    match kind {
+        // WCS points and vectors, the plane beside them.
+        EntityKind::Line(_)
+        | EntityKind::Ellipse(_)
+        | EntityKind::Spline(_)
+        | EntityKind::Helix(_)
+        | EntityKind::Ray(_)
+        | EntityKind::XLine(_)
+        | EntityKind::Polyline3d(_)
+        | EntityKind::PolylineMesh(_)
+        | EntityKind::Face3d(_)
+        | EntityKind::Image(_)
+        | EntityKind::MText(_)
+        | EntityKind::MLine(_)
+        | EntityKind::Leader(_)
+        | EntityKind::MLeader(_)
+        | EntityKind::Table(_)
+        | EntityKind::Tolerance(_) => PayloadFrame::Wcs,
+        // OCS points of the plane (the Z of a point is the elevation).
+        EntityKind::Circle(_)
+        | EntityKind::Arc(_)
+        | EntityKind::LwPolyline(_)
+        | EntityKind::Solid(_)
+        | EntityKind::Trace(_)
+        | EntityKind::Text(_)
+        | EntityKind::AttDef(_)
+        | EntityKind::Hatch(_) => PayloadFrame::Ocs,
+        // A position in WCS, its angle from the OCS X axis.
+        EntityKind::Point(_) => PayloadFrame::Mixed(&[("p", "wcs"), ("angle", "ocs")]),
+        // The insertion point in the OCS, each attribute in the plane of its own.
+        EntityKind::Insert(_) => PayloadFrame::Mixed(&[("insert", "ocs"), ("attribs", "attribute plane")]),
+        // The definition points in WCS, the text midpoint and the arc point in the OCS, the marks in WCS.
+        EntityKind::Dimension(_) => PayloadFrame::Mixed(&[
+            ("defpt", "wcs"),
+            ("p13", "wcs"),
+            ("p14", "wcs"),
+            ("p15", "wcs"),
+            ("textMid", "ocs"),
+            ("p16", "ocs"),
+            ("marks", "wcs"),
+        ]),
+        // The image frame in WCS, the clip in pixels.
+        EntityKind::Wipeout(_) => PayloadFrame::Mixed(&[("frame.origin", "wcs"), ("frame.u", "wcs"), ("frame.v", "wcs"), ("frame.clip", "pixels")]),
+        EntityKind::Region(_) | EntityKind::Viewport(_) | EntityKind::Unknown(_) => PayloadFrame::Unspecified,
+    }
+}
+
 pub(super) fn entity_props(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) -> Value {
     let mut v = json!({
         "handle": e.handle.hex(),
@@ -120,12 +179,24 @@ pub(super) fn entity_props(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) 
                 );
             }
         }
-        // A canonical entity reports its world values: the geometry above is in its own frame (the OCS of the extrusion, WCS for a
-        // LINE), so a LINE measures in space and a circle or arc also gives its WCS center.
+        // A canonical entity reports its world values: the geometry above is in the frame its family's contract names (`payload_frame`),
+        // so a LINE measures in space and a circle or arc also gives its WCS center.
         let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
         if canonical {
             o.insert("geometryRevision".into(), json!("canonical"));
-            o.insert("geometryFrame".into(), json!(if matches!(e.kind, EntityKind::Line(_)) { "wcs" } else { "ocs" }));
+            match payload_frame(&e.kind) {
+                PayloadFrame::Wcs => {
+                    o.insert("geometryFrame".into(), json!("wcs"));
+                }
+                PayloadFrame::Ocs => {
+                    o.insert("geometryFrame".into(), json!("ocs"));
+                }
+                PayloadFrame::Mixed(fields) => {
+                    o.insert("geometryFrame".into(), json!("mixed"));
+                    o.insert("geometryFieldFrames".into(), json!(fields.iter().copied().collect::<std::collections::BTreeMap<_, _>>()));
+                }
+                PayloadFrame::Unspecified => {}
+            }
             o.insert("extrusion".into(), json!([e.common.extrusion.x, e.common.extrusion.y, e.common.extrusion.z]));
             if let Some(center) = crate::canonical::world_center(d, e) {
                 o.insert("worldCenter".into(), json!([center.x, center.y, center.z]));
