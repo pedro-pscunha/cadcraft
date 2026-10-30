@@ -41,6 +41,7 @@ fn table() -> Table {
         row_styles: Default::default(),
         breaks: Default::default(),
         data_link: Default::default(),
+        overrides: Default::default(),
     }
 }
 

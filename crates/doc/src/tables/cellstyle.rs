@@ -256,6 +256,7 @@ impl Default for Table {
             row_styles: Vec::new(),
             breaks: None,
             data_link: None,
+            overrides: Default::default(),
         }
     }
 }

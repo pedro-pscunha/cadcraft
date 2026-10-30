@@ -106,6 +106,7 @@ mod style_typeface;
 mod svg_arc_budget;
 mod svg_tiny_extents;
 mod table_cellstyle_roundtrip;
+mod table_codes;
 mod table_style_codes;
 mod tables_objects_roundtrip;
 mod tablestyle_border_dwg;

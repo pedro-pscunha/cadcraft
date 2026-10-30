@@ -205,6 +205,7 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
         header: false,
         breaks: None,
         data_link: None,
+        overrides: Default::default(),
     }
 }
 
