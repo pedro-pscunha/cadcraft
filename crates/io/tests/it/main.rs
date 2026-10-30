@@ -1,6 +1,7 @@
 mod acad_interop;
 #[cfg(not(target_arch = "wasm32"))]
 mod acis_data_store;
+mod activation_graph;
 mod angle_header;
 mod annotative_roundtrip;
 mod arrow_block_refs;
