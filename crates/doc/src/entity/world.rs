@@ -296,17 +296,23 @@ pub enum WorldLayout<'a> {
 pub struct WorldGeometry {
     owner: Handle,
     primitives: Vec<WorldPrimitive>,
+    layout_to_world: Option<Mat4>,
 }
 
 impl WorldGeometry {
     /// Geometry owned by `owner` from primitives that are finite and well formed.
     pub fn from_primitives(owner: Handle, primitives: Vec<WorldPrimitive>) -> Result<WorldGeometry> {
         primitives.iter().try_for_each(WorldPrimitive::validate)?;
-        Ok(WorldGeometry { owner, primitives })
+        Ok(WorldGeometry { owner, primitives, layout_to_world: None })
     }
 
     pub fn primitives(&self) -> &[WorldPrimitive] {
         &self.primitives
+    }
+
+    /// Complete placement of a supplied local annotation layout, when that layout has one frame.
+    pub fn layout_to_world(&self) -> Option<&Mat4> {
+        self.layout_to_world.as_ref()
     }
 
     /// Project the completed WCS result into XY, or refuse an unrepresentable projection.
@@ -317,6 +323,11 @@ impl WorldGeometry {
         }
         Ok(out)
     }
+}
+
+fn layout_matrix(frame: &TextFrame, parent: &Mat4) -> Mat4 {
+    let (x, y, z, origin) = (frame.x_axis, frame.y_axis, frame.normal, frame.origin);
+    parent.mul(&Mat4 { m: [[x.x, y.x, z.x, origin.x], [x.y, y.y, z.y, origin.y], [x.z, y.z, z.z, origin.z], [0.0, 0.0, 0.0, 1.0]] })
 }
 
 fn transformed_conic(parent: &Mat4, center: Vec3, axis_u: Vec3, axis_v: Vec3, start: f64, end: f64) -> WorldPrimitive {
@@ -357,18 +368,36 @@ impl Entity {
             return Err(DocError::Invalid("A world geometry parent must be an affine transform.".into()));
         }
         if let Some(layout) = layout {
-            let primitives = match (&self.kind, layout) {
+            let (primitives, placement) = match (&self.kind, layout) {
                 (EntityKind::Dimension(dimension), WorldLayout::Dimension(layout)) => {
-                    super::dimension_primitives(dimension, self.common.extrusion, layout, parent)?
+                    let frame = self.world_ocs_frame()?;
+                    let frame = TextFrame {
+                        origin: frame.to_world(Vec3::new(0.0, 0.0, layout.elevation)),
+                        x_axis: frame.to_world(Vec3::new(1.0, 0.0, 0.0)),
+                        y_axis: frame.to_world(Vec3::new(0.0, 1.0, 0.0)),
+                        normal: frame.to_world(Vec3::Z),
+                    };
+                    (super::dimension_primitives(dimension, self.common.extrusion, layout, parent)?, Some(layout_matrix(&frame, parent)))
                 }
-                (EntityKind::Leader(leader), WorldLayout::Leader(arrow)) => super::leader_primitives(leader, self.common.extrusion, arrow, parent)?,
+                (EntityKind::Leader(leader), WorldLayout::Leader(arrow)) => {
+                    (super::leader_primitives(leader, self.common.extrusion, arrow, parent)?, None)
+                }
                 (EntityKind::Tolerance(tolerance), WorldLayout::Tolerance { layout, text_style }) => {
-                    super::tolerance_primitives(tolerance, self.common.extrusion, layout, text_style, parent)?
+                    let frame = tolerance.world_frame(self.common.extrusion)?;
+                    (super::tolerance_primitives(tolerance, self.common.extrusion, layout, text_style, parent)?, Some(layout_matrix(&frame, parent)))
                 }
-                (EntityKind::Table(table), WorldLayout::Table(layout)) => super::table_primitives(table, self.common.extrusion, layout, parent)?,
+                (EntityKind::Table(table), WorldLayout::Table(layout)) => {
+                    let frame = table.world_frame(self.common.extrusion)?;
+                    (super::table_primitives(table, self.common.extrusion, layout, parent)?, Some(layout_matrix(&frame, parent)))
+                }
                 _ => return Err(DocError::Invalid(format!("Entity {} has a mismatched world layout.", self.handle.hex()))),
             };
-            return WorldGeometry::from_primitives(self.handle, primitives);
+            if placement.as_ref().is_some_and(|matrix| !has_finite_numbers(matrix)) {
+                return Err(DocError::NonFinite(self.handle));
+            }
+            let mut geometry = WorldGeometry::from_primitives(self.handle, primitives)?;
+            geometry.layout_to_world = placement;
+            return Ok(geometry);
         }
         // Each family adds its complete field contract here, not a projected legacy fallback.
         let primitives = match &self.kind {
@@ -419,6 +448,6 @@ impl Entity {
         if primitives.iter().any(|primitive| primitive.validate().is_err()) {
             return Err(DocError::NonFinite(self.handle));
         }
-        Ok(WorldGeometry { owner: self.handle, primitives })
+        Ok(WorldGeometry { owner: self.handle, primitives, layout_to_world: None })
     }
 }

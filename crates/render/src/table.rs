@@ -127,13 +127,16 @@ struct Anchor {
     style: usize,
 }
 
+pub(crate) fn local_table(t: &Table) -> Table {
+    Table { insert: cadcraft_geom::Vec3::ZERO, dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0), ..t.clone() }
+}
+
 /// The layout of table `t` in the local coordinates of its frame, for the world builders: laid out as a table at the
 /// origin with the horizontal direction +X, so the insertion point is the top left corner at (0, 0), x runs along the
 /// table and rows have negative y. A broken table lays out every part. Colors and line weights are properties and stay
 /// with the entity.
 pub fn table_layout(d: &Drawing, t: &Table) -> TableLayout {
-    let at_origin = Table { insert: cadcraft_geom::Vec3::ZERO, dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0), ..t.clone() };
-    let g = table_geometry(d, &at_origin);
+    let g = table_geometry(d, &local_table(t));
     TableLayout {
         fills: g.fills.iter().map(|f| f.corners).collect(),
         lines: g.lines.iter().map(|l| [l.a, l.b]).collect(),

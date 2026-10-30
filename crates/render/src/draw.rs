@@ -109,7 +109,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<
     let tol = b.opts.tolerance / ctx.xf.scale_factor().max(1e-12);
     let lw = if b.opts.lineweights { lw } else { 0.0 };
     if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
-        return super::world_paint::draw(b, ctx, e, rgb, lw, lt.as_ref());
+        return super::world_paint::draw(b, ctx, e, rgb, lw, lt.as_ref(), ltscale);
     }
     // Stroke a polyline with the entity's linetype.
     let stroke = |b: &mut Builder, pts: &[Vec2]| match &lt {
