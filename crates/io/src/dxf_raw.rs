@@ -527,9 +527,9 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
 /// - `AcDbDimension`: the version (280) first, then the block, the points, the type and presentation groups, the measurement, the text,
 ///   the rotation, the normal and the style (DXF Reference).
 /// - `AcDbEntity`: measured on the entities of the AutoCAD 2010 and 2018 saves of Citycon, DPInc and Planeta.
-/// - `AcDbMText`, `AcDbText`, `AcDbWipeout`, `AcDbRasterImage`, `AcDbTextStyleTableRecord`, `AcDbLeader`, `AcDbPlotSettings`, `AcDbViewport`, `AcDbLayerTableRecord`: the same.
+/// - `AcDbMText`, `AcDbText`, `AcDbWipeout`, `AcDbRasterImage`, `AcDbTextStyleTableRecord`, `AcDbLeader`, `AcDbPlotSettings`, `AcDbViewport`, `AcDbViewportTableRecord`, `AcDbLayerTableRecord`: the same.
 /// - The embedded multiline text of an attribute (`AcDbAttribute`, `AcDbAttributeDefinition`, after their 101) follows the `AcDbMText` order.
-const SUBCLASS_ORDER: [(&str, &[i32]); 11] = [
+const SUBCLASS_ORDER: [(&str, &[i32]); 12] = [
     ("AcDbDimension", &[280, 2, 10, 11, 12, 70, 1, 71, 72, 41, 42, 73, 74, 75, 53, 51, 54, 210, 3]),
     ("AcDbEntity", &[67, 410, 8, 6, 347, 62, 420, 430, 440, 48, 60, 92, 160, 310, 370, 380, 390, 284, 348]),
     ("AcDbMText", &[10, 40, 41, 46, 71, 72, 3, 1, 7, 210, 11, 73, 44, 90, 63, 421, 45, 441]),
@@ -542,6 +542,13 @@ const SUBCLASS_ORDER: [(&str, &[i32]); 11] = [
         &[
             10, 40, 41, 68, 69, 12, 13, 14, 15, 16, 17, 42, 43, 44, 45, 50, 51, 72, 331, 90, 1, 281, 71, 74, 110, 120, 130, 111, 121, 131, 112, 122,
             132, 79, 146, 170, 61, 348, 292, 282, 141, 142, 63, 421, 361,
+        ],
+    ),
+    (
+        "AcDbViewportTableRecord",
+        &[
+            2, 70, 10, 11, 12, 13, 14, 15, 16, 17, 40, 41, 42, 43, 44, 50, 51, 71, 72, 73, 74, 75, 76, 77, 78, 281, 65, 110, 120, 130, 111, 121, 131,
+            112, 122, 132, 79, 146, 348, 60, 61, 292, 282, 141, 142, 63, 421, 361,
         ],
     ),
     ("AcDbLayerTableRecord", &[2, 70, 62, 420, 430, 6, 290, 370, 390, 347, 348]),

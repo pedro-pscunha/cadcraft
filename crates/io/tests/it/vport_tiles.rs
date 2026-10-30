@@ -149,14 +149,19 @@ fn a_skipped_tile_does_not_shift_the_views_of_the_next_ones() {
     }
 }
 
-/// A single `*Active` tile with a visual style (348) has that group once, not once from the tile and once from the record's kept groups.
+/// A single `*Active` tile with a visual style (348) has that group once, not once from the tile and once from the record's kept groups, and
+/// its groups are in AutoCAD's order.
 #[test]
 fn a_single_active_viewport_has_its_visual_style_once() {
-    let source = file(&[tile("70", ("0", "0"), ("1", "1"), ("100", "200"), "50", &[(16, "0"), (26, "0"), (36, "1"), (348, "61")])], STYLES);
+    let source =
+        file(&[tile("70", ("0", "0"), ("1", "1"), ("100", "200"), "50", &[(16, "0"), (26, "0"), (36, "1"), (42, "35"), (348, "61")])], STYLES);
     let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
     for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&d)) {
         let tiles = active_tiles(&text);
         assert_eq!(tiles.len(), 1, "{what}");
         assert_eq!(tiles[0].iter().filter(|t| t.code == 348).count(), 1, "{what}: {:?}", tiles[0]);
+        // And in AutoCAD's order: the view direction (16) before the height (40), the lens (42) and the visual style (348).
+        let at = |code: i32| tiles[0].iter().position(|t| t.code == code).unwrap_or_else(|| panic!("{what}: no group {code}"));
+        assert!(at(12) < at(16) && at(16) < at(40) && at(40) < at(42) && at(42) < at(348), "{what}: {:?}", tiles[0]);
     }
 }
