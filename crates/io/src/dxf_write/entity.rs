@@ -653,6 +653,11 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
                     }
                     continue;
                 }
+                // The FIELD object the cell shows; the cell text is its cached value. The handle is the one the object had in the
+                // file read (`dxf_raw` rewrites it to the written one).
+                if let Some(field) = cell_ref.field {
+                    w.s(344, field.hex());
+                }
                 // Long text: 250-character code-2 chunks, the rest in code 1.
                 let chars: Vec<char> = cell.map(|x| x.text.chars().collect()).unwrap_or_default();
                 let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();

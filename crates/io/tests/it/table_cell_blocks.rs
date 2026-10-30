@@ -202,3 +202,38 @@ fn a_native_block_cell_is_not_turned_into_a_text_cell_by_a_save() {
         assert_eq!((saved.0, saved.1.as_deref(), saved.2), (CellType::Block, Some("Logo"), expected), "{version:?}: after a save");
     }
 }
+
+#[test]
+fn a_block_cell_whose_extents_are_refused_is_still_saved_as_it_is() {
+    use cadcraft_doc::GeometryRevision;
+    let mut d = drawing();
+    // A canonical entity in the block makes a legacy measurement refuse: the table cannot place the block in its graphics.
+    let mut logo = d.block("Logo").unwrap().as_ref().clone();
+    logo.entities.push(Entity {
+        geometry_revision: GeometryRevision::CanonicalV2,
+        ..Entity::new(Handle(0x4203), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 2.0 }))
+    });
+    d.blocks.insert("Logo".into(), std::sync::Arc::new(logo));
+    let text = dxf(&d);
+    let g = groups(&text, "ACAD_TABLE");
+    let at = |code: i32| g.iter().filter(|(c, _)| *c == code).map(|(_, v)| v.clone()).collect::<Vec<_>>();
+    assert_eq!(
+        (at(171), at(144), at(179), at(331), at(300)),
+        (
+            ["1", "2", "1", "1"].map(String::from).to_vec(),
+            ["2.0".to_string()].to_vec(),
+            ["1".to_string()].to_vec(),
+            ["4202".to_string()].to_vec(),
+            ["Acme".to_string()].to_vec()
+        )
+    );
+    assert_eq!(at(340).len(), 1);
+    assert_eq!(first_table(&read_dxf(text.as_bytes()).unwrap()).cells[0][1].block, first_table(&d).cells[0][1].block);
+    // The anonymous block holds no reference for it.
+    let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+    let blocks = sections(&tags).into_iter().find(|s| s.name == "BLOCKS").unwrap();
+    let recs = records(&blocks.tags);
+    let start = recs.iter().position(|(k, t)| k == "BLOCK" && t.iter().any(|t| t.code == 2 && t.str().starts_with("*T"))).unwrap();
+    let end = recs[start..].iter().position(|(k, _)| k == "ENDBLK").map_or(recs.len(), |p| start + p);
+    assert!(recs[start..end].iter().all(|(k, _)| k != "INSERT"));
+}
