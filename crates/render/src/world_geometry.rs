@@ -28,6 +28,18 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
     spend(remaining, 1, entity.handle)?;
     match &entity.kind {
         EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining),
+        EntityKind::MLeader(leader) => {
+            let block = leader.block.as_ref().and_then(|insert| drawing.block(&insert.block));
+            let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
+            let arrow = crate::mleader_arrow_layout(drawing, leader);
+            let world = cadcraft_doc::mleader_primitives(leader, base, &arrow, parent)?;
+            let mut primitives = world.primitives;
+            if let (Some(block), Some(matrix)) = (block, world.block) {
+                spend(remaining, 1, entity.handle)?;
+                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives)?;
+            }
+            WorldGeometry::from_primitives(entity.handle, primitives)
+        }
         EntityKind::Dimension(dimension) => {
             let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
             entity.world_geometry_with_layout(parent, Some(WorldLayout::Dimension(&layout)))
@@ -47,6 +59,28 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
         }
         _ => entity.world_geometry(parent),
     }
+}
+
+fn append_block_geometry(
+    drawing: &Drawing,
+    block: &cadcraft_doc::Block,
+    parent: &Mat4,
+    depth: usize,
+    remaining: &mut usize,
+    primitives: &mut Vec<WorldPrimitive>,
+) -> cadcraft_doc::Result<()> {
+    for child in block.entities.iter() {
+        // Definitions are replaced by instances; unknown records have no modeled display geometry.
+        if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_))
+            || !child.common.visible
+            || (child.common.layer != "0" && drawing.layer(&child.common.layer).is_some_and(|layer| !layer.visible()))
+        {
+            continue;
+        }
+        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining)?;
+        primitives.extend_from_slice(geometry.primitives());
+    }
+    Ok(())
 }
 
 fn spend(remaining: &mut usize, count: usize, owner: Handle) -> cadcraft_doc::Result<()> {
@@ -80,17 +114,7 @@ fn insert_geometry(
                     .world_transform(entity.common.extrusion, block.base, column, row)
                     .map_err(|error| if matches!(error, DocError::NonFinite(_)) { DocError::NonFinite(entity.handle) } else { error })?;
                 let complete = parent.mul(&local);
-                for child in block.entities.iter() {
-                    // Definitions are replaced by instances; unknown records have no modeled display geometry.
-                    if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_))
-                        || !child.common.visible
-                        || (child.common.layer != "0" && drawing.layer(&child.common.layer).is_some_and(|layer| !layer.visible()))
-                    {
-                        continue;
-                    }
-                    let geometry = geometry_in(drawing, child, &complete, depth + 1, remaining)?;
-                    primitives.extend_from_slice(geometry.primitives());
-                }
+                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives)?;
             }
         }
     }
