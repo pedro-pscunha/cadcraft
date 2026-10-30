@@ -170,7 +170,7 @@ fn plot_styled() -> CadDocument {
 }
 
 #[test]
-fn user_dxf_plot_styles_use_only_standard_entity_groups() {
+fn user_dxf_plot_styles_use_the_public_type_and_pointer_groups() {
     let source = acadrust::DwgWriter::write_to_vec(&plot_styled()).unwrap();
     for style in ["Color_1", "ByBlock", "ByDictionaryDefault"] {
         let mut drawing = cadcraft_io::read(&source, "x.dwg").unwrap();
@@ -190,6 +190,7 @@ fn user_dxf_plot_styles_use_only_standard_entity_groups() {
         let tags = cadcraft_dxf::parse(&dxf).unwrap();
         let mut entity_groups = false;
         let mut named = 0;
+        let mut types = Vec::new();
         for tag in &tags {
             if tag.code == 0 {
                 entity_groups = false;
@@ -198,10 +199,20 @@ fn user_dxf_plot_styles_use_only_standard_entity_groups() {
                 entity_groups = tag.str() == "AcDbEntity";
             }
             if entity_groups {
-                assert_ne!(tag.code, 380, "{style}: private plot-style flags in user DXF");
+                if tag.code == 380 {
+                    types.push(tag.i64());
+                }
                 named += usize::from(tag.code == 390);
             }
+            assert!(!(tag.code == 1000 && tag.str() == "PLOTSTYLE"), "{style}: a private plot-style xdata in user DXF");
         }
+        // The public groups: 380 is the plot style type (3 = by object with its 390 pointer, 1 = by block, 2 = by dictionary default).
+        let expected = match style {
+            "Color_1" => 3,
+            "ByBlock" => 1,
+            _ => 2,
+        };
+        assert!(!types.is_empty() && types.iter().all(|t| *t == expected), "{style}: group 380 values {types:?}");
         assert_eq!(named > 0, style == "Color_1", "{style}: only named objects use group 390");
         let back = cadcraft_io::read_dxf(&dxf).unwrap();
         for entity in back.model.iter() {
@@ -555,4 +566,17 @@ fn a_table_style_keeps_the_byblock_linetype_of_its_borders() {
             assert_eq!(handles, vec![by_block; 6], "{what}: override {key}");
         }
     }
+}
+
+#[test]
+fn a_file_saved_with_the_old_private_plot_style_xdata_still_reads() {
+    // Earlier saves wrote ByBlock as `CADCRAFT` xdata `PLOTSTYLE 1` instead of group 380; those files keep their plot style.
+    let text = "0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n100\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n\
+                1001\nCADCRAFT\n1000\nPLOTSTYLE\n1070\n1\n0\nENDSEC\n0\nEOF\n";
+    let d = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(d.model.iter().next().unwrap().common.plot_style, "ByBlock");
+    // And saving it writes the public group, not the xdata.
+    let saved = cadcraft_io::write_dxf(&d);
+    assert!(!saved.contains("PLOTSTYLE\n") || saved.contains("CPLOTSTYLE"), "the private xdata was written again");
+    assert!(cadcraft_dxf::parse(saved.as_bytes()).unwrap().windows(2).any(|p| p[0].code == 380 && p[0].i64() == 1));
 }
