@@ -10,16 +10,19 @@ pub(crate) fn allocate_handle(next: &mut u64) -> Handle {
 
 impl EntityKind {
     pub fn polyline_records(&self) -> impl Iterator<Item = &crate::PolylineRecord> {
-        let (vertices, fit, mesh, seqend) = match self {
+        let (vertices, fit, fit3, mesh, seqend) = match self {
             Self::LwPolyline(p) => {
-                (if p.saved_fit().is_some() { &[][..] } else { p.records.vertices.as_slice() }, p.saved_fit(), None, p.records.seqend.as_ref())
+                (if p.saved_fit().is_some() { &[][..] } else { p.records.vertices.as_slice() }, p.saved_fit(), None, None, p.records.seqend.as_ref())
             }
-            Self::Polyline3d(p) => (p.records.vertices.as_slice(), None, None, p.records.seqend.as_ref()),
-            Self::PolylineMesh(mesh) => (&[][..], None, Some(mesh), mesh.seqend.as_ref()),
-            _ => (&[][..], None, None, None),
+            Self::Polyline3d(p) => {
+                (if p.saved_fit().is_some() { &[][..] } else { p.records.vertices.as_slice() }, None, p.saved_fit(), None, p.records.seqend.as_ref())
+            }
+            Self::PolylineMesh(mesh) => (&[][..], None, None, Some(mesh), mesh.seqend.as_ref()),
+            _ => (&[][..], None, None, None, None),
         };
         fit.into_iter()
             .flat_map(|f| f.vertices.iter().map(|v| &v.record))
+            .chain(fit3.into_iter().flat_map(|f| f.vertices.iter().map(|v| &v.record)))
             .chain(vertices)
             .chain(mesh.into_iter().flat_map(|m| m.vertices.iter().map(|v| &v.vertex.record)))
             .chain(seqend)
@@ -35,7 +38,14 @@ impl EntityKind {
                 }
                 &mut p.records
             }
-            Self::Polyline3d(p) => &mut p.records,
+            Self::Polyline3d(p) => {
+                if let Some(fit) = &mut p.fit {
+                    for vertex in &mut fit.vertices {
+                        edit(&mut vertex.record);
+                    }
+                }
+                &mut p.records
+            }
             Self::PolylineMesh(mesh) => {
                 for vertex in &mut mesh.vertices {
                     edit(&mut vertex.vertex.record);
@@ -63,13 +73,23 @@ impl EntityKind {
             Self::MLeader(m) => {
                 out.extend(m.block.iter_mut().flat_map(|i| i.attribs.iter_mut()).filter_map(|a| a.handle.as_mut()));
             }
+            // The vertex records the writer writes: the fit data's while it describes the polyline, else the plain ones.
             Self::LwPolyline(p) => {
-                if let Some(fit) = &mut p.fit {
-                    out.extend(fit.vertices.iter_mut().filter_map(|v| v.record.handle.as_mut()));
+                let fitted = p.saved_fit().is_some();
+                match &mut p.fit {
+                    Some(fit) if fitted => out.extend(fit.vertices.iter_mut().filter_map(|v| v.record.handle.as_mut())),
+                    _ => out.extend(p.records.vertices.iter_mut().filter_map(|r| r.handle.as_mut())),
                 }
-                out.extend(p.records.vertices.iter_mut().chain(p.records.seqend.as_mut()).filter_map(|r| r.handle.as_mut()));
+                out.extend(p.records.seqend.as_mut().and_then(|r| r.handle.as_mut()));
             }
-            Self::Polyline3d(p) => out.extend(p.records.vertices.iter_mut().chain(p.records.seqend.as_mut()).filter_map(|r| r.handle.as_mut())),
+            Self::Polyline3d(p) => {
+                let fitted = p.saved_fit().is_some();
+                match &mut p.fit {
+                    Some(fit) if fitted => out.extend(fit.vertices.iter_mut().filter_map(|v| v.record.handle.as_mut())),
+                    _ => out.extend(p.records.vertices.iter_mut().filter_map(|r| r.handle.as_mut())),
+                }
+                out.extend(p.records.seqend.as_mut().and_then(|r| r.handle.as_mut()));
+            }
             Self::PolylineMesh(m) => {
                 out.extend(m.vertices.iter_mut().filter_map(|v| v.vertex.record.handle.as_mut()));
                 out.extend(m.seqend.as_mut().and_then(|r| r.handle.as_mut()));
