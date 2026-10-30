@@ -73,6 +73,30 @@ fn paper_plot_fields_survive_two_saves() {
 }
 
 #[test]
+fn a_scale_only_edit_keeps_unrelated_source_plot_fields() {
+    let source = fixture(2, 3, true);
+    let expected = plot(source.as_bytes());
+    let mut drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    drawing.layouts.iter_mut().find(|l| l.name == "Sheet").unwrap().page.scale = 0.5;
+    for format in ["edited.dxf", "edited.dwg"] {
+        let saved = cadcraft_io::write(&drawing, format).unwrap();
+        let dxf = if format.ends_with("dwg") { cadcraft_dwg::dwg_to_dxf(&saved).unwrap() } else { saved };
+        let actual = plot(&dxf);
+        for code in [1, 6] {
+            assert_eq!(value(&actual, code), value(&expected, code), "{format}: {code}");
+        }
+        for code in [72, 73, 74, 44, 45] {
+            assert_eq!(value(&actual, code).parse::<f64>().unwrap(), value(&expected, code).parse::<f64>().unwrap(), "{format}: {code}");
+        }
+        assert_eq!(value(&actual, 70).parse::<i64>().unwrap() & 16, 0);
+        assert_eq!(value(&actual, 75).parse::<i64>().unwrap(), 16);
+        assert_eq!(value(&actual, 142).parse::<f64>().unwrap(), 0.5);
+        assert_eq!(value(&actual, 143).parse::<f64>().unwrap(), 1.0);
+        assert_eq!(value(&actual, 147).parse::<f64>().unwrap(), 0.5);
+    }
+}
+
+#[test]
 fn page_edits_replace_only_the_source_fields_whose_meaning_changes() {
     let mut drawing = cadcraft_io::read_dxf(fixture(2, 3, true).as_bytes()).unwrap();
     let page = &mut drawing.layouts.iter_mut().find(|l| l.name == "Sheet").unwrap().page;
