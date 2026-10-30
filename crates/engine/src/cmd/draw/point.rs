@@ -8,9 +8,16 @@ pub(super) fn run_point(s: &mut Session, p: &Value) -> Result<Value> {
         Some(a) => vec![a],
         None => points_param(p, "points").ok_or_else(|| bad("point", "`at` or `points` is required"))?,
     };
+    // The Z of a point is its third number; a point without one is at the current elevation.
+    let elevation = s.elevation();
+    let z_of = |v: Option<&Value>| v.and_then(|v| v.get(2)).and_then(Value::as_f64).filter(|z| z.is_finite()).unwrap_or(elevation);
+    let zs: Vec<f64> = match p.get("at") {
+        Some(a) if point_param(p, "at").is_some() => vec![z_of(Some(a))],
+        _ => (0..pts.len()).map(|i| z_of(p.get("points").and_then(|v| v.get(i)))).collect(),
+    };
     let mut hs = Vec::new();
-    for q in pts {
-        hs.push(s.add_entity(EntityKind::Point(Point { p: v3(q), angle: 0.0 }))?.hex());
+    for (q, z) in pts.into_iter().zip(zs) {
+        hs.push(s.add_entity(EntityKind::Point(Point { p: q.to3(z), angle: 0.0 }))?.hex());
     }
     Ok(json!({ "handles": hs }))
 }
@@ -66,7 +73,7 @@ impl Interactive for PointM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
-                s.add_entity(EntityKind::Point(Point { p: v3(p), angle: 0.0 }))?;
+                s.add_entity(EntityKind::Point(Point { p: p.to3(s.point_z(None)), angle: 0.0 }))?;
                 Ok(if self.multiple { Step::Continue } else { Step::Done })
             }
             Input::Enter => Ok(Step::Done),

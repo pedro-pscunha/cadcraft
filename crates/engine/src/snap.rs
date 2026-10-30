@@ -7,8 +7,8 @@ mod viewport;
 
 pub use viewport::ViewportPoint;
 
-use cadcraft_doc::{Drawing, EntityKind, Insert, MAX_BLOCK_DEPTH, Prim, Space};
-use cadcraft_geom::{Bounds2, Circle, EPS, Ellipse, Mat3, PI, Segment, Vec2, intersect_ext};
+use cadcraft_doc::{Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MAX_BLOCK_DEPTH, Prim, Space, WorldPrimitive};
+use cadcraft_geom::{Bounds2, Circle, EPS, Ellipse, Mat3, Mat4, PI, Segment, Vec2, intersect_ext};
 use serde::Serialize;
 
 /// OSMODE bits.
@@ -312,7 +312,7 @@ fn osnap_in_with_prims(
     frozen: &[String],
     clip: Option<Bounds2>,
 ) -> Option<(Option<SnapHit>, Vec<Prim>)> {
-    let (mut cands, near_prims) = gather_in(d, space, ix, cursor, aperture, osmode, frozen)?;
+    let Gathered { mut cands, near: near_prims, world } = gather_in(d, space, ix, cursor, aperture, osmode, frozen)?;
     // Intersections between nearby primitives; Apparent Intersection also where their extensions
     // meet (lines extended, arcs as full circles: in 2D, the "apparent" crossing of objects
     // that don't reach each other).
@@ -349,8 +349,7 @@ fn osnap_in_with_prims(
             }
         }
     }
-    let hit =
-        finish(cands, &near_prims, cursor, aperture, osmode, base, deferred, clip).map(|h| crate::canonical::with_world(d, space, ix, h, frozen));
+    let hit = finish(cands, &near_prims, cursor, aperture, osmode, base, deferred, clip).map(|h| crate::canonical::with_world(world, h));
     Some((hit, near_prims))
 }
 
@@ -403,7 +402,13 @@ pub(crate) fn gather(
     aperture: f64,
     osmode: u32,
 ) -> Option<(Vec<(u32, Vec2)>, Vec<Prim>)> {
-    gather_in(d, space, ix, cursor, aperture, osmode, &[])
+    gather_in(d, space, ix, cursor, aperture, osmode, &[]).map(|g| (g.cands, g.near))
+}
+
+struct Gathered {
+    cands: Vec<(u32, Vec2)>,
+    near: Vec<Prim>,
+    world: Vec<WorldPrimitive>,
 }
 
 fn gather_in(
@@ -414,10 +419,11 @@ fn gather_in(
     aperture: f64,
     osmode: u32,
     frozen: &[String],
-) -> Option<(Vec<(u32, Vec2)>, Vec<Prim>)> {
+) -> Option<Gathered> {
     let probe = Bounds2::new(cursor, cursor).expand(aperture);
     let mut cands: Vec<(u32, Vec2)> = Vec::new();
     let mut near_prims: Vec<Prim> = Vec::new();
+    let mut world = Vec::new();
     let mut count = 0usize;
     let mut budget = MAX_BLOCK_LEAVES;
     for (e, known) in crate::select::candidates(d, space, ix, &probe.expand(aperture), true, false)? {
@@ -425,7 +431,7 @@ fn gather_in(
             continue;
         }
         let inf = crate::select::is_infinite(e);
-        if !inf && !crate::select::bounds_of(d, e, known).expand(aperture).intersects(&probe) {
+        if !inf && !crate::select::bounds_of(d, e, known).expand(aperture).intersects(&probe) && cadcraft_render::entity_extents(d, e, 0).is_ok() {
             continue;
         }
         count += 1;
@@ -437,7 +443,7 @@ fn gather_in(
             if osmode & mode::INS != 0 {
                 cands.extend(flat.inserts.iter().map(|p| (mode::INS, *p)));
             }
-            let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims };
+            let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims, world: &mut world };
             sink.canonical(&e.kind, &flat);
             continue;
         }
@@ -448,7 +454,7 @@ fn gather_in(
                 EntityKind::Tolerance(t) => cands.push((mode::INS, t.insert.xy())),
                 EntityKind::Insert(i) => {
                     cands.push((mode::INS, i.insert.xy()));
-                    cands.extend(i.attribs.iter().filter(|a| !a.invisible).map(|a| (mode::INS, a.text.justify_point())));
+                    attribute_inserts(d, i, &mut cands);
                 }
                 EntityKind::AttDef(a) => cands.push((mode::INS, a.text.justify_point())),
                 // A multileader: its text's insertion point, or its block content's.
@@ -459,17 +465,44 @@ fn gather_in(
                 _ => {}
             }
         }
-        let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims };
+        let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims, world: &mut world };
         sink.object(&e.kind, None);
         // A block reference snaps to the objects inside it, placed by its transform.
-        if let EntityKind::Insert(ins) = &e.kind {
-            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, frozen, &mut |k, m| sink.object(k, Some(m)));
+        if let EntityKind::Insert(_) = &e.kind {
+            block_leaves(d, e, &BlockFrame::IDENTITY, 0, &mut budget, frozen, &mut |entity, frame| sink.leaf(d, entity, frame));
         }
         if let EntityKind::Dimension(dm) = &e.kind {
             sink.dimension(d, dm, &mut budget, frozen);
         }
     }
-    Some((cands, near_prims))
+    if budget == 0 || count > 2000 {
+        world.clear();
+    }
+    Some(Gathered { cands, near: near_prims, world })
+}
+
+fn attribute_inserts(d: &Drawing, insert: &Insert, cands: &mut Vec<(u32, Vec2)>) {
+    for attribute in insert.attribs.iter().filter(|a| !a.invisible) {
+        let canonical_multiline = attribute.multiline.as_ref().filter(|m| m.geometry_revision == GeometryRevision::CanonicalV2);
+        if attribute.geometry_revision == GeometryRevision::LegacyProjectedV1 && canonical_multiline.is_none() {
+            cands.push((mode::INS, attribute.text.justify_point()));
+            continue;
+        }
+        if attribute.props.visible == Some(false) || (attribute.multiline.is_some() && canonical_multiline.is_none()) {
+            continue;
+        }
+        let (kind, normal, thickness) = match canonical_multiline {
+            Some(multiline) => (EntityKind::MText(multiline.mtext.clone()), multiline.normal, 0.0),
+            None => (EntityKind::Text(attribute.text.clone()), attribute.plane.normal, attribute.plane.thickness),
+        };
+        let mut entity = Entity::new(Handle(0), kind);
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        entity.common.extrusion = normal;
+        entity.common.thickness = thickness;
+        if let Some(flat) = crate::canonical::flatten(d, &entity) {
+            cands.extend(flat.inserts.into_iter().map(|point| (mode::INS, point)));
+        }
+    }
 }
 
 /// Picks the best of the gathered candidates, adding the base-dependent and deferred snaps.
@@ -574,9 +607,25 @@ struct Sink<'a> {
     probe: Bounds2,
     cands: &'a mut Vec<(u32, Vec2)>,
     near: &'a mut Vec<Prim>,
+    world: &'a mut Vec<WorldPrimitive>,
 }
 
 impl Sink<'_> {
+    fn leaf(&mut self, d: &Drawing, entity: &Entity, frame: &BlockFrame) {
+        if entity.geometry_revision == GeometryRevision::CanonicalV2 {
+            if let Some(parent) = &frame.world
+                && let Some(flat) = crate::canonical::flatten_in(d, entity, parent)
+            {
+                if self.osmode & mode::INS != 0 {
+                    self.cands.extend(flat.inserts.iter().map(|p| (mode::INS, *p)));
+                }
+                self.canonical(&entity.kind, &flat);
+            }
+        } else {
+            self.object(&entity.kind, Some(&frame.legacy));
+        }
+    }
+
     /// The snap points of one object; `xf` places an object from inside a block reference
     /// (whose primitives far from the cursor are skipped).
     fn object(&mut self, kind: &EntityKind, xf: Option<&Mat3>) {
@@ -615,6 +664,7 @@ impl Sink<'_> {
         if self.osmode & mode::HATCH == 0 && matches!(kind, EntityKind::Hatch(_)) {
             return;
         }
+        self.world.extend(flat.world.iter().cloned());
         for p in &flat.prims {
             if !prim_near(p, &self.probe, self.aperture) {
                 continue;
@@ -749,7 +799,8 @@ impl Sink<'_> {
                     col_spacing: 0.0,
                     row_spacing: 0.0,
                 };
-                block_leaves(d, &ins, &Mat3::IDENTITY, 0, budget, frozen, &mut |k, m| self.object(k, Some(m)));
+                let entity = Entity::new(Handle(0), EntityKind::Insert(ins));
+                block_leaves(d, &entity, &BlockFrame::IDENTITY, 0, budget, frozen, &mut |entity, frame| self.leaf(d, entity, frame));
             }
             None => {
                 let g = cadcraft_render::dimension_in(d, dm);
@@ -791,10 +842,28 @@ fn dim_def_points(dm: &cadcraft_doc::Dimension) -> Vec<Vec2> {
     pts.into_iter().map(|p| p.xy()).filter(|p| p.is_finite()).collect()
 }
 
+#[derive(Clone, Copy)]
+struct BlockFrame {
+    legacy: Mat3,
+    world: Option<Mat4>,
+}
+impl BlockFrame {
+    const IDENTITY: Self = Self { legacy: Mat3::IDENTITY, world: Some(Mat4::IDENTITY) };
+}
+
 /// Calls `f` with each object drawn by a block reference and the transform placing it, nested
 /// references expanded (within [`MAX_BLOCK_DEPTH`] levels and `budget` objects); objects that
 /// aren't drawn (hidden, on a layer that is off or frozen, attribute definitions) are left out.
-fn block_leaves(d: &Drawing, ins: &Insert, m: &Mat3, depth: usize, budget: &mut usize, frozen: &[String], f: &mut dyn FnMut(&EntityKind, &Mat3)) {
+fn block_leaves(
+    d: &Drawing,
+    entity: &Entity,
+    frame: &BlockFrame,
+    depth: usize,
+    budget: &mut usize,
+    frozen: &[String],
+    f: &mut dyn FnMut(&Entity, &BlockFrame),
+) {
+    let EntityKind::Insert(ins) = &entity.kind else { return };
     if depth >= MAX_BLOCK_DEPTH {
         return;
     }
@@ -811,7 +880,11 @@ fn block_leaves(d: &Drawing, ins: &Insert, m: &Mat3, depth: usize, budget: &mut 
             }
             *budget -= 1;
             let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
-            let mm = m.then_before(Mat3::translate(off).then_before(ins.transform(blk.base.xy())));
+            let legacy = frame.legacy.then_before(Mat3::translate(off).then_before(ins.transform(blk.base.xy())));
+            // Legacy INSERT fields already use their explicit normalized XY placement.
+            let normal = if entity.geometry_revision == GeometryRevision::CanonicalV2 { entity.common.extrusion } else { cadcraft_geom::Vec3::Z };
+            let world = frame.world.and_then(|parent| ins.world_transform(normal, blk.base, c, r).ok().map(|local| parent.mul(&local)));
+            let child_frame = BlockFrame { legacy, world };
             for be in blk.entities.iter() {
                 if *budget == 0 {
                     return;
@@ -825,8 +898,8 @@ fn block_leaves(d: &Drawing, ins: &Insert, m: &Mat3, depth: usize, budget: &mut 
                 }
                 match &be.kind {
                     EntityKind::AttDef(_) => {}
-                    EntityKind::Insert(inner) => block_leaves(d, inner, &mm, depth + 1, budget, frozen, f),
-                    k => f(k, &mm),
+                    EntityKind::Insert(_) => block_leaves(d, be, &child_frame, depth + 1, budget, frozen, f),
+                    _ => f(be, &child_frame),
                 }
             }
         }

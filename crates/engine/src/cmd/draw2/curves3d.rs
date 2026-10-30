@@ -1,6 +1,6 @@
 use super::{
     Accept, EntityKind, Handle, Helix, HelixConstrain, Input, Interactive, MAX_GEN, Polyline3d, Prompt, Result, Session, Spline, Step, Value, Vec2,
-    Vec3, added, bad, bool_or, circle, curves, f64_or, f64_req, line, number, other, point_req, points_param, v3,
+    Vec3, added, bad, bool_or, circle, curves, f64_or, f64_req, number, other, point_req, points_param,
 };
 
 // =====================================================================================
@@ -32,13 +32,19 @@ pub(super) fn run_3dpoly(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 pub(super) struct Poly3dM {
     pts: Vec<Vec2>,
+    /// The Z of each point of `pts`.
+    zs: Vec<f64>,
     handle: Option<Handle>,
 }
 
 impl Poly3dM {
     fn sync(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        let k =
-            EntityKind::Polyline3d(Polyline3d { records: Default::default(), points: self.pts.iter().map(|p| v3(*p)).collect(), closed, fit: None });
+        let k = EntityKind::Polyline3d(Polyline3d {
+            records: Default::default(),
+            points: self.pts.iter().zip(&self.zs).map(|(p, z)| p.to3(*z)).collect(),
+            closed,
+            fit: None,
+        });
         match (self.handle, self.pts.len() >= 2) {
             (Some(h), true) => s.doc_mut()?.modify_entity(h, |e| e.kind = k)?,
             (None, true) => self.handle = Some(s.add_entity(k)?),
@@ -66,14 +72,17 @@ impl Interactive for Poly3dM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
-                if self.pts.last().is_none_or(|l| !l.near(p, 1e-12)) && self.pts.len() < MAX_GEN {
+                let z = s.point_z(self.zs.last().copied());
+                if self.pts.last().zip(self.zs.last()).is_none_or(|(l, lz)| !(l.near(p, 1e-12) && *lz == z)) && self.pts.len() < MAX_GEN {
                     self.pts.push(p);
+                    self.zs.push(z);
                     self.sync(s, false)?;
                 }
                 Ok(Step::Continue)
             }
             Input::Keyword(k) if k == "Undo" => {
                 self.pts.pop();
+                self.zs.pop();
                 self.sync(s, false)?;
                 Ok(Step::Continue)
             }
@@ -86,7 +95,10 @@ impl Interactive for Poly3dM {
         }
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        self.pts.last().map(|l| vec![line(*l, c)]).unwrap_or_default()
+        match (self.pts.last(), self.zs.last()) {
+            (Some(l), Some(z)) => vec![EntityKind::Line(cadcraft_doc::Line { a: l.to3(*z), b: c.to3(*z) })],
+            _ => Vec::new(),
+        }
     }
 }
 

@@ -131,7 +131,10 @@ impl Session {
         if prompt.accept.point {
             if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
-                return self.input(Input::Point(p));
+                self.typed_z = prompt::typed_z(tt);
+                let result = self.input(Input::Point(p));
+                self.typed_z = None;
+                return result;
             }
             // Direct distance entry along the tracking path the cursor is on, from the point it
             // comes from (an acquired or temporary tracking point needs no base point).

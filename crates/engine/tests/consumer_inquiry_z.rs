@@ -34,3 +34,17 @@ fn id_on_a_canonical_circle_in_a_tilted_plane_gives_the_world_z() {
     // (12, 5, 0), which is the world point (-12, -4, 3).
     assert!((z_of(&mut session, [-12.0, -4.0]) - 3.0).abs() < 1e-6);
 }
+
+#[test]
+fn id_on_the_reviews_tilted_circle_gives_z_17_8() {
+    use cadcraft_doc::{Circle, Common, EntityKind, Space};
+    use cadcraft_geom::Vec3;
+    let mut session = Session::new();
+    let circle = Circle { center: Vec3::new(10.0, 20.0, 3.0), radius: 1.0 };
+    let handle = session.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Circle(circle)).unwrap();
+    assert_eq!(z_of(&mut session, [11.0, 20.0]), 3.0, "legacy control reads the OCS center z");
+    make_canonical_in(&mut session, handle, Vec3::new(0.0, 0.8, 0.6));
+    // The OCS of the normal (0, 0.8, 0.6) has x axis (-1, 0, 0) and y axis (0, -0.6, 0.8): the center is (-10, -9.6, 17.8) and the
+    // curve point at t = 0 is (-11, -9.6, 17.8).
+    assert!((z_of(&mut session, [-11.0, -9.6]) - 17.8).abs() < 1e-9);
+}

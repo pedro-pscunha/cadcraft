@@ -1,32 +1,46 @@
 use super::{
     Accept, EntityKind, Input, Interactive, Outcome, PlineAsk, PolyVertex, Prompt, Result, Session, Step, Value, Vec2, added, arc_to_bulge, bad,
-    bool_or, bulge_to_arc, distinct_points, f64_or, json, line, lwpoly, number, point_value, points_param, size_param, snap,
+    bool_or, bulge_to_arc, f64_or, json, line, lwpoly, number, point_value, points_param, size_param, snap,
 };
 
 // ---------------- JSON forms ----------------
 
+/// A segment between two points that keep their Z.
+fn line3(a: Vec2, az: f64, b: Vec2, bz: f64) -> EntityKind {
+    EntityKind::Line(cadcraft_doc::Line { a: a.to3(az), b: b.to3(bz) })
+}
+
 pub(super) fn run_line(s: &mut Session, p: &Value) -> Result<Value> {
-    let pts = points_param(p, "points").ok_or_else(|| bad("line", "`points` [[x,y],...] (2 or more) is required"))?;
-    if pts.len() < 2 {
+    let xy = points_param(p, "points").ok_or_else(|| bad("line", "`points` [[x,y],...] (2 or more) is required"))?;
+    // The Z of a point is its third number; a point without one is at the current elevation.
+    let elevation = s.elevation();
+    let z_of = |i: usize| p.get("points").and_then(|v| v.get(i)).and_then(|v| v.get(2)).and_then(Value::as_f64).filter(|z| z.is_finite());
+    let all: Vec<(Vec2, f64)> = xy.iter().enumerate().map(|(i, q)| (*q, z_of(i).unwrap_or(elevation))).collect();
+    if all.len() < 2 {
         return Err(bad("line", "need at least 2 points"));
     }
     // A repeated point would make a zero-length line.
-    let pts = distinct_points(&pts);
+    let mut pts: Vec<(Vec2, f64)> = Vec::with_capacity(all.len());
+    for q in all {
+        if !pts.last().is_some_and(|l| l.0.near(q.0, 1e-12) && l.1 == q.1) {
+            pts.push(q);
+        }
+    }
     if pts.len() < 2 {
         return Err(bad("line", "need at least 2 different points"));
     }
     let mut hs = Vec::new();
     for w in pts.windows(2) {
         if let [a, b] = w {
-            hs.push(s.add_entity(line(*a, *b))?.hex());
+            hs.push(s.add_entity(line3(a.0, a.1, b.0, b.1))?.hex());
         }
     }
     if bool_or(p, "closed", false)
         && pts.len() > 2
         && let (Some(a), Some(b)) = (pts.last(), pts.first())
-        && !a.near(*b, 1e-12)
+        && !(a.0.near(b.0, 1e-12) && a.1 == b.1)
     {
-        hs.push(s.add_entity(line(*a, *b))?.hex());
+        hs.push(s.add_entity(line3(a.0, a.1, b.0, b.1))?.hex());
     }
     Ok(json!({ "handles": hs }))
 }
@@ -53,6 +67,9 @@ pub(super) fn run_pline(s: &mut Session, p: &Value) -> Result<Value> {
     let mut k = lwpoly(vs, bool_or(p, "closed", false));
     if let EntityKind::LwPolyline(pl) = &mut k {
         pl.const_width = width;
+        // A polyline is planar: the Z of its first point is its elevation, as in AutoCAD.
+        let first = raw.and_then(|a| a.first()).map(|v| v.get("p").unwrap_or(v));
+        pl.elevation = first.and_then(|v| v.get(2)).and_then(Value::as_f64).filter(|z| z.is_finite()).unwrap_or_else(|| s.elevation());
     }
     added(s.add_entity(k)?)
 }
@@ -62,6 +79,8 @@ pub(super) fn run_pline(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 pub(super) struct LineM {
     pts: Vec<Vec2>,
+    /// The Z of each point of `pts`.
+    zs: Vec<f64>,
     handles: Vec<cadcraft_doc::Handle>,
     /// A first point picked as a deferred tangent/perpendicular, resolved by the next point.
     first: Option<snap::Deferred>,
@@ -76,6 +95,7 @@ impl LineM {
         };
         self.handles.push(s.add_entity(line(a, b))?);
         self.pts = vec![a, b];
+        self.zs = vec![0.0, 0.0];
         self.first = None;
         s.last_point = b;
         Ok(Step::Continue)
@@ -108,6 +128,7 @@ impl Interactive for LineM {
                         let e = t + Vec2::new(ang.cos(), ang.sin()) * dist;
                         self.handles.push(s.add_entity(line(t, e))?);
                         self.pts = vec![t, e];
+                        self.zs = vec![0.0, 0.0];
                         s.last_point = e;
                         self.first = None;
                         return Ok(Step::Continue);
@@ -132,13 +153,15 @@ impl Interactive for LineM {
                 None => Ok(Step::Continue),
             },
             Input::Point(p) => {
-                if let Some(last) = self.pts.last().copied() {
-                    if last.near(p, 1e-12) {
+                let z = s.point_z(self.zs.last().copied());
+                if let (Some(last), Some(last_z)) = (self.pts.last().copied(), self.zs.last().copied()) {
+                    if last.near(p, 1e-12) && last_z == z {
                         return Ok(Step::Continue);
                     }
-                    self.handles.push(s.add_entity(line(last, p))?);
+                    self.handles.push(s.add_entity(line3(last, last_z, p, z))?);
                 }
                 self.pts.push(p);
+                self.zs.push(z);
                 Ok(Step::Continue)
             }
             Input::Keyword(k) if k == "Undo" => {
@@ -149,11 +172,14 @@ impl Interactive for LineM {
                     s.doc_mut()?.remove_entity(h);
                 }
                 self.pts.pop();
+                self.zs.pop();
                 Ok(Step::Continue)
             }
             Input::Keyword(k) if k == "Close" => {
-                if let (Some(a), Some(b)) = (self.pts.last().copied(), self.pts.first().copied()) {
-                    s.add_entity(line(a, b))?;
+                if let (Some(a), Some(b), Some(az), Some(bz)) =
+                    (self.pts.last().copied(), self.pts.first().copied(), self.zs.last().copied(), self.zs.first().copied())
+                {
+                    s.add_entity(line3(a, az, b, bz))?;
                 }
                 Ok(Step::Done)
             }
@@ -167,7 +193,10 @@ impl Interactive for LineM {
             let end = s.cursor_deferred.map_or(snap::LineEnd::Point(c), snap::LineEnd::Deferred);
             return snap::resolve_deferred(snap::LineEnd::Deferred(first), end).map(|(a, b)| vec![line(a, b)]).unwrap_or_default();
         }
-        self.pts.last().map(|l| vec![line(*l, c)]).unwrap_or_default()
+        match (self.pts.last(), self.zs.last()) {
+            (Some(l), Some(z)) => vec![line3(*l, *z, c, *z)],
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -185,12 +214,15 @@ pub(super) struct PlineM {
     half: bool,
     /// An option asking further questions (arc mode's Angle, CEnter…, line mode's Length).
     ask: Option<PlineAsk>,
+    /// The Z of the first point: the elevation of the polyline.
+    elevation: f64,
 }
 
 impl PlineM {
     fn entity(&self, closed: bool) -> EntityKind {
         let mut k = lwpoly(self.verts.clone(), closed);
         if let EntityKind::LwPolyline(pl) = &mut k {
+            pl.elevation = self.elevation;
             // Every segment the same uniform width: store it as the constant width, as before.
             let segs = if closed { pl.vertices.len() } else { pl.vertices.len().saturating_sub(1) };
             let w = pl.vertices.first().map_or(0.0, |v| v.start_width);
@@ -327,6 +359,7 @@ impl Interactive for PlineM {
             Input::Point(p) => {
                 if self.verts.is_empty() {
                     s.echo(format!("Current line-width is {:.4}", self.start_w));
+                    self.elevation = s.point_z(None);
                 }
                 self.begin_segment();
                 if self.arc_mode && !self.verts.is_empty() {
