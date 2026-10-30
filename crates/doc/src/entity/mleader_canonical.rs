@@ -28,10 +28,14 @@ fn frame(normal: Vec3, what: &str) -> Result<OcsFrame> {
 }
 
 impl MLeader {
-    /// Refuse a payload whose context or block attributes are not canonical.
+    /// Refuse a payload whose context, block attributes or the multiline texts embedded in them are not canonical.
     pub fn require_canonical(&self) -> Result<()> {
-        let canonical = self.context.geometry_revision == GeometryRevision::CanonicalV2
-            && self.block.iter().flat_map(|b| &b.attribs).all(|a| a.geometry_revision == GeometryRevision::CanonicalV2);
+        let canonical_attrib = |a: &super::Attrib| {
+            a.geometry_revision == GeometryRevision::CanonicalV2
+                && a.multiline.as_ref().is_none_or(|m| m.geometry_revision == GeometryRevision::CanonicalV2)
+        };
+        let canonical =
+            self.context.geometry_revision == GeometryRevision::CanonicalV2 && self.block.iter().flat_map(|b| &b.attribs).all(canonical_attrib);
         if canonical { Ok(()) } else { Err(DocError::Invalid("This multileader payload is not canonical.".into())) }
     }
 
@@ -166,6 +170,23 @@ mod tests {
         }
     }
 
+    fn text_for_attrib() -> crate::Text {
+        crate::Text {
+            insert: Vec3::ZERO,
+            align_pt: None,
+            height: 1.0,
+            value: "v".into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".into(),
+            halign: crate::HAlign::Left,
+            valign: crate::VAlign::Baseline,
+            backward: false,
+            upside_down: false,
+        }
+    }
+
     fn two_roots() -> MLeader {
         let mut m =
             MLeader::single(Vec3::new(10.0, 20.0, 3.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 3.0), Vec3::new(4.0, 6.0, 3.0)]], Some(text()));
@@ -289,6 +310,35 @@ mod tests {
             row_spacing: 0.0,
         });
         assert!(m.require_canonical().is_err());
+    }
+
+    #[test]
+    fn an_embedded_multiline_text_must_be_canonical_too() {
+        let mut m = two_roots();
+        m.text = None;
+        let mut attrib = crate::Attrib::new("T", text_for_attrib());
+        attrib.geometry_revision = GeometryRevision::CanonicalV2;
+        attrib.multiline = Some(crate::MultilineAttrib {
+            geometry_revision: GeometryRevision::LegacyProjectedV1,
+            normal: Vec3::Z,
+            mtext: text(),
+            read_as: String::new(),
+        });
+        m.block = Some(Insert {
+            block: "B".into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: vec![attrib],
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        });
+        assert!(m.require_canonical().is_err(), "a legacy embedded text refuses");
+        assert!(m.transformed_canonical(&rotation_x(0.5)).is_err());
+        m.block.as_mut().unwrap().attribs[0].multiline.as_mut().unwrap().geometry_revision = GeometryRevision::CanonicalV2;
+        assert!(m.require_canonical().is_ok());
     }
 
     #[test]
