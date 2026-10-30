@@ -105,9 +105,9 @@ debug = 0
 # writer with the style name from its dictionary key, table override values in a text DXF, R2010 table style flow direction, cell overrides
 # and legacy table fields, block cells, the DXF cell flag apart from the R2010 geometry flag, xref names and resolved bits of layers, linetypes, text styles and applications, field cells, the ENDBLK layer,
 # the planar bit of a spline read from a DWG, MULTILEADER text flow direction kept as read, VIEWPORT status derived on a DWG read as the DXF
-# reference gives it; upstream main 2c436ae merged),
+# reference gives it, entity ENC true-color fallback indices and duplicate-handle remapping; upstream main 2c436ae merged),
 # until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "7b0471f870120c869cdf4f3bb66ebeae2c343639" }
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "871e0d034d1ccfe9c767cbba8f60dc20a8132e13" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
