@@ -66,3 +66,24 @@ fn bit_32_is_set_outside_blocks_only() {
     // The dimensions of the block are the ones with a handle of the block; the anonymous blocks of the others may come first.
     assert!(in_block.ends_with(&["0".to_string(), "1".to_string(), "129".to_string()]), "{in_block:?}");
 }
+
+#[test]
+fn a_dwg_has_bit_32_outside_blocks_only_too() {
+    let mut d = Drawing::new_metric();
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(dimension(DimKind::Linear { rotation: 0.0 }, false))).unwrap();
+    let mut b = Block::new("Plan");
+    b.entities.push(Entity::new(Handle(0x901), EntityKind::Dimension(dimension(DimKind::Aligned, false))));
+    d.blocks.insert("Plan".into(), Arc::new(b));
+    d.bump_handseed(Handle(0x901));
+    let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
+    let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(&dwg)).read().unwrap();
+    // The flags byte of the DWG dimension holds group 70's bit 32 as its bit 1.
+    let mut seen: Vec<(String, u8)> = Vec::new();
+    for e in doc.entities() {
+        let acadrust::entities::EntityType::Dimension(dim) = e else { continue };
+        let owner = doc.block_records.iter().find(|br| br.handle == dim.base().common.owner_handle).map(|br| br.name.clone());
+        seen.push((owner.unwrap_or_default(), dim.base().dwg_flags_byte & 0x02));
+    }
+    assert!(seen.contains(&("*Model_Space".to_string(), 2)), "{seen:?}");
+    assert!(seen.contains(&("Plan".to_string(), 0)), "{seen:?}");
+}

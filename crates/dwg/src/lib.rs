@@ -326,12 +326,24 @@ mod native {
 
     /// The DWG dimension flags byte. Its bit 1 is DXF group 70's bit 32 (ODA DWG specification,
     /// common dimension data), which acadrust keeps no copy of from DXF: it is set here as
-    /// CADCraft's DXF writer always sets it (#1094). Bit 0, the opposite of group 70's bit 128,
+    /// CADCraft's DXF writer sets it (#1094), for a dimension of a layout and not for one inside a
+    /// block definition (AutoCAD writes 0 there). Bit 0, the opposite of group 70's bit 128,
     /// acadrust 0.6.5 reads and writes itself.
     fn dimension_flags(doc: &mut acadrust::CadDocument) {
+        let layouts: std::collections::HashSet<acadrust::Handle> = doc
+            .block_records
+            .iter()
+            .filter(|br| {
+                let n = br.name.to_ascii_uppercase();
+                n == "*MODEL_SPACE" || n.starts_with("*PAPER_SPACE")
+            })
+            .map(|br| br.handle)
+            .collect();
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::Dimension(d) = e else { continue };
-            d.base_mut().dwg_flags_byte |= 0x02;
+            if layouts.contains(&d.base().common.owner_handle) {
+                d.base_mut().dwg_flags_byte |= 0x02;
+            }
         }
     }
 
