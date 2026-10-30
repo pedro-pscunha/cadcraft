@@ -386,7 +386,10 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             if n == 0 {
                 w.s(1, "");
             }
-            w.s(7, &t.style);
+            // AutoCAD leaves out the style of an MTEXT in the default style (it writes the group for any other).
+            if !t.style.eq_ignore_ascii_case("Standard") {
+                w.s(7, &t.style);
+            }
             match canonical_plane(e) {
                 // The plane and the full WCS direction of a canonical text.
                 Some(normal) => {
