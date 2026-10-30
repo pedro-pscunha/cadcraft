@@ -4,6 +4,28 @@ use std::cell::Cell;
 std::thread_local! { pub(super) static SCANNED: Cell<usize> = const { Cell::new(0) }; }
 
 #[test]
+fn inactive_gradient_replay_uses_the_dwg_target_not_the_bridge_declaration() {
+    let drawing = crate::read_dxf(b"0\nSECTION\n2\nENTITIES\n0\nHATCH\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n2\nSOLID\n70\n1\n71\n0\n91\n0\n75\n0\n76\n1\n98\n0\n450\n0\n453\n2\n421\n66051\n421\n263430\n470\nSPHERICAL\n0\nENDSEC\n0\nEOF\n").unwrap();
+    for target in [Version::R2000, Version::R2018] {
+        let tags = cadcraft_dxf::parse(&dwg_bridge(&drawing, target)).unwrap();
+        let record = cadcraft_dxf::sections(&tags)
+            .into_iter()
+            .filter(|s| s.name == "ENTITIES")
+            .flat_map(|s| cadcraft_dxf::records(&s.tags))
+            .find(|(k, _)| k == "HATCH")
+            .unwrap()
+            .1;
+        let colors: Vec<_> = record.iter().filter(|t| t.code == 421).map(Tag::i64).collect();
+        if target == Version::R2000 {
+            assert!(colors.is_empty());
+        } else {
+            assert_eq!(colors, vec![66051, 263430]);
+            assert_eq!(record.iter().find(|t| t.code == 450).unwrap().i64(), 0);
+        }
+    }
+}
+
+#[test]
 fn named_shape_style_stays_named_in_the_bridge_reader() {
     let drawing = crate::read_dxf(include_bytes!("../../tests/data/named_shape_style.dxf")).unwrap();
     let bytes = dwg_bridge(&drawing, Version::R2018);

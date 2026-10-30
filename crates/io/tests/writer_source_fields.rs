@@ -17,6 +17,53 @@ fn saved_dxf(drawing: &cadcraft_doc::Drawing, name: &str) -> Vec<u8> {
 }
 
 #[test]
+fn solid_hatches_keep_inactive_gradient_data_without_becoming_gradients() {
+    let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nHATCH\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\nSOLID\n70\n1\n71\n0\n91\n1\n92\n2\n72\n0\n73\n1\n93\n4\n10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n97\n0\n75\n0\n76\n1\n98\n0\n450\n0\n451\n0\n460\n0.25\n461\n0.75\n452\n1\n462\n0.6\n453\n2\n463\n0\n63\n3\n421\n66051\n463\n1\n63\n5\n421\n263430\n470\nSPHERICAL\n0\nENDSEC\n0\nEOF\n";
+    let gradient_codes = [450, 451, 460, 461, 452, 462, 453, 463, 63, 421, 470];
+    let fields = |record: &[Tag]| record.iter().filter(|t| gradient_codes.contains(&t.code)).map(|t| (t.code, t.str())).collect::<Vec<_>>();
+    let expected = fields(&entity_record(source, "HATCH"));
+    for name in ["solid.dxf", "solid.dwg"] {
+        let mut drawing = cadcraft_io::read(source, "source.dxf").unwrap();
+        drawing
+            .modify_entity(cadcraft_doc::Handle(0x200), |e| {
+                let cadcraft_doc::EntityKind::Hatch(hatch) = &mut e.kind else { panic!("hatch") };
+                assert!(hatch.solid && hatch.gradient.is_none());
+                for vertex in hatch.loops.iter_mut().flat_map(|l| &mut l.vertices) {
+                    vertex.p.x += 1.0;
+                }
+            })
+            .unwrap();
+        for _ in 0..2 {
+            let dxf = saved_dxf(&drawing, name);
+            assert_eq!(fields(&entity_record(&dxf, "HATCH")), expected, "{name}");
+            drawing = cadcraft_io::read(&dxf, "saved.dxf").unwrap();
+            let cadcraft_doc::EntityKind::Hatch(hatch) = &drawing.entity(cadcraft_doc::Handle(0x200)).unwrap().kind else { panic!("hatch") };
+            assert!(hatch.solid && hatch.gradient.is_none());
+        }
+        let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_dxf::Version::R2000), ..Default::default() };
+        let (old, _) = cadcraft_io::write_with_noted(&drawing, "old.dxf", &opts).unwrap();
+        assert!(fields(&entity_record(&old, "HATCH")).is_empty());
+        drawing
+            .modify_entity(cadcraft_doc::Handle(0x200), |e| {
+                let cadcraft_doc::EntityKind::Hatch(hatch) = &mut e.kind else { panic!("hatch") };
+                hatch.gradient = Some(cadcraft_doc::Gradient {
+                    name: "LINEAR".into(),
+                    color1: cadcraft_color::Color::Index(1),
+                    color2: cadcraft_color::Color::Index(2),
+                    angle: 0.0,
+                    centered: true,
+                    source: Default::default(),
+                });
+            })
+            .unwrap();
+        let dxf = saved_dxf(&drawing, name);
+        let rec = entity_record(&dxf, "HATCH");
+        assert_eq!(rec.iter().filter(|t| t.code == 450).map(Tag::i64).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(rec.iter().filter(|t| t.code == 470).map(Tag::str).collect::<Vec<_>>(), vec!["LINEAR"]);
+    }
+}
+
+#[test]
 fn block_boundary_entities_keep_independent_colors_and_linetype_scales() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n70\n1\n0\nBLOCK_RECORD\n5\n50\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\nSourceBlock\n70\n0\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n51\n330\n50\n100\nAcDbEntity\n8\n0\n48\n2.5\n62\n3\n100\nAcDbBlockBegin\n2\nSourceBlock\n70\n0\n10\n0\n20\n0\n30\n0\n3\nSourceBlock\n0\nLINE\n5\n52\n330\n50\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n10\n21\n0\n31\n0\n0\nENDBLK\n5\n53\n330\n50\n100\nAcDbEntity\n8\n0\n48\n3.75\n62\n5\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nEOF\n";
     for name in ["boundary.dxf", "boundary.dwg"] {
