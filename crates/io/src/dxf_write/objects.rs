@@ -166,7 +166,8 @@ pub(super) fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)
         w.s(300, dxf_ext::xdata_str(&s.name));
         w.f(140, s.paper_units);
         w.f(141, s.drawing_units);
-        w.i(290, i64::from(cadcraft_doc::same_factor(s.factor(), 1.0)));
+        // The unit scale flag is AutoCAD's one scale "1:1"; scales of factor 1 under another name ("1'-0\" = 1'-0\"") do not have it.
+        w.i(290, i64::from(cadcraft_doc::same_factor(s.factor(), 1.0) && s.name == "1:1"));
     }
 }
 

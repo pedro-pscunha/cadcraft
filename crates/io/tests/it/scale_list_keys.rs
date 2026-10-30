@@ -65,3 +65,19 @@ fn a_drawing_never_read_from_a_file_numbers_its_scales_from_a0() {
     d.scales = vec![AnnoScale::new("1:5", 1.0, 5.0), AnnoScale::new("1:10", 1.0, 10.0)];
     assert_eq!(written_keys(&cadcraft_io::write_dxf(&d)), pairs(&[("A0", "1:5"), ("A1", "1:10")]));
 }
+
+/// The unit scale flag (290) is on AutoCAD's scale "1:1" only, not on another scale of factor 1.
+#[test]
+fn only_the_scale_named_one_to_one_is_the_unit_scale() {
+    let mut d = Drawing::new_metric();
+    d.scales = vec![AnnoScale::new("1:1", 1.0, 1.0), AnnoScale::new("1'-0\" = 1'-0\"", 12.0, 12.0), AnnoScale::new("1:50", 1.0, 50.0)];
+    let tags = cadcraft_dxf::parse(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
+    let flags: Vec<(String, i64)> = sections(&tags)
+        .into_iter()
+        .filter(|s| s.name == "OBJECTS")
+        .flat_map(|s| records(&s.tags))
+        .filter(|(k, _)| k == "SCALE")
+        .map(|(_, body)| (body.iter().find(|t| t.code == 300).unwrap().str(), body.iter().find(|t| t.code == 290).unwrap().i64()))
+        .collect();
+    assert_eq!(flags, vec![("1:1".to_string(), 1), ("1'-0\" = 1'-0\"".to_string(), 0), ("1:50".to_string(), 0)]);
+}
