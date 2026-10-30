@@ -105,6 +105,11 @@ pub struct Common {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transparency_alpha: Option<u8>,
     pub visible: bool,
+    /// The paper space flag (DXF group 67) an entity inside a block definition was read with: a block made
+    /// from objects drawn in paper space keeps it, and a save writes it back. Entities of model space and of
+    /// layouts get it from the space they are in.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub paper_space: bool,
     pub thickness: f64,
     pub extrusion: Vec3,
     /// Named plot style: `ByLayer`, `ByBlock` or a style of the layout's named (`.stb`) plot
@@ -135,6 +140,7 @@ impl Default for Common {
             transparency: Transparency::ByLayer,
             transparency_alpha: None,
             visible: true,
+            paper_space: false,
             thickness: 0.0,
             extrusion: Vec3::Z,
             plot_style: "ByLayer".into(),

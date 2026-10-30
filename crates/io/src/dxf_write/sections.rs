@@ -1136,7 +1136,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             w.s(4, desc);
         }
         for e in ents {
-            entity(w, d, e, brh, false, &cx);
+            entity(w, d, e, brh, e.common.paper_space, &cx);
         }
         let eh = w.h();
         w.s(0, "ENDBLK");

@@ -207,7 +207,8 @@ pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, 
             b.xref_path = Some(String::new());
             b.xref_overlay = xref & 8 != 0;
         } else {
-            for (_, _, e) in ents {
+            for (_, paper, mut e) in ents {
+                e.common.paper_space = paper;
                 b.entities.push(e);
             }
         }
