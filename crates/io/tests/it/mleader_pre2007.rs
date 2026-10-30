@@ -70,6 +70,7 @@ fn leader(block: Option<Vec3>) -> MLeader {
         text_dir: Vec3::new(1.0, 0.0, 0.0),
         block_normal: NORMAL,
         geometry_revision: GeometryRevision::CanonicalV2,
+        codes: Default::default(),
     };
     if let Some(scale) = block {
         let mut attrib = Attrib::new("TAG", text());

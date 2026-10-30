@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cadcraft_doc::{
-    Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot, MLeaderStyle, MText,
+    Attrib, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderRoot,
+    MLeaderStyle, MText,
 };
 use cadcraft_dxf::Tag;
 use cadcraft_geom::{OcsFrame, Vec3};
@@ -124,6 +125,10 @@ struct Parsed {
     x_axis: P,
     y_axis: P,
     roots: Vec<Root>,
+    /// The attachment and connection codes as the file has them: the context's 174, 175, 176, 177, and the entity's 173, 95,
+    /// 174, 175, 176.
+    ctx_codes: [Option<i64>; 4],
+    entity_codes: [Option<i64>; 5],
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -171,8 +176,17 @@ fn parse(tags: &[Tag]) -> Parsed {
                     p.block_scale.take(10, c, f);
                 }
                 43 => p.block_rotation = finite(f),
-                173 => p.left_attach = p.left_attach.or(Some(t.i64())),
-                95 => p.right_attach = p.right_attach.or(Some(t.i64())),
+                173 => {
+                    p.left_attach = p.left_attach.or(Some(t.i64()));
+                    p.entity_codes[0] = Some(t.i64());
+                }
+                95 => {
+                    p.right_attach = p.right_attach.or(Some(t.i64()));
+                    p.entity_codes[1] = Some(t.i64());
+                }
+                174 => p.entity_codes[2] = Some(t.i64()),
+                175 => p.entity_codes[3] = Some(t.i64()),
+                176 => p.entity_codes[4] = Some(t.i64()),
                 // Block attribute values: ATTDEF handle (330), index, width, then the text (302).
                 330 => attrib = handle(t),
                 302 => {
@@ -227,8 +241,16 @@ fn parse(tags: &[Tag]) -> Parsed {
                 45 => p.line_spacing = finite(f),
                 170 => p.line_spacing_style = Some(t.i64()),
                 171 => p.side = Some(t.i64()),
-                174 => p.left_attach = Some(t.i64()),
-                175 => p.right_attach = Some(t.i64()),
+                174 => {
+                    p.left_attach = Some(t.i64());
+                    p.ctx_codes[0] = Some(t.i64());
+                }
+                175 => {
+                    p.right_attach = Some(t.i64());
+                    p.ctx_codes[1] = Some(t.i64());
+                }
+                176 => p.ctx_codes[2] = Some(t.i64()),
+                177 => p.ctx_codes[3] = Some(t.i64()),
                 296 => p.has_block = Some(t.i64() != 0),
                 341 => p.block_ctx = handle(t),
                 15 | 25 | 35 => {
@@ -434,6 +456,18 @@ fn read_as(tags: &[Tag], canonical: bool) -> (MLeader, bool) {
         }),
         block_normal,
         geometry_revision: if canonical { GeometryRevision::CanonicalV2 } else { ctx.geometry_revision },
+        codes: MLeaderCodes {
+            derived_attach: text.as_ref().map(|t| t.attach),
+            ctx_left: p.ctx_codes[0],
+            ctx_right: p.ctx_codes[1],
+            ctx_alignment: p.ctx_codes[2],
+            ctx_connection: p.ctx_codes[3],
+            left: p.entity_codes[0],
+            right: p.entity_codes[1],
+            angle_type: p.entity_codes[2],
+            alignment: p.entity_codes[3],
+            block_attachment: p.entity_codes[4],
+        },
     };
     let leader = MLeader {
         roots,
@@ -613,6 +647,10 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
         _ => 4,
     };
     let align = i64::from((attach - 1) % 3);
+    // The codes the file gave apply while the text keeps the attachment point they were read with; the block connection always.
+    let codes = m.context.codes;
+    let same = codes.derived_attach == text.map(|x| x.attach);
+    let pick = |code: Option<i64>, derived: i64| if same { code.unwrap_or(derived) } else { derived };
     i(&mut t, 270, 2);
     s(&mut t, 300, "CONTEXT_DATA{");
     f(&mut t, 40, 1.0);
@@ -620,10 +658,10 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     f(&mut t, 41, text.map_or(style.text_height, |x| x.height));
     f(&mut t, 140, m.arrow_size);
     f(&mut t, 145, style.landing_gap);
-    i(&mut t, 174, vert);
-    i(&mut t, 175, vert);
-    i(&mut t, 176, align);
-    i(&mut t, 177, 1);
+    i(&mut t, 174, pick(codes.ctx_left, vert));
+    i(&mut t, 175, pick(codes.ctx_right, vert));
+    i(&mut t, 176, pick(codes.ctx_alignment, align));
+    i(&mut t, 177, codes.ctx_connection.unwrap_or(1));
     i(&mut t, 290, i64::from(text.is_some()));
     if let Some(x) = text {
         s(&mut t, 304, &x.contents);
@@ -761,10 +799,10 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
     if let Some(h) = &r.text_style {
         s(&mut t, 343, h);
     }
-    i(&mut t, 173, vert);
-    i(&mut t, 95, vert);
-    i(&mut t, 174, 1);
-    i(&mut t, 175, align);
+    i(&mut t, 173, pick(codes.left, vert));
+    i(&mut t, 95, pick(codes.right, vert));
+    i(&mut t, 174, pick(codes.angle_type, 1));
+    i(&mut t, 175, pick(codes.alignment, align));
     i(&mut t, 92, BYBLOCK);
     i(&mut t, 292, 0);
     if let Some((b, h)) = block {
@@ -772,7 +810,7 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool) -
         i(&mut t, 93, BYBLOCK);
         p(&mut t, 10, b.scale);
         f(&mut t, 43, b.rotation);
-        i(&mut t, 176, 1);
+        i(&mut t, 176, codes.block_attachment.unwrap_or(1));
         // Attribute values by their ATTDEF in the block.
         let defs: Vec<(Handle, &str)> = d
             .block(&b.block)

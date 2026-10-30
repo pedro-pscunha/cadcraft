@@ -65,7 +65,7 @@ fn text_multileader_survives_as_multileader() {
     assert!(!back.model.iter().any(|e| matches!(e.kind, EntityKind::Leader(_) | EntityKind::MText(_))), "no LEADER/MTEXT pieces");
     let got = mleaders(&back);
     assert_eq!(got.len(), 1);
-    assert_eq!(*got[0], m, "same multileader after save and reopen");
+    assert_eq!(*got[0], with_codes_of(&m, got[0]), "same multileader after save and reopen");
     assert!(back.mleader_styles.iter().any(|s| s.name == "Callout" && s.arrow_size == 0.3));
 }
 
@@ -140,7 +140,7 @@ fn multileader_without_leader_lines() {
     let (_, back) = roundtrip(&d);
     let got = mleaders(&back);
     assert_eq!(got.len(), 1);
-    assert_eq!(*got[0], m);
+    assert_eq!(*got[0], with_codes_of(&m, got[0]));
 }
 
 #[test]
@@ -155,10 +155,11 @@ fn multileader_in_a_block_and_in_paper_space() {
     let layout = d.layouts[0].name.clone();
     d.add(&Space::Paper(layout.clone()), Common::default(), EntityKind::MLeader(m.clone())).unwrap();
     let (_, back) = roundtrip(&d);
-    let in_block = back.block("NOTE").unwrap().entities.iter().filter(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == m)).count();
+    let in_block =
+        back.block("NOTE").unwrap().entities.iter().filter(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == with_codes_of(&m, x))).count();
     assert_eq!(in_block, 1);
     let l = back.layouts.iter().find(|l| l.name == layout).unwrap();
-    assert_eq!(l.entities.iter().filter(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == m)).count(), 1);
+    assert_eq!(l.entities.iter().filter(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == with_codes_of(&m, x))).count(), 1);
 }
 
 /// A DXF file with one entity record (`body`: group/value lines) in its ENTITIES section.
@@ -238,5 +239,10 @@ fn multileader_through_dwg() {
     let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
     let got = mleaders(&back);
     assert_eq!(got.len(), 1, "{:?}", back.model.iter().map(|e| e.kind.dxf_name()).collect::<Vec<_>>());
-    assert_eq!(*got[0], m);
+    assert_eq!(*got[0], with_codes_of(&m, got[0]));
+}
+
+/// `m` with the attachment and connection codes a file gave `read` (the writer's own are derived and read back as codes).
+fn with_codes_of(m: &cadcraft_doc::MLeader, read: &cadcraft_doc::MLeader) -> cadcraft_doc::MLeader {
+    cadcraft_doc::MLeader { context: cadcraft_doc::MLeaderContext { codes: read.context.codes, ..m.context }, ..m.clone() }
 }

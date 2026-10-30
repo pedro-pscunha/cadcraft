@@ -90,7 +90,7 @@ fn multileader_from_2007_is_native() {
         assert_eq!(records(&text, "LEADER"), 0, "{v:?}");
         let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
         let got: Vec<&MLeader> = back.model.iter().filter_map(|e| if let EntityKind::MLeader(m) = &e.kind { Some(m) } else { None }).collect();
-        assert_eq!(got, vec![&m], "{v:?}");
+        assert_eq!(got, vec![&with_codes_of(&m, got[0])], "{v:?}");
     }
 }
 
@@ -224,4 +224,9 @@ fn modelled_dictionaries_are_not_kept_twice() {
     for key in ["ACAD_MLINESTYLE", "ACAD_SCALELIST", "ACAD_GROUP", "ACAD_MLEADERSTYLE", "ACAD_PLOTSTYLENAME", "CADCRAFT_HANDSEED"] {
         assert_eq!(l.windows(2).filter(|w| *w == ["3", key]).count(), 1, "{key} once in the named object dictionary");
     }
+}
+
+/// `m` with the attachment and connection codes a file gave `read` (the writer's own are derived and read back as codes).
+fn with_codes_of(m: &cadcraft_doc::MLeader, read: &cadcraft_doc::MLeader) -> cadcraft_doc::MLeader {
+    cadcraft_doc::MLeader { context: cadcraft_doc::MLeaderContext { codes: read.context.codes, ..m.context }, ..m.clone() }
 }

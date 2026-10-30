@@ -71,6 +71,7 @@ fn multileader_styles_and_current_style_round_trip() {
         text_style: "Slanted".into(),
         annotative: false,
         arrow_block: String::new(),
+        ..MLeaderStyle::default()
     };
     d.mleader_styles.push(callout);
     d.header.set_str("CMLEADERSTYLE", "Callout");

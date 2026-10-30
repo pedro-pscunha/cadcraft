@@ -200,6 +200,11 @@ impl Objects {
                 text_style: text_style.unwrap_or(def.text_style),
                 annotative: t.i(296).unwrap_or(0) != 0,
                 arrow_block: t.s(341).and_then(|h| rx.brs.get(&h.trim().to_ascii_uppercase()).cloned()).unwrap_or_default(),
+                text_left_attachment: t.i(174).unwrap_or(def.text_left_attachment),
+                text_right_attachment: t.i(178).unwrap_or(def.text_right_attachment),
+                text_angle_type: t.i(175).unwrap_or(def.text_angle_type),
+                text_alignment: t.i(176).unwrap_or(def.text_alignment),
+                block_connection: t.i(177).unwrap_or(def.block_connection),
             };
             match d.mleader_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,
