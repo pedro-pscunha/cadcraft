@@ -82,8 +82,8 @@ pub use world_families::{
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
 pub use curves::{
-    Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, PolylineFit, PolylineFitVertex, PolylineRecord, PolylineRecords, RayLine,
-    Solid,
+    Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, Polyline3d, Polyline3dFit, PolylineFit, PolylineFitVertex, PolylineRecord,
+    PolylineRecords, RayLine, Solid,
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
 pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
@@ -374,7 +374,7 @@ impl EntityKind {
                 }
             }
             EntityKind::LwPolyline(p) => p.transform(m),
-            EntityKind::Polyline3d(p) => p.points.iter_mut().for_each(t3),
+            EntityKind::Polyline3d(p) => p.map_points(t3),
             EntityKind::PolylineMesh(mesh) => mesh.transform(m),
             EntityKind::Spline(sp) => sp.transform(m),
             EntityKind::Helix(h) => {

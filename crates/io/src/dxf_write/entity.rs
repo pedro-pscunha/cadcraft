@@ -254,13 +254,24 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             w.p(10, Vec3::ZERO);
             thickness(w, e);
             canonical_normal(w, e);
-            w.i(70, 8 | i64::from(p.closed));
-            for (index, q) in p.points.iter().enumerate() {
-                let record = p.records.vertices.get(index);
+            // Fit data as read: the polyline flags and curve type, then every vertex with its flags (the frame control points
+            // and the generated curve). Without it (or once the polyline was reshaped) the drawn points are plain vertices.
+            let vertices: Vec<(Option<&cadcraft_doc::PolylineRecord>, Vec3, i64)> = match p.saved_fit() {
+                Some(fit) => {
+                    w.i(70, fit.flags);
+                    w.i(75, fit.smooth_type);
+                    fit.vertices.iter().map(|v| (Some(&v.record), v.position, v.flags)).collect()
+                }
+                None => {
+                    w.i(70, 8 | i64::from(p.closed));
+                    p.points.iter().enumerate().map(|(index, q)| (p.records.vertices.get(index), *q, 32)).collect()
+                }
+            };
+            for (record, q, flags) in vertices {
                 let start = polyline_child(w, e, record, "VERTEX", "AcDbVertex");
                 w.s(100, "AcDb3dPolylineVertex");
-                w.p(10, *q);
-                w.i(70, record.and_then(|r| r.flags).unwrap_or(32));
+                w.p(10, q);
+                w.i(70, flags);
                 if let Some(record) = record {
                     plot_style_xdata(w, &record.common.plot_style, start);
                 }

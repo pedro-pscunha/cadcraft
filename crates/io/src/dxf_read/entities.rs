@@ -548,7 +548,7 @@ pub(super) fn polyline_entity_in(
             c.plot_style = style;
         }
         let handle = tt.s(5).and_then(|h| Handle::parse_hex(&h)).unwrap_or_else(|| d.new_handle());
-        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c, flags: None }
+        cadcraft_doc::PolylineRecord { handle: Some(handle), common: c }
     };
     let mesh = flags & (16 | 64) != 0;
     let mut mesh_vertices = Vec::new();
@@ -601,14 +601,17 @@ pub(super) fn polyline_entity_in(
             seqend: records.seqend,
         })
     } else if flags & 8 != 0 {
-        // The vertex flags (32 plus 8 for a spline frame control point) are kept on the records, as read.
-        let vertices = fit_vertices
-            .iter()
-            .filter(|v| v.flags & 16 == 0)
-            .map(|v| cadcraft_doc::PolylineRecord { flags: Some(v.flags), ..v.record.clone() })
-            .collect();
-        let records = cadcraft_doc::PolylineRecords { vertices, ..records };
-        EntityKind::Polyline3d(Polyline3d { records, points: pts.iter().map(|p| p.0).collect(), closed: flags & 1 != 0 })
+        let points: Vec<Vec3> = pts.iter().map(|p| p.0).collect();
+        // Curve-fit and spline-fit data (header flags 2 and 4, curve type 75, vertices that are not plain 3D polyline vertices:
+        // the frame control points and the generated curve) is kept whole, as read.
+        let fitted = flags & 6 != 0 || t.i(75).unwrap_or(0) != 0 || fit_vertices.iter().any(|v| v.flags & !32 != 0);
+        let fit = fitted.then(|| cadcraft_doc::Polyline3dFit {
+            flags,
+            smooth_type: t.i(75).unwrap_or(0),
+            vertices: fit_vertices,
+            display_points: points.clone(),
+        });
+        EntityKind::Polyline3d(Polyline3d { records, points, closed: flags & 1 != 0, fit })
     } else {
         // A 2D polyline's vertices are in its OCS: mirrored like LWPOLYLINE.
         let m = if c.extrusion.z < 0.0 && !canonical { -1.0 } else { 1.0 };

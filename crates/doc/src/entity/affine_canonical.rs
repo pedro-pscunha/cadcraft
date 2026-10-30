@@ -147,7 +147,9 @@ impl Polyline3d {
     /// This 3D polyline after the invertible affine map `m`.
     pub fn transformed_canonical(&self, m: &Mat4) -> Result<Polyline3d> {
         invertible(m)?;
-        Ok(Polyline3d { points: self.points.iter().map(|p| m.apply(*p)).collect(), ..self.clone() })
+        let mut moved = self.clone();
+        moved.map_points(|p| *p = m.apply(*p));
+        Ok(moved)
     }
 }
 
@@ -286,7 +288,8 @@ mod tests {
     #[test]
     fn a_polyline_a_mesh_and_a_face_move_their_positions_only() {
         let m = rotation_x(0.8, Vec3::new(1.0, 2.0, 3.0));
-        let poly = Polyline3d { records: Default::default(), points: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 3.0, 4.0)], closed: false };
+        let poly =
+            Polyline3d { records: Default::default(), points: vec![Vec3::new(0.0, 0.0, 1.0), Vec3::new(2.0, 3.0, 4.0)], closed: false, fit: None };
         let moved = poly.transformed_canonical(&m).unwrap();
         assert!(near(moved.points[1], m.apply(poly.points[1])) && !moved.closed);
         let face = Face3d { corners: [Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 1.0, 0.0)], hidden_edges: 3 };
