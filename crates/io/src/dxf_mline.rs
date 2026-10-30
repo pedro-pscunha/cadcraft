@@ -45,6 +45,8 @@ struct RawVertex {
     miter: Vec3,
     /// Per element: its groups 41.
     params: Vec<Vec<f64>>,
+    /// Per element: its area-fill parameters (groups 42 after its 75).
+    fills: Vec<Vec<f64>>,
 }
 
 /// The MLINE entity's own groups (after the `AcDbMline` marker when present). The style's
@@ -68,6 +70,7 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
     let mut flags = 0;
     let mut verts: Vec<RawVertex> = Vec::new();
     let mut in_params = false;
+    let mut in_fill = false;
     for t in tags {
         let v = t.f64();
         match t.code {
@@ -76,7 +79,7 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
             70 => just = MLineJust::from_dxf(t.i64()),
             71 => flags = t.i64(),
             11 => {
-                in_params = false;
+                (in_params, in_fill) = (false, false);
                 if verts.len() >= MAX_MLINE_VERTICES {
                     break;
                 }
@@ -104,6 +107,27 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
                     in_params = true;
                 } else {
                     in_params = false;
+                }
+                in_fill = false;
+            }
+            75 => {
+                // The area-fill parameters of the element whose groups 41 came last follow in groups 42.
+                if let Some(r) = verts.last_mut() {
+                    while r.fills.len() + 1 < r.params.len() {
+                        r.fills.push(Vec::new());
+                    }
+                    if r.fills.len() < r.params.len() {
+                        r.fills.push(Vec::new());
+                    }
+                }
+                in_params = false;
+                in_fill = true;
+            }
+            42 if in_fill => {
+                if let Some(list) = verts.last_mut().and_then(|r| r.fills.last_mut())
+                    && list.len() < MAX_PARAMS
+                {
+                    list.push(finite(v));
                 }
             }
             41 if in_params => {
@@ -153,14 +177,14 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
         .map(|r| {
             if plane.is_some() {
                 let frame = MLineVertexFrame { dir: r.dir, miter: r.miter, params: r.params.clone() };
-                return MLineVertex { p: r.p, cuts: Vec::new(), frame: Some(frame) };
+                return MLineVertex { p: r.p, cuts: Vec::new(), frame: Some(frame), fills: fills(&r.fills) };
             }
             let mut cuts = Vec::new();
             for (e, list) in r.params.iter().enumerate() {
                 cuts.extend(gaps(list).into_iter().map(|(start, end)| MLineCut { element: e, start, end }));
             }
             cuts.truncate(MAX_MLINE_CUTS);
-            MLineVertex { p: r.p, cuts, frame: None }
+            MLineVertex { p: r.p, cuts, frame: None, fills: fills(&r.fills) }
         })
         .collect();
     MLine {
@@ -177,6 +201,18 @@ fn read(tags: &[Tag], plane: Option<Vec3>) -> MLine {
 
 /// End of a break that runs to the end of its segment.
 const TO_END: f64 = 1e12;
+
+/// The area-fill parameters read, unless every element has none.
+fn fills(read: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    if read.iter().all(Vec::is_empty) { Vec::new() } else { read.to_vec() }
+}
+
+/// The groups 75 and 42 of element `e` at vertex `v`: its area-fill parameters.
+fn fill_tags(t: &mut Vec<Tag>, v: &MLineVertex, e: usize) {
+    let list = v.fills.get(e).map_or(&[][..], Vec::as_slice);
+    t.push(Tag::i(75, list.len() as i64));
+    t.extend(list.iter().map(|x| Tag::f(42, *x)));
+}
 
 /// Breaks from an element's groups 41: the first is its distance along the miter, the second
 /// where the element starts (from the miter point), then alternately where it stops and starts
@@ -245,10 +281,10 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
             p(&mut t, 11, v.p);
             p(&mut t, 12, f.dir);
             p(&mut t, 13, f.miter);
-            for list in &f.params {
+            for (e, list) in f.params.iter().enumerate() {
                 t.push(Tag::i(74, list.len() as i64));
                 t.extend(list.iter().map(|x| Tag::f(41, *x)));
-                t.push(Tag::i(75, 0));
+                fill_tags(&mut t, v, e);
             }
         }
         return t;
@@ -279,7 +315,7 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
             let list = if has_seg { params(along, &on, len) } else { vec![along, 0.0] };
             t.push(Tag::i(74, list.len() as i64));
             t.extend(list.into_iter().map(|x| Tag::f(41, x)));
-            t.push(Tag::i(75, 0));
+            fill_tags(&mut t, v, e);
         }
     }
     t
