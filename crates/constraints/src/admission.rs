@@ -30,18 +30,25 @@ impl<'a> Admission<'a> {
     pub(crate) fn entity(&mut self, entity: &Entity, depth: usize) -> Result<(), SolveError> {
         self.remaining = self.remaining.checked_sub(1).ok_or(SolveError::TooLarge)?;
         entity.require_legacy_geometry().map_err(|_| SolveError::CanonicalGeometry { handle: entity.handle })?;
+        if let EntityKind::Insert(insert) = &entity.kind {
+            self.block(&insert.block, depth)?;
+        }
+        Ok(())
+    }
+    fn block(&mut self, name: &str, depth: usize) -> Result<(), SolveError> {
         if depth > MAX_BLOCK_DEPTH {
             return Err(SolveError::TooLarge);
         }
-        if let EntityKind::Insert(insert) = &entity.kind
-            && let Some(block) = self.drawing.block(&insert.block)
-            && self.visited.insert(block.name.as_str())
-        {
-            let result = block.entities.iter().try_for_each(|child| self.entity(child, depth + 1));
-            if result.is_err() {
-                self.visited.remove(block.name.as_str());
-            }
-            result?;
+        let Some(block) = self.drawing.block(name) else { return Ok(()) };
+        if !self.visited.insert(block.name.as_str()) {
+            return Ok(());
+        }
+        if let Some(handle) = block.entities.first_non_legacy_geometry() {
+            return Err(SolveError::CanonicalGeometry { handle });
+        }
+        for name in block.entities.referenced_blocks() {
+            self.remaining = self.remaining.checked_sub(1).ok_or(SolveError::TooLarge)?;
+            self.block(name, depth + 1)?;
         }
         Ok(())
     }

@@ -5,6 +5,33 @@ use cadcraft_doc::{
 use cadcraft_geom::{Vec2, Vec3};
 use std::sync::Arc;
 
+#[test]
+fn a_definition_over_the_old_admission_budget_keeps_legacy_rigid_sampling() {
+    use cadcraft_doc::Point;
+    let (mut d, insert, _) = fixture(false, false);
+    let block = Arc::make_mut(d.blocks.get_mut("BODY").unwrap());
+    for i in 0..1_000_001_u64 {
+        block.entities.push(Entity::new(Handle(0x1000 + i), EntityKind::Point(Point { p: Vec3::new(i as f64, 0.0, 0.0), angle: 0.0 })));
+    }
+    assert!(cadcraft_constraints::require_legacy_inputs(&d, [insert]).is_ok());
+    let points = cadcraft_constraints::rigid_points(&d, d.entity(insert).unwrap()).unwrap();
+    assert_eq!(points.len(), 256);
+    assert_eq!(points.first(), Some(&Vec2::new(11.0, 22.0)));
+    assert_eq!(points.last(), Some(&Vec2::new(264.0, 20.0)));
+    let body = Handle(0x1000 + 1_000_000);
+    let before = d.clone();
+    let block = Arc::make_mut(d.blocks.get_mut("BODY").unwrap());
+    let mut child = (**block.entities.get(body).unwrap()).clone();
+    child.geometry_revision = GeometryRevision::CanonicalV2;
+    assert!(block.entities.replace(child));
+    assert!(
+        matches!(cadcraft_constraints::require_legacy_inputs(&d,[insert]),Err(cadcraft_constraints::SolveError::CanonicalGeometry {handle}) if handle==body)
+    );
+    assert!(cadcraft_constraints::require_legacy_inputs(&before, [insert]).is_ok());
+    Arc::make_mut(d.blocks.get_mut("BODY").unwrap()).entities.remove(body);
+    assert!(cadcraft_constraints::require_legacy_inputs(&d, [insert]).is_ok());
+}
+
 fn fixture(canonical: bool, nested: bool) -> (Drawing, Handle, Handle) {
     let mut d = Drawing::new_metric();
     let mut child = Entity::new(d.new_handle(), EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 5.0), radius: 4.0 }));
