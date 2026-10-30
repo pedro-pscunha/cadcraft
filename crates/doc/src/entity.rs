@@ -94,6 +94,7 @@ pub use mleader::{
     MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderContextGroups, MLeaderEntityGroups, MLeaderGroups, MLeaderRoot, MLeaderRootGroups,
 };
 pub use mleader_canonical::MLeaderParts;
+pub use mline_canonical::MLineLayout;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

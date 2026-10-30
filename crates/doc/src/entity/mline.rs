@@ -427,7 +427,7 @@ fn pieces(len: f64, gaps: impl Iterator<Item = (f64, f64)>) -> Vec<(f64, f64)> {
 }
 
 /// A half circle from `a` to `b` bulging backwards (`start`) or forwards along the multiline.
-fn half_circle(a: Vec2, b: Vec2, start: bool) -> Option<Segment> {
+pub(super) fn half_circle(a: Vec2, b: Vec2, start: bool) -> Option<Segment> {
     let r = a.dist(b) / 2.0;
     if r <= 1e-12 {
         return None;
