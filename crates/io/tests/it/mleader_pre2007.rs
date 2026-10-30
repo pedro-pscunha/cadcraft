@@ -52,6 +52,7 @@ fn leader(block: Option<Vec3>) -> MLeader {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(1.0, 0.0, 0.0)),
+        drawing_direction: None,
     };
     let mut m = MLeader::single(
         in_plane(10.0, 5.0),

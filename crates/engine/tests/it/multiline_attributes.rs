@@ -37,6 +37,7 @@ fn session() -> Session {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let def = Attrib {
         prompt: "Site".into(),
@@ -45,6 +46,8 @@ fn session() -> Session {
             mtext,
             read_as: "SITE\nNAME".into(),
             normal: cadcraft_geom::Vec3::Z,
+            embedded_46: None,
+            type_72: None,
         }),
         ..Attrib::new("LABEL", text)
     };

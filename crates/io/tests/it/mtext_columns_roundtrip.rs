@@ -18,6 +18,7 @@ fn mtext(contents: &str, rotation: f64, columns: Option<MTextColumns>) -> MText 
         line_spacing_exact: false,
         columns,
         direction: None,
+        drawing_direction: None,
     }
 }
 

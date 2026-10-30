@@ -388,6 +388,7 @@ fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
         style: "Standard".into(),
         arrow_size: 0.3,

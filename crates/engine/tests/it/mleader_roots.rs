@@ -28,6 +28,7 @@ fn two_roots(s: &mut Session) -> Handle {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let mut m = MLeader::single(v(10.0, 20.0), 2.0, false, vec![vec![v(0.0, 0.0), v(4.0, 6.0)]], Some(text));
     m.roots[0].id = 7;

@@ -34,6 +34,7 @@ fn mtext() -> MText {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(0.0, 0.6, 0.8)),
+        drawing_direction: None,
     }
 }
 
@@ -41,8 +42,14 @@ fn attrib() -> Attrib {
     let mut a = Attrib::new("TAG", text());
     a.plane.normal = Vec3::new(0.0, 3.0, 4.0);
     a.plane.thickness = 0.25;
-    a.multiline =
-        Some(MultilineAttrib { geometry_revision: Default::default(), normal: Vec3::new(1.0, 0.0, 2.0), mtext: mtext(), read_as: "x".into() });
+    a.multiline = Some(MultilineAttrib {
+        geometry_revision: Default::default(),
+        normal: Vec3::new(1.0, 0.0, 2.0),
+        mtext: mtext(),
+        read_as: "x".into(),
+        embedded_46: None,
+        type_72: None,
+    });
     a
 }
 

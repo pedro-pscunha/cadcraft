@@ -499,6 +499,7 @@ fn mtext_kind(contents: &str) -> EntityKind {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     })
 }
 

@@ -76,6 +76,7 @@ fn mtext() -> MText {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(0.6, 0.64, -0.48)),
+        drawing_direction: None,
     }
 }
 
@@ -300,6 +301,8 @@ fn fixtures() -> Vec<(&'static str, Entity)> {
             normal: Vec3::new(1.0, 0.0, 2.0),
             mtext: mtext(),
             read_as: "Body".into(),
+            embedded_46: None,
+            type_72: None,
         });
         a
     };

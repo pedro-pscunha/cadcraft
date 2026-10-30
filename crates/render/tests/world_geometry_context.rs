@@ -144,7 +144,10 @@ fn an_insert_attribute_uses_its_own_plane_and_only_the_enclosing_parent() {
             line_spacing_exact: false,
             columns: None,
             direction: Some(Vec3::Z),
+            drawing_direction: None,
         },
+        embedded_46: None,
+        type_72: None,
     });
     let geometry = entity_world_geometry(&drawing, &root, &parent).unwrap();
     let [WorldPrimitive::Text(text)] = geometry.primitives() else { panic!("not one multiline attribute") };

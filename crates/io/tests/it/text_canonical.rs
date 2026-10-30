@@ -40,6 +40,7 @@ fn mtext() -> MText {
         line_spacing_exact: false,
         columns: None,
         direction: Some(Vec3::new(0.0, 0.6, 0.8)),
+        drawing_direction: None,
     }
 }
 
@@ -314,6 +315,8 @@ fn each_embedded_mtext_field_alone_reaches_the_attributes_dxf() {
             normal: Vec3::new(0.0, 3.0, 4.0),
             mtext: mtext(),
             read_as: "Body".into(),
+            embedded_46: None,
+            type_72: None,
         };
         mutate(&mut ml);
         a.text.value = "Body".into();
@@ -385,6 +388,8 @@ fn the_canonical_reader_keeps_an_attribs_own_plane_and_its_embedded_planes() {
         normal: Vec3::new(1.0, 0.0, 1.0),
         mtext: mtext(),
         read_as: "Body".into(),
+        embedded_46: None,
+        type_72: None,
     });
     let out = dxf(&insert_with(a.clone(), Vec3::new(1.0, 0.0, 0.0)));
     let read = cadcraft_io::canonical_attrib_from_groups(&record(&out, "ATTRIB"), "0", None).unwrap();

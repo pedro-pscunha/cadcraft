@@ -357,6 +357,7 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         };
         let ml = crate::MLeader {
             roots: vec![crate::MLeaderRoot::new(Vec3::new(25.0, 0.0, 0.0), 0.45, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],
