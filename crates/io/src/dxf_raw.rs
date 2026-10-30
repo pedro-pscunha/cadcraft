@@ -418,6 +418,41 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     }
 }
 
+/// The place of a group in the `AcDbDimension` subclass of a DIMENSION as AutoCAD reads it (DXF Reference): its version (280) first,
+/// then the block, the points, the type and presentation groups, the measurement, the text, the rotation, the normal and the style.
+/// A coordinate's x, y and z groups share the place of the first.
+fn dimension_rank(code: i32) -> usize {
+    const ORDER: [i32; 20] = [280, 2, 10, 11, 12, 70, 71, 72, 41, 42, 73, 74, 75, 1, 53, 51, 54, 210, 3, 0];
+    let base = match code {
+        20 | 30 => 10,
+        21 | 31 => 11,
+        22 | 32 => 12,
+        220 | 230 => 210,
+        c => c,
+    };
+    ORDER.iter().position(|c| *c == base).unwrap_or(ORDER.len())
+}
+
+/// Put the groups of the `AcDbDimension` subclass of every DIMENSION in AutoCAD's order. The writer and the replays of the source's
+/// groups (the versioned presentation groups, the geometry) each place theirs, and AutoCAD refuses a file whose version group (280)
+/// does not follow the subclass marker ("unexpected DXF group code: 280").
+pub(crate) fn order_dimension_groups(tags: &mut [Tag]) {
+    let mut at = 0;
+    while at < tags.len() {
+        if !(tags[at].code == 0 && tags[at].str() == "DIMENSION") {
+            at += 1;
+            continue;
+        }
+        let end = tags[at + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |n| at + 1 + n);
+        let start = tags[at..end].iter().position(|t| t.code == 100 && t.str() == "AcDbDimension").map(|n| at + n + 1);
+        if let Some(start) = start {
+            let stop = tags[start..end].iter().position(|t| t.code == 100 || t.code >= 1000).map_or(end, |n| start + n);
+            tags[start..stop].sort_by_key(|t| dimension_rank(t.code));
+        }
+        at = end;
+    }
+}
+
 /// Give the written tables, symbol records, blocks and dictionary entries the handles the file
 /// the drawing came from gave them, wherever a group names one: the written handle of a role the
 /// file had becomes the file's, unless another record of the written file already has it. A role
