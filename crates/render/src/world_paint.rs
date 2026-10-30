@@ -12,6 +12,7 @@ pub(crate) fn draw(
     color: Ink,
     lineweight: f32,
     linetype: Option<&cadcraft_doc::Linetype>,
+    linetype_scale: f64,
 ) -> cadcraft_doc::Result<()> {
     if !builder.opts.text && matches!(entity.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
         return Ok(());
@@ -44,8 +45,31 @@ pub(crate) fn draw(
     {
         return Err(unsupported("extrusion thickness"));
     }
-    if matches!(entity.kind, EntityKind::Table(_) | EntityKind::Tolerance(_) | EntityKind::Dimension(_) | EntityKind::MLine(_)) {
-        return Err(unsupported("annotation paint roles"));
+    if matches!(entity.kind, EntityKind::Table(_) | EntityKind::Tolerance(_) | EntityKind::Dimension(_)) {
+        let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
+        let matrix = geometry.layout_to_world().ok_or_else(|| DocError::Invalid("The annotation has no shared local-layout placement.".into()))?;
+        let xy = Mat3 { a: matrix.m[0][0], b: matrix.m[1][0], c: matrix.m[0][1], d: matrix.m[1][1], e: matrix.m[0][3], f: matrix.m[1][3] };
+        let local = Ctx { world: *matrix, xf: xy, ..context.clone() };
+        match &entity.kind {
+            EntityKind::Table(table) => {
+                let at_origin = super::table::local_table(table);
+                super::table::draw(builder, &local, &at_origin, color, lineweight);
+            }
+            EntityKind::Tolerance(tolerance) => {
+                let at_origin = super::tolerance::local_tolerance(tolerance);
+                let tolerance = builder.opts.tolerance / super::max_scale(&xy).max(1e-12);
+                super::tolerance::draw(builder, &local, entity, &at_origin, lineweight, tolerance);
+            }
+            EntityKind::Dimension(dimension) => {
+                let localized = dimension.localized(entity.common.extrusion)?;
+                super::dim_draw::dimension(builder, &local, entity, &localized, lineweight, linetype, linetype_scale);
+            }
+            _ => return Err(unsupported("a mismatched annotation layout")),
+        }
+        return Ok(());
+    }
+    if matches!(entity.kind, EntityKind::MLine(_)) {
+        return Err(unsupported("multiline element paint roles"));
     }
     if let EntityKind::LwPolyline(polyline) = &entity.kind
         && (polyline.const_width > 0.0 || polyline.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0))
