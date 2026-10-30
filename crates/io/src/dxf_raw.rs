@@ -439,12 +439,14 @@ pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
             opening = false;
         }
         let entity_section = matches!(section.as_str(), "ENTITIES" | "BLOCKS");
-        if entity_section && t.code == 5 && tags.get(i + 1).is_some_and(|n| n.code == 102 && n.str().trim() == "{ACAD_REACTORS") {
-            if let Some(source) = handle(&t.str()).and_then(|h| d.source_symbols.reactor_order.get(&h)) {
-                let from = i + 2;
-                let len = tags[from..].iter().take_while(|g| g.code == 330).count();
-                tags[from..from + len].sort_by_key(|g| handle(&g.str()).and_then(|h| source.iter().position(|s| *s == h)).unwrap_or(usize::MAX));
-            }
+        if entity_section
+            && t.code == 5
+            && tags.get(i + 1).is_some_and(|n| n.code == 102 && n.str().trim() == "{ACAD_REACTORS")
+            && let Some(source) = handle(&t.str()).and_then(|h| d.source_symbols.reactor_order.get(&h))
+        {
+            let from = i + 2;
+            let len = tags[from..].iter().take_while(|g| g.code == 330).count();
+            tags[from..from + len].sort_by_key(|g| handle(&g.str()).and_then(|h| source.iter().position(|s| *s == h)).unwrap_or(usize::MAX));
         }
         i += 1;
     }
