@@ -411,6 +411,7 @@ fn layout_obj(w: &mut W, context: LayoutWriteContext<'_>, data: LayoutWriteData<
         "display" => 0,
         "extents" => 1,
         "limits" => 2,
+        "view" => 3,
         "window" => 4,
         _ => 5,
     };

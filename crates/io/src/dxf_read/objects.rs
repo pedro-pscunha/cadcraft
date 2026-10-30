@@ -365,6 +365,7 @@ pub(super) fn page_setup(t: &T) -> PageSetup {
         Some(0) => "display",
         Some(1) => "extents",
         Some(2) => "limits",
+        Some(3) => "view",
         Some(4) => "window",
         _ => "layout",
     }
