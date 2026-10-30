@@ -364,3 +364,15 @@ fn open_polyline_centroid_ignores_last_bulge() {
     let after = pl.centroid().unwrap();
     assert!(before.near(after, 1e-9), "{before:?} -> {after:?}");
 }
+
+#[test]
+fn a_validated_spline_evaluates_as_the_spline_does_and_an_invalid_one_is_refused() {
+    let spline = Spline::from_control(vec![Vec2::new(0.0, 0.0), Vec2::new(5.0, 8.0), Vec2::new(10.0, 0.0)], 2);
+    let valid = spline.validated().expect("a valid spline");
+    assert_eq!(valid.domain(), spline.domain());
+    for t in [0.0, 0.25, 0.5, 0.9, 1.0, 2.0] {
+        assert_eq!(valid.eval(t), spline.eval(t), "t {t}");
+    }
+    let broken = Spline { knots: vec![1.0, 0.0, 0.0, 0.0, 1.0, 1.0], ..spline };
+    assert!(broken.validated().is_none());
+}
