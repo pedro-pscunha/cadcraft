@@ -500,7 +500,13 @@ impl EntityKind {
                     }
                 }
                 h.scale *= s;
-                h.angle = cadcraft_geom::norm_angle(h.angle + rot);
+                // MIRRHATCH = 0 (the default): a mirrored hatch keeps its pattern and gradient direction.
+                if !mirror {
+                    h.angle = cadcraft_geom::norm_angle(h.angle + rot);
+                    if let Some(g) = &mut h.gradient {
+                        g.angle = cadcraft_geom::norm_angle(g.angle + rot);
+                    }
+                }
                 h.origin = m.apply(h.origin);
                 h.seed_points.iter_mut().for_each(|p| *p = m.apply(*p));
             }
