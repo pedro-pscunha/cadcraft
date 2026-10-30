@@ -460,7 +460,7 @@ fn dimensions_keep_their_plane_and_definition_points_through_every_save() {
 }
 
 #[test]
-fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
+fn dimension_text_and_point_edits_keep_the_source_plane() {
     let own = "100 AcDbAlignedDimension\n13 0.5\n23 1.5\n33 1.25\n14 8.5\n24 2.5\n34 1.25";
     let source = dxf(&[&dimension(33, PLANES[0], own)]);
     let mut d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
@@ -481,7 +481,10 @@ fn a_dimension_text_edit_keeps_the_plane_and_a_point_edit_drops_it() {
     })
     .unwrap();
     let got = record(&cadcraft_io::write_dxf(&d), "DIMENSION");
-    assert!(!got.iter().any(|t| t.code == 210), "{got:?}");
+    assert_eq!(bits(&got, 210), vec![0.0f64.to_bits()]);
+    assert_eq!(bits(&got, 220), vec![0.0f64.to_bits()]);
+    assert_eq!(bits(&got, 230), vec![(-1.0f64).to_bits()]);
+    assert_eq!(bits(&got, 14), vec![9.5f64.to_bits()]);
 }
 
 /// A drawing saved as 2018 DXF: the version with a native MULTILEADER.

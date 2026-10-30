@@ -2,7 +2,7 @@ use super::assoc::std_assoc_refs;
 use super::blocks::{arrow_block_entities, dim_block_entities, dim_block_plan, reuse_handles, table_block_entities};
 use super::common::annotative_xdata;
 use super::ctx::{AssocObj, Ctx};
-use super::entity::{canonical_plane, entity, hatch_reactors};
+use super::entity::{entity, hatch_reactors};
 use super::header::{code_page, header_vars};
 use super::layout::{paper_views, record_head, sheet_first, table_head, vport_table};
 use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
@@ -766,13 +766,13 @@ fn dimension_block_definitions(
                         b.name.clone()
                     }
                     Some(b) => {
-                        let mut fresh = dim_block_entities(d, dm, &e.common.layer, canonical_plane(e));
+                        let mut fresh = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion);
                         reuse_handles(&mut fresh, b, &mut reused_handles);
                         ents = fresh;
                         b.name.clone()
                     }
                     None => {
-                        ents = dim_block_entities(d, dm, &e.common.layer, canonical_plane(e));
+                        ents = dim_block_entities(d, dm, &e.common.layer, e.common.extrusion);
                         let mut name = format!("*D{n}");
                         while d.block(&name).is_some() {
                             n += 1;

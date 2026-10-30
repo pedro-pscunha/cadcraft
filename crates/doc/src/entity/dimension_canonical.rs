@@ -49,6 +49,12 @@ impl Dimension {
         Ok(d)
     }
 
+    /// The picture elevation of an already-localized dimension. A two-line angular dimension's
+    /// arc point sets its plane; `defpt` is a line endpoint and can have a different elevation.
+    pub fn local_picture_elevation(&self) -> f64 {
+        if matches!(self.kind, DimKind::Angular) { self.p16.z } else { self.defpt.z }
+    }
+
     /// This dimension, in the plane of `normal`, after the similarity `transform`; and the new normal.
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Dimension, Vec3)> {
         let from = frame(normal)?;
