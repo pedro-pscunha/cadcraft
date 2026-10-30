@@ -31,6 +31,11 @@ fn text() -> Text {
 /// A multileader at the world point (10, 2, 3) with block "B" (a line from the origin to (1, 0, 0) with ByBlock colour and an
 /// attribute definition TAG), scale 2, in the plane of `normal`.
 fn drawing(canonical: bool, normal: Vec3, rotation: f64) -> Drawing {
+    placed(canonical, normal, rotation, Vec3::new(2.0, 2.0, 2.0), true)
+}
+
+/// The same with the block scale and without its attribute when `attribute` is false.
+fn placed(canonical: bool, normal: Vec3, rotation: f64, scale: Vec3, attribute: bool) -> Drawing {
     let mut d = Drawing::new_metric();
     let mut block = Block::new("B");
     let mut line = Entity::new(Handle(0x500), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) }));
@@ -55,9 +60,9 @@ fn drawing(canonical: bool, normal: Vec3, rotation: f64) -> Drawing {
     let content = Insert {
         block: "B".into(),
         insert: Vec3::new(10.0, 2.0, if canonical { 3.0 } else { 0.0 }),
-        scale: Vec3::new(2.0, 2.0, 2.0),
+        scale,
         rotation,
-        attribs: vec![attrib],
+        attribs: if attribute { vec![attrib] } else { Vec::new() },
         cols: 1,
         rows: 1,
         col_spacing: 0.0,
@@ -146,4 +151,20 @@ fn in_the_xy_plane_the_canonical_painting_is_the_legacy_one() {
     let (a, b) = (segments(&legacy), segments(&canonical));
     assert!(a.len() > 4, "leader lines, dogleg, block line and the attribute strokes: {a:?}");
     assert_eq!(a, b);
+}
+
+#[test]
+fn the_placement_fields_are_what_the_legacy_painter_uses() {
+    // The legacy multileader places its block by the insertion point, scale and rotation (groups 15, 16 and 46); it ignores the
+    // connection type (group 177), which only says how AutoCAD chose them. The canonical block matrix carries the same fields,
+    // so a non-uniform scale and a rotation give the same picture.
+    let scale = Vec3::new(2.0, 3.0, 1.0);
+    let legacy = build(&placed(false, Vec3::Z, 0.7, scale, false), &Space::Model, &Options::default());
+    let canonical = build(&placed(true, Vec3::Z, 0.7, scale, false), &Space::Model, &Options::default());
+    let (a, b) = (segments(&legacy), segments(&canonical));
+    assert!(a.len() >= 4);
+    assert_eq!(a, b);
+    // The block line runs from the insertion point along the rotated, scaled X axis: 2 (cos 0.7, sin 0.7).
+    let end = Vec2::new(10.0 + 2.0 * 0.7f64.cos(), 2.0 + 2.0 * 0.7f64.sin());
+    assert!(polylines(&canonical).iter().any(|(l, _)| l.len() == 2 && near(l[0], Vec2::new(10.0, 2.0)) && near(l[1], end)));
 }

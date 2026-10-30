@@ -218,3 +218,117 @@ fn a_text_in_an_outline_font_has_no_thickness_as_in_autocad() {
     assert_eq!(flat.tris.len(), thick.tris.len());
     assert_eq!(flat.verts, thick.verts);
 }
+
+fn attribute(thickness: f64, style: &str) -> cadcraft_doc::Attrib {
+    let mut a = cadcraft_doc::Attrib::new(
+        "TAG",
+        Text {
+            insert: Vec3::new(1.0, 1.0, 0.0),
+            align_pt: None,
+            height: 1.0,
+            value: "AB".into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: style.into(),
+            halign: cadcraft_doc::HAlign::Left,
+            valign: cadcraft_doc::VAlign::Baseline,
+            backward: false,
+            upside_down: false,
+        },
+    );
+    a.geometry_revision = GeometryRevision::CanonicalV2;
+    a.plane.normal = NORMAL;
+    a.plane.thickness = thickness;
+    a
+}
+
+fn insert_with(attribs: Vec<cadcraft_doc::Attrib>) -> Drawing {
+    use cadcraft_doc::{Block, Insert};
+    let mut d = Drawing::new_metric();
+    d.blocks.insert("B".into(), std::sync::Arc::new(Block::new("B")));
+    let mut e = Entity::new(
+        Handle(0x410),
+        EntityKind::Insert(Insert {
+            block: "B".into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs,
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        }),
+    );
+    e.geometry_revision = GeometryRevision::CanonicalV2;
+    d.model.push(e);
+    d
+}
+
+#[test]
+fn an_attribute_with_a_thickness_is_swept_along_its_own_normal() {
+    let plain = build_lines(&insert_with(vec![attribute(0.0, "Standard")]));
+    let swept = build_lines(&insert_with(vec![attribute(5.0, "Standard")]));
+    assert!(!plain.is_empty());
+    assert!(swept.len() > 2 * plain.len(), "the strokes, their far copy and the side edges");
+    assert_eq!(&swept[..plain.len()], &plain[..]);
+    // The far copy is the near strokes moved by 5 * (0, 0.6, 0.8): (0, 3) in the view.
+    for (a, b) in plain.iter().zip(&swept[plain.len()..]) {
+        assert!(a.iter().zip(b).all(|(p, q)| near(*p + Vec2::new(0.0, 3.0), *q)), "{a:?} vs {b:?}");
+    }
+}
+
+#[test]
+fn the_attribute_of_a_multileader_block_is_swept_through_the_block_matrix() {
+    use cadcraft_doc::{Block, Insert, MLeader, MLeaderContext};
+    let build_with = |thickness| {
+        let mut d = Drawing::new_metric();
+        d.blocks.insert("B".into(), std::sync::Arc::new(Block::new("B")));
+        let mut m = MLeader::single(Vec3::new(8.0, 5.0, 0.0), 1.0, true, vec![vec![Vec3::new(2.0, 8.0, 0.0)]], None);
+        // The block matrix is the identity: no shift, scale 1, rotation 0 in the XY plane.
+        m.block = Some(Insert {
+            block: "B".into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: vec![attribute(thickness, "Standard")],
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        });
+        m.context = MLeaderContext { geometry_revision: GeometryRevision::CanonicalV2, ..MLeaderContext::default() };
+        let mut e = Entity::new(Handle(0x411), EntityKind::MLeader(m));
+        e.geometry_revision = GeometryRevision::CanonicalV2;
+        d.model.push(e);
+        build_lines(&d)
+    };
+    let (plain, swept) = (build_with(0.0), build_with(5.0));
+    assert!(swept.len() > plain.len());
+    assert_eq!(&swept[..plain.len()], &plain[..]);
+    // The far copy of the attribute text: the near text strokes (those after the leader lines) shifted by (0, 3).
+    let strokes: Vec<&Vec<Vec2>> = plain.iter().filter(|l| l.len() > 2).collect();
+    assert!(!strokes.is_empty());
+    for stroke in strokes {
+        let moved: Vec<Vec2> = stroke.iter().map(|p| *p + Vec2::new(0.0, 3.0)).collect();
+        assert!(swept.iter().any(|l| l.len() == moved.len() && l.iter().zip(&moved).all(|(p, q)| near(*p, *q))), "{stroke:?}");
+    }
+}
+
+#[test]
+fn an_attribute_in_an_outline_font_stays_flat() {
+    let Some(face) = ["Arial", "Helvetica", "DejaVu Sans", "Liberation Sans"]
+        .into_iter()
+        .find(|f| matches!(cadcraft_fonts::TextFont::resolve(f), cadcraft_fonts::TextFont::Outline(_)))
+    else {
+        return;
+    };
+    let build_with = |thickness| {
+        let mut d = insert_with(vec![attribute(thickness, "Outline")]);
+        d.text_styles.push(cadcraft_doc::TextStyle { name: "Outline".into(), font: face.into(), ..cadcraft_doc::TextStyle::default() });
+        build(&d, &Space::Model, &fine())
+    };
+    let (flat, thick) = (build_with(0.0), build_with(5.0));
+    assert_eq!((flat.verts.clone(), flat.tris.clone(), flat.prims.len()), (thick.verts.clone(), thick.tris.clone(), thick.prims.len()));
+}
