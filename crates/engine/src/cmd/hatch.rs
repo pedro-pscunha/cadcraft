@@ -5,8 +5,9 @@ pub use patfile::{PatternChoice, pattern_choices};
 pub(super) use patfile::{lines_for, run_patterns};
 
 use cadcraft_color::Color;
-use cadcraft_doc::{Drawing, Entity, EntityKind, Gradient, Handle, Hatch, HatchLoop, Space, entity_bounds};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Gradient, Handle, Hatch, HatchLoop, Space};
 use cadcraft_geom::{Bounds2, PolyVertex, Polyline, Vec2, point_in_polygon};
+use cadcraft_render::entity_extents;
 use serde_json::{Value, json};
 
 use super::helpers::lwpoly;
@@ -43,9 +44,9 @@ pub(super) fn outline_tol(ext: Bounds2) -> f64 {
 
 /// Tessellated outlines of every visible curve in the space (hatch boundary candidates), each
 /// with the handle of the object it came from.
-fn outlines(d: &Drawing, space: &Space, near: Option<Bounds2>) -> (Vec<Vec<Vec2>>, Vec<Handle>) {
-    let Some(store) = d.space(space) else { return (Vec::new(), Vec::new()) };
-    let ext = d.extents(space);
+fn outlines(d: &Drawing, space: &Space, near: Option<Bounds2>) -> Result<(Vec<Vec<Vec2>>, Vec<Handle>)> {
+    let Some(store) = d.space(space) else { return Ok((Vec::new(), Vec::new())) };
+    let ext = cadcraft_render::space_extents(d, space)?;
     let tol = outline_tol(ext);
     let mut out = Vec::new();
     let mut owners = Vec::new();
@@ -55,7 +56,7 @@ fn outlines(d: &Drawing, space: &Space, near: Option<Bounds2>) -> (Vec<Vec<Vec2>
         }
         if let Some(n) = near
             && !matches!(e.kind, EntityKind::XLine(_) | EntityKind::Ray(_))
-            && !entity_bounds(d, e, 0).intersects(&n)
+            && !entity_extents(d, e, 0)?.intersects(&n)
         {
             continue;
         }
@@ -63,7 +64,7 @@ fn outlines(d: &Drawing, space: &Space, near: Option<Bounds2>) -> (Vec<Vec<Vec2>
         owners.extend(std::iter::repeat_n(e.handle, polys.len()));
         out.extend(polys);
     }
-    (out, owners)
+    Ok((out, owners))
 }
 
 /// An object's outline as polylines (tolerance `tol`), infinite lines clipped to a generous
@@ -216,9 +217,9 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
             entity.require_legacy_geometry()?;
         }
     }
-    let ext = d.extents(&space);
+    let ext = cadcraft_render::space_extents(d, &space)?;
     let tol = ((ext.width() + ext.height()) * 1e-9).max(1e-9);
-    let (polys, owners) = outlines(d, &space, None);
+    let (polys, owners) = outlines(d, &space, None)?;
     // A line that ends on a flattened curve (an ellipse) can stop short of its chords.
     let polys = cadcraft_geom::region::snap_ends(&polys, outline_tol(ext), tol);
     let found = cadcraft_geom::region::boundary_at_gap(&polys, p, tol, gap_tolerance(d))
@@ -233,7 +234,7 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
             if !d.is_visible(e) {
                 continue;
             }
-            let eb = entity_bounds(d, e, 0);
+            let eb = entity_extents(d, e, 0)?;
             if !ob.contains_box(&eb) {
                 continue;
             }

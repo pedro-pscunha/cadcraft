@@ -613,7 +613,7 @@ fn block_box(s: &Session, ins: &Insert) -> Result<(Vec2, Vec2)> {
     let d = s.doc()?;
     let probe =
         Entity { geometry_revision: Default::default(), handle: Handle(0), common: Default::default(), kind: EntityKind::Insert(ins.clone()) };
-    let b = cadcraft_doc::entity_bounds(d, &probe, 0);
+    let b = cadcraft_render::entity_extents(d, &probe, 0)?;
     if b.is_empty() || !b.center().is_finite() {
         return Ok((Vec2::new(0.0, 0.0), ins.insert.xy()));
     }

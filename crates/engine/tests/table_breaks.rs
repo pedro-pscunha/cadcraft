@@ -49,7 +49,7 @@ fn breaking_draws_parts_with_repeated_labels() {
     assert_eq!(r5.row, 6);
     assert!(r5.at.x > 7.0 && r5.at.y > -3.0, "r5 starts the second part at x 7: {:?}", r5.at);
     // Extents cover both parts.
-    let b = cadcraft_engine::doc::entity_bounds(s.doc().unwrap(), s.doc().unwrap().entity(Handle::parse_hex(&h).unwrap()).unwrap(), 0);
+    let b = cadcraft_render::entity_extents(s.doc().unwrap(), s.doc().unwrap().entity(Handle::parse_hex(&h).unwrap()).unwrap(), 0).unwrap();
     assert!((b.max.x - 13.0).abs() < 1e-9 && (b.min.y + 6.0).abs() < 1e-9, "{b:?}");
     // TABLEDIT finds cells in the second part.
     s.execute("tabledit", &json!({ "at": [11.5, -2.5], "text": "five" })).unwrap();

@@ -100,7 +100,7 @@ fn massprop_does_not_flag_area_without_visible_extents() {
     let mut s = Session::new();
     let a = rect_region(&mut s, [0.0, 0.0], [10.0, 4.0]);
     hide(&mut s, a);
-    assert!(s.doc().unwrap().extents(&Space::Model).is_empty());
+    assert!(cadcraft_render::space_extents(s.doc().unwrap(), &Space::Model).unwrap().is_empty());
     let m = s.execute("massprop", &json!({"handles": [a.hex()]})).unwrap();
     assert_eq!(m["regions"][0]["area"], json!(40.0));
     assert_eq!(m["selfCheck"]["implausible"], json!([]), "no extents means no area bound: {m}");

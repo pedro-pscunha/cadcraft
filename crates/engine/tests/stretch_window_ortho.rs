@@ -36,7 +36,7 @@ fn stretch_from_corner(mut s: Session, to: Vec2) -> (Vec2, Vec2) {
         s.cmdline(t).unwrap();
     }
     assert!(s.current_prompt().is_none(), "STRETCH is done, still at {:?}", s.current_prompt().map(|p| p.message));
-    let b = s.doc().unwrap().extents(&s.space());
+    let b = cadcraft_render::space_extents(s.doc().unwrap(), &s.space()).unwrap();
     (b.min, b.max)
 }
 

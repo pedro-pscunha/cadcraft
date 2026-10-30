@@ -513,25 +513,25 @@ fn setvar_dim_variables_apply_to_new_dimensions() {
     assert!((text_height(&s, first) - base).abs() < 1e-12);
     // Extents use the same scale as the geometry: room for 2.5 text heights beyond the points.
     let d = s.doc().unwrap();
-    let margin = |hd: Handle, span: f64| (cadcraft_doc::entity_bounds(d, d.entity(hd).unwrap(), 0).height() - span) / 2.0;
+    let margin = |hd: Handle, span: f64| (cadcraft_render::entity_extents(d, d.entity(hd).unwrap(), 0).unwrap().height() - span) / 2.0;
     assert!((margin(first, 20.0) - 2.5 * base).abs() < 1e-9);
     assert!((margin(scaled, 40.0) - 2.5 * text_height(&s, scaled)).abs() < 1e-9);
 
     // Making a style current clears the overrides.
     s.execute("dimstyle.current", &json!({ "name": "Standard" })).unwrap();
-    assert_eq!(crate::sysvars::get(&s, "DIMSCALE"), Some(json!(1.0)));
+    assert_eq!(crate::sysvars::get(&s, "DIMSCALE").unwrap(), Some(json!(1.0)));
     let plain = linear(&mut s, -60.0);
     assert!(dim(&s, plain).overrides.is_empty());
 
     // Editing the current style updates the variables, so the issue's workaround keeps working.
     s.execute("dimstyle", &json!({ "name": "Standard", "DIMSCALE": 24 })).unwrap();
-    assert_eq!(crate::sysvars::get(&s, "DIMSCALE"), Some(json!(24.0)));
+    assert_eq!(crate::sysvars::get(&s, "DIMSCALE").unwrap(), Some(json!(24.0)));
     let restyled = linear(&mut s, -80.0);
     assert!(dim(&s, restyled).overrides.is_empty());
     assert!((text_height(&s, restyled) / base - 24.0).abs() < 1e-9);
 
     // A DIM* variable the header doesn't carry reads from the style and can be overridden too.
-    let dec = crate::sysvars::get(&s, "DIMDEC").unwrap();
+    let dec = crate::sysvars::get(&s, "DIMDEC").unwrap().unwrap();
     assert_eq!(dec, json!(s.doc().unwrap().dim_style("Standard").unwrap().decimals));
     s.execute("setvar", &json!({ "name": "DIMDEC", "value": 1 })).unwrap();
     let one = linear(&mut s, -100.0);

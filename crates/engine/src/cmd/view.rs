@@ -1,7 +1,7 @@
 //! View menu: ZOOM (with Realtime and Dynamic), PAN, REGEN, REDRAW, named views (VIEW), layout
 //! switching.
 
-use cadcraft_doc::{Space, entity_bounds};
+use cadcraft_doc::Space;
 use cadcraft_geom::{Bounds2, Vec2};
 use serde_json::{Value, json};
 
@@ -108,9 +108,10 @@ pub fn specs() -> Vec<CommandSpec> {
     v
 }
 
-fn ext_bounds(s: &Session) -> Result<Bounds2> {
+fn ext_bounds(s: &mut Session) -> Result<Bounds2> {
     let space = s.space();
-    Ok(s.doc()?.extents(&space))
+    let query = cadcraft_render::space_extents(s.doc()?, &space);
+    Ok(s.report_extent_refusals(query))
 }
 
 fn fit(s: &mut Session, b: Bounds2) -> Result<()> {
@@ -174,7 +175,8 @@ pub(crate) fn zoom(s: &mut Session, p: &Value) -> Result<Value> {
         "object" | "o" => {
             let hs = targets(s, p)?;
             let d = s.doc()?;
-            let b = hs.iter().filter_map(|h| d.entity(*h)).fold(Bounds2::EMPTY, |a, e| a.union(&entity_bounds(d, e, 0)));
+            let query = cadcraft_render::entities_extents(d, hs.iter().filter_map(|h| d.entity(*h)).map(|e| e.as_ref()), 0);
+            let b = s.report_extent_refusals(query);
             fit(s, b.expand(b.height().max(b.width()) * 0.05))?;
         }
         _ => return Err(bad("zoom", "unknown mode")),

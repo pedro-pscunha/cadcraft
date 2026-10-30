@@ -5,8 +5,9 @@
 //! left of their extents. Otherwise each TEXT becomes its own MTEXT, attached at the point it
 //! is justified by.
 
-use cadcraft_doc::{EntityKind, HAlign, Handle, MText, Text, VAlign, entity_bounds, mtext_literal};
+use cadcraft_doc::{EntityKind, HAlign, Handle, MText, Text, VAlign, mtext_literal};
 use cadcraft_geom::Bounds2;
+use cadcraft_render::entity_extents;
 use serde_json::{Value, json};
 
 use super::curves::KW;
@@ -63,7 +64,7 @@ fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<H
             continue;
         }
         e.require_legacy_geometry()?;
-        items.push((*h, e.kind.clone(), entity_bounds(d, e, 0)));
+        items.push((*h, e.kind.clone(), entity_extents(d, e, 0)?));
     }
     if !o.combine {
         let mut made = Vec::new();

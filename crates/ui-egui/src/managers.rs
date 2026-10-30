@@ -910,10 +910,12 @@ fn plot_params(st: &PlotState, preview_dpi: Option<f64>) -> Value {
 /// (where the host has a file dialog) and runs `plot` with those settings.
 fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     let t = Tokens::get();
-    let Ok(d) = app.session.doc() else {
+    let Ok(state) = app.session.state() else {
         no_drawing(ctx, "Plot", open);
         return None;
     };
+    let document = state.doc.clone();
+    let d = document.as_ref();
     let mut targets = vec!["Model".to_string()];
     let mut layouts: Vec<(u32, String)> = d.layouts.iter().map(|l| (l.tab_order, l.name.clone())).collect();
     layouts.sort_by_key(|l| l.0);
@@ -921,7 +923,8 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     let generation = PLOT_GEN.load(Ordering::Relaxed);
     let mut st = temp::<PlotState>(ctx, "plot_state").filter(|s| s.generation == generation && targets.contains(&s.target)).unwrap_or_else(|| {
         let target = app.session.layout_space().tab_name().to_string();
-        let mut ext = d.extents(&cadcraft_doc::Space::Model);
+        let query = cadcraft_render::space_extents(d, &cadcraft_doc::Space::Model);
+        let mut ext = app.session.report_extent_refusals(query);
         if ext.is_empty() {
             ext = cadcraft_geom::Bounds2::new(cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(12.0, 9.0));
         }

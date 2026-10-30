@@ -44,9 +44,9 @@ pub(super) fn new_vp_frozen(d: &Drawing) -> Vec<String> {
 }
 
 /// A new viewport over `r`, zoomed to the model extents.
-pub(super) fn new_viewport(d: &Drawing, r: Bounds2, id: u32) -> Viewport {
-    let (view_center, view_height) = fit_view(d, r.width(), r.height());
-    Viewport {
+pub(super) fn new_viewport(d: &Drawing, r: Bounds2, id: u32) -> Result<Viewport> {
+    let (view_center, view_height) = fit_view(d, r.width(), r.height())?;
+    Ok(Viewport {
         center: r.center().to3(0.0),
         width: r.width(),
         height: r.height(),
@@ -55,7 +55,7 @@ pub(super) fn new_viewport(d: &Drawing, r: Bounds2, id: u32) -> Viewport {
         id,
         frozen_layers: new_vp_frozen(d),
         ..Viewport::default()
-    }
+    })
 }
 
 /// Polygon vertices from `points` (+ optional `bulges`, one per vertex: the arc to the next).
@@ -101,7 +101,7 @@ fn check_boundary(cmd: &str, d: &Drawing, space: &Space, h: Handle) -> Result<Bo
     }
     let b = boundary_bounds(&e.kind).ok_or_else(|| bad(cmd, "the object must be a closed polyline, circle, ellipse or spline"))?;
     // The exact extents (the tessellated outline runs just inside curves).
-    let eb = cadcraft_doc::entity_bounds(d, e, 0);
+    let eb = cadcraft_render::entity_extents(d, e, 0)?;
     let b = if eb.is_empty() || !eb.min.is_finite() || !eb.max.is_finite() { b } else { b.union(&eb) };
     if b.width() > 1e7 || b.height() > 1e7 {
         return Err(bad(cmd, "the viewport is too large"));
@@ -126,7 +126,7 @@ fn add_clipped(s: &mut Session, cmd: &str, space: &Space, boundary: Handle) -> R
     let common = s.current_common();
     let d = s.doc_mut()?;
     let id = next_viewport_id(d);
-    let vp = Viewport { clip: Some(boundary), ..new_viewport(d, b, id) };
+    let vp = Viewport { clip: Some(boundary), ..new_viewport(d, b, id)? };
     Ok(d.add(space, common, EntityKind::Viewport(vp))?)
 }
 
@@ -261,7 +261,7 @@ fn mview_restore(s: &mut Session, p: &Value) -> Result<Value> {
     for t in tiles.iter().take(MAX_RESTORED) {
         let Some(r) = tile_rect(t, rect) else { continue };
         let id = next_viewport_id(d);
-        let mut vp = new_viewport(d, r, id);
+        let mut vp = new_viewport(d, r, id)?;
         if let Some((c, h)) = tile_view(t, r) {
             (vp.view_center, vp.view_height) = (c, h);
         }

@@ -478,7 +478,7 @@ fn getvar_drawing_and_session_variables() {
     let file = dir.join("lisp_getvar_test.dxf");
     s.state_mut().unwrap().path = Some(file.to_string_lossy().into_owned());
     let want = format!("{}{}", dir.to_string_lossy().trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR);
-    assert_eq!(crate::sysvars::get(&s, "DWGPREFIX"), Some(serde_json::json!(want)));
+    assert_eq!(crate::sysvars::get(&s, "DWGPREFIX").unwrap(), Some(serde_json::json!(want)));
     assert_eq!(ok(&mut s, "(getvar \"DWGTITLED\")"), "1");
 }
 

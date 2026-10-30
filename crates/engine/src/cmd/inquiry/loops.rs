@@ -91,14 +91,14 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let s: &Session = s;
     let st = s.state()?;
     let d = &st.doc;
-    let tol = tolerance.unwrap_or_else(|| {
-        let ext = d.extents(&st.space);
-        if ext.is_empty() {
-            return MIN_TOLERANCE;
+    let tol = match tolerance {
+        Some(tolerance) => tolerance,
+        None => {
+            let ext = cadcraft_render::space_extents(d, &st.space)?;
+            let diag = ext.min.dist(ext.max);
+            if ext.is_empty() || !diag.is_finite() { MIN_TOLERANCE } else { (diag * 1e-9).max(MIN_TOLERANCE) }
         }
-        let diag = ext.min.dist(ext.max);
-        if diag.is_finite() { (diag * 1e-9).max(MIN_TOLERANCE) } else { MIN_TOLERANCE }
-    });
+    };
     let mut skipped: Skipped = BTreeMap::new();
     let Some(store) = d.space(&st.space) else {
         return Ok(empty_report(offset, tol, 0, 0, pair_limit, false, skipped));

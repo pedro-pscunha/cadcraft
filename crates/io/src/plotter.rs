@@ -81,7 +81,7 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     // Paper units per drawing unit: 1 for a layout at 1:1, the fitted scale for model space.
     let fit = matches!(space, Space::Model) || o.fit == Some(true);
     let window = o.window.filter(|w| matches!(space, Space::Model) && !w.is_empty());
-    let est = if fit { fit_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, &o) } else { 1.0 };
+    let est = if fit { fit_scale(&crate::image_bounds(d, space, window)?, &sheet, &o) } else { 1.0 };
     // Chord tolerance: a fifth of a pixel.
     let tolerance = (0.2 / (k * est)).max(1e-9);
     let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
@@ -120,7 +120,7 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let window = o.window.filter(|w| !w.is_empty());
     let table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(Arc::new);
     let lineweights = o.lineweights.unwrap_or(true);
-    let est = fit_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, &o);
+    let est = fit_scale(&crate::image_bounds(d, space, window)?, &sheet, &o);
     // Chord tolerance: about 0.05 mm on paper.
     let tolerance = (0.05 / (sheet.unit_mm * est)).max(1e-9);
     let tolerance = if tolerance.is_finite() { tolerance } else { cadcraft_render::Options::default().tolerance };

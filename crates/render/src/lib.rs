@@ -9,6 +9,7 @@
 
 pub mod clip;
 mod dim;
+mod extents;
 mod fill;
 mod hatch;
 mod linetype;
@@ -27,6 +28,7 @@ mod wide;
 mod world_bounds;
 mod world_geometry;
 mod world_paint;
+pub use extents::{ExtentsRefusal, entities_extents, entity_extents, space_extents};
 pub use world_bounds::entity_world_bounds;
 pub use world_geometry::entity_world_geometry;
 

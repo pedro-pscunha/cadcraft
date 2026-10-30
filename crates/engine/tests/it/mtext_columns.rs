@@ -76,7 +76,7 @@ fn columns_shape_the_drawn_text_and_its_extents() {
     let xs: Vec<f64> = l.strokes.iter().flatten().map(|p| p.x).collect();
     assert!(xs.iter().any(|x| *x > 24.0), "text reaches the third column");
     let e = d.model.iter().last().unwrap();
-    let b = cadcraft_doc::entity_bounds(d, e, 0);
+    let b = cadcraft_render::entity_extents(d, e, 0).unwrap();
     assert!((b.width() - 34.0).abs() < 1e-9 && (b.height() - 6.0).abs() < 1e-9, "{b:?}");
 }
 

@@ -78,7 +78,7 @@ pub fn is_profile_var(name: &str) -> bool {
 pub fn profile(s: &Session) -> Value {
     let mut m = Map::new();
     for name in PROFILE_VARS {
-        if let Some(v) = crate::sysvars::get(s, name) {
+        if let Some(v) = crate::sysvars::scalar_value(s, name) {
             m.insert((*name).to_string(), v);
         }
     }

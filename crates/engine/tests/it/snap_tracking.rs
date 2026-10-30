@@ -338,7 +338,7 @@ fn shift_ortho_override_wins_over_polar() {
 #[test]
 fn sysvars_polarmode_polaraddang_autosnap() {
     let mut s = Session::new();
-    let get = |s: &Session, n: &str| cadcraft_engine::sysvars::get(s, n).unwrap();
+    let get = |s: &Session, n: &str| cadcraft_engine::sysvars::get(s, n).unwrap().unwrap();
     setvar(&mut s, "POLARMODE", json!(6));
     assert_eq!(get(&s, "POLARMODE"), json!(6));
     setvar(&mut s, "POLARADDANG", json!("15;22.5"));
