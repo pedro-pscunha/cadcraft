@@ -110,7 +110,8 @@ numeric_groups! {
     /// The groups of the entity itself besides its geometry and attachment codes: the property-override flags (90), colours (91,
     /// 92, 93), lineweight (171), landing and dogleg switches (290, 291), text frame (292), annotation scale switch (293), text
     /// direction negative (294), alignment in the in-place editor (178), attachment point (179), scale factor (45) and the
-    /// attachment direction and top and bottom attachments (271, 272, 273); the block rotation of the entity (43), which AutoCAD
+    /// attachment direction and top and bottom attachments (271, 272, 273); the dogleg length of the entity (41, which differs from the
+    /// roots' own when AutoCAD scales them); the block rotation of the entity (43), which AutoCAD
     /// leaves as it was when the multileader is rotated (the rotation lives in the context's 46), and the group 295 that ends an
     /// AutoCAD 2018 entity.
     MLeaderEntityGroups {
@@ -127,6 +128,7 @@ numeric_groups! {
         text_align_in_editor = 178,
         attachment_point = 179,
         scale = 45,
+        dogleg_length = 41,
         attach_direction = 271,
         attach_top = 272,
         attach_bottom = 273,

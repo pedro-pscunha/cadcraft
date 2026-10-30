@@ -818,7 +818,7 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs, canonical: bool, t
     inum(&mut t, 171, eg.line_weight, -2);
     inum(&mut t, 290, eg.landing_enabled, 1);
     inum(&mut t, 291, eg.dogleg_enabled, i64::from(first.dogleg > 0.0));
-    f(&mut t, 41, first.dogleg);
+    fnum(&mut t, 41, eg.dogleg_length, first.dogleg);
     if let Some(h) = &r.arrow {
         s(&mut t, 342, h);
     }

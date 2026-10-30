@@ -19,7 +19,7 @@ fn save(d: &Drawing) -> String {
 /// The multileader record: its groups after the end of the content context (301 `}`).
 fn entity_part(p: &[(i32, String)]) -> Vec<(i32, String)> {
     let start = p.iter().position(|(c, v)| *c == 0 && v == "MULTILEADER").unwrap();
-    let rec: Vec<(i32, String)> = p[start..].iter().take_while(|(c, _)| *c != 0 || p[start].1 == "MULTILEADER").cloned().collect();
+    let rec: Vec<(i32, String)> = p[start + 1..].iter().take_while(|(c, _)| *c != 0).cloned().collect();
     let ctx_end = rec.iter().position(|(c, v)| *c == 301 && v == "}").unwrap();
     rec[ctx_end..].to_vec()
 }
@@ -104,4 +104,24 @@ fn the_leader_line_type_comes_back() {
     assert!(entity_part(&p).contains(&(341, ltype)), "341 names the DASHED record");
     let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
     assert_eq!(mleader(&back).context.codes.line_type.as_deref(), Some("DASHED"));
+}
+
+#[test]
+fn the_dogleg_length_of_the_entity_is_kept_beside_the_roots_own() {
+    let mut d = drawing("_DOT");
+    let h = d.model.iter().next().unwrap().handle;
+    d.modify_entity(h, |e| {
+        if let EntityKind::MLeader(m) = &mut e.kind {
+            m.roots[0].dogleg = 0.009;
+            m.context.codes.groups.entity.dogleg_length = Some(0.1);
+        }
+    })
+    .unwrap();
+    let text = save(&d);
+    let part = entity_part(&pairs(&text));
+    let lengths: Vec<f64> = part.iter().filter(|(c, _)| *c == 41).filter_map(|(_, v)| v.parse().ok()).collect();
+    assert_eq!(lengths, [0.1], "the entity's own value, not the root's 0.009");
+    let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(mleader(&back).context.codes.groups.entity.dogleg_length, Some(0.1));
+    assert!((mleader(&back).roots[0].dogleg - 0.009).abs() < 1e-9);
 }
