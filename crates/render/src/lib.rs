@@ -27,6 +27,7 @@ mod wide;
 mod world_bounds;
 mod world_geometry;
 mod world_paint;
+mod world_roles;
 pub use world_bounds::entity_world_bounds;
 pub use world_geometry::entity_world_geometry;
 

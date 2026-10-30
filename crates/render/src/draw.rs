@@ -157,39 +157,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<
         EntityKind::MLine(m) => mline::draw(b, ctx, e, m, rgb, lw, tol),
         EntityKind::LwPolyline(p) if p.const_width > 0.0 || p.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0) => {
             if b.opts.fill && ctx.d.header.i64("FILLMODE", 1) != 0 {
-                // The GPU canvas has no MSAA: a band narrower than a pixel lights only where it
-                // covers pixel centres, so whole sides vanish at some zooms (#1434). On screen the
-                // centre line is drawn too, as a hairline (wide bands are drawn without lineweight),
-                // so a thin band still shows as a one-pixel line. Always, not below a threshold:
-                // the list serves a whole band of zooms. Plots and exports draw the band alone, and
-                // a transparent band gets none (its alpha would add up along the centre).
-                let hairline = !b.plotting && b.opts.min_dash > 0.0 && b.transparency == 0;
-                match &lt {
-                    // Dashed: each dash a filled piece of the band; dots a line across it.
-                    Some(lt) => {
-                        let min = b.opts.min_dash / ctx.xf.scale_factor().max(1e-12);
-                        let (tris, ticks, centres) = wide::dashed(p, tol, lt, ltscale, min);
-                        b.tris(ctx, rgb, &tris);
-                        if hairline {
-                            for c in &centres {
-                                b.hairline(ctx, rgb, c);
-                            }
-                        }
-                        for t in &ticks {
-                            match t.as_slice() {
-                                [q] => b.point(ctx, rgb, *q),
-                                _ => b.polyline(ctx, rgb, lw, t),
-                            }
-                        }
-                    }
-                    None => {
-                        b.tris(ctx, rgb, &fill::wide_polyline(p, tol));
-                        if hairline {
-                            let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
-                            b.hairline(ctx, rgb, &pl.tessellate(tol));
-                        }
-                    }
-                }
+                wide_fill(b, ctx, p, rgb, lw, lt.as_ref(), ltscale, tol);
             } else {
                 let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
                 stroke(b, &pl.tessellate(tol));
@@ -386,6 +354,54 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
         }
     } else {
         dimension(b, ctx, e, dm, lw, lt, ltscale);
+    }
+}
+
+/// A wide polyline's band (and its hairline centre line on screen), whole or dashed: the fill branch of the legacy painter, in
+/// the polyline's own 2D coordinates.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn wide_fill(
+    b: &mut Builder,
+    ctx: &Ctx,
+    p: &cadcraft_doc::LwPolyline,
+    rgb: Ink,
+    lw: f32,
+    lt: Option<&cadcraft_doc::Linetype>,
+    ltscale: f64,
+    tol: f64,
+) {
+    // The GPU canvas has no MSAA: a band narrower than a pixel lights only where it
+    // covers pixel centres, so whole sides vanish at some zooms (#1434). On screen the
+    // centre line is drawn too, as a hairline (wide bands are drawn without lineweight),
+    // so a thin band still shows as a one-pixel line. Always, not below a threshold:
+    // the list serves a whole band of zooms. Plots and exports draw the band alone, and
+    // a transparent band gets none (its alpha would add up along the centre).
+    let hairline = !b.plotting && b.opts.min_dash > 0.0 && b.transparency == 0;
+    match lt {
+        // Dashed: each dash a filled piece of the band; dots a line across it.
+        Some(lt) => {
+            let min = b.opts.min_dash / ctx.xf.scale_factor().max(1e-12);
+            let (tris, ticks, centres) = wide::dashed(p, tol, lt, ltscale, min);
+            b.tris(ctx, rgb, &tris);
+            if hairline {
+                for c in &centres {
+                    b.hairline(ctx, rgb, c);
+                }
+            }
+            for t in &ticks {
+                match t.as_slice() {
+                    [q] => b.point(ctx, rgb, *q),
+                    _ => b.polyline(ctx, rgb, lw, t),
+                }
+            }
+        }
+        None => {
+            b.tris(ctx, rgb, &fill::wide_polyline(p, tol));
+            if hairline {
+                let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
+                b.hairline(ctx, rgb, &pl.tessellate(tol));
+            }
+        }
     }
 }
 
