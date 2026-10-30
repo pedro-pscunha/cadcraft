@@ -25,6 +25,7 @@ fn drawing(psltscale: i64) -> Drawing {
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        source_status: None,
     };
     d.add(&Space::Paper("Layout1".into()), Common::default(), EntityKind::Viewport(vp)).unwrap();
     d
