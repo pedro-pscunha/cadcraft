@@ -137,6 +137,8 @@ mod vx_table;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_aci_fallback;
 #[cfg(not(target_arch = "wasm32"))]
+mod writer_block_fields;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer_dictionary_policy;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer_plot_fields;

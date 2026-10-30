@@ -146,6 +146,8 @@ pub struct ForeignExtra {
     pub color_book: Option<(String, String)>,
     /// Source true color (420) and its independent indexed fallback (62).
     pub color_index: Option<(String, i64)>,
+    /// Whether the source block had nonconstant attribute definitions.
+    pub block_attributes: Option<bool>,
     /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
     /// The groups of the record's own subclass the model has no field for (a viewport's view, UCS
@@ -163,6 +165,7 @@ impl ForeignExtra {
             && self.xdata.is_empty()
             && self.color_book.is_none()
             && self.color_index.is_none()
+            && self.block_attributes.is_none()
             && self.props.is_empty()
             && self.subclass.is_empty()
             && self.layout.is_empty()
