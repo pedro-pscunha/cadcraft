@@ -157,6 +157,11 @@ fn shape_json(e: &Entity, f: &Facts) -> Value {
 /// full ellipses, closed or self-closing polylines and splines are measured, arcs and everything
 /// else are skipped.
 fn facts(s: &Session, e: &Entity, tol: f64) -> Result<Facts> {
+    // Centroids, crossings and bounds here are plan-view values of 2D fields: a canonical shape has no such view, so it is named as
+    // skipped rather than measured from its OCS fields.
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+        return Ok(Facts::Skip("canonical geometry is not analysed"));
+    }
     Ok(match &e.kind {
         EntityKind::Circle(c) => {
             let (area, perimeter) = object_area(s, e.handle)?;

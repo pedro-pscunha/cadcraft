@@ -20,9 +20,14 @@ pub fn spatial_line(session: &mut Session, a: [f64; 3], b: [f64; 3]) -> Handle {
 
 /// The same entity, canonical, in the plane of the normal (0, 3, 4) / 5.
 pub fn make_canonical(session: &mut Session, handle: Handle) {
+    make_canonical_in(session, handle, Vec3::new(0.0, 0.6, 0.8));
+}
+
+/// The same entity, canonical, with `extrusion` as the normal of its plane.
+pub fn make_canonical_in(session: &mut Session, handle: Handle, extrusion: Vec3) {
     let mut entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
     entity.geometry_revision = GeometryRevision::CanonicalV2;
-    entity.common.extrusion = Vec3::new(0.0, 0.6, 0.8);
+    entity.common.extrusion = extrusion;
     session.doc_mut().unwrap().model.push(entity);
     assert_eq!(session.doc().unwrap().entity(handle).unwrap().geometry_revision, GeometryRevision::CanonicalV2);
 }

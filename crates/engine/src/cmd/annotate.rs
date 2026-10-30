@@ -21,6 +21,7 @@ mod mleader;
 mod radial;
 
 use angular::{AngularM, ArcLenM, run_angular, run_arclen};
+pub(super) use common::require_legacy_source;
 pub(super) use common::segment_at;
 use common::{DimText, add_dim, assoc_enabled, circle_of, dim, pick_at};
 use edit::{DimSpaceM, OverrideM, dims_of, run_dimspace, run_dimtedit, run_disassociate, run_override, run_reassociate, run_tedit, run_update};

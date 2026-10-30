@@ -248,13 +248,17 @@ pub(crate) fn z_at(s: &Session, p: Vec2) -> f64 {
     let space = s.space();
     crate::select::pick(d, &space, p, ap)
         .and_then(|h| d.entity(h))
-        .and_then(|e| entity_z(e, p))
+        .and_then(|e| entity_z(d, e, p, ap))
         .filter(|z| z.is_finite())
         .unwrap_or(if elevation.is_finite() { elevation } else { 0.0 })
 }
 
-/// The Z of `e` at the point of it nearest `p` (seen from above), when it has one there.
-fn entity_z(e: &Entity, p: Vec2) -> Option<f64> {
+/// The Z of `e` at the point of it nearest `p` (seen from above), when it has one there. A canonical entity gives the Z of its world
+/// geometry within `tol` of `p`, never a field read as a world value.
+fn entity_z(d: &cadcraft_doc::Drawing, e: &Entity, p: Vec2, tol: f64) -> Option<f64> {
+    if let Some(flat) = crate::canonical::flatten(d, e) {
+        return flat.world_points(p, tol).into_iter().min_by(|a, b| a.xy().dist(p).total_cmp(&b.xy().dist(p))).map(|w| w.z);
+    }
     let on_segment = |a: Vec3, b: Vec3| {
         let d = b.xy() - a.xy();
         let l2 = d.dot(d);
@@ -303,6 +307,26 @@ fn face_z(c: &[Vec3; 4], p: Vec2) -> Option<f64> {
     tri(c[0], c[1], c[2]).or_else(|| if c[3] == c[2] { None } else { tri(c[0], c[2], c[3]) })
 }
 
+/// How LIST reads the points of an entity: a canonical circle, arc, polyline or text keeps them in its OCS, so they are placed in the
+/// world by its extrusion; a legacy entity's points are listed as they are.
+struct ListFrame {
+    canonical: bool,
+    frame: Option<cadcraft_geom::OcsFrame>,
+}
+
+impl ListFrame {
+    fn of(e: &Entity) -> ListFrame {
+        let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
+        ListFrame { canonical, frame: canonical.then(|| cadcraft_geom::OcsFrame::new(e.common.extrusion)).flatten() }
+    }
+    fn center(&self, ocs: Vec3) -> Vec3 {
+        match &self.frame {
+            Some(frame) => frame.to_world(ocs),
+            None => ocs,
+        }
+    }
+}
+
 fn list_text(s: &Session, h: Handle) -> String {
     let Ok(d) = s.doc() else { return String::new() };
     let Some(e) = d.entity(h) else { return String::new() };
@@ -314,6 +338,14 @@ fn list_text(s: &Session, h: Handle) -> String {
         space,
         h.hex()
     );
+    let world = ListFrame::of(e);
+    if world.canonical
+        && world.frame.is_none()
+        && matches!(e.kind, EntityKind::Circle(_) | EntityKind::Arc(_) | EntityKind::LwPolyline(_) | EntityKind::Text(_))
+    {
+        t.push_str("\n          canonical geometry has no valid source plane");
+        return t;
+    }
     match &e.kind {
         EntityKind::Line(l) => {
             t.push_str(&format!(
@@ -334,22 +366,24 @@ fn list_text(s: &Session, h: Handle) -> String {
             t.push_str(&format!("\n          Delta X = {},  Delta Y = {},  Delta Z = {}", fmt_d(s, d.x), fmt_d(s, d.y), fmt_d(s, d.z)));
         }
         EntityKind::Circle(c) => {
+            let center = world.center(c.center);
             t.push_str(&format!(
                 "\n            center point, X={}  Y={}  Z={}\n            radius {}\n     circumference {}\n             area {}",
-                fmt_d(s, c.center.x),
-                fmt_d(s, c.center.y),
-                fmt_d(s, c.center.z),
+                fmt_d(s, center.x),
+                fmt_d(s, center.y),
+                fmt_d(s, center.z),
                 fmt_d(s, c.radius),
                 fmt_d(s, c.radius * cadcraft_geom::TAU),
                 fmt_d(s, c.radius * c.radius * cadcraft_geom::PI)
             ));
         }
         EntityKind::Arc(a) => {
+            let center = world.center(a.center);
             t.push_str(&format!(
                 "\n            center point, X={}  Y={}  Z={}\n            radius {}\n            start angle {}\n              end angle {}",
-                fmt_d(s, a.center.x),
-                fmt_d(s, a.center.y),
-                fmt_d(s, a.center.z),
+                fmt_d(s, center.x),
+                fmt_d(s, center.y),
+                fmt_d(s, center.z),
                 fmt_d(s, a.radius),
                 fmt_a(s, a.start),
                 fmt_a(s, a.end)
@@ -363,20 +397,30 @@ fn list_text(s: &Session, h: Handle) -> String {
             } else {
                 t.push_str(&format!("\n           length   {}", fmt_d(s, pl.len())));
             }
-            // The elevation, in world Z (down Z for a mirrored polyline).
-            let z = entity_z(e, Vec2::ZERO).unwrap_or(p.elevation);
-            t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
-            for v in &p.vertices {
-                t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
+            if world.canonical {
+                // A canonical polyline keeps its elevation in its own plane; each vertex is listed in world coordinates.
+                t.push_str(&format!("\n        elevation   {}", fmt_d(s, p.elevation)));
+                for v in &p.vertices {
+                    let at = world.center(Vec3::new(v.p.x, v.p.y, p.elevation));
+                    t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, at.x), fmt_d(s, at.y), fmt_d(s, at.z)));
+                }
+            } else {
+                // The elevation, in world Z (down Z for a mirrored polyline).
+                let z = entity_z(d, e, Vec2::ZERO, 0.0).unwrap_or(p.elevation);
+                t.push_str(&format!("\n        elevation   {}", fmt_d(s, z)));
+                for v in &p.vertices {
+                    t.push_str(&format!("\n          at point  X={}  Y={}  Z={}", fmt_d(s, v.p.x), fmt_d(s, v.p.y), fmt_d(s, z)));
+                }
             }
         }
         EntityKind::Text(tx) => {
+            let start = world.center(tx.insert);
             t.push_str(&format!(
                 "\n            Style = \"{}\"\n       start point, X={}  Y={}  Z={}\n          height {}\n           text {}\n        rotation angle {}",
                 tx.style,
-                fmt_d(s, tx.insert.x),
-                fmt_d(s, tx.insert.y),
-                fmt_d(s, tx.insert.z),
+                fmt_d(s, start.x),
+                fmt_d(s, start.y),
+                fmt_d(s, start.z),
                 fmt_d(s, tx.height),
                 tx.value,
                 fmt_a(s, tx.rotation)
@@ -483,6 +527,16 @@ pub(super) fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
             let g = Polyline { vertices: pl.vertices.clone(), closed: true };
             let drawn = Polyline { vertices: pl.vertices.clone(), closed: pl.closed };
             (g.area().abs(), drawn.len())
+        }
+        // A canonical ellipse is measured in its own plane: its major axis is a space vector, and the plan view of it is not the measure.
+        EntityKind::Ellipse(el) if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 => {
+            if cadcraft_geom::ccw_sweep(el.start, el.end) != cadcraft_geom::TAU {
+                return Err(bad("area", "object has no area"));
+            }
+            let a = el.major.len();
+            let b = a * el.ratio;
+            let flat = cadcraft_geom::Ellipse::from_conjugate(Vec2::ZERO, Vec2::new(a, 0.0), Vec2::new(0.0, b), 0.0, cadcraft_geom::TAU);
+            (cadcraft_geom::PI * a * b, flat.arc_length_from(0.0, cadcraft_geom::TAU))
         }
         EntityKind::Ellipse(el) => {
             let arc = el.projected();
@@ -657,10 +711,16 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.state()?;
     let Some(store) = st.doc.space(&st.space) else { return Ok(json!({ "count": 0, "returned": 0, "offset": offset, "texts": [] })) };
     let mut found: Vec<Value> = Vec::new();
+    let mut refused: Vec<Value> = Vec::new();
     for e in store.iter() {
         if layer.as_ref().is_some_and(|l| e.common.layer.to_lowercase() != *l) {
             continue;
         }
+        // A canonical TEXT or ATTRIB keeps its insertion point in its own plane (an MTEXT, in the world already): report the world point.
+        let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2;
+        let world = |t: &cadcraft_doc::Text, normal: cadcraft_geom::Vec3| -> std::result::Result<cadcraft_geom::Vec3, String> {
+            if canonical { t.world_frame(normal).map(|frame| frame.origin).map_err(|error| error.to_string()) } else { Ok(t.insert) }
+        };
         let mut push = |ty: &str, value: String, at: cadcraft_geom::Vec3, height: f64, rotation: f64, style: &str, tag: Option<&str>| {
             let value = value.trim().to_string();
             if value.is_empty()
@@ -679,11 +739,17 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
             found.push(v);
         };
         match &e.kind {
-            EntityKind::Text(t) => push("Text", t.value.clone(), t.insert, t.height, t.rotation, &t.style, None),
+            EntityKind::Text(t) => match world(t, e.common.extrusion) {
+                Ok(at) => push("Text", t.value.clone(), at, t.height, t.rotation, &t.style, None),
+                Err(reason) => refused.push(json!({ "handle": e.handle.hex(), "reason": reason })),
+            },
             EntityKind::MText(t) => push("MText", cadcraft_fonts::plain_mtext(&t.contents), t.insert, t.height, t.rotation, &t.style, None),
             EntityKind::Insert(i) => {
                 for a in i.attribs.iter().filter(|a| !a.invisible) {
-                    push("Attribute", a.text.value.clone(), a.text.insert, a.text.height, a.text.rotation, &a.text.style, Some(&a.tag));
+                    match world(&a.text, a.plane.normal) {
+                        Ok(at) => push("Attribute", a.text.value.clone(), at, a.text.height, a.text.rotation, &a.text.style, Some(&a.tag)),
+                        Err(reason) => refused.push(json!({ "handle": e.handle.hex(), "reason": reason })),
+                    }
                 }
             }
             EntityKind::MLeader(m) => {
@@ -696,7 +762,11 @@ fn run_texts(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let n = found.len();
     let page: Vec<Value> = found.into_iter().skip(offset).take(limit).collect();
-    Ok(json!({ "count": n, "returned": page.len(), "offset": offset, "texts": page }))
+    let mut report = json!({ "count": n, "returned": page.len(), "offset": offset, "texts": page });
+    if let (false, Some(o)) = (refused.is_empty(), report.as_object_mut()) {
+        o.insert("refused".into(), json!(refused));
+    }
+    Ok(report)
 }
 
 mod count;

@@ -68,7 +68,7 @@ pub(super) fn with_assoc(k: EntityKind, assoc: Vec<DimAssoc>) -> EntityKind {
     }
 }
 
-pub(super) fn require_legacy_source(s: &Session, handle: Handle) -> Result<()> {
+pub(in crate::cmd) fn require_legacy_source(s: &Session, handle: Handle) -> Result<()> {
     if let Some(entity) = s.doc()?.entity(handle) {
         entity.require_legacy_geometry()?;
     }

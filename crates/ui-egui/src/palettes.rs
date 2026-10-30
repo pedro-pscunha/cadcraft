@@ -1005,7 +1005,15 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 }
             });
         };
+        // A canonical LINE, CIRCLE or ARC shows its world values, read-only: its fields are not the legacy 2D coordinates, and an edit
+        // of them would be refused.
+        let canonical_rows = cadcraft_engine::canonical_geometry_rows(d, &e);
         match &e.kind {
+            _ if canonical_rows.is_some() => {
+                for (label, value) in canonical_rows.iter().flatten() {
+                    prop_row(ui, label, |ui| read_only(ui, value));
+                }
+            }
             EntityKind::Line(l) => {
                 prop_row(ui, "Start X", |ui| {
                     if let Some(f) = number(edit_field(ui, ui.scope_id().with(("sx", &ids)), len(l.a.x)), &mut bad) {

@@ -227,6 +227,7 @@ impl<'a> Signer<'a> {
                     }
                     _ => self.geometry(&e.kind, depth + 1).hash(&mut h),
                 }
+                semantics(e).hash(&mut h);
                 properties(e).hash(&mut h);
                 if self.frames.is_some() {
                     let c = &e.common;
@@ -238,6 +239,19 @@ impl<'a> Signer<'a> {
         self.blocks.insert(key, v);
         v
     }
+}
+
+/// What the numbers of an entity's geometry mean: the revision and, for a canonical entity, the plane they are in. The same fields
+/// with another revision or another normal are other geometry, and a legacy and a canonical entity are never the same here (no
+/// legacy entity has a world geometry to compare).
+fn semantics(e: &Entity) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    format!("{:?}", e.geometry_revision).hash(&mut h);
+    if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+        let n = e.common.extrusion;
+        [n.x, n.y, n.z].map(|v| (v * 1e9).round() as i64).hash(&mut h);
+    }
+    h.finish()
 }
 
 fn properties(e: &Entity) -> u64 {
@@ -263,7 +277,9 @@ fn objects<'a>(d: &'a Drawing, space: &Space, truncated: &mut bool) -> Vec<Obj<'
             *truncated = true;
             break;
         }
-        out.push(Obj { e, geom: sg.geometry(&e.kind, 0), props: properties(e) });
+        let mut geom = std::collections::hash_map::DefaultHasher::new();
+        (sg.geometry(&e.kind, 0), semantics(e)).hash(&mut geom);
+        out.push(Obj { e, geom: geom.finish(), props: properties(e) });
     }
     out
 }
