@@ -144,6 +144,8 @@ pub struct ForeignExtra {
     /// The colour book colour (group 430) and the true colour (group 420) it was read with: it is
     /// written back while the colour is unchanged.
     pub color_book: Option<(String, String)>,
+    /// Source true color (420) and its independent indexed fallback (62).
+    pub color_index: Option<(String, i64)>,
     /// Other unmodelled property groups of an entity's `AcDbEntity` subclass (material 347, shadow mode 284).
     pub props: Vec<RawTag>,
     /// The groups of the record's own subclass the model has no field for (a viewport's view, UCS
@@ -160,6 +162,7 @@ impl ForeignExtra {
             && self.reactors.is_empty()
             && self.xdata.is_empty()
             && self.color_book.is_none()
+            && self.color_index.is_none()
             && self.props.is_empty()
             && self.subclass.is_empty()
             && self.layout.is_empty()

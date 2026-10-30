@@ -472,6 +472,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
         let rgb = props.iter().find(|t| t.code == 420).map(Tag::str);
+        if let (Some(rgb), Some(index)) = (rgb.as_ref(), props.iter().find(|t| t.code == 62)) {
+            x.color_index = Some((rgb.clone(), index.i64()));
+        }
         if let (Some(book), Some(rgb)) = (book, rgb)
             && !book.trim().is_empty()
         {
@@ -1728,6 +1731,25 @@ fn record_geometry<'a>(
     g.and_then(|g| g.records.first())
 }
 
+/// Keep source indexed fallbacks only while their corresponding RGB color is unchanged.
+fn patch_color_index(kind: &str, body: &[Tag], source: &(String, i64)) -> Vec<Tag> {
+    let start = body.iter().position(|t| t.code == 100 && t.str() == "AcDbEntity").map_or(body.len(), |i| i + 1);
+    let end = body.get(start..).unwrap_or(&[]).iter().position(|t| t.code == 100 || t.code >= 1000).map_or(body.len(), |i| start + i);
+    let common = if kind == "LAYER" { body } else { body.get(start..end).unwrap_or(&[]) };
+    let same_rgb = common.iter().find(|t| t.code == 420).is_some_and(|t| t.str() == source.0);
+    body.iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if same_rgb && t.code == 62 && (kind == "LAYER" || (start..end).contains(&i)) {
+                let aci = if kind == "LAYER" { if t.i64() < 0 { -source.1.saturating_abs() } else { source.1.saturating_abs() } } else { source.1 };
+                Tag::i(62, aci)
+            } else {
+                t.clone()
+            }
+        })
+        .collect()
+}
+
 /// A written record with its kept extras, remapped references (unknown entities) and kept
 /// dictionary entries (the named object dictionary).
 #[allow(clippy::too_many_arguments)]
@@ -1759,6 +1781,13 @@ fn record(
             replayed.as_slice()
         }
         None => b,
+    };
+    let colors;
+    let b = if let Some(source) = x.and_then(|x| x.color_index.as_ref()) {
+        colors = patch_color_index(&r.kind, b, source);
+        colors.as_slice()
+    } else {
+        b
     };
     let h = head(b);
     // Header snap/grid edits belong only to the first active VPORT tile.
