@@ -138,6 +138,8 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 /// Degrees of freedom of the constrained geometry (`handles` empty), or of the given objects
 /// (constrained or not) and the constraint components they belong to.
 pub fn dof(d: &Drawing, handles: &[Handle]) -> Result<DofReport, SolveError> {
+    let mut admission = crate::admission::Admission::new(d);
+    admission.check(handles.iter().copied())?;
     let cons: Vec<&Constraint> = d.constraints.iter().take(MAX_CONSTRAINTS).collect();
     let mut members_left = crate::model::MAX_RIGID_WORK;
     let (comps, _) = build_budgeted(d, &cons, &SolveOptions::default(), &mut members_left)?;
@@ -179,7 +181,7 @@ pub fn dof(d: &Drawing, handles: &[Handle]) -> Result<DofReport, SolveError> {
         if seen.contains(&h) {
             continue;
         }
-        let m = Model::build_budgeted(d, &[h], &mut members_left);
+        let m = Model::build_budgeted(&mut admission, &[h], &mut members_left)?;
         let Some(s) = m.slots.first() else { continue };
         seen.insert(h);
         free_objects = true;
