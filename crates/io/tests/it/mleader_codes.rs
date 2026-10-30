@@ -456,7 +456,7 @@ fn differing_codes(got: &cadcraft_doc::MLeaderCodes, want: &cadcraft_doc::MLeade
 
 /// What a DWG save loses today of the groups `source_all` sets: the text flow direction (172 of the context), which acadrust does not
 /// carry (the root fix is in acadrust; this list empties then and the test fails until it does).
-const MULTILEADER_LOST_IN_DWG_TODAY: &[&str] = &["groups.ctx.flowDirection"];
+const MULTILEADER_LOST_IN_DWG_TODAY: &[&str] = &[];
 
 #[test]
 fn every_numeric_group_of_a_multileader_survives_a_dwg_save() {
