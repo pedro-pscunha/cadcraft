@@ -39,6 +39,7 @@ fn add_mline_vertex_hits(d: &cadcraft_doc::Drawing, space: &cadcraft_doc::Space,
 
 /// Move the vertices of `e` that lie inside any of the areas `wins` by `d` (STRETCH).
 fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) -> cadcraft_doc::Result<()> {
+    e.require_legacy_geometry()?;
     let inside = |p: Vec2| wins.iter().any(|a| a.contains(p));
     let mv = |p: &mut cadcraft_geom::Vec3| {
         if inside(p.xy()) {
@@ -355,10 +356,10 @@ impl Interactive for StretchM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         let rect = |a: Vec2| {
             let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
-            vec![line(a, b), line(b, c), line(c, d), line(d, a)]
+            vec![s.preview_entity(line(a, b)), s.preview_entity(line(b, c)), s.preview_entity(line(c, d)), s.preview_entity(line(d, a))]
         };
         if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
             let Some(first) = m.pts.first().copied() else { return Vec::new() };
@@ -366,10 +367,10 @@ impl Interactive for StretchM {
                 return rect(first);
             }
             // The fence or polygon so far, on to the cursor; a polygon closes back to its start.
-            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| Some(line(*w.first()?, *w.get(1)?))).collect();
-            out.extend(m.pts.last().map(|l| line(*l, c)));
+            let mut out: Vec<Entity> = m.pts.windows(2).filter_map(|w| Some(s.preview_entity(line(*w.first()?, *w.get(1)?)))).collect();
+            out.extend(m.pts.last().map(|l| s.preview_entity(line(*l, c))));
             if m.kind != SelectKind::Fence && m.pts.len() >= 2 {
-                out.push(line(c, first));
+                out.push(s.preview_entity(line(c, first)));
             }
             return out;
         }
@@ -378,7 +379,7 @@ impl Interactive for StretchM {
             (StretchPhase::Second, _, Some(base)) => {
                 let Ok(doc) = s.doc() else { return Vec::new() };
                 let m = Mat3::translate(c - base);
-                let mut out: Vec<EntityKind> = self
+                let mut out: Vec<Entity> = self
                     .objs
                     .iter()
                     .take(500)
@@ -390,13 +391,40 @@ impl Interactive for StretchM {
                         } else {
                             stretch_entity(&mut e, &self.windows, c - base).ok()?;
                         }
-                        Some(e.kind)
+                        Some(e)
                     })
                     .collect();
-                out.push(line(base, c));
+                out.push(s.preview_entity(line(base, c)));
                 out
             }
             _ => Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::{GeometryRevision, Line};
+    use cadcraft_geom::{Bounds2, Vec3};
+
+    #[test]
+    fn partial_stretch_refuses_canonical_geometry_before_any_preview_edit() {
+        for canonical in [false, true] {
+            let mut entity = Entity::new(Handle(0x100), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(3.0, 0.0, 4.0) }));
+            if canonical {
+                entity.geometry_revision = GeometryRevision::CanonicalV2;
+            }
+            let before = entity.clone();
+            let windows = [StretchArea::Box(Bounds2 { min: Vec2::new(2.0, -1.0), max: Vec2::new(4.0, 1.0) })];
+            let result = stretch_entity(&mut entity, &windows, Vec2::new(1.0, 2.0));
+            if canonical {
+                assert!(result.is_err());
+                assert_eq!(entity, before);
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(entity.kind, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(4.0, 2.0, 4.0) }));
+            }
         }
     }
 }

@@ -2,7 +2,8 @@ use super::break_join::join;
 use super::explode::explode;
 use super::transform::{erase, transform_entities};
 use super::{
-    Accept, EngineError, EntityKind, Handle, Input, Interactive, Mat3, Prompt, Result, SelOutcome, SelectPhase, Session, Step, Vec2, line, number,
+    Accept, EngineError, Entity, EntityKind, Handle, Input, Interactive, Mat3, Prompt, Result, SelOutcome, SelectPhase, Session, Step, Vec2, line,
+    number,
 };
 
 // ---------------- interactive ----------------
@@ -214,22 +215,22 @@ impl SelectThen {
 
     /// Rubber band while ROTATE Reference collects its angles: the objects turned to the cursor
     /// once the reference angle is known, else the line from the first point.
-    fn rotate_reference_preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn rotate_reference_preview(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         let (Some(base), Ok(d)) = (self.pts.first().copied(), s.doc()) else { return Vec::new() };
         match (self.ref_angle, self.ref_points, self.ref_from) {
             (Some(r), false, _) => {
                 let m = Mat3::rotate_about(base, base.angle_to(c) - r);
-                let mut out: Vec<EntityKind> = self
+                let mut out: Vec<Entity> = self
                     .objs
                     .iter()
                     .take(500)
                     .filter_map(|h| d.entity(*h))
-                    .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
+                    .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok())
                     .collect();
-                out.push(line(base, c));
+                out.push(s.preview_entity(line(base, c)));
                 out
             }
-            (_, _, Some(a)) => vec![line(a, c)],
+            (_, _, Some(a)) => vec![s.preview_entity(line(a, c))],
             _ => Vec::new(),
         }
     }
@@ -452,7 +453,7 @@ impl Interactive for SelectThen {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         if self.op == Op::Rotate && self.reference {
             return self.rotate_reference_preview(s, c);
         }
@@ -467,20 +468,15 @@ impl Interactive for SelectThen {
             Op::Scale => match self.ref_len.and_then(|r| positive_length(Some(base.dist(c) / r))) {
                 Some(f) => Mat3::scale_about(base, f),
                 None if self.ref_len.is_some() => return Vec::new(),
-                None => return self.ref_from.map(|a| vec![line(a, c)]).unwrap_or_default(),
+                None => return self.ref_from.map(|a| vec![s.preview_entity(line(a, c))]).unwrap_or_default(),
             },
             Op::Mirror if !self.ask_erase => Mat3::mirror(base, c),
             _ => return Vec::new(),
         };
         let Ok(d) = s.doc() else { return Vec::new() };
-        let mut out: Vec<EntityKind> = self
-            .objs
-            .iter()
-            .take(500)
-            .filter_map(|h| d.entity(*h))
-            .filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok().map(|entity| entity.kind))
-            .collect();
-        out.push(line(base, c));
+        let mut out: Vec<Entity> =
+            self.objs.iter().take(500).filter_map(|h| d.entity(*h)).filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok()).collect();
+        out.push(s.preview_entity(line(base, c)));
         out
     }
     fn drag(&self, s: &Session, c: Vec2) -> Option<crate::prompt::Drag> {
@@ -496,7 +492,7 @@ impl Interactive for SelectThen {
             Op::Mirror if !self.ask_erase => Mat3::mirror(base, c),
             _ => return None,
         };
-        let mut extra = vec![line(base, c)];
+        let mut extra = vec![s.preview_entity(line(base, c))];
         if self.op != Op::Mirror {
             return Some(crate::prompt::Drag { handles: self.objs.clone(), matrix, extra, clipboard: false });
         }
@@ -512,7 +508,7 @@ impl Interactive for SelectThen {
             } else if texts < MAX_MIRROR_TEXT_PREVIEW {
                 texts += 1;
                 if let Ok(entity) = e.transformed(&cadcraft_geom::Mat4::from_mat3(&matrix)) {
-                    extra.push(entity.kind);
+                    extra.push(entity);
                 }
             }
         }
@@ -572,11 +568,11 @@ impl Interactive for DisplaceM {
         }
         self.inner.input(s, i)
     }
-    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview_objects(&self, s: &Session, c: Vec2) -> Vec<Entity> {
         if self.displacement {
             return Vec::new();
         }
-        self.inner.preview(s, c)
+        self.inner.preview_objects(s, c)
     }
     fn drag(&self, s: &Session, c: Vec2) -> Option<crate::prompt::Drag> {
         if self.displacement {
