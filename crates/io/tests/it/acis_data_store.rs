@@ -101,3 +101,24 @@ fn dwg_keeps_the_solids_geometry() {
     let again = cadcraft_io::read(&dwg, "x.dwg").unwrap();
     assert_eq!(again.foreign.data_store_entities().len(), 2);
 }
+
+/// A record the data store binds to a layout (its thumbnail, say) stays: the layout is written under the handle the file gave it, which the
+/// record names.
+#[test]
+fn a_record_bound_to_a_layout_is_kept() {
+    let objects = super::foreign_passthrough::styled_objects();
+    let source = objects.replace(
+        "0\nEOF\n",
+        &format!(
+            "0\nSECTION\n2\nACDSDATA\n70\n2\n71\n1\n0\nACDSSCHEMA\n90\n1\n1\nAcDbThumbnail\n2\nAcDbDs::ID\n280\n10\n91\n8\n2\nThumb\n280\n15\n91\n0\n\
+             0\nACDSRECORD\n90\n1\n2\nAcDbDs::ID\n280\n10\n320\n31\n2\nThumb\n280\n15\n94\n{}\n310\n{SAB_HEX}\n0\nENDSEC\n0\nEOF\n",
+            SAB_HEX.len() / 2
+        ),
+    );
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    let out = String::from_utf8(cadcraft_io::write_with(&d, "x.dxf", &options).unwrap()).unwrap();
+    let tags = cadcraft_dxf::parse(out.as_bytes()).unwrap();
+    let bound: Vec<String> = tags.iter().skip_while(|t| !(t.code == 2 && t.str() == "ACDSDATA")).filter(|t| t.code == 320).map(|t| t.str()).collect();
+    assert_eq!(bound, ["31"], "{out}");
+}

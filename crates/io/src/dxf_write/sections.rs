@@ -1317,11 +1317,10 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     if let Some(tag) = w.t.get_mut(seed_pos + 1) {
         *tag = Tag::s(5, format!("{:X}", w.next));
     }
-    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     // Group 91 of a CLASS exists from AutoCAD 2004 on (AutoCAD 2000 expects the next group, 280, after 90);
     // the DWG bridge keeps it for acadrust.
     if version >= Version::R2004 || dwg_bridge {
-        add_class_instance_counts(&mut w.t);
+        add_class_instance_counts(&mut w.t, d);
     } else {
         remove_class_instance_counts(&mut w.t);
     }
@@ -1329,12 +1328,18 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::order_subclass_groups(&mut w.t);
     crate::dxf_raw::order_reactors(&mut w.t, d);
     crate::dxf_raw::restore_source_handles(&mut w.t, d);
+    // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
+    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     w.t
 }
 
 /// Write DXF Reference group 91 on every CLASS record. Count records after `dxf_raw::finish`
 /// restores foreign classes and objects so every class gets its actual instance count.
-fn add_class_instance_counts(tags: &mut Vec<Tag>) {
+/// A class of the file with no object in the written file keeps the count the file gave it (AutoCAD does: its own save of DPInc
+/// has 217 such classes, of the Architecture objects a DXF does not hold).
+fn add_class_instance_counts(tags: &mut Vec<Tag>, d: &Drawing) {
+    let kept: std::collections::HashSet<String> =
+        d.source_symbols.classes.iter().filter_map(|c| c.iter().find(|t| t.code == 1)).map(|t| t.value.trim().to_ascii_uppercase()).collect();
     let mut counts: HashMap<String, i64> = HashMap::new();
     for t in tags.iter().filter(|t| t.code == 0) {
         let kind = t.str();
@@ -1351,7 +1356,9 @@ fn add_class_instance_counts(tags: &mut Vec<Tag>) {
         }
         let end = tags[start + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |i| start + 1 + i);
         let name = tags[start + 1..end].iter().find(|t| t.code == 1).map(Tag::str).unwrap_or_default().to_ascii_uppercase();
-        let count = counts.get(&name).copied().unwrap_or(0);
+        let counted = counts.get(&name).copied().unwrap_or(0);
+        let given = tags[start + 1..end].iter().find(|t| t.code == 91).map_or(0, Tag::i64);
+        let count = if counted == 0 && kept.contains(&name) { given } else { counted };
         let inserted = if let Some(i) = tags[start + 1..end].iter().position(|t| t.code == 91) {
             tags[start + 1 + i] = Tag::i(91, count);
             false

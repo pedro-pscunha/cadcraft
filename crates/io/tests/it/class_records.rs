@@ -23,6 +23,14 @@ fn source() -> String {
         (91, "0"),
         (280, "0"),
         (281, "0"),
+        (0, "CLASS"),
+        (1, "AEC_VARS_DWG_SETUP"),
+        (2, "AecDbVarsDwgSetup"),
+        (3, "AecBase"),
+        (90, "0"),
+        (91, "7"),
+        (280, "0"),
+        (281, "0"),
         (0, "ENDSEC"),
         (0, "EOF"),
     ])
@@ -43,4 +51,16 @@ fn the_application_and_flags_of_the_file_are_kept_and_unused_classes_stay() {
     // And the file reads back the same way.
     let again = cadcraft_io::write_dxf(&cadcraft_io::read_dxf(text.as_bytes()).unwrap());
     assert_eq!(section(&again, "CLASSES").len(), classes.len());
+}
+
+/// A class kept from the file whose objects the file does not hold (Architecture's, which a DXF leaves out) keeps its instance count (91).
+#[test]
+fn a_kept_class_without_objects_in_the_file_keeps_its_count() {
+    let d = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
+    let text = String::from_utf8(cadcraft_io::write_with(&d, "x.dxf", &options).unwrap()).unwrap();
+    let classes = section(&text, "CLASSES");
+    let class = |name: &str| classes.iter().find(|(k, t)| k == "CLASS" && val(t, 1) == name).map(|(_, t)| t.clone()).unwrap();
+    assert_eq!(val(&class("AEC_VARS_DWG_SETUP"), 91), "7");
+    assert_eq!(val(&class("NPOCOLLECTION"), 91), "0");
 }

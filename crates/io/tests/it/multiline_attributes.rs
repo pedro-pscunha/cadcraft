@@ -388,3 +388,22 @@ fn an_embedded_mtext_keeps_its_plane_and_placement() {
         .unwrap();
     assert_eq!(embedded_numbers(&save(&edited)).iter().filter(|(c, _)| *c == 230).count(), 1);
 }
+
+/// The multiline text embedded in an attribute (after its 101) is written in the order of an MTEXT, as AutoCAD writes it: the text (1)
+/// and its style (7) before the line spacing (73, 44).
+#[test]
+fn the_embedded_text_of_an_attribute_has_the_order_of_a_multiline_text() {
+    let d = read_dxf(dxf(FIXTURE).as_bytes()).unwrap();
+    let tags = cadcraft_dxf::parse(save(&d).as_bytes()).unwrap();
+    let embedded: Vec<Vec<i32>> = tags
+        .split(|t| t.code == 0)
+        .filter(|record| record.iter().any(|t| t.code == 100 && t.str() == "AcDbAttribute"))
+        .map(|record| record.iter().skip_while(|t| t.code != 101).skip(1).take_while(|t| t.code < 1000 && t.code != 100).map(|t| t.code).collect())
+        .collect();
+    assert!(!embedded.is_empty());
+    let rank = |c: i32| [10, 40, 41, 46, 71, 72, 1, 7, 73, 44].iter().position(|x| *x == c);
+    for codes in embedded {
+        let ranks: Vec<usize> = codes.iter().filter_map(|c| rank(*c)).collect();
+        assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "embedded text out of order: {codes:?}");
+    }
+}
