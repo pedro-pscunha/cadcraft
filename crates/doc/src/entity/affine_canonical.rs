@@ -68,7 +68,7 @@ impl Ellipse {
         let full = self.end - self.start >= TAU - 1e-12;
         let (start, end) = if full { (self.start, self.end) } else { (self.start - shift, self.end - shift) };
         let moved = Ellipse { center: m.apply(self.center), major, normal: new_unit * normal.len(), ratio, start, end };
-        if !crate::has_finite_numbers(&moved) || !(ratio > 0.0 && ratio <= 1.0 + 1e-12) {
+        if !(crate::has_finite_numbers(&moved) && ratio > 0.0 && ratio <= 1.0 + 1e-12) {
             return Err(invalid("An ellipse cannot be placed with finite coordinates."));
         }
         let n = moved.normal;
