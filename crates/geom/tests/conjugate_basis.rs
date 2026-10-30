@@ -17,6 +17,23 @@ fn conjugate_axis_decomposition_is_scale_independent() {
 }
 
 #[test]
+fn a_flat_basis_keeps_its_true_ratio_in_either_axis_order() {
+    for ratio in [0.0, 1e-20, 1e-200] {
+        for scale in [1.0, 1e100, 1e-100] {
+            let (a, b) = (Vec2::new(scale * ratio, 0.0), Vec2::new(0.0, scale));
+            for (a, b) in [(a, b), (b, a)] {
+                let ellipse = Ellipse::from_conjugate(Vec2::ZERO, a, b, 0.0, cadcraft_geom::TAU);
+                if ratio == 0.0 {
+                    assert_eq!(ellipse.ratio, 0.0, "a rank-one basis must not gain a second axis");
+                } else {
+                    assert!((ellipse.ratio / ratio - 1.0).abs() < 1e-12, "{ratio} at {scale}: {ellipse:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_small_nonzero_parameter_span_is_not_a_full_conic() {
     let ellipse = Ellipse::from_conjugate(Vec2::ZERO, Vec2::new(1e12, 0.0), Vec2::new(0.0, 5e11), 0.0, 1e-12);
     assert!(!ellipse.is_full());
