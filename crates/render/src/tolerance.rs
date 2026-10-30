@@ -15,10 +15,14 @@ pub fn tolerance_in(d: &Drawing, t: &Tolerance) -> GdtLayout {
     t.layout(d, &|s, h| cadcraft_fonts::text_width(&dt.font, s, h, dt.width_factor))
 }
 
+pub(crate) fn local_tolerance(t: &Tolerance) -> Tolerance {
+    Tolerance { insert: cadcraft_geom::Vec3::ZERO, dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0), ..t.clone() }
+}
+
 /// The frame in the local coordinates of its frame, for the world builders: laid out for a tolerance at (0, 0) with the
 /// direction +X, so every point is a distance along the frame and across it.
 pub fn tolerance_layout(d: &Drawing, t: &Tolerance) -> GdtLayout {
-    tolerance_in(d, &Tolerance { insert: cadcraft_geom::Vec3::ZERO, dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0), ..t.clone() })
+    tolerance_in(d, &local_tolerance(t))
 }
 
 /// Points of a frame primitive, tessellated at `tol` (a fill's triangle as is).
