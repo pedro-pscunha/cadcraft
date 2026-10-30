@@ -49,6 +49,7 @@ mod followups_626;
 mod foreign_passthrough;
 mod geometry_snapshot;
 mod groups_roundtrip;
+mod handle_collision;
 mod hatch_assoc_roundtrip;
 mod hatch_clockwise_arc_edge;
 mod hatch_groups_roundtrip;
