@@ -117,6 +117,12 @@ fn an_edited_column_text_keeps_its_columns() {
     assert_eq!(mtext(&cadcraft_io::read_dxf(text.as_bytes()).unwrap()).columns.map(|c| c.kind), Some(MTextColumnType::Dynamic));
 }
 
+/// The columns without which heights the file gave negated: a DWG holds a model space column of no height as AutoCAD's negated extents height
+/// whatever the DXF said, and reads back flagged.
+fn plain(columns: Option<cadcraft_doc::MTextColumns>) -> Option<cadcraft_doc::MTextColumns> {
+    columns.map(|c| cadcraft_doc::MTextColumns { negated_heights: Vec::new(), ..c })
+}
+
 #[test]
 fn the_columns_survive_a_dwg_save() {
     // The text style of the fixtures is not in a style table, which a DWG would replace by Standard.
@@ -126,11 +132,11 @@ fn the_columns_survive_a_dwg_save() {
         let want = mtext(&d);
         let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
         let back = cadcraft_io::read(&dwg, "x.dwg").unwrap();
-        assert_eq!(mtext(&back).columns, want.columns, "{source}");
+        assert_eq!(plain(mtext(&back).columns), plain(want.columns.clone()), "{source}");
         assert_eq!(mtext(&back).width, want.width);
         // A second DWG save.
         let again = cadcraft_io::read(&cadcraft_io::write(&back, "x.dwg").unwrap(), "x.dwg").unwrap();
-        assert_eq!(mtext(&again).columns, want.columns);
+        assert_eq!(plain(mtext(&again).columns), plain(want.columns));
         // And the 2018 DXF of the DWG save has them in the embedded object.
         assert_eq!(layout(&r2018(&back)), layout(&dxf(source)));
     }

@@ -432,7 +432,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                 if cx.dwg_bridge && t.columns.is_some() && cx.target >= Version::R2007 && cx.target < Version::R2018 {
                     w.t.extend(crate::dxf_read::mtext_dxf::xdata_column_chunk(t, &e.common.xdata));
                 } else {
-                    w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t));
+                    w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t, cx.dwg_bridge));
                 }
             } else if t.columns.is_some() && cx.target >= Version::R2007 && !cx.entget {
                 // 2007 to 2017: the columns are the ACAD extended data of the entity.

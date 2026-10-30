@@ -187,6 +187,10 @@ pub struct MTextColumns {
     /// does: the values are written back only while the text, its size and its columns are as read.
     #[serde(skip)]
     pub extents: Option<ColumnExtents>,
+    /// Dynamic columns with manual heights: which `heights` the file gave as the negative of the text's extents height (AutoCAD's way of
+    /// saying the column has no height of its own; the height here is 0). Empty when none was. Written back negated, as AutoCAD's DWG has it.
+    #[serde(skip)]
+    pub negated_heights: Vec<bool>,
 }
 
 /// The laid-out extents of a column text and the [`MText::layout_key`] they belong to.

@@ -98,6 +98,7 @@ pub(crate) fn read_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
         heights: if manual { heights } else { Vec::new() },
         flow_reversed: first(78).map(Tag::i64).unwrap_or(0) != 0,
         extents: None,
+        negated_heights: Vec::new(),
     };
     Some((c, first(48).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
 }
@@ -117,6 +118,7 @@ pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)>
     let auto_height = first(73).map(|t| t.i64()).unwrap_or(0) != 0;
     let manual = kind == MTextColumnType::Dynamic && !auto_height;
     let heights: Vec<f64> = block.iter().filter(|t| t.code == 46).take(MAX_COLUMNS).map(|t| finite(t.f64()).max(0.0)).collect();
+    let negated: Vec<bool> = block.iter().filter(|t| t.code == 46).take(MAX_COLUMNS).map(|t| finite(t.f64()) < 0.0).collect();
     let count = first(72).map(|t| t.i64()).unwrap_or(heights.len() as i64).clamp(1, MAX_COLUMNS as i64);
     let rect = first(41).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0);
     let height = if manual { heights.iter().copied().fold(0.0, f64::max) } else { rect };
@@ -129,6 +131,7 @@ pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)>
         heights: if manual { heights } else { Vec::new() },
         flow_reversed: first(74).map(|t| t.i64()).unwrap_or(0) != 0,
         extents: None,
+        negated_heights: if manual && negated.contains(&true) { negated } else { Vec::new() },
     };
     Some((c, first(44).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0)))
 }
@@ -193,6 +196,7 @@ pub(crate) fn read_xdata_columns(xdata: &[Tag]) -> Option<(MTextColumns, f64)> {
         heights: if manual { heights } else { Vec::new() },
         flow_reversed: flow,
         extents: None,
+        negated_heights: Vec::new(),
     };
     Some((c, width))
 }
@@ -278,7 +282,8 @@ pub(crate) fn xdata_column_chunk(t: &MText, kept: &[cadcraft_doc::RawTag]) -> Ve
 
 /// The embedded object (group 101) of an R2018+ MTEXT with columns, as AutoCAD writes it: the
 /// attachment, X-axis direction, insertion point, rectangle size, laid-out extents (kept from the file while the text is as read) and the columns.
-pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
+/// `negated`: the heights the file gave as the negative of the extents height are written so (the DWG bridge; AutoCAD's DXF has 0 there).
+pub(crate) fn embedded_tags(t: &MText, negated: bool) -> Vec<Tag> {
     let Some(c) = &t.columns else { return Vec::new() };
     let manual = c.kind == MTextColumnType::Dynamic && !c.auto_height;
     let count = if manual { c.heights.len().max(1) } else { usize::from(c.count.max(1)) };
@@ -304,7 +309,11 @@ pub(crate) fn embedded_tags(t: &MText) -> Vec<Tag> {
         Tag::i(74, i64::from(c.flow_reversed)),
     ];
     if manual {
-        v.extend(c.heights.iter().map(|h| Tag::f(46, *h)));
+        let extents_height = t.column_extents().1;
+        v.extend(c.heights.iter().enumerate().map(|(i, h)| {
+            let automatic = negated && *h == 0.0 && extents_height > 0.0 && c.negated_heights.get(i).copied().unwrap_or(false);
+            Tag::f(46, if automatic { -extents_height } else { *h })
+        }));
     }
     v
 }
