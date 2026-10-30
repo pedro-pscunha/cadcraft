@@ -65,7 +65,7 @@ pub(super) fn apply(s: &Session, k: EntityKind, c: &Content) -> Result<EntityKin
                 common: Default::default(),
                 kind: EntityKind::Insert(ins.clone()),
             };
-            let b = cadcraft_doc::entity_bounds(d, &probe, 0);
+            let b = cadcraft_render::entity_extents(d, &probe, 0)?;
             if !b.is_empty() {
                 let c = b.center();
                 if c.is_finite() {

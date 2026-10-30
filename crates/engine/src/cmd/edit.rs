@@ -1,6 +1,6 @@
 //! Edit menu: undo/redo, clipboard, selection.
 
-use cadcraft_doc::{Entity, Handle, entity_bounds};
+use cadcraft_doc::{Entity, Handle};
 use cadcraft_geom::{Bounds2, Mat3, Vec2};
 use serde_json::{Value, json};
 
@@ -444,7 +444,7 @@ fn copy_to_clip(s: &mut Session, hs: &[Handle], base: Option<Vec2>) -> Result<us
     let d = s.doc()?;
     let mut seen = std::collections::HashSet::new();
     let ents: Vec<Entity> = hs.iter().filter(|h| seen.insert(**h)).filter_map(|h| d.entity(*h).map(|e| (**e).clone())).collect();
-    let b = ents.iter().fold(Bounds2::EMPTY, |acc, e| acc.union(&entity_bounds(d, e, 0)));
+    let b = cadcraft_render::entities_extents(d, ents.iter(), 0)?;
     let base = base.unwrap_or(if b.min.is_finite() { b.min } else { Vec2::ZERO });
     let n = ents.len();
     clipboard::copy(s, ents, base)?;

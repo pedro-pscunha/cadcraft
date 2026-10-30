@@ -421,8 +421,8 @@ fn split(r: Bounds2, count: usize, arrangement: &str) -> Vec<Bounds2> {
 }
 
 /// View height that shows `ext` in a viewport of the given size (zoom extents).
-fn fit_view(d: &Drawing, w: f64, h: f64) -> (Vec2, f64) {
-    let mut ext = d.extents(&Space::Model);
+fn fit_view(d: &Drawing, w: f64, h: f64) -> Result<(Vec2, f64)> {
+    let mut ext = cadcraft_render::space_extents(d, &Space::Model)?;
     if ext.is_empty() {
         let lo = d.header.point("LIMMIN").map(|p| p.xy()).unwrap_or(Vec2::ZERO);
         let hi = d.header.point("LIMMAX").map(|p| p.xy()).unwrap_or(Vec2::new(12.0, 9.0));
@@ -431,7 +431,7 @@ fn fit_view(d: &Drawing, w: f64, h: f64) -> (Vec2, f64) {
     let aspect = (w / h.max(1e-12)).max(1e-12);
     let vh = (ext.height().max(ext.width() / aspect) * 1.02).max(1e-9);
     let c = ext.center();
-    if vh.is_finite() && c.is_finite() { (c, vh) } else { (Vec2::ZERO, 1.0) }
+    Ok(if vh.is_finite() && c.is_finite() { (c, vh) } else { (Vec2::ZERO, 1.0) })
 }
 
 /// Add `count` viewports tiling `rect` in a layout, each zoomed to the model extents.
@@ -450,7 +450,7 @@ fn add_viewports(s: &mut Session, space: &Space, rect: Bounds2, count: usize, ar
     let mut out = Vec::new();
     for r in split(rect, count, arrangement) {
         let id = viewports::next_viewport_id(d);
-        let vp = viewports::new_viewport(d, r, id);
+        let vp = viewports::new_viewport(d, r, id)?;
         out.push(d.add(space, common.clone(), EntityKind::Viewport(vp))?);
     }
     Ok(out)

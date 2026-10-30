@@ -9,6 +9,7 @@
 
 pub mod clip;
 mod dim;
+mod extents;
 mod fill;
 mod hatch;
 mod linetype;
@@ -28,6 +29,7 @@ mod world_bounds;
 mod world_geometry;
 mod world_paint;
 mod world_roles;
+pub use extents::{ExtentsRefusal, entities_extents, entity_extents, space_extents};
 pub use world_bounds::entity_world_bounds;
 pub use world_geometry::entity_world_geometry;
 
@@ -306,7 +308,9 @@ impl Builder<'_> {
 }
 
 mod table;
-pub use table::{MAX_LAYOUT_CELLS, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_layout, table_style_of};
+pub use table::{
+    MAX_LAYOUT_CELLS, TableBlock, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_layout, table_style_of,
+};
 
 mod blocks;
 mod dim_draw;

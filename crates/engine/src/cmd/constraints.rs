@@ -1137,11 +1137,18 @@ fn infer_after(s: &mut Session, before: &Drawing) {
     let mut others: Vec<Handle> = Vec::new();
     let mut parallel: Option<(f64, Handle)> = None;
     let near = pts.first().copied().unwrap_or_default();
+    let mut extent_refusal = None;
     for e in store.iter().take(MAX_INFER_SCAN) {
         if placed.contains(&e.handle) || !cs::supported(&e.kind) || e.require_legacy_geometry().is_err() || !d.is_visible(e) {
             continue;
         }
-        let b = cadcraft_doc::entity_bounds(d, e, 0).expand(tol);
+        let b = match cadcraft_render::entity_extents(d, e, 0) {
+            Ok(bounds) => bounds.expand(tol),
+            Err(refused) => {
+                extent_refusal = Some(refused);
+                break;
+            }
+        };
         if pts.iter().any(|p| b.contains(*p)) {
             if others.len() < 150 {
                 others.push(e.handle);
@@ -1154,6 +1161,10 @@ fn infer_after(s: &mut Session, before: &Drawing) {
                 parallel = Some((dist, e.handle));
             }
         }
+    }
+    if let Some(refused) = extent_refusal {
+        s.echo(refused.to_string());
+        return;
     }
     others.extend(parallel.map(|p| p.1));
     let o = cs::InferOptions { distance_tolerance: tol, angle_tolerance: 1e-7, types };

@@ -12,6 +12,8 @@ pub(crate) enum CliError {
     #[error(transparent)]
     Format(#[from] cadcraft_io::IoError),
     #[error(transparent)]
+    Extents(#[from] cadcraft_render::ExtentsRefusal),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Run(#[from] RunError),

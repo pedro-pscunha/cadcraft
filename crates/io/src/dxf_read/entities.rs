@@ -207,20 +207,26 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             k
         }
         "ACAD_TABLE" => EntityKind::Table(acad_table(tags, table_cells_left)),
-        "VIEWPORT" => EntityKind::Viewport(Viewport {
-            center: t.p(10),
-            width: t.fd(40, 1.0),
-            height: t.fd(41, 1.0),
-            view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
-            view_height: t.fd(45, 1.0),
-            id: t.i(69).unwrap_or(0) as u32,
-            locked: t.i(90).unwrap_or(0) & 16384 != 0,
-            frozen_layers: crate::dxf_ext::read_frozen(tags),
-            layer_colors: crate::dxf_ext::read_layer_colors(tags),
-            // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
-            clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
-            on: t.i(90).unwrap_or(0) & 131072 == 0,
-        }),
+        "VIEWPORT" => {
+            let flags = t.i(90).unwrap_or(32768);
+            let stacking = t.i(68).unwrap_or_else(|| if flags & 131072 == 0 { t.i(69).unwrap_or(0).clamp(1, 32767) } else { 0 });
+            let source_status = cadcraft_doc::ViewportStatus { stacking, flags };
+            EntityKind::Viewport(Viewport {
+                center: t.p(10),
+                width: t.fd(40, 1.0),
+                height: t.fd(41, 1.0),
+                view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
+                view_height: t.fd(45, 1.0),
+                id: t.i(69).unwrap_or(0) as u32,
+                locked: t.i(90).unwrap_or(0) & 16384 != 0,
+                frozen_layers: crate::dxf_ext::read_frozen(tags),
+                layer_colors: crate::dxf_ext::read_layer_colors(tags),
+                // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
+                clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
+                on: source_status.is_on(),
+                source_status: Some(source_status),
+            })
+        }
         "WIPEOUT" => {
             let o = t.p(10);
             let u = t.p(11);
@@ -302,6 +308,9 @@ pub(super) fn tolerance_from(t: &T, dir: Vec3) -> Tolerance {
     }
 }
 
+/// The groups of a cell's own style (see `TableCell::style_groups`).
+const CELL_STYLE_GROUPS: [i32; 17] = [170, 283, 63, 64, 65, 66, 68, 69, 7, 275, 276, 278, 279, 285, 286, 288, 289];
+
 /// An ACAD_TABLE entity: sizes, cell texts and merges (DXF Reference), plus CADCraft's
 /// title/header flags, text height and style name from xdata when present.
 pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
@@ -357,18 +366,72 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
             (Some(rs), Some(cs)) if rs >= 1 && cs >= 1 && (rs, cs) != (1, 1) => Some((rs, cs)),
             _ => None,
         };
-        // The cell's own text height: 140 outside the value block (301 … 304), where it is a number.
+        // The cell's own text height: 140 outside the value block (301 … 304), where it is a number. Its flag (91), rotation (145),
+        // flag value (172), auto-fit (174), virtual edge (178) and type (171, the record's first group) are read outside the
+        // value block too, where the codes mean other things.
         let mut in_value = false;
         let mut text_height = None;
+        let (mut flag, mut rotation, mut flag_value, mut auto_fit, mut virtual_edge) = (None, None, None, None, None);
+        let mut style_groups = Vec::new();
         for x in cell {
+            if !in_value && CELL_STYLE_GROUPS.contains(&x.code) {
+                style_groups.push(cadcraft_doc::RawTag { code: x.code, value: x.str() });
+            }
             match x.code {
                 301 => in_value = true,
                 304 => in_value = false,
                 140 if !in_value => text_height = Some(x.f64()).filter(|h| h.is_finite() && *h > 0.0 && *h < 1e9),
+                91 if !in_value => flag = flag.or(i32::try_from(x.i64()).ok()),
+                145 if !in_value => rotation = rotation.or(Some(x.f64()).filter(|v| v.is_finite())),
+                172 => flag_value = flag_value.or(i32::try_from(x.i64()).ok()),
+                174 => auto_fit = auto_fit.or(Some(x.i64() != 0)),
+                178 => virtual_edge = virtual_edge.or(i32::try_from(x.i64()).ok()),
                 _ => {}
             }
         }
-        flat.push(TableCell { text, merged, text_height, ..TableCell::default() });
+        // A block cell (171 = 2): its block record handle (resolved to the name once the records are known), scale (144) and the
+        // attribute values by their ATTDEF handle (331, 300).
+        let block = (t0.i64() == 2).then(|| {
+            let mut attribs: Vec<(cadcraft_doc::Handle, String)> = Vec::new();
+            let mut open = false;
+            for x in cell.iter().filter(|x| matches!(x.code, 331 | 300)) {
+                match x.code {
+                    331 => {
+                        open = true;
+                        if let Some(h) = cadcraft_doc::Handle::parse_hex(x.str().trim()) {
+                            attribs.push((h, String::new()));
+                        } else {
+                            open = false;
+                        }
+                    }
+                    _ if open => {
+                        if let Some(a) = attribs.last_mut() {
+                            a.1 = x.str();
+                        }
+                        open = false;
+                    }
+                    _ => {}
+                }
+            }
+            cadcraft_doc::TableCellBlock {
+                block: c.s(340).unwrap_or_default().trim().to_string(),
+                scale: c.f(144).filter(|v| v.is_finite()).unwrap_or(1.0),
+                attribs,
+            }
+        });
+        flat.push(TableCell {
+            text,
+            block,
+            merged,
+            text_height,
+            flag_value: flag_value.unwrap_or(0),
+            override_flag: flag.unwrap_or(0),
+            auto_fit: auto_fit.unwrap_or(false),
+            virtual_edge: virtual_edge.unwrap_or(0),
+            rotation: rotation.unwrap_or(0.0),
+            style_groups,
+            ..TableCell::default()
+        });
     }
     flat.resize(rows * cols, TableCell::default());
     let cells: Vec<Vec<TableCell>> = if cols == 0 { vec![Vec::new(); rows] } else { flat.chunks(cols).map(<[TableCell]>::to_vec).collect() };
@@ -385,9 +448,31 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
         // Their text height is resolved to the table style's once the styles are read (`apply`).
         None => (cols > 1 && cells.first().and_then(|r| r.first()).and_then(|c| c.merged) == Some((1, cols as u32)), false, 0.0, "Standard".into()),
     };
-    let mut t = Table { insert: T(tags).p(10), col_widths, row_heights, cells, style, text_height, title, header, ..Table::default() };
+    let overrides = table_overrides(tail.get(..first_cell).unwrap_or(&[]));
+    let mut t = Table { insert: T(tags).p(10), col_widths, row_heights, cells, style, text_height, title, header, overrides, ..Table::default() };
     crate::dxf_table::read_table_xdata(tags, &mut t);
     t
+}
+
+/// The value flags (90) and the override masks (93 to 96) of an ACAD_TABLE's own groups `head`, with the override values that follow
+/// them up to the row heights.
+fn table_overrides(head: &[Tag]) -> cadcraft_doc::TableOverrides {
+    let int = |code: i32| head.iter().find(|t| t.code == code).and_then(|t| i32::try_from(t.i64()).ok()).unwrap_or(0);
+    let values = head
+        .iter()
+        .skip_while(|t| t.code != 96)
+        .skip(1)
+        .take_while(|t| !matches!(t.code, 141 | 142))
+        .map(|t| cadcraft_doc::RawTag { code: t.code, value: t.str() })
+        .collect();
+    cadcraft_doc::TableOverrides {
+        value_flags: int(90),
+        style: int(93),
+        border_color: int(94),
+        border_lineweight: int(95),
+        border_visibility: int(96),
+        values,
+    }
 }
 
 /// The plot style names of a file: the entries of the `ACAD_PLOTSTYLENAME` dictionary of the
@@ -489,7 +574,19 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
                 dm.marks.oblique = Some(cadcraft_geom::norm_angle(base + o.to_radians()));
             }
         }
-        ("ACAD_TABLE", EntityKind::Table(_)) => {
+        ("ACAD_TABLE", EntityKind::Table(table)) => {
+            // The blocks the cells hold, by their BLOCK_RECORD handles; a cell whose block is unknown is a text cell.
+            for cell in table.cells.iter_mut().flatten() {
+                if let Some(content) = &mut cell.block {
+                    match rx.brs.get(&content.block.to_ascii_uppercase()).filter(|n| !n.is_empty()) {
+                        Some(name) => {
+                            content.block = name.clone();
+                            rx.inserted.insert(name.to_ascii_uppercase());
+                        }
+                        None => cell.block = None,
+                    }
+                }
+            }
             let t = T(tags);
             if let Some(b) = t.s(2) {
                 rx.table_blocks.insert(b.to_ascii_uppercase());

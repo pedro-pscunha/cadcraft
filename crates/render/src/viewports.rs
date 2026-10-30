@@ -65,10 +65,18 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
     if !viewport_shown(d, e, vp) || area.is_empty() || !(area.min.is_finite() && area.max.is_finite()) {
         return DisplayList::default();
     }
-    let opts = &with_point_view(d, space, opts);
+    let (point_options, extent_refusals) = with_point_view(d, space, opts);
+    let opts = &point_options;
     let styler = style_table(d, space, opts, false).map(|t| plotstyle::Styler::new(d, t));
-    let mut b =
-        Builder { list: DisplayList::default(), opts, plotting: false, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList { geometry_refusals: extent_refusals, ..DisplayList::default() },
+        opts,
+        plotting: false,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+    };
     contents(&mut b, d, vp, area, &Clip::Rect(area), paper::unit_mm_of(d, handle));
     b.list
 }
@@ -97,23 +105,24 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
     // paper space, whatever the viewport scale.
     let lt_factor = if d.header.i64("PSLTSCALE", 1) != 0 { 1.0 / s } else { 1.0 };
     let ctx = || Ctx { lt_factor, ..top_ctx(d, xf, VIEWPORT_CONTENT, &vp.frozen_layers, &vp.layer_colors) };
-    let seen = |me: &Entity| {
+    let mut extent_refusals = Vec::new();
+    let mut seen = |me: &Entity| {
         if matches!(me.kind, EntityKind::Viewport(_)) {
             return false;
         }
         if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             return true;
         }
-        if me.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
-            return match crate::entity_world_bounds(d, me, &cadcraft_geom::Mat4::IDENTITY) {
-                Ok(bounds) => bounds.is_empty() || bounds.intersects(&win),
-                // Keep refused geometry in the render pass so its diagnostic reaches the canvas or export.
-                Err(_) => true,
-            };
+        match crate::entity_extents(d, me, 0) {
+            Ok(bounds) => bounds.is_empty() || bounds.intersects(&win),
+            Err(refused) => {
+                extent_refusals.extend(refused.refusals);
+                true
+            }
         }
-        let eb = cadcraft_doc::entity_bounds(d, me, 0);
-        eb.is_empty() || eb.intersects(&win)
     };
+    let candidates: Vec<_> = d.model.iter().filter(|entity| seen(entity)).collect();
+    b.list.geometry_refusals.extend(extent_refusals);
     // One expansion budget for the whole build: seed it with what the enclosing list has already
     // spent so a viewport's contents cannot start over with a fresh allowance and exceed the
     // documented limit (CWE-400). Both the serial sub-builder and the parallel chunks share it.
@@ -136,9 +145,8 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         {
             // As `build_parallel`: chunks built side by side, joined in drawing order.
             use rayon::prelude::*;
-            let ents: Vec<&std::sync::Arc<Entity>> = d.model.iter().collect();
             let opts = b.opts;
-            let parts: Vec<DisplayList> = ents
+            let parts: Vec<DisplayList> = candidates
                 .par_chunks(PARALLEL_CHUNK)
                 .map(|chunk| {
                     let mut part = Builder {
@@ -151,7 +159,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
                         transparency: 0,
                     };
                     let c = ctx();
-                    for me in chunk.iter().filter(|me| seen(me)) {
+                    for me in chunk {
                         entity(&mut part, &c, me);
                     }
                     part.list
@@ -163,7 +171,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         }
     } else {
         let c = ctx();
-        for me in d.model.iter().filter(|me| seen(me)) {
+        for me in candidates {
             entity(&mut sub, &c, me);
         }
     }

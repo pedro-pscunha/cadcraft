@@ -56,7 +56,7 @@ fn draw_flat(
         match &entity.kind {
             EntityKind::Table(table) => {
                 let at_origin = super::table::local_table(table);
-                super::table::draw(builder, &local, &at_origin, color, lineweight);
+                super::table::draw(builder, &local, entity, &at_origin, color, lineweight);
             }
             EntityKind::Tolerance(tolerance) => {
                 let at_origin = super::tolerance::local_tolerance(tolerance);

@@ -7,7 +7,7 @@ use super::header::{code_page, header_vars};
 use super::layout::{paper_views, record_head, sheet_first, table_head, vport_table};
 use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
 use super::{
-    Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup, Space,
+    Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup,
     TableStyle, Tag, Vec2, Vec3, Version, W, dxf_ext,
 };
 
@@ -299,12 +299,10 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     w.s(1, version.code());
     w.s(9, "$DWGCODEPAGE");
     w.s(3, code_page(d, version));
-    let ext = d.extents(&Space::Model);
-    if !ext.is_empty() {
-        w.s(9, "$EXTMIN");
-        w.p(10, ext.min.to3(0.0));
-        w.s(9, "$EXTMAX");
-        w.p(10, ext.max.to3(0.0));
+    // Saving source records must not require a display adapter or replace their saved WCS extents.
+    for name in ["EXTMIN", "EXTMAX"] {
+        w.s(9, format!("${name}"));
+        w.p(10, d.header.point(name).unwrap_or(Vec3::ZERO));
     }
     header_vars(w, d, target);
     let seed_pos = w.t.len();
@@ -411,6 +409,7 @@ fn layout_obj(w: &mut W, context: LayoutWriteContext<'_>, data: LayoutWriteData<
         "display" => 0,
         "extents" => 1,
         "limits" => 2,
+        "view" => 3,
         "window" => 4,
         _ => 5,
     };
@@ -910,6 +909,11 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     // Xrefs are saved as references: without their objects and the symbols that came with them.
     let saved_view = crate::dxf_xref::saved_view(d);
     let d = saved_view.as_ref().unwrap_or(d);
+    let ext = d
+        .header
+        .point("EXTMIN")
+        .zip(d.header.point("EXTMAX"))
+        .map_or(cadcraft_geom::Bounds2::EMPTY, |(min, max)| cadcraft_geom::Bounds2::new(min.xy(), max.xy()));
     let ps_brs: Vec<(String, String, &Layout)> = paper_layouts
         .iter()
         .enumerate()
@@ -1007,7 +1011,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
 
     write_classes(&mut w, &cx, &every);
 
-    let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext: d.extents(&Space::Model) });
+    let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext });
 
     // BLOCK_RECORD
     let th = table_head(&mut w, "BLOCK_RECORD", 1 + ps_brs.len() + user_blocks.len() + dim_defs.len() + arrow_defs.len() + table_defs.len());

@@ -8,8 +8,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, MAX_BLOCK_DEPTH, Space, entity_bounds};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, MAX_BLOCK_DEPTH, Space};
 use cadcraft_geom::{Bounds2, Vec2};
+use cadcraft_render::entity_extents;
 use serde_json::{Value, json};
 
 use super::super::{CommandSpec, bad, str_param};
@@ -375,16 +376,24 @@ fn run_compare(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let Diff { added, removed, changed, common, truncated } = diff(&cur, &other, &space);
     let mut boxes = Vec::new();
-    let mut bound = |d: &Drawing, h: Handle| {
-        if let Some(b) = d.entity(h).map(|e| entity_bounds(d, e, 0)).filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) {
-            boxes.push(b);
+    let mut bound = |d: &Drawing, h: Handle| -> Result<()> {
+        if let Some(entity) = d.entity(h) {
+            let bounds = entity_extents(d, entity, 0)?;
+            if !bounds.is_empty() && bounds.min.is_finite() && bounds.max.is_finite() {
+                boxes.push(bounds);
+            }
         }
+        Ok(())
     };
-    added.iter().for_each(|h| bound(&cur, *h));
-    removed.iter().for_each(|h| bound(&other, *h));
+    for handle in &added {
+        bound(&cur, *handle)?;
+    }
+    for handle in &removed {
+        bound(&other, *handle)?;
+    }
     for (a, b, _, _) in &changed {
-        bound(&cur, *a);
-        bound(&other, *b);
+        bound(&cur, *a)?;
+        bound(&other, *b)?;
     }
     let regions = regions(&boxes);
     let ch: Vec<Value> = changed

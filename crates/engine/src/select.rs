@@ -1,7 +1,8 @@
 //! Hit testing and window/crossing selection.
 
-use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Prim, Space, entity_bounds};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Prim, Space};
 use cadcraft_geom::{Bounds2, Line, Vec2, point_in_polygon};
+use cadcraft_render::entity_extents;
 
 use crate::spatial::{self, SpatialIndex};
 use crate::{Accept, Prompt};
@@ -23,7 +24,7 @@ pub fn hit_polylines(d: &Drawing, e: &Entity, tol: f64) -> Vec<Vec<Vec2>> {
         | EntityKind::MLeader(_)
         | EntityKind::Image(_) => {
             // Text-like objects are hit inside their box.
-            let b = entity_bounds(d, e, 0);
+            let Ok(b) = entity_extents(d, e, 0) else { return Vec::new() };
             if b.is_empty() {
                 return Vec::new();
             }
@@ -98,7 +99,7 @@ pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
     let mut best = polys.iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
     let filled = matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Table(_))
         || matches!(e.kind, EntityKind::Tolerance(_));
-    if (filled && entity_bounds(d, e, 0).contains(p)) || in_text(d, e, p) {
+    if (filled && entity_extents(d, e, 0).is_ok_and(|bounds| bounds.contains(p))) || in_text(d, e, p) {
         best = 0.0;
     }
     // A solid hatch fills its loops with odd parity under its island style, as it is drawn, not
@@ -127,7 +128,7 @@ fn in_text(d: &Drawing, e: &Entity, p: Vec2) -> bool {
         EntityKind::Dimension(dm) => match dm.block.as_ref().and_then(|n| d.block(n)) {
             Some(blk) => blk.entities.iter().any(|be| match &be.kind {
                 EntityKind::MText(t) => in_box(cadcraft_render::layout_mtext_entity(d, t).strokes.into_iter().flatten(), t.rotation, p),
-                EntityKind::Text(_) => entity_bounds(d, be, 0).contains(p),
+                EntityKind::Text(_) => entity_extents(d, be, 0).is_ok_and(|bounds| bounds.contains(p)),
                 _ => false,
             }),
             None => {
@@ -157,14 +158,7 @@ fn selectable(d: &Drawing, e: &Entity) -> bool {
 pub(crate) type Cands<'a> = Box<dyn Iterator<Item = (&'a Entity, Option<Bounds2>)> + 'a>;
 
 pub(crate) fn bounds_of(d: &Drawing, e: &Entity, known: Option<Bounds2>) -> Bounds2 {
-    known.unwrap_or_else(|| {
-        // A canonical entity's bounds are those of its WCS geometry; one the resolver refuses has none.
-        if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
-            cadcraft_render::entity_world_bounds(d, e, &cadcraft_geom::Mat4::IDENTITY).unwrap_or(Bounds2::EMPTY)
-        } else {
-            entity_bounds(d, e, 0)
-        }
-    })
+    known.unwrap_or_else(|| entity_extents(d, e, 0).unwrap_or(Bounds2::EMPTY))
 }
 
 pub(crate) fn is_infinite(e: &Entity) -> bool {

@@ -173,7 +173,7 @@ fn run_setvar(s: &mut Session, p: &Value) -> Result<Value> {
     let v = p.get("value").ok_or_else(|| bad("setvar", "`value` is required"))?;
     crate::sysvars::set(s, name, v)?;
     s.touch();
-    Ok(json!({ "name": name.to_ascii_uppercase(), "value": crate::sysvars::get(s, name) }))
+    Ok(json!({ "name": name.to_ascii_uppercase(), "value": crate::sysvars::get(s, name)? }))
 }
 
 /// A system variable value as the command line shows it.
@@ -203,8 +203,9 @@ impl Interactive for SetvarM {
             Some(n) => {
                 let p = Prompt::new(format!("Enter new value for {n}"), accept);
                 match crate::sysvars::get(s, n) {
-                    Some(v) => p.default(show_value(&v)),
-                    None => p,
+                    Ok(Some(value)) => p.default(show_value(&value)),
+                    Ok(None) => p,
+                    Err(error) => p.default(error.to_string()),
                 }
             }
         }
@@ -222,7 +223,7 @@ impl Interactive for SetvarM {
             }
             (None, Input::Text(t)) => {
                 let n = t.trim().to_ascii_uppercase();
-                match crate::sysvars::get(s, &n) {
+                match crate::sysvars::get(s, &n)? {
                     None => {
                         s.echo(format!("Unknown variable {n}. Type SETVAR ? to list variables."));
                         Ok(Step::Done)
@@ -254,6 +255,6 @@ impl Interactive for SetvarM {
 
 fn run_getvar(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("getvar", "`name` is required"))?;
-    let v = crate::sysvars::get(s, name).ok_or_else(|| bad("getvar", format!("unknown variable `{name}`")))?;
+    let v = crate::sysvars::get(s, name)?.ok_or_else(|| bad("getvar", format!("unknown variable `{name}`")))?;
     Ok(json!({ "name": name.to_ascii_uppercase(), "value": v }))
 }

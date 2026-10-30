@@ -232,6 +232,13 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
         }
     }
     out.extend(texts);
+    // The blocks the cells hold, as references in the cell.
+    out.extend(g.blocks.into_iter().map(|b| Entity {
+        geometry_revision: Default::default(),
+        handle: Handle(0),
+        common: c.clone(),
+        kind: EntityKind::Insert(b.insert),
+    }));
     out
 }
 

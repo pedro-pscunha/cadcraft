@@ -130,9 +130,30 @@ fn first_group(from: &[RawTag], code: i32) -> Option<&RawTag> {
     from.iter().find(|t| t.code == code)
 }
 
+/// Keep independent source plot fields until a page edit changes their meaning.
+fn plot_replay_codes(plot: &[RawTag], page: Option<&cadcraft_doc::PageSetup>) -> HashSet<i32> {
+    let mut codes: HashSet<i32> = PLOT_EXTRA_CODES.iter().copied().chain([1]).collect();
+    let Some(page) = page else { return codes };
+    let tags: Vec<Tag> = plot.iter().map(tag).collect();
+    let source = crate::dxf_read::page_setup_from_groups(&tags);
+    if page.paper_mm == source.paper_mm {
+        codes.insert(72);
+    }
+    if (page.width_mm, page.height_mm, page.landscape) == (source.width_mm, source.height_mm, source.landscape) {
+        codes.extend([44, 45, 73]);
+    }
+    if page.plot_area == source.plot_area {
+        codes.extend([6, 74]);
+    }
+    if (page.scale, page.scale_to_fit) == (source.scale, source.scale_to_fit) {
+        codes.extend([75, 142, 143, 147]);
+    }
+    codes
+}
+
 /// A written layout with the groups it has constants for taken from the file's (`kept`, see
 /// [`layout_groups`]), and the Model layout's plot settings replaced by the file's.
-fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<String>) -> Vec<Tag> {
+fn patch_layout(b: &[Tag], kept: &[RawTag], page: Option<&cadcraft_doc::PageSetup>, saved: impl Fn(&str) -> Option<String>) -> Vec<Tag> {
     let at = kept.iter().position(|t| t.code == 100 && layout_part(&t.value) == LayoutPart::Frame).unwrap_or(kept.len());
     let (plot, frame) = (kept.get(1..at).unwrap_or(&[]), kept.get(at + 1..).unwrap_or(&[]));
     let model = b
@@ -140,6 +161,8 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
         .skip_while(|t| !(t.code == 100 && layout_part(&t.str()) == LayoutPart::Frame))
         .find(|t| t.code == 1)
         .is_some_and(|t| t.str().trim().eq_ignore_ascii_case("Model"));
+    let replay = plot_replay_codes(plot, page);
+    let modelled_flags = if replay.contains(&75) { PLOT_FLAGS_MODELLED & !16 } else { PLOT_FLAGS_MODELLED };
     // A kept plot group, a pointer remapped to the saved object (null when it is gone).
     let plot_tag = |k: &RawTag| if is_pointer(k.code) { Tag::s(k.code, saved(&k.value).unwrap_or_else(|| "0".into())) } else { tag(k) };
     let mut out = Vec::with_capacity(b.len() + plot.len());
@@ -176,10 +199,10 @@ fn patch_layout(b: &[Tag], kept: &[RawTag], saved: impl Fn(&str) -> Option<Strin
                 plot_codes.insert(t.code);
                 match t.code {
                     70 => first_group(plot, 70)
-                        .map(|k| Tag::i(70, (t.i64() & PLOT_FLAGS_MODELLED) | (k.value.trim().parse::<i64>().unwrap_or(0) & !PLOT_FLAGS_MODELLED))),
+                        .map(|k| Tag::i(70, (t.i64() & modelled_flags) | (k.value.trim().parse::<i64>().unwrap_or(0) & !modelled_flags))),
                     // The paper's canonical name: the model keeps it with spaces, the writer writes underscores.
                     4 => first_group(plot, 4).filter(|k| k.value.replace('_', " ") == t.str().replace('_', " ")).map(tag),
-                    code => first_group(plot, code).filter(|_| PLOT_EXTRA_CODES.contains(&code)).map(plot_tag),
+                    code => first_group(plot, code).filter(|_| replay.contains(&code)).map(plot_tag),
                 }
             }
             LayoutPart::Frame => first_group(frame, t.code).filter(|_| LAYOUT_FRAME_CODES.contains(&t.code)).map(tag),
@@ -444,7 +467,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
-    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT")) {
+    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT" | "VIEW" | "UCS")) {
         let props =
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
@@ -457,7 +480,17 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
     }
+    if !entity && is_dictionary(kind) {
+        x.subclass.extend(tags.iter().find(|t| t.code == 281).map(raw));
+    }
     x
+}
+
+fn source_dictionary_group(t: &Tag, extra: Option<&ForeignExtra>, dictionary: bool) -> Tag {
+    if dictionary && t.code == 281 {
+        return extra.and_then(|extra| first_group(&extra.subclass, 281)).map_or_else(|| t.clone(), tag);
+    }
+    t.clone()
 }
 
 /// The groups of an entity's or a VPORT record's own subclass that the model has no field for, as
@@ -472,7 +505,9 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
-        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
+        "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 40, 41, 361]),
+        "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
+        "UCS" => ("AcDbUCSTableRecord", &[2, 70, 10, 20, 30, 11, 21, 31, 12, 22, 32, 79]),
         _ => return Vec::new(),
     };
     let mut out = Vec::new();
@@ -631,7 +666,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     put_xdata(d, xdata_of);
     let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
     crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
-    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()));
+    let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
         let x = extra(kind, t, kind == "BLOCK", false, &kept);
@@ -1005,6 +1040,7 @@ struct Map<'a> {
     geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
     /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
     version: u32,
+    pages: HashMap<String, &'a cadcraft_doc::PageSetup>,
 }
 
 impl Map<'_> {
@@ -1178,7 +1214,9 @@ impl<'a> Extras<'a> {
             ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".into(), up(&val(body, 2).unwrap_or_default()))).map(Cow::Borrowed),
             ("BLOCKS", "ENDBLK") => None,
             ("ENTITIES" | "BLOCKS", _) => entity_extra(f, self.xd, handle(&head(body).handle?)?),
-            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) => f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed),
+            ("OBJECTS", kind) if MODELLED_OBJECTS.contains(&kind) || is_dictionary(kind) => {
+                f.records.get(self.ids.get(&head(body).handle?)?).map(Cow::Borrowed)
+            }
             _ => None,
         }
     }
@@ -1527,7 +1565,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         .find(|w| w[0].code == 9 && w[0].str() == "$ACADVER")
         .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
         .unwrap_or(0);
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version };
+    let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1696,7 +1735,9 @@ fn record(
     let patched;
     let b = match x.filter(|x| r.kind == "LAYOUT" && !x.layout.is_empty()) {
         Some(x) => {
-            patched = patch_layout(b, &x.layout, |h| map.get(h));
+            let name = b.iter().skip_while(|t| !(t.code == 100 && t.str() == "AcDbLayout")).find(|t| t.code == 1).map(Tag::str);
+            let page = name.as_ref().and_then(|name| map.pages.get(&up(name))).copied();
+            patched = patch_layout(b, &x.layout, page, |h| map.get(h));
             patched.as_slice()
         }
         None => b,
@@ -1711,6 +1752,10 @@ fn record(
         None => b,
     };
     let h = head(b);
+    // Header snap/grid edits belong only to the first active VPORT tile.
+    let active_snap = r.kind == "VPORT" && h.handle.as_ref().is_some_and(|h| Some(h) == map.roles.get(&("VPORT".into(), "*ACTIVE".into())));
+    let dictionary = is_dictionary(&r.kind);
+    let replay = |p: &RawTag| (!dictionary || p.code != 281) && (!active_snap || !matches!(p.code, 13 | 23 | 14 | 24 | 15 | 25 | 50));
     let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
     let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
@@ -1745,19 +1790,19 @@ fn record(
         if i == xdata_at
             && let Some(x) = x
         {
-            out.extend(x.subclass.iter().map(|p| map.group(p)));
+            out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
-        // A VPORT record's kept view replaces the plan view the writer wrote.
+        // Kept table fields replace the defaults the writer wrote.
         if !entity
-            && r.kind == "VPORT"
+            && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS")
             && i < xdata_at
-            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code))
+            && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code && replay(p)))
             && !matches!(t.code, 0 | 5 | 100 | 330)
         {
             continue;
         }
-        let mut t = t.clone();
+        let mut t = source_dictionary_group(t, x, dictionary);
         if unknown && i < xdata_at && is_pointer(t.code) && t.code != 102 {
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
@@ -1792,7 +1837,7 @@ fn record(
             out.extend(x.props.iter().map(|p| map.group(p)));
         }
         if xdata_at == b.len() {
-            out.extend(x.subclass.iter().map(|p| map.group(p)));
+            out.extend(x.subclass.iter().filter(|p| replay(p)).map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
     }

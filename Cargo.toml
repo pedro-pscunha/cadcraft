@@ -102,9 +102,11 @@ debug = 0
 # vertices, TABLESTYLE border linetypes and flags in the bridge, entity material and shadow mode,
 # VERTEX/SEQEND identity and polygon mesh vertex flags, AutoCAD-readable public DXF, no silent
 # record drops, ATTRIB/ATTDEF thickness, POINT angle in DXF degrees, every MLEADERSTYLE group in the DXF reader and
-# writer with the style name from its dictionary key; upstream main 2c436ae merged),
+# writer with the style name from its dictionary key, table override values in a text DXF, R2010 table style flow direction, cell overrides
+# and legacy table fields, block cells, the DXF cell flag apart from the R2010 geometry flag, xref names and resolved bits of layers, linetypes, text styles and applications, MULTILEADER text flow direction kept as read, VIEWPORT status derived on a DWG read as the DXF
+# reference gives it; upstream main 2c436ae merged),
 # until upstream.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "1c370d40e5e623b7ed0c507ace251c637ce0705c" }
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "32051e0fc1abdd09d3caa993627be03e2131ed1c" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }

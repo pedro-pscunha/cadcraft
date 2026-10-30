@@ -2,9 +2,9 @@ use super::{Drawing, Group, MLeaderStyle, TableStyle, W, dxf_ext};
 
 /// A TABLESTYLE object (DXF Reference, OBJECTS: TABLESTYLE): margins, title/header
 /// suppression and per row type (data, column header, title) text and border settings.
-/// A table style's name is its dictionary key, and group 3 is its description. The DWG bridge reads
-/// the name from group 3 (`bridge`, given with the handles of the written linetypes by upper-case name),
-/// and writes it into the DWG object. The border linetypes and override flags are written for the bridge only.
+/// A table style's name is its dictionary key, and group 3 is its description (the text field of the DWG object, which acadrust
+/// calls the style's name). The border linetypes and override flags are written for the bridge only (`bridge`, given with the
+/// handles of the written linetypes by upper-case name).
 pub(super) fn table_style_obj(
     w: &mut W,
     d: &Drawing,
@@ -18,11 +18,14 @@ pub(super) fn table_style_obj(
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbTableStyle");
-    w.s(3, if bridge.is_some() { s.name.as_str() } else { "" });
-    w.i(70, 0);
-    w.i(71, 0);
+    w.s(3, &s.description);
+    w.i(70, i64::from(s.flow_up));
+    // The flags word as read; its suppression bits (1 title, 2 header) follow the style's switches, which are all a style made
+    // here has set.
+    w.i(71, i64::from(s.flags & !3 | i16::from(!s.title) | i16::from(!s.header) << 1));
     w.f(40, s.margin);
-    w.f(41, s.margin);
+    // The vertical margin is the Data cell style's (the cell styles read it from group 41).
+    w.f(41, s.cell_style(crate::dxf_table::CELL_TYPES[0]).margin_v);
     w.i(280, i64::from(!s.title));
     w.i(281, i64::from(!s.header));
     // Data, column header and title cell styles; CADCraft's complete cell styles in xdata.

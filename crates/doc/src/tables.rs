@@ -795,11 +795,35 @@ pub struct TableStyle {
     /// height and margin imply ([`TableStyle::cell_style`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cell_styles: Vec<crate::CellStyle>,
+    /// The description (DXF group 3, which is not the name), as the file gave it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The cells flow from the bottom up (DXF group 70 = 1) instead of from the top down.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub flow_up: bool,
+    /// The flags word of the style (DXF group 71), as the file gave it. Its title (1) and header (2) suppression bits follow
+    /// `title` and `header` when written.
+    #[serde(skip_serializing_if = "is_zero_flags")]
+    pub flags: i16,
+}
+
+fn is_zero_flags(v: &i16) -> bool {
+    *v == 0
 }
 
 impl Default for TableStyle {
     fn default() -> Self {
-        TableStyle { name: "Standard".into(), text_height: 0.18, margin: 0.06, title: true, header: true, cell_styles: Vec::new() }
+        TableStyle {
+            name: "Standard".into(),
+            text_height: 0.18,
+            margin: 0.06,
+            title: true,
+            header: true,
+            cell_styles: Vec::new(),
+            description: String::new(),
+            flow_up: false,
+            flags: 0,
+        }
     }
 }
 
@@ -947,7 +971,7 @@ pub struct PageSetup {
     pub height_mm: f64,
     pub margins_mm: [f64; 4],
     pub landscape: bool,
-    /// "layout" | "extents" | "display" | "window" | "limits".
+    /// "layout" | "extents" | "display" | "window" | "limits" | "view".
     pub plot_area: String,
     /// Plot window corners `[x1, y1, x2, y2]` (DXF plot layout groups 48, 49, 140, 141); used when `plot_area` is "window".
     pub plot_window: [f64; 4],

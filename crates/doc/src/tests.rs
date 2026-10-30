@@ -38,7 +38,7 @@ fn add_and_extents() {
     let mut d = Drawing::new_imperial();
     d.add(&Space::Model, Common::default(), line((0.0, 0.0), (10.0, 5.0))).unwrap();
     d.add(&Space::Model, Common::default(), EntityKind::Circle(Circle { center: Vec3::new(20.0, 0.0, 0.0), radius: 2.0 })).unwrap();
-    let b = d.extents(&Space::Model);
+    let b = d.legacy_extents(&Space::Model).unwrap();
     assert_eq!(b.min, Vec2::new(0.0, -2.0));
     assert_eq!(b.max, Vec2::new(22.0, 5.0));
 }
@@ -50,7 +50,7 @@ fn hidden_layers_excluded_from_extents() {
     d.add(&Space::Model, c, line((100.0, 100.0), (200.0, 200.0))).unwrap();
     d.add(&Space::Model, Common::default(), line((0.0, 0.0), (1.0, 1.0))).unwrap();
     d.layer_mut("Hidden").unwrap().on = false;
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(1.0, 1.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(1.0, 1.0));
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn rays_and_xlines_do_not_stretch_extents() {
     let far = Vec3::new(-1_977_989.0, -1_952_638.0, 0.0);
     d.add(&Space::Model, Common::default(), EntityKind::Ray(RayLine { base: far, dir: Vec3::new(-0.7, -0.7, 0.0) })).unwrap();
     d.add(&Space::Model, Common::default(), EntityKind::XLine(RayLine { base: far, dir: Vec3::new(1.0, 0.0, 0.0) })).unwrap();
-    let b = d.extents(&Space::Model);
+    let b = d.legacy_extents(&Space::Model).unwrap();
     assert_eq!((b.min, b.max), (Vec2::ZERO, Vec2::new(1.0, 1.0)));
 }
 
@@ -86,14 +86,14 @@ fn inserts_of_missing_or_empty_blocks_do_not_stretch_extents() {
     d.blocks.insert("Empty".into(), std::sync::Arc::new(Block::new("Empty")));
     d.add(&Space::Model, Common::default(), ins("Missing", -125_319.0, -79_990.0)).unwrap();
     d.add(&Space::Model, Common::default(), ins("Empty", 55_652.0, -3_448_576.0)).unwrap();
-    let b = d.extents(&Space::Model);
+    let b = d.legacy_extents(&Space::Model).unwrap();
     assert_eq!((b.min, b.max), (Vec2::ZERO, Vec2::new(1.0, 1.0)));
     // A block with geometry still counts.
     let mut full = Block::new("Full");
     full.entities.push(Entity::new(Handle(1), line((0.0, 0.0), (2.0, 2.0))));
     d.blocks.insert("Full".into(), std::sync::Arc::new(full));
     d.add(&Space::Model, Common::default(), ins("Full", 10.0, 10.0)).unwrap();
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(12.0, 12.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(12.0, 12.0));
 }
 
 #[test]
@@ -138,14 +138,14 @@ fn visible_attributes_of_a_missing_block_still_count() {
     };
     let mut d = Drawing::new_imperial();
     d.blocks.insert("Empty".into(), std::sync::Arc::new(Block::new("Empty")));
-    let missing = entity_bounds(&d, &ins("Missing", vec![attrib(false)]), 0);
-    let empty = entity_bounds(&d, &ins("Empty", vec![attrib(false)]), 0);
+    let missing = legacy_entity_bounds(&d, &ins("Missing", vec![attrib(false)]), 0).unwrap();
+    let empty = legacy_entity_bounds(&d, &ins("Empty", vec![attrib(false)]), 0).unwrap();
     assert!(!missing.is_empty());
     assert_eq!((missing.min, missing.max), (empty.min, empty.max));
     assert_eq!(missing.min, Vec2::new(1000.0, 1000.0));
     // Without a visible attribute there is nothing to measure.
-    assert!(entity_bounds(&d, &ins("Missing", vec![]), 0).is_empty());
-    assert!(entity_bounds(&d, &ins("Missing", vec![attrib(true)]), 0).is_empty());
+    assert!(legacy_entity_bounds(&d, &ins("Missing", vec![]), 0).unwrap().is_empty());
+    assert!(legacy_entity_bounds(&d, &ins("Missing", vec![attrib(true)]), 0).unwrap().is_empty());
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn insert_bounds_with_cyclic_block_terminate() {
         )
         .unwrap();
     let e = d.entity(h).unwrap().clone();
-    let bb = entity_bounds(&d, &e, 0);
+    let bb = legacy_entity_bounds(&d, &e, 0).unwrap();
     assert_eq!(bb.max, Vec2::new(7.0, 7.0));
 }
 
@@ -235,7 +235,7 @@ fn wide_pline(verts: &[(f64, f64, f64, f64, f64)], closed: bool, const_width: f6
         fit: None,
     });
     d.add(&Space::Model, Common::default(), kind).unwrap();
-    d.extents(&Space::Model)
+    d.legacy_extents(&Space::Model).unwrap()
 }
 
 fn near_bounds(b: Bounds2, min: (f64, f64), max: (f64, f64)) -> bool {
@@ -344,7 +344,7 @@ fn far_line(layer: &str) -> Entity {
 }
 
 fn extents_pair(d: &Drawing) -> (Vec2, Vec2) {
-    let b = d.extents(&Space::Model);
+    let b = d.legacy_extents(&Space::Model).unwrap();
     (b.min, b.max)
 }
 
@@ -374,7 +374,7 @@ fn deep_and_shallow(children: &[&str]) -> Drawing {
 fn deep_block_visit_does_not_hide_a_shallow_reference() {
     let line = (Vec2::new(1000.0, 1000.0), Vec2::new(2000.0, 1000.0));
     // Control: past the limit, the deep path alone contributes nothing.
-    assert!(deep_and_shallow(&["C1"]).extents(&Space::Model).is_empty());
+    assert!(deep_and_shallow(&["C1"]).legacy_extents(&Space::Model).unwrap().is_empty());
     assert_eq!(extents_pair(&deep_and_shallow(&["B"])), line);
     assert_eq!(extents_pair(&deep_and_shallow(&["B", "C1"])), line);
     assert_eq!(extents_pair(&deep_and_shallow(&["C1", "B"])), line);
@@ -388,7 +388,7 @@ fn block_entity_with_invisible_flag_is_ignored_in_insert_extents() {
     assert_eq!(extents_pair(&d), (Vec2::ZERO, Vec2::new(1.0, 1.0)));
     // Control: the same entity visible does count.
     let d = drawing_with_block(far_line("0"));
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn block_entity_on_off_or_frozen_layer_is_ignored() {
         let l = d.layer_mut("Hidden").unwrap();
         l.on = true;
         l.frozen = false;
-        assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+        assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
     }
 }
 
@@ -423,16 +423,16 @@ fn block_entity_on_layer_zero_counts_even_if_layer_zero_is_off_or_missing() {
     d.blocks.insert("B".into(), std::sync::Arc::new(blk));
     // Layer 0 switched off.
     d.layer_mut("0").unwrap().on = false;
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
     // Layer 0 frozen.
     let l = d.layer_mut("0").unwrap();
     l.on = true;
     l.frozen = true;
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
     // Layer 0 not defined at all.
     d.layers.retain(|l| l.name != "0");
     assert!(d.layer("0").is_none());
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
 }
 
 #[test]
@@ -440,7 +440,7 @@ fn block_entity_on_undefined_layer_counts() {
     // An unknown layer name is not hidden (is_none_or).
     let d = drawing_with_block(far_line("Nowhere"));
     assert!(d.layer("Nowhere").is_none());
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
 }
 
 #[test]
@@ -508,7 +508,7 @@ fn blank_text_and_mtext_have_no_bounds() {
     let d = Drawing::new_imperial();
     for s in ["", " ", "   ", "\t \n", "\\~", " \\~ \\~", "\u{a0}"] {
         for kind in [text_kind(s), mtext_kind(s)] {
-            let b = entity_bounds(&d, &Entity::new(Handle(1), kind), 0);
+            let b = legacy_entity_bounds(&d, &Entity::new(Handle(1), kind), 0).unwrap();
             assert!(b.is_empty(), "{s:?} should have empty bounds");
         }
     }
@@ -524,7 +524,7 @@ fn blank_text_and_mtext_have_no_bounds() {
 fn non_blank_text_and_mtext_have_bounds() {
     let d = Drawing::new_imperial();
     for kind in [text_kind("Hi"), text_kind(" a "), mtext_kind("Hi"), mtext_kind("a\\Pb"), mtext_kind("\\~x")] {
-        let b = entity_bounds(&d, &Entity::new(Handle(1), kind.clone()), 0);
+        let b = legacy_entity_bounds(&d, &Entity::new(Handle(1), kind.clone()), 0).unwrap();
         assert!(!b.is_empty(), "{kind:?} should have bounds");
     }
 }
@@ -567,18 +567,18 @@ fn invisible_dimblock_entity_is_ignored_in_dimension_extents() {
     let mut hidden = on_layer("*ADSK_CONSTRAINTS", line((5000.0, 5000.0), (6000.0, 6000.0)), 2);
     hidden.common.visible = false;
     dim(&mut d, hidden);
-    assert!(d.extents(&Space::Model).max.x < 100.0);
+    assert!(d.legacy_extents(&Space::Model).unwrap().max.x < 100.0);
     // Hidden by its layer state.
     let mut d = Drawing::new_imperial();
     let mut l = Layer::new("*ADSK_CONSTRAINTS");
     l.on = false;
     d.layers.push(l);
     dim(&mut d, on_layer("*ADSK_CONSTRAINTS", line((5000.0, 5000.0), (6000.0, 6000.0)), 2));
-    assert!(d.extents(&Space::Model).max.x < 100.0);
+    assert!(d.legacy_extents(&Space::Model).unwrap().max.x < 100.0);
     // Control: a visible far entity does count.
     let mut d = Drawing::new_imperial();
     dim(&mut d, far_line("0"));
-    assert_eq!(d.extents(&Space::Model).max, Vec2::new(6000.0, 6000.0));
+    assert_eq!(d.legacy_extents(&Space::Model).unwrap().max, Vec2::new(6000.0, 6000.0));
 }
 
 #[test]

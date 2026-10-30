@@ -10,6 +10,8 @@ fn image_exports_refuse_incomplete_canonical_geometry() {
     drawing.model.push(entity);
     for name in ["invalid.png", "invalid.pdf", "invalid.svg"] {
         let error = cadcraft_io::write(&drawing, name).unwrap_err();
-        assert!(error.to_string().contains("180") && error.to_string().contains("display geometry"), "{name}: {error}");
+        // A PDF frames its page first, so its refusal comes from the extent query; PNG and SVG refuse while drawing.
+        let refused = error.to_string().contains("display geometry") || error.to_string().contains("Extent query refused");
+        assert!(error.to_string().contains("180") && refused, "{name}: {error}");
     }
 }

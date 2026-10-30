@@ -89,7 +89,7 @@ fn json_and_default_parsing_keep_degrees_from_east() {
     }
     assert!((cadcraft_engine::units::parse_angle("90").unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
     // SETVAR reports ANGBASE in degrees.
-    let v = cadcraft_engine::sysvars::get(&s, "ANGBASE").unwrap();
+    let v = cadcraft_engine::sysvars::get(&s, "ANGBASE").unwrap().unwrap();
     assert!((v.as_f64().unwrap() - 90.0).abs() < 1e-9, "{v}");
     let a = AngleSettings { aunits: 0, angbase: 0.0, clockwise: false };
     assert_eq!(a.direction(""), None);

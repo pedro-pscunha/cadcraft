@@ -92,7 +92,7 @@ fn perf_file(path: &std::path::Path, io: &mut Streams) -> Result {
     let open_ms = ms(t);
     let st = s.state()?;
     let (d, space) = (&st.doc, &st.space);
-    let ext = d.extents(space);
+    let ext = cadcraft_render::space_extents(d, space)?;
     let size = ext.width().max(ext.height());
     if ext.is_empty() || !(size.is_finite() && size > 0.0) {
         return Err(PerfError::EmptyDrawing.into());

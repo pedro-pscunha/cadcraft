@@ -7,10 +7,10 @@ use serde_json::json;
 fn dynprompt_is_a_setting_on_by_default() {
     let mut s = Session::new();
     assert!(s.settings.dynprompt);
-    assert_eq!(sysvars::get(&s, "DYNPROMPT"), Some(json!(1)));
+    assert_eq!(sysvars::get(&s, "DYNPROMPT").unwrap(), Some(json!(1)));
     s.execute("setvar", &json!({"name": "dynprompt", "value": 0})).unwrap();
     assert!(!s.settings.dynprompt);
-    assert_eq!(sysvars::get(&s, "dynprompt"), Some(json!(0)));
+    assert_eq!(sysvars::get(&s, "dynprompt").unwrap(), Some(json!(0)));
     s.cmdline("setvar dynprompt 1").unwrap();
     assert!(s.settings.dynprompt);
     assert!(s.execute("setvar", &json!({"name": "DYNPROMPT", "value": "x"})).is_err());

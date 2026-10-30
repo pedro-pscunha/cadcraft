@@ -601,13 +601,15 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         w.s(342, cx.table_style(&t.style));
         w.s(343, brh);
         w.p(11, t.dir);
-        w.i(90, 0);
+        let o = &t.overrides;
+        w.i(90, i64::from(o.value_flags));
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
         w.i(92, cols as i64);
-        for c in [93, 94, 95, 96] {
-            w.i(c, 0);
+        for (c, mask) in [(93, o.style), (94, o.border_color), (95, o.border_lineweight), (96, o.border_visibility)] {
+            w.i(c, i64::from(mask));
         }
+        w.t.extend(o.values.iter().map(crate::dxf_raw::tag));
         for h in t.row_heights.iter().take(rows) {
             w.f(141, *h);
         }
@@ -616,23 +618,40 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         }
         let cov = cadcraft_render::table_covered(t);
         let span = |v: u32| i64::from(v.min(i16::MAX as u32));
+        let blank = cadcraft_doc::TableCell::default();
         for r in 0..rows {
             for c in 0..cols {
                 let cell = t.cells.get(r).and_then(|x| x.get(c));
                 let covered = cov.get(r).and_then(|x| x.get(c)).copied().unwrap_or(false);
                 let merge = cell.and_then(|x| x.merged).filter(|&(a, b)| a >= 1 && b >= 1 && (a, b) != (1, 1));
-                w.i(171, 1);
-                w.i(172, 0);
+                let cell_ref = cell.unwrap_or(&blank);
+                // A block cell (171 = 2) holds a block of the file; one whose block is gone is a text cell.
+                let block = cell_ref.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).map(|h| (b, h)));
+                w.i(171, if block.is_some() { 2 } else { 1 });
+                w.i(172, i64::from(cell_ref.flag_value));
                 w.i(173, i64::from(covered || merge.is_some()));
-                w.i(174, 0);
+                w.i(174, i64::from(cell_ref.auto_fit));
                 let (rs, cs) = if covered { (0, 0) } else { merge.map(|(a, b)| (span(a), span(b))).unwrap_or((1, 1)) };
                 w.i(175, cs);
                 w.i(176, rs);
-                w.i(91, 0);
-                w.i(178, 0);
-                w.f(145, 0.0);
+                w.i(91, i64::from(cell_ref.override_flag));
+                w.i(178, i64::from(cell_ref.virtual_edge));
+                w.f(145, cell_ref.rotation);
                 if let Some(h) = cell.and_then(|x| x.text_height).filter(|h| h.is_finite() && *h > 0.0) {
                     w.f(140, h);
+                }
+                w.t.extend(cell_ref.style_groups.iter().map(crate::dxf_raw::tag));
+                if let Some((b, record)) = block {
+                    w.f(144, b.scale);
+                    w.s(340, record);
+                    if !b.attribs.is_empty() {
+                        w.i(179, b.attribs.len() as i64);
+                        for (definition, value) in &b.attribs {
+                            w.s(331, definition.hex());
+                            w.s(300, value);
+                        }
+                    }
+                    continue;
                 }
                 // Long text: 250-character code-2 chunks, the rest in code 1.
                 let chars: Vec<char> = cell.map(|x| x.text.chars().collect()).unwrap_or_default();
@@ -888,15 +907,19 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
         w.p(10, v.center);
         w.f(40, v.width);
         w.f(41, v.height);
-        // Status 68: a positive value is "on" (the stacking order; 1 is the active viewport), 0 off.
-        w.i(68, if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 });
+        // Keep source stacking status, including -1, until an ON/OFF edit changes it.
+        let source = v.source_status.filter(|s| v.on == s.is_on());
+        w.i(68, source.map(|s| s.stacking).unwrap_or_else(|| if v.on { i64::from(v.id.clamp(1, 32767)) } else { 0 }));
         w.i(69, i64::from(v.id));
         w.p2(12, v.view_center);
         w.f(45, v.view_height);
         // Status flags: 16384 = display locked, 32768 = always set, 65536 = clipped by the
         // 340 entity, 131072 = off.
         let clip = v.clip.filter(|h| *h != e.handle && d.entity(*h).is_some());
-        let flags = 32768 | if v.locked { 16384 } else { 0 } | if clip.is_some() { 65536 } else { 0 } | if v.on { 0 } else { 131072 };
+        let flags = (v.source_status.map_or(32768, |s| s.flags) & !(16384 | 65536 | 131072))
+            | if v.locked { 16384 } else { 0 }
+            | if clip.is_some() { 65536 } else { 0 }
+            | source.map_or_else(|| if v.on { 0 } else { 131072 }, |s| s.flags & 131072);
         w.i(90, flags);
         if let Some(h) = clip {
             w.s(340, h.hex());

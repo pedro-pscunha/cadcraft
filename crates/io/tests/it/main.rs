@@ -111,7 +111,10 @@ mod split_entities_section;
 mod style_typeface;
 mod svg_arc_budget;
 mod svg_tiny_extents;
+mod table_cell_blocks;
 mod table_cellstyle_roundtrip;
+mod table_codes;
+mod table_style_codes;
 mod tables_objects_roundtrip;
 mod tablestyle_border_dwg;
 mod tablestyle_cell_order;
@@ -130,4 +133,14 @@ mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_dictionary_policy;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_plot_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_view_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_viewport_status;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_vport_snap;
 mod xref_roundtrip;

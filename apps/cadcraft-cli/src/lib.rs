@@ -274,14 +274,14 @@ mod tests {
         let before = model_views(&s);
         // The smallest entity with an area, selected then framed with ZOOM Object.
         let d = s.doc().unwrap();
-        let bounds = |e: &cadcraft_engine::doc::Entity| cadcraft_engine::doc::entity_bounds(d, e, 0);
+        let bounds = |e: &cadcraft_engine::doc::Entity| cadcraft_render::entity_extents(d, e, 0).unwrap();
         let e = d
             .model
             .iter()
             .filter(|e| bounds(e).width() > 0.0 && bounds(e).height() > 0.0)
             .min_by(|a, b| bounds(a).width().total_cmp(&bounds(b).width()))
             .unwrap();
-        let (h, eb, ext) = (e.handle, bounds(e), d.extents(&Space::Model));
+        let (h, eb, ext) = (e.handle, bounds(e), cadcraft_render::space_extents(d, &Space::Model).unwrap());
         s.set_selection(vec![h]);
         s.execute("zoom", &json!({"mode": "object"})).unwrap();
         let w = export_window(&s, Framing::Auto, Some(&before)).unwrap().unwrap();

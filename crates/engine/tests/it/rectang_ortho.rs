@@ -25,11 +25,11 @@ fn click_rectangle(ortho: bool) -> ((Vec2, Vec2), (Vec2, Vec2)) {
     let c = hover(&mut s, Vec2::new(10.0, 3.0));
     let mut pv = cadcraft_geom::Bounds2::EMPTY;
     for e in s.preview(c) {
-        pv = pv.union(&cadcraft_doc::entity_bounds(s.doc().unwrap(), &e, 0));
+        pv = pv.union(&cadcraft_render::entity_extents(s.doc().unwrap(), &e, 0).unwrap());
     }
     s.input(Input::Point(c)).unwrap();
     assert!(s.current_prompt().is_none(), "RECTANG is done, still at {:?}", s.current_prompt().map(|p| p.message));
-    let b = s.doc().unwrap().extents(&s.space());
+    let b = cadcraft_render::space_extents(s.doc().unwrap(), &s.space()).unwrap();
     ((b.min, b.max), (pv.min, pv.max))
 }
 
@@ -56,7 +56,7 @@ fn click_unit_cell(ortho: bool) -> (Vec2, Vec2) {
     s.input(Input::Point(c)).unwrap();
     s.cmdline("x").unwrap();
     assert!(s.current_prompt().is_none(), "ARRAYRECT is done, still at {:?}", s.current_prompt().map(|p| p.message));
-    let b = s.doc().unwrap().extents(&s.space());
+    let b = cadcraft_render::space_extents(s.doc().unwrap(), &s.space()).unwrap();
     (b.min, b.max)
 }
 

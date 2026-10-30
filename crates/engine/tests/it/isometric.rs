@@ -17,7 +17,7 @@ fn deg(a: f64) -> Vec2 {
 }
 
 fn getvar(s: &Session, name: &str) -> Value {
-    cadcraft_engine::sysvars::get(s, name).unwrap_or(Value::Null)
+    cadcraft_engine::sysvars::get(s, name).unwrap().unwrap_or(Value::Null)
 }
 
 fn setvar(s: &mut Session, name: &str, value: Value) -> cadcraft_engine::Result<Value> {

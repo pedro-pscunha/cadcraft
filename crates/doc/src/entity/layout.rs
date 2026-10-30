@@ -25,6 +25,21 @@ pub struct Viewport {
     /// Display on (MVIEW ON/OFF). An off viewport shows its border but no model space.
     #[serde(default = "yes")]
     pub on: bool,
+    /// Source stacking status and display flags, before MVIEW edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_status: Option<ViewportStatus>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViewportStatus {
+    pub stacking: i64,
+    pub flags: i64,
+}
+
+impl ViewportStatus {
+    pub fn is_on(self) -> bool {
+        self.stacking != 0 && self.flags & 131072 == 0
+    }
 }
 
 impl Default for Viewport {
@@ -41,6 +56,7 @@ impl Default for Viewport {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            source_status: None,
         }
     }
 }
@@ -144,6 +160,94 @@ pub struct TableCell {
     /// `None`: its cell style's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_height: Option<f64>,
+    /// The cell flag value (group 172), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub flag_value: i32,
+    /// The cell flag (group 91 outside the cell's value block), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub override_flag: i32,
+    /// The cell fits its content automatically (group 174).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_fit: bool,
+    /// The cell has a virtual edge (group 178).
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub virtual_edge: i32,
+    /// The block the cell holds instead of text (DXF cell type 171 = 2); `text` is then not drawn or written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<TableCellBlock>,
+    /// The cell's own style groups (alignment 170, fill 283 and 63, text colour 64, text style 7, border colours, lineweights and
+    /// visibilities 65 to 69, 275 to 279 and 285 to 289), as the file gave them: the values the cell flag (91) says are overridden.
+    /// The text height (140) is `text_height`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub style_groups: Vec<super::RawTag>,
+    /// The rotation of the cell's content (group 145), as the file gave it.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub rotation: f64,
+}
+
+/// The block a table cell holds: its name, scale (DXF 144) and attribute values, each by the handle of its ATTDEF in the block
+/// definition (331) and the value (300).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableCellBlock {
+    pub block: String,
+    pub scale: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribs: Vec<(Handle, String)>,
+}
+
+impl TableCellBlock {
+    /// The reference that draws the block at `at`, turned by `rotation`, at the cell's block scale. Each attribute value is
+    /// placed like its definition in the block (an attribute whose definition is gone is dropped).
+    pub fn insert(&self, d: &crate::Drawing, at: Vec3, rotation: f64) -> super::Insert {
+        let mut insert = super::Insert {
+            block: self.block.clone(),
+            insert: at,
+            scale: Vec3::new(self.scale, self.scale, self.scale),
+            rotation,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        };
+        let Some(block) = d.block(&self.block) else { return insert };
+        let matrix = super::Mat4::from_mat3(&insert.transform(block.base.xy()));
+        for (handle, value) in &self.attribs {
+            let Some(super::EntityKind::AttDef(def)) = block.entities.get(*handle).map(|e| &e.kind) else { continue };
+            let mut placed = super::Entity::new(Handle(0), super::EntityKind::Text(def.text.clone()));
+            if placed.try_transform(&matrix).is_err() {
+                continue;
+            }
+            let super::EntityKind::Text(mut text) = placed.kind else { continue };
+            text.value = value.clone();
+            insert.attribs.push(super::Attrib { invisible: def.invisible, ..super::Attrib::new(def.tag.clone(), text) });
+        }
+        insert
+    }
+}
+
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+/// The table-wide groups of an ACAD_TABLE that the table model has no field for, as the file gave them: the value flags (90), the
+/// style override masks (93), the border colour, lineweight and visibility override masks (94 to 96) and the override values that
+/// follow them (280, 281, 70, 40, 41, 64 and so on up to the row heights).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableOverrides {
+    pub value_flags: i32,
+    pub style: i32,
+    pub border_color: i32,
+    pub border_lineweight: i32,
+    pub border_visibility: i32,
+    /// The override value groups after 96, with the text of each value.
+    pub values: Vec<super::RawTag>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -175,6 +279,15 @@ pub struct Table {
     /// The CSV file the cells come from (DATALINK).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_link: Option<crate::DataLink>,
+    /// The table's override masks and values, as the file gave them.
+    #[serde(default, skip_serializing_if = "TableOverrides::is_default")]
+    pub overrides: TableOverrides,
+}
+
+impl TableOverrides {
+    fn is_default(&self) -> bool {
+        *self == TableOverrides::default()
+    }
 }
 
 fn table_x_axis() -> Vec3 {
