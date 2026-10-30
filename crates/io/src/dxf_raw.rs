@@ -1627,6 +1627,17 @@ pub(crate) fn reform_for_version(tags: &mut Vec<Tag>, source: u32, target: u32) 
     *tags = out;
 }
 
+/// The `$ACADVER` of the written file as a number (1015 for AC1015), 0 when it has none. The DXF of the DWG bridge says AC1015 but has
+/// the fit data count of spline edges, which acadrust reads from there: it counts as 2010 (1024).
+fn declared_version(tags: &[Tag], dwg_bridge: bool) -> u32 {
+    let version = tags
+        .windows(2)
+        .find(|w| w[0].code == 9 && w[0].str() == "$ACADVER")
+        .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
+        .unwrap_or(0);
+    if dwg_bridge { version.max(1024) } else { version }
+}
+
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
 pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
@@ -1774,13 +1785,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
-    let version = tags
-        .windows(2)
-        .find(|w| w[0].code == 9 && w[0].str() == "$ACADVER")
-        .and_then(|w| w[1].str().trim().strip_prefix("AC").and_then(|v| v.parse().ok()))
-        .unwrap_or(0);
-    // The DXF of the DWG bridge says AC1015 but has the fit data count of spline edges (acadrust reads it from there).
-    let version = if dwg_bridge { version.max(1024) } else { version };
+    let version = declared_version(tags, dwg_bridge);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
     let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, target, pages, block_attributes, table_aliases };
