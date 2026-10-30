@@ -204,3 +204,91 @@ pub(crate) fn point_marker(
     }
     Ok(())
 }
+
+/// A translation by `v`.
+pub(crate) fn translation(v: Vec3) -> Mat4 {
+    Mat4 { m: [[1.0, 0.0, 0.0, v.x], [0.0, 1.0, 0.0, v.y], [0.0, 0.0, 1.0, v.z], [0.0, 0.0, 0.0, 1.0]] }
+}
+
+/// Whether the kind is swept along its normal by its thickness (the kinds with an extrusion).
+pub(crate) fn swept(kind: &cadcraft_doc::EntityKind) -> bool {
+    use cadcraft_doc::EntityKind as K;
+    matches!(
+        kind,
+        K::Line(_)
+            | K::Point(_)
+            | K::Circle(_)
+            | K::Arc(_)
+            | K::Ellipse(_)
+            | K::LwPolyline(_)
+            | K::Text(_)
+            | K::AttDef(_)
+            | K::Solid(_)
+            | K::Trace(_)
+    )
+}
+
+/// The vector from an outline to its far copy: the thickness along the normal of the entity's plane, carried by the parent.
+pub(crate) fn extrusion_offset(context: &Ctx, entity: &Entity) -> cadcraft_doc::Result<Vec3> {
+    let frame = OcsFrame::new(entity.common.extrusion)
+        .ok_or_else(|| DocError::Invalid(format!("Entity {} has no valid source plane.", entity.handle.hex())))?;
+    let offset = context.world.apply_vec(frame.to_world(Vec3::Z) * entity.common.thickness);
+    if offset.is_finite() { Ok(offset) } else { Err(DocError::NonFinite(entity.handle)) }
+}
+
+/// At most this many side edges of one extruded entity (text strokes have many vertices).
+const MAX_SIDE_EDGES: usize = 20_000;
+
+/// The side edges of an extrusion: a line from each vertex of the outline to its far copy at `offset`. A line has its two ends, a
+/// full circle its four quadrants, an arc its ends, a polyline its vertices, a point itself, a SOLID or TRACE its corners and a text
+/// every vertex of its strokes. Edges seen end-on (a normal along the view) have no length and are left out.
+pub(crate) fn side_edges(
+    builder: &mut Builder,
+    context: &Ctx,
+    entity: &Entity,
+    offset: Vec3,
+    color: Ink,
+    lineweight: f32,
+) -> cadcraft_doc::Result<()> {
+    if offset.xy().len() <= 0.0 {
+        return Ok(());
+    }
+    let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
+    let mut vertices: Vec<Vec3> = Vec::new();
+    for primitive in geometry.primitives() {
+        match primitive {
+            WorldPrimitive::Line { a, b } => vertices.extend([*a, *b]),
+            WorldPrimitive::Point(p) => vertices.push(*p),
+            WorldPrimitive::Conic { center, axis_u, axis_v, start, end } => {
+                let at = |t: f64| *center + *axis_u * t.cos() + *axis_v * t.sin();
+                if cadcraft_geom::ccw_sweep(*start, *end) >= std::f64::consts::TAU - 1e-12 {
+                    vertices.extend((0..4).map(|k| at(f64::from(k) * std::f64::consts::FRAC_PI_2)));
+                } else {
+                    vertices.extend([at(*start), at(*end)]);
+                }
+            }
+            WorldPrimitive::Spline { .. } | WorldPrimitive::Fill(_) => {}
+            WorldPrimitive::Text(text) => {
+                if !builder.opts.text {
+                    continue;
+                }
+                let value = match &text.content {
+                    cadcraft_doc::WorldTextContent::Text(t) => t.value.as_str(),
+                    cadcraft_doc::WorldTextContent::MText(t) => t.contents.as_str(),
+                };
+                match super::layout_world_text(context.d, text, value)? {
+                    super::WorldTextLayout::Text(shaped) => vertices.extend(shaped.strokes.iter().flatten().copied()),
+                    super::WorldTextLayout::MText(pieces) => {
+                        vertices.extend(pieces.iter().flat_map(|p| p.shaped.strokes.iter().flatten().copied()));
+                    }
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let flat = Ctx { xf: Mat3::IDENTITY, ..context.clone() };
+    for v in vertices.into_iter().filter(|v| seen.insert((v.x.to_bits(), v.y.to_bits(), v.z.to_bits()))).take(MAX_SIDE_EDGES) {
+        builder.polyline(&flat, color, lineweight, &[v.xy(), (v + offset).xy()]);
+    }
+    Ok(())
+}

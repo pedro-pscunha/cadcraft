@@ -14,6 +14,26 @@ pub(crate) fn draw(
     linetype: Option<&cadcraft_doc::Linetype>,
     linetype_scale: f64,
 ) -> cadcraft_doc::Result<()> {
+    // An extrusion sweeps the outline along the normal: the outline, its far copy and the side edges.
+    if entity.common.thickness != 0.0 && super::world_roles::swept(&entity.kind) {
+        let far = super::world_roles::extrusion_offset(context, entity)?;
+        draw_flat(builder, context, entity, color, lineweight, linetype, linetype_scale)?;
+        let moved = Ctx { world: super::world_roles::translation(far).mul(&context.world), ..context.clone() };
+        draw_flat(builder, &moved, entity, color, lineweight, linetype, linetype_scale)?;
+        return super::world_roles::side_edges(builder, context, entity, far, color, lineweight);
+    }
+    draw_flat(builder, context, entity, color, lineweight, linetype, linetype_scale)
+}
+
+fn draw_flat(
+    builder: &mut Builder,
+    context: &Ctx,
+    entity: &Entity,
+    color: Ink,
+    lineweight: f32,
+    linetype: Option<&cadcraft_doc::Linetype>,
+    linetype_scale: f64,
+) -> cadcraft_doc::Result<()> {
     if !builder.opts.text && matches!(entity.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
         return Ok(());
     }
@@ -27,23 +47,6 @@ pub(crate) fn draw(
         && leader.block.is_some()
     {
         return Err(unsupported("multileader block-content paint roles"));
-    }
-    if entity.common.thickness != 0.0
-        && matches!(
-            entity.kind,
-            EntityKind::Line(_)
-                | EntityKind::Point(_)
-                | EntityKind::Circle(_)
-                | EntityKind::Arc(_)
-                | EntityKind::Ellipse(_)
-                | EntityKind::LwPolyline(_)
-                | EntityKind::Text(_)
-                | EntityKind::AttDef(_)
-                | EntityKind::Solid(_)
-                | EntityKind::Trace(_)
-        )
-    {
-        return Err(unsupported("extrusion thickness"));
     }
     if matches!(entity.kind, EntityKind::Table(_) | EntityKind::Tolerance(_) | EntityKind::Dimension(_)) {
         let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
