@@ -559,10 +559,11 @@ pub fn not_saved(d: &Drawing) -> std::collections::BTreeMap<String, usize> {
 
 /// Solid modeler entities whose ACIS geometry a file of AutoCAD 2013 and later keeps in its data
 /// store section, which is written back with the drawing (`Foreign::data_store`).
-const MODELER_TYPES: [&str; 3] = ["3DSOLID", "REGION", "BODY"];
+const MODELER_TYPES: [&str; 10] =
+    ["3DSOLID", "REGION", "BODY", "SURFACE", "PLANESURFACE", "EXTRUDEDSURFACE", "LOFTEDSURFACE", "REVOLVEDSURFACE", "SWEPTSURFACE", "NURBSURFACE"];
 
-/// [`not_saved`] for a file saved as `version`. From 2013 on, a 3D solid, region or body the data
-/// store has a record for keeps its geometry and is not counted.
+/// [`not_saved`] for a file saved as `version`. From 2013 on, a modeler entity with a data-store
+/// record keeps its geometry and is not counted.
 pub fn not_saved_as(d: &Drawing, version: Version) -> std::collections::BTreeMap<String, usize> {
     let mut out: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let stored = if version >= Version::R2013 { d.foreign.data_store_entities() } else { Default::default() };

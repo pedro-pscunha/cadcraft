@@ -39,7 +39,7 @@ use document::{
 };
 #[cfg(test)]
 use entities::acad_table;
-pub(crate) use entities::seqend_record;
+pub(crate) use entities::seqend_common;
 use entities::{entity, plot_style_names};
 use objects::Objects;
 pub(crate) use tables::{MAX_VPORT_TILES, kept_vport};

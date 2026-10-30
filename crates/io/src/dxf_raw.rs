@@ -453,6 +453,24 @@ fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
     }
 }
 
+/// Keep the common properties (layer, colour, linetype...) of the SEQEND after the ATTRIBs of each INSERT with the
+/// INSERT's other kept data. Its handle is not kept here: the role of its owner gives it back (see [`owned_roles`]).
+fn keep_insert_seqends(f: &mut Foreign, blocks: &Recs, entities: &Recs) {
+    let mut insert: Option<Handle> = None;
+    for (kind, _, t) in blocks.iter().chain(entities) {
+        match kind.as_str() {
+            "INSERT" => insert = head(t).handle.and_then(|h| handle(&h)),
+            "ATTRIB" => {}
+            "SEQEND" => {
+                if let Some(parent) = insert.take() {
+                    f.entities.entry(parent).or_default().insert_seqend = Some(crate::dxf_read::seqend_common(t));
+                }
+            }
+            _ => insert = None,
+        }
+    }
+}
+
 /// Remember the order of the persistent reactors of the entities that have more than one.
 fn keep_reactor_order(d: &mut Drawing, blocks: &Recs, entities: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -996,19 +1014,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // that name kept objects or other entities of the file (a hatch that lists its boundary).
     let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
-    let mut insert_of: Option<Handle> = None;
     for (kind, _, t) in blocks.iter().chain(&entities) {
-        // The SEQEND after the ATTRIBs of an INSERT is the INSERT's.
-        match kind.as_str() {
-            "INSERT" => insert_of = head(t).handle.and_then(|h| handle(&h)),
-            "ATTRIB" => {}
-            "SEQEND" => {
-                if let Some(parent) = insert_of.take() {
-                    f.entities.entry(parent).or_default().insert_seqend = Some(crate::dxf_read::seqend_record(t));
-                }
-            }
-            _ => insert_of = None,
-        }
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
             continue;
         }
@@ -1028,6 +1034,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     put_xdata(d, xdata_of);
+    // After the extras of the INSERT itself, which they join.
+    keep_insert_seqends(&mut f, &blocks, &entities);
     let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
     crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
     crate::dxf_mleader_proxy::capture_all(d, blocks.iter().chain(&entities).map(|(kind, _, tags)| (kind.as_str(), *tags)), &mut f);
