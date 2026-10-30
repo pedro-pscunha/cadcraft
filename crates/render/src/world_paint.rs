@@ -44,9 +44,9 @@ fn draw_flat(
         return super::blocks::canonical_insert(builder, context, entity, insert, color);
     }
     if let EntityKind::MLeader(leader) = &entity.kind
-        && leader.block.is_some()
+        && let Some(content) = &leader.block
     {
-        return Err(unsupported("multileader block-content paint roles"));
+        return super::blocks::canonical_mleader_block(builder, context, entity, leader, content, color, lineweight);
     }
     if matches!(entity.kind, EntityKind::Table(_) | EntityKind::Tolerance(_) | EntityKind::Dimension(_)) {
         let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
