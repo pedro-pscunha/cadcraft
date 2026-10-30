@@ -235,3 +235,57 @@ pub(crate) fn with_world(
     }
     hit
 }
+
+/// A grip of a canonical entity: its XY position, the WCS point it is at, and whether dragging it moves the whole entity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CanonicalGrip {
+    pub point: Vec2,
+    pub world: Vec3,
+    /// A grip that stands for the entity as a whole (a line's middle, a circle's center, a point, a text's insertion point).
+    pub moves: bool,
+}
+
+impl Flat {
+    /// The grips of the WCS geometry, in the order of its primitives: a line's ends and middle, a conic's center and its
+    /// quadrants (or the ends of an arc), a point, a text's insertion point, a spline's control points and the corners of a
+    /// fill. A WCS point that two primitives share is one grip.
+    pub fn grips(&self) -> Vec<CanonicalGrip> {
+        let mut out: Vec<CanonicalGrip> = Vec::new();
+        let mut add = |world: Vec3, moves: bool| {
+            if !out.iter().any(|g| g.world == world) {
+                out.push(CanonicalGrip { point: world.xy(), world, moves });
+            }
+        };
+        for primitive in &self.world {
+            match primitive {
+                WorldPrimitive::Line { a, b } => {
+                    add(*a, false);
+                    add((*a + *b) * 0.5, true);
+                    add(*b, false);
+                }
+                WorldPrimitive::Point(p) => add(*p, true),
+                WorldPrimitive::Conic { center, axis_u, axis_v, start, end } => {
+                    let at = |t: f64| *center + *axis_u * t.cos() + *axis_v * t.sin();
+                    add(*center, true);
+                    if cadcraft_geom::ccw_sweep(*start, *end) >= std::f64::consts::TAU - 1e-12 {
+                        (0..4).for_each(|k| add(at(f64::from(k) * std::f64::consts::FRAC_PI_2), false));
+                    } else {
+                        add(at(*start), false);
+                        add(at(start + cadcraft_geom::ccw_sweep(*start, *end) / 2.0), false);
+                        add(at(*end), false);
+                    }
+                }
+                WorldPrimitive::Spline { control, .. } => control.iter().for_each(|c| add(*c, false)),
+                WorldPrimitive::Text(text) => add(text.frame.origin, true),
+                WorldPrimitive::Fill(fill) => {
+                    for edge in fill.loops.iter().flatten() {
+                        if let WorldPrimitive::Line { a, .. } = edge {
+                            add(*a, false);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}

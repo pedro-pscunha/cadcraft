@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::curves;
 use super::{CommandSpec, bad, bool_or, point_param, point_req, str_param, targets};
 
-use crate::grips::{GripAction, GripMode, grip_action, mode_matrix, stretch_grip};
+use crate::grips::{GripAction, GripMode, commit_stretch, grip_action, grip_points, mode_matrix, stretch_grip_in};
 use crate::{EngineError, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -46,19 +46,19 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
     let e = curves::entity(s, h)?;
-    let k = stretch_grip(&e, i, to)?.ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
+    let k = stretch_grip_in(s.doc()?, &e, i, to)?.ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
     let mut edits = vec![(h, k)];
     // The other `handles` with a grip on the same point stretch with it (connected objects stay
     // connected); locked ones and edits that would be degenerate are left alone.
-    let from = e.kind.grips().get(i).copied().unwrap_or(to);
+    let from = grip_points(s.doc()?, &e).get(i).copied().unwrap_or(to);
     let tol = 1e-9 * (1.0 + from.len());
     for o in targets(s, p)? {
         if o == h || edits.iter().any(|(x, _)| *x == o) || curves::is_locked(s, o) {
             continue;
         }
         let Ok(oe) = curves::entity(s, o) else { continue };
-        if let Some(j) = oe.kind.grips().iter().position(|g| g.near(from, tol))
-            && let Some(k) = stretch_grip(&oe, j, to)?
+        if let Some(j) = grip_points(s.doc()?, &oe).iter().position(|g| g.near(from, tol))
+            && let Some(k) = stretch_grip_in(s.doc()?, &oe, j, to)?
         {
             edits.push((o, k));
         }
@@ -74,7 +74,7 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
             let st = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
             st.follow_text(dm, d.header.f64("DIMSCALE", 1.0));
         }
-        d.modify_entity(*o, |e| *e = k.clone())?;
+        commit_stretch(d, *o, k.clone())?;
     }
     Ok(json!({ "handle": h.hex(), "handles": edits.iter().map(|(o, _)| o.hex()).collect::<Vec<_>>() }))
 }
@@ -88,7 +88,7 @@ fn base_point(s: &Session, cmd: &str, p: &Value, hs: &[Handle]) -> Result<Vec2> 
         .or_else(|| hs.first().copied())
         .ok_or_else(|| bad(cmd, "`base` or `baseHandle` + `index` is required"))?;
     let i = index_param(cmd, p)?;
-    let g = curves::entity(s, h)?.kind.grips();
+    let g = grip_points(s.doc()?, &curves::entity(s, h)?);
     g.get(i).copied().ok_or_else(|| bad(cmd, "no such grip"))
 }
 
@@ -117,7 +117,7 @@ fn run_grip_stretch(s: &mut Session, p: &Value) -> Result<Value> {
         None => {
             let base = match point_param(p, "base") {
                 Some(b) => b,
-                None => curves::entity(s, h0)?.kind.grips().get(i0).copied().ok_or_else(|| bad(cmd, "no such grip"))?,
+                None => grip_points(s.doc()?, &curves::entity(s, h0)?).get(i0).copied().ok_or_else(|| bad(cmd, "no such grip"))?,
             };
             point_req(cmd, p, "to")? - base
         }
@@ -174,14 +174,14 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
         None => moves.push((h, vec![(i, to)])),
     };
     for &(h, i) in hot.iter().take(MAX_GRIPS) {
-        let Some(from) = d.entity(h).and_then(|e| e.kind.grips().get(i).copied()) else { continue };
+        let Some(from) = d.entity(h).and_then(|e| grip_points(d, e).get(i).copied()) else { continue };
         add(h, i, from + delta);
         let tol = 1e-9 * (1.0 + from.len());
         for &o in others.iter().take(MAX_GRIPS) {
             if o == h {
                 continue;
             }
-            if let Some(j) = d.entity(o).and_then(|e| e.kind.grips().iter().position(|g| g.near(from, tol))) {
+            if let Some(j) = d.entity(o).and_then(|e| grip_points(d, e).iter().position(|g| g.near(from, tol))) {
                 add(o, j, from + delta);
             }
         }
@@ -195,7 +195,7 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
         let mut k = e.as_ref().clone();
         let mut changed = false;
         for (i, to) in mv {
-            if let Some(nk) = stretch_grip(&k, i, to)? {
+            if let Some(nk) = stretch_grip_in(d, &k, i, to)? {
                 k = nk;
                 changed = true;
             }
@@ -232,7 +232,7 @@ pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[
         }
     } else {
         for (h, entity) in edits {
-            d.modify_entity(h, |e| *e = entity)?;
+            commit_stretch(d, h, entity)?;
             out.push(h);
         }
     }
