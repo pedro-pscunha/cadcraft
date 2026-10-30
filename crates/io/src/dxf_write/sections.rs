@@ -325,7 +325,7 @@ fn write_header(w: &mut W, d: &Drawing, version: Version, target: Version) -> us
     seed_pos
 }
 
-fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
+fn write_classes(w: &mut W, d: &Drawing, cx: &Ctx, every: &[&Entity]) {
     w.s(0, "SECTION");
     w.s(2, "CLASSES");
     let mut classes = vec![
@@ -356,14 +356,32 @@ fn write_classes(w: &mut W, cx: &Ctx, every: &[&Entity]) {
         classes.push(("RASTERVARIABLES", "AcDbRasterVariables", 0, false));
     }
     classes.push(("SCALE", "AcDbScale", 0, false));
+    // The file's own record of a class (its application and proxy flags) replaces ours; the classes it had that no object needs here
+    // stay too, as AutoCAD keeps them.
+    let source = |name: &str| d.source_symbols.classes.iter().find(|c| c.iter().any(|g| g.code == 1 && g.value.trim().eq_ignore_ascii_case(name)));
+    let mut written: Vec<String> = if w.dwg_bridge { Vec::new() } else { crate::dxf_raw::private_classes(d).into_iter().collect() };
     for (dxf_name, cpp, proxy, is_entity) in classes {
+        written.push(dxf_name.to_ascii_uppercase());
         w.s(0, "CLASS");
-        w.s(1, dxf_name);
-        w.s(2, cpp);
-        w.s(3, "ObjectDBX Classes");
-        w.i(90, proxy);
-        w.i(280, 0);
-        w.i(281, i64::from(is_entity));
+        match source(dxf_name) {
+            Some(c) => w.t.extend(c.iter().map(crate::dxf_raw::tag)),
+            None => {
+                w.s(1, dxf_name);
+                w.s(2, cpp);
+                w.s(3, "ObjectDBX Classes");
+                w.i(90, proxy);
+                w.i(280, 0);
+                w.i(281, i64::from(is_entity));
+            }
+        }
+    }
+    for c in &d.source_symbols.classes {
+        let Some(name) = c.iter().find(|g| g.code == 1).map(|g| g.value.trim().to_ascii_uppercase()) else { continue };
+        if !written.contains(&name) {
+            w.s(0, "CLASS");
+            w.t.extend(c.iter().map(crate::dxf_raw::tag));
+            written.push(name);
+        }
     }
     w.s(0, "ENDSEC");
 }
@@ -1075,7 +1093,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
 
     let seed_pos = write_header(&mut w, d, version, target);
 
-    write_classes(&mut w, &cx, &every);
+    write_classes(&mut w, d, &cx, &every);
 
     let ltype_handles = write_tables(&mut w, TableWritePlan { d, cx: &mut cx, ext });
 

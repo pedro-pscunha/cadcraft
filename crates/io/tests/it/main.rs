@@ -18,6 +18,7 @@ mod block_order;
 mod block_references;
 mod bridge_header_groups;
 mod bridge_object_groups;
+mod class_records;
 mod closed_spline;
 mod codepages;
 mod curve_canonical;

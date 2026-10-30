@@ -406,6 +406,17 @@ fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
     }
 }
 
+/// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 280 and 281), in order.
+fn keep_classes(d: &mut Drawing, classes: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (_, _, t) in classes.iter().filter(|(kind, _, _)| kind == "CLASS").take(MAX_OBJECTS) {
+        let groups: Vec<RawTag> = t.iter().filter(|g| matches!(g.code, 1 | 2 | 3 | 90 | 280 | 281)).map(raw).collect();
+        if groups.iter().any(|g| g.code == 1) {
+            source.classes.push(groups);
+        }
+    }
+}
+
 /// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -777,6 +788,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ids = identities(&tables, &blocks, &objects);
     keep_source_handles(d, &ids);
     keep_block_references(d, &tables);
+    keep_classes(d, &classes);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")
@@ -1651,6 +1663,14 @@ fn public_foreign(f: &Foreign) -> Foreign {
     let kept: HashSet<String> = public.objects.iter().map(|o| up(&o.kind)).collect();
     public.classes.retain(|c| c.iter().find(|t| t.code == 1).map(|n| up(&n.value)).is_none_or(|n| !private.contains(&n) || kept.contains(&n)));
     public
+}
+
+/// The upper-case names of the classes only private DWG records use: a user DXF does not name them (the DWG bridge keeps them).
+pub(crate) fn private_classes(d: &Drawing) -> HashSet<String> {
+    let public = public_foreign(&d.foreign);
+    let name = |c: &Vec<RawTag>| c.iter().find(|t| t.code == 1).map(|n| up(&n.value));
+    let kept: HashSet<String> = public.classes.iter().filter_map(name).collect();
+    d.foreign.classes.iter().filter_map(name).filter(|n| !kept.contains(n)).collect()
 }
 
 /// The form a kept record has in a DXF of `release` (an `$ACADVER` number), for the kinds whose form depends on
