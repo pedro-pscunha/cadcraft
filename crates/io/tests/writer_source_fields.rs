@@ -35,7 +35,10 @@ fn solid_hatches_keep_inactive_gradient_data_without_becoming_gradients() {
             .unwrap();
         for _ in 0..2 {
             let dxf = saved_dxf(&drawing, name);
-            assert_eq!(fields(&entity_record(&dxf, "HATCH")), expected, "{name}");
+            // A DWG CMC color stores RGB but no independent ACI beside it.
+            let semantic =
+                |groups: Vec<(i32, String)>| groups.into_iter().filter(|(code, _)| !name.ends_with(".dwg") || *code != 63).collect::<Vec<_>>();
+            assert_eq!(semantic(fields(&entity_record(&dxf, "HATCH"))), semantic(expected.clone()), "{name}");
             drawing = cadcraft_io::read(&dxf, "saved.dxf").unwrap();
             let cadcraft_doc::EntityKind::Hatch(hatch) = &drawing.entity(cadcraft_doc::Handle(0x200)).unwrap().kind else { panic!("hatch") };
             assert!(hatch.solid && hatch.gradient.is_none());
@@ -91,28 +94,49 @@ fn block_boundary_entities_keep_independent_colors_and_linetype_scales() {
 #[test]
 fn dimension_presentation_fields_survive_geometry_edits_and_native_saves() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nDIMENSION\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbDimension\n280\n1\n10\n0\n20\n3\n30\n0\n11\n5\n21\n3\n31\n0\n70\n32\n71\n9\n72\n2\n41\n1.375\n73\n1\n74\n1\n75\n1\n100\nAcDbAlignedDimension\n13\n0\n23\n0\n33\n0\n14\n10\n24\n0\n34\n0\n50\n0\n100\nAcDbRotatedDimension\n0\nENDSEC\n0\nEOF\n";
-    for name in ["presentation.dxf", "presentation.dwg"] {
-        for edited in [false, true] {
-            let mut drawing = cadcraft_io::read(source, "source.dxf").unwrap();
-            if edited {
-                drawing
-                    .modify_entity(cadcraft_doc::Handle(0x200), |e| {
-                        let cadcraft_doc::EntityKind::Dimension(dim) = &mut e.kind else { panic!("dimension") };
-                        dim.p14.x += 3.0;
-                    })
-                    .unwrap();
-            }
-            for _ in 0..2 {
-                let dxf = saved_dxf(&drawing, name);
-                let rec = entity_record(&dxf, "DIMENSION");
-                let start = rec.iter().position(|t| t.code == 100 && t.str() == "AcDbDimension").unwrap();
-                let own: Vec<_> = rec.iter().skip(start + 1).take_while(|t| t.code != 100).collect();
-                let expected = [(71, 9.0), (72, 2.0), (41, 1.375), (73, 1.0), (74, 1.0), (75, 1.0), (280, 1.0)];
-                let actual: Vec<_> =
-                    expected.iter().map(|(code, _)| (*code, own.iter().filter(|t| t.code == *code).map(|t| t.f64()).collect::<Vec<_>>())).collect();
-                let expected: Vec<_> = expected.into_iter().map(|(code, value)| (code, vec![value])).collect();
-                assert_eq!(actual, expected, "{name} edited={edited}");
-                drawing = cadcraft_io::read(&dxf, "saved.dxf").unwrap();
+    for version in [
+        cadcraft_dxf::Version::R2000,
+        cadcraft_dxf::Version::R2004,
+        cadcraft_dxf::Version::R2007,
+        cadcraft_dxf::Version::R2010,
+        cadcraft_dxf::Version::R2018,
+    ] {
+        for name in ["presentation.dxf", "presentation.dwg"] {
+            for edited in [false, true] {
+                let mut drawing = cadcraft_io::read(source, "source.dxf").unwrap();
+                if edited {
+                    drawing
+                        .modify_entity(cadcraft_doc::Handle(0x200), |e| {
+                            let cadcraft_doc::EntityKind::Dimension(dim) = &mut e.kind else { panic!("dimension") };
+                            dim.p14.x += 3.0;
+                        })
+                        .unwrap();
+                }
+                for _ in 0..2 {
+                    let opts = cadcraft_io::SaveOptions { version: Some(version), ..Default::default() };
+                    let bytes = cadcraft_io::write_with(&drawing, name, &opts).unwrap();
+                    let dxf = if name.ends_with(".dwg") { cadcraft_dwg::dwg_to_dxf(&bytes).unwrap() } else { bytes };
+                    let rec = entity_record(&dxf, "DIMENSION");
+                    let start = rec.iter().position(|t| t.code == 100 && t.str() == "AcDbDimension").unwrap();
+                    let own: Vec<_> = rec.iter().skip(start + 1).take_while(|t| t.code != 100).collect();
+                    let arrows = version >= cadcraft_dxf::Version::R2007;
+                    let expected = [
+                        (71, Some(9.0)),
+                        (72, Some(2.0)),
+                        (41, Some(1.375)),
+                        (73, arrows.then_some(1.0)),
+                        (74, arrows.then_some(1.0)),
+                        (75, arrows.then_some(1.0)),
+                        (280, (version >= cadcraft_dxf::Version::R2010).then_some(1.0)),
+                    ];
+                    let actual: Vec<_> = expected
+                        .iter()
+                        .map(|(code, _)| (*code, own.iter().filter(|t| t.code == *code).map(|t| t.f64()).collect::<Vec<_>>()))
+                        .collect();
+                    let expected: Vec<_> = expected.into_iter().map(|(code, value)| (code, value.into_iter().collect::<Vec<_>>())).collect();
+                    assert_eq!(actual, expected, "{name} {version:?} edited={edited}");
+                    drawing = cadcraft_io::read(&dxf, "saved.dxf").unwrap();
+                }
             }
         }
     }

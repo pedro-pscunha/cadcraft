@@ -1885,7 +1885,14 @@ fn record(
     let attributes = (r.kind == "BLOCK").then(|| val(b, 2).and_then(|name| map.block_attributes.get(&up(&name)).copied())).flatten();
     let replaces_gradient = r.kind == "HATCH" && (map.target < cadcraft_dxf::Version::R2004 || b.iter().any(|t| t.code == 450 && t.i64() != 0));
     let replay = |p: &RawTag| {
-        (!replaces_gradient || !matches!(p.code, 450..=470 | 63 | 421))
+        let dimension_field_supported = r.kind != "DIMENSION"
+            || match p.code {
+                73..=75 => map.target >= cadcraft_dxf::Version::R2007,
+                280 => map.target >= cadcraft_dxf::Version::R2010,
+                _ => true,
+            };
+        dimension_field_supported
+            && (!replaces_gradient || !matches!(p.code, 450..=470 | 63 | 421))
             && (!boundary || p.code != 8)
             && (flag_mask == 0 || p.code != 70)
             && (!dictionary || p.code != 281)
