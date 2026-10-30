@@ -165,8 +165,9 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                     l.plot_style = n.clone();
                 }
                 let alpha = crate::dxf_ext::xdata(&tg, crate::dxf_ext::LAYER_TRANSPARENCY_APP).iter().find(|x| x.code == 1071);
-                if let Some(pct) = alpha.and_then(|x| crate::dxf_ext::transparency_from_dxf(x.i64())) {
+                if let Some((pct, x)) = alpha.and_then(|x| Some((crate::dxf_ext::transparency_from_dxf(x.i64())?, x))) {
                     l.transparency = pct;
+                    l.transparency_alpha = u8::try_from(x.i64() & 0xff).ok();
                 }
                 if let Some(desc) = crate::dxf_ext::xdata(&tg, crate::dxf_ext::LAYER_DESCRIPTION_APP).iter().filter(|x| x.code == 1000).nth(1) {
                     l.description = desc.str();

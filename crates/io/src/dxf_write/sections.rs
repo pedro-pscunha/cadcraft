@@ -209,7 +209,7 @@ fn write_layer_table(w: &mut W, d: &Drawing) {
         }
         if l.transparency > 0 {
             w.s(1001, dxf_ext::LAYER_TRANSPARENCY_APP);
-            w.i(1071, dxf_ext::transparency_to_dxf(l.transparency));
+            w.i(1071, dxf_ext::transparency_to_dxf(l.transparency, l.transparency_alpha));
         }
         if !l.description.is_empty() {
             // The first string is the layer standard's name, unused here.

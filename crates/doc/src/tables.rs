@@ -23,6 +23,10 @@ pub struct Layer {
     pub plot: bool,
     /// 0..=90 percent.
     pub transparency: u8,
+    /// The alpha value a file gave, when more than one alpha shows as the same percentage (128 and 127 are both 50 percent). A save
+    /// writes it back while `transparency` still shows as the same percentage, so the file's value is exact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparency_alpha: Option<u8>,
     pub description: String,
     pub plot_style: String,
     /// Frozen in viewports created from now on (New VP Freeze; DXF layer flag 2).
@@ -41,6 +45,7 @@ impl Default for Layer {
             locked: false,
             plot: true,
             transparency: 0,
+            transparency_alpha: None,
             description: String::new(),
             plot_style: "Normal".into(),
             vp_freeze_new: false,

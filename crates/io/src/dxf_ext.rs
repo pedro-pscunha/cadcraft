@@ -362,10 +362,12 @@ pub(crate) const LAYER_TRANSPARENCY_APP: &str = "AcCmTransparency";
 pub(crate) const LAYER_DESCRIPTION_APP: &str = "AcAecLayerStandard";
 
 /// A transparency percentage (0..=90) as an `AcCmTransparency` value: the alpha with the
-/// "by alpha" flag (0x02 in the top byte).
-pub(crate) fn transparency_to_dxf(percent: u8) -> i64 {
-    let t = u32::from(percent.min(90));
-    i64::from(0x0200_0000 | ((100 - t) * 255 / 100))
+/// "by alpha" flag (0x02 in the top byte). `alpha` is the one the file gave, used while it still
+/// shows as `percent`; else the alpha AutoCAD stores for the percentage.
+pub(crate) fn transparency_to_dxf(percent: u8, alpha: Option<u8>) -> i64 {
+    let percent = percent.min(90);
+    let alpha = alpha.filter(|a| cadcraft_doc::Transparency::from_alpha(*a) == cadcraft_doc::Transparency::Percent(percent));
+    0x0200_0000 | i64::from(alpha.unwrap_or_else(|| cadcraft_doc::Transparency::default_alpha(percent)))
 }
 
 /// The percentage of an `AcCmTransparency` value; `None` unless it is "by alpha".
