@@ -181,6 +181,13 @@ pub fn check_window(w: &Bounds2) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn image_bounds(drawing: &Drawing, space: &Space, window: Option<Bounds2>) -> Result<Bounds2> {
+    match window {
+        Some(bounds) => Ok(bounds),
+        None => cadcraft_render::space_extents(drawing, space).map_err(|error| IoError::Format(error.to_string())),
+    }
+}
+
 /// Render a space to PNG, fitted to its extents.
 pub fn png(d: &Drawing, space: &Space, width: u32, height: u32) -> Result<Vec<u8>> {
     png_framed(d, space, width, height, None)

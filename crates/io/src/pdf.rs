@@ -532,7 +532,7 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
     let window = o.window.filter(|w| matches!(space, Space::Model) && !w.is_empty());
     let fit = o.fit.unwrap_or(window.is_some() || matches!(space, Space::Model));
     // Chord tolerance: about 0.05 mm on paper.
-    let est = plot_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, fit, o.scale);
+    let est = plot_scale(&crate::image_bounds(d, space, window)?, &sheet, fit, o.scale);
     let tol = 0.05 / unit_mm / est.max(1e-300);
     let tolerance = if tol.is_finite() && tol > 0.0 { tol } else { ropts.tolerance };
     // Relative point sizes follow the plotted window (else the extents).

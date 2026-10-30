@@ -9,7 +9,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, Entity, EntityStore, Handle, entity_bounds, has_finite_numbers};
+use cadcraft_doc::{Drawing, EntityStore, Handle, has_finite_numbers};
+use cadcraft_render::entity_extents;
 
 use crate::{EngineError, Session};
 
@@ -23,10 +24,14 @@ impl Session {
             None => self.state_mut().ok(),
         };
         let Some(st) = st.filter(|st| !Arc::ptr_eq(before, &st.doc)) else { return Ok(()) };
-        let Some(h) = first_non_finite(before, &st.doc) else { return Ok(()) };
+        let error = match first_non_finite(before, &st.doc) {
+            Ok(None) => return Ok(()),
+            Ok(Some(handle)) => EngineError::BadParams { cmd: cmd.into(), msg: too_large(handle) },
+            Err(refused) => EngineError::from(refused),
+        };
         st.doc = before.clone();
         st.selection = selection.to_vec();
-        Err(EngineError::BadParams { cmd: cmd.into(), msg: too_large(h) })
+        Err(error)
     }
 }
 
@@ -37,31 +42,44 @@ pub(crate) fn too_large(h: Handle) -> String {
 
 /// The first object changed between `before` and `after` that has a NaN or infinite number, or
 /// whose extents overflow.
-pub(crate) fn first_non_finite(before: &Drawing, after: &Drawing) -> Option<Handle> {
+pub(crate) fn first_non_finite(before: &Drawing, after: &Drawing) -> Result<Option<Handle>, cadcraft_render::ExtentsRefusal> {
     let layouts = after.layouts.iter().map(|l| (&l.entities, before.layout(&l.name).map(|b| &b.entities)));
     let blocks = after
         .blocks
         .iter()
         .filter(|(name, b)| before.blocks.get(*name).is_none_or(|old| !Arc::ptr_eq(old, b)))
         .map(|(name, b)| (&b.entities, before.blocks.get(name).map(|old| &old.entities)));
-    std::iter::once((&after.model, Some(&before.model))).chain(layouts).chain(blocks).find_map(|(a, b)| changed_non_finite(after, b, a))
+    for (current, previous) in std::iter::once((&after.model, Some(&before.model))).chain(layouts).chain(blocks) {
+        if let Some(handle) = changed_non_finite(after, previous, current)? {
+            return Ok(Some(handle));
+        }
+    }
+    Ok(None)
 }
 
-fn changed_non_finite(d: &Drawing, before: Option<&EntityStore>, after: &EntityStore) -> Option<Handle> {
+fn changed_non_finite(d: &Drawing, before: Option<&EntityStore>, after: &EntityStore) -> Result<Option<Handle>, cadcraft_render::ExtentsRefusal> {
     if before.is_some_and(|b| b.same_as(after)) {
-        return None;
+        return Ok(None);
     }
     // Chunks shared with `before` hold only unchanged objects.
     let shared: HashSet<usize> = before.map(|b| b.chunk_slices().map(|(key, _)| key).collect()).unwrap_or_default();
-    let finite = |e: &Entity| {
-        let b = entity_bounds(d, e, 0);
-        has_finite_numbers(e) && (b.is_empty() || (b.min.is_finite() && b.max.is_finite()))
-    };
-    after
-        .chunk_slices()
-        .filter(|(key, _)| !shared.contains(key))
-        .flat_map(|(_, items)| items.iter())
-        .filter(|e| before.and_then(|b| b.get(e.handle)).is_none_or(|old| !Arc::ptr_eq(old, e)))
-        .find(|e| !finite(e))
-        .map(|e| e.handle)
+    for entity in after.chunk_slices().filter(|(key, _)| !shared.contains(key)).flat_map(|(_, items)| items.iter()) {
+        let previous = before.and_then(|store| store.get(entity.handle));
+        if previous.is_some_and(|old| Arc::ptr_eq(old, entity)) {
+            continue;
+        }
+        if !has_finite_numbers(entity.as_ref()) {
+            return Ok(Some(entity.handle));
+        }
+        if previous.is_some_and(|old| {
+            old.kind == entity.kind && old.common.extrusion == entity.common.extrusion && old.common.thickness == entity.common.thickness
+        }) {
+            continue;
+        }
+        let bounds = entity_extents(d, entity, 0)?;
+        if !bounds.is_empty() && (!bounds.min.is_finite() || !bounds.max.is_finite()) {
+            return Ok(Some(entity.handle));
+        }
+    }
+    Ok(None)
 }

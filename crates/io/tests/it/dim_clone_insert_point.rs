@@ -22,7 +22,7 @@ fn shifted_dimension_dxf() -> String {
 }
 
 fn check_in_place(d: &cadcraft_doc::Drawing, what: &str) {
-    let ext = d.extents(&Space::Model);
+    let ext = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     assert!(ext.max.x <= 11.0 && ext.max.y <= 6.0 && ext.min.x >= -1.0, "{what}: extents {ext:?}");
     let dim = d.model.iter().find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some(dm) } else { None }).expect("the dimension");
     let name = dim.block.clone().expect("its graphics block is kept");

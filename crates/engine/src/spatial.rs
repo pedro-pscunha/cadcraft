@@ -15,11 +15,10 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use cadcraft_doc::{
-    Block, DimStyle, Drawing, Entity, EntityKind, EntityStore, GeometryRevision, MLeaderStyle, Space, TableStyle, TextStyle, entity_bounds,
-};
-use cadcraft_geom::{Bounds2, Mat4};
-use cadcraft_render::{GeometryRefusal, entity_world_bounds};
+use cadcraft_doc::{Block, DimStyle, Drawing, Entity, EntityKind, EntityStore, MLeaderStyle, Space, TableStyle, TextStyle};
+use cadcraft_geom::Bounds2;
+use cadcraft_render::GeometryRefusal;
+use cadcraft_render::entity_extents;
 use rstar::primitives::{GeomWithData, Rectangle};
 use rstar::{AABB, RTree};
 
@@ -56,20 +55,13 @@ impl ChunkIx {
                 let index = u32::try_from(i).unwrap_or(u32::MAX);
                 if matches!(e.kind, EntityKind::XLine(_) | EntityKind::Ray(_)) {
                     infinite.push(index);
-                    if e.geometry_revision == GeometryRevision::CanonicalV2 {
-                        return Bounds2::EMPTY;
-                    }
                 }
-                if e.geometry_revision == GeometryRevision::CanonicalV2 {
-                    match entity_world_bounds(d, e, &Mat4::IDENTITY) {
-                        Ok(bounds) => bounds,
-                        Err(error) => {
-                            refused.push((index, GeometryRefusal { handle: e.handle, reason: error.to_string() }));
-                            Bounds2::EMPTY
-                        }
+                match entity_extents(d, e, 0) {
+                    Ok(bounds) => bounds,
+                    Err(error) => {
+                        refused.extend(error.refusals.into_iter().map(|refusal| (index, refusal)));
+                        error.bounds
                     }
-                } else {
-                    entity_bounds(d, e, 0)
                 }
             })
             .collect();

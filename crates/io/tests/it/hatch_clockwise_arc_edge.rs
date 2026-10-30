@@ -13,7 +13,7 @@ fn a_clockwise_arc_edge_keeps_the_hatch_inside_its_boundary() {
         .iter()
         .find_map(|e| if let cadcraft_doc::EntityKind::Hatch(h) = &e.kind { Some(h) } else { None })
         .expect("the fixture has one hatch");
-    let ext = d.extents(&cadcraft_doc::Space::Model);
+    let ext = cadcraft_render::space_extents(&d, &cadcraft_doc::Space::Model).unwrap();
     assert!(ext.max.x <= 20.0 + 1e-6 && ext.max.y <= 26.0 && ext.min.y >= -20.0 - 1e-6, "extents {ext:?}");
     let points: Vec<_> = hatch.loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)).collect();
     assert!(points.iter().any(|p| p.near(cadcraft_geom::Vec2::new(20.0, -10.0), 1e-6)), "the bite starts at (20,-10): {points:?}");

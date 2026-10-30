@@ -95,9 +95,18 @@ pub(crate) fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [St
 }
 
 fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> DisplayList {
-    let opts = &with_point_view(d, space, opts);
+    let (point_options, extent_refusals) = with_point_view(d, space, opts);
+    let opts = &point_options;
     let styler = style_table(d, space, opts, plotting).map(|t| plotstyle::Styler::new(d, t));
-    let mut b = Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList { geometry_refusals: extent_refusals, ..DisplayList::default() },
+        opts,
+        plotting,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+    };
     if let Space::Paper(name) = space {
         b.list.sheet = paper::sheet(d, name);
     }
@@ -180,14 +189,21 @@ pub(crate) fn style_table(d: &Drawing, space: &Space, opts: &Options, plotting: 
 
 /// `opts` with a view height for relative point sizes: the extents height when none is given
 /// and points draw as figures sized relative to the view.
-pub(crate) fn with_point_view(d: &Drawing, space: &Space, opts: &Options) -> Options {
+pub(crate) fn with_point_view(d: &Drawing, space: &Space, opts: &Options) -> (Options, Vec<super::GeometryRefusal>) {
     let mut o = opts.clone();
+    let mut refusals = Vec::new();
     let relative = d.header.f64("PDSIZE", 0.0) <= 0.0 && point::sized(d.header.i64("PDMODE", 0));
     if !(o.view_height.is_finite() && o.view_height > 0.0) && relative {
-        let ext = d.extents(space);
+        let ext = match crate::space_extents(d, space) {
+            Ok(bounds) => bounds,
+            Err(refused) => {
+                refusals = refused.refusals;
+                refused.bounds
+            }
+        };
         o.view_height = if ext.is_empty() { 0.0 } else { ext.height().max(ext.width() * 1e-3) };
     }
-    o
+    (o, refusals)
 }
 
 /// Build the display list for a set of loose entities (previews, rubber bands).
@@ -195,13 +211,24 @@ pub fn build_entities<'a, I: IntoIterator<Item = &'a Entity>>(d: &Drawing, ents:
     let ents: Vec<&Entity> = ents.into_iter().collect();
     // Only previews holding points need the model extents for relative point sizes.
     let with_view;
+    let mut extent_refusals = Vec::new();
     let opts = if ents.iter().any(|e| matches!(e.kind, EntityKind::Point(_))) {
-        with_view = with_point_view(d, &Space::Model, opts);
+        let (options, refusals) = with_point_view(d, &Space::Model, opts);
+        with_view = options;
+        extent_refusals = refusals;
         &with_view
     } else {
         opts
     };
-    let mut b = Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList { geometry_refusals: extent_refusals, ..DisplayList::default() },
+        opts,
+        plotting: false,
+        styles: None,
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+    };
     for e in ents {
         entity(&mut b, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
     }

@@ -343,7 +343,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let height = if height.is_finite() { (height as u64).clamp(16, MAX_PREVIEW_PX) } else { width };
     let px_per_paper_unit = width as f64 / sheet.size.x;
     // Curves are flattened to about half a pixel.
-    let est = plot_scale(&d.extents(&space), &sheet, fit, scale);
+    let est = plot_scale(&cadcraft_render::space_extents(d, &space)?, &sheet, fit, scale);
     let tol = 0.5 / (px_per_paper_unit * est);
     let ropts = cadcraft_render::Options {
         tolerance: if tol.is_finite() && tol > 0.0 { tol } else { 0.01 },
@@ -468,7 +468,7 @@ fn paper_for(w: f64, h: f64) -> Option<(&'static str, bool)> {
 }
 
 /// Sheet frames grouped into books: rows of equal lower edge, bottom to top, each left to right.
-fn frame_books(d: &Drawing, frame_height: f64, unit: f64) -> (Vec<Vec<Frame>>, usize) {
+fn frame_books(d: &Drawing, frame_height: f64, unit: f64) -> Result<(Vec<Vec<Frame>>, usize)> {
     let mut found: Vec<(i64, f64, Frame)> = Vec::new();
     let mut skipped = 0;
     for e in d.model.iter().take(MAX_FRAMES) {
@@ -476,7 +476,7 @@ fn frame_books(d: &Drawing, frame_height: f64, unit: f64) -> (Vec<Vec<Frame>>, u
         if !pl.closed {
             continue;
         }
-        let b = cadcraft_doc::entity_bounds(d, e, 0);
+        let b = cadcraft_render::entity_extents(d, e, 0)?;
         if b.is_empty() || !b.width().is_finite() || !b.height().is_finite() {
             continue;
         }
@@ -506,7 +506,7 @@ fn frame_books(d: &Drawing, frame_height: f64, unit: f64) -> (Vec<Vec<Frame>>, u
             b.push(f);
         }
     }
-    (books, skipped)
+    Ok((books, skipped))
 }
 
 fn run_pdfbook(s: &mut Session, p: &Value) -> Result<Value> {
@@ -515,7 +515,7 @@ fn run_pdfbook(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let num = |k: &str, default: f64| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(default);
     let (frame_height, unit) = (num("frameHeight", 297.0), num("unit", 1.0));
-    let (books, skipped) = frame_books(s.doc()?, frame_height, unit);
+    let (books, skipped) = frame_books(s.doc()?, frame_height, unit)?;
     if books.is_empty() {
         return Err(bad("pdfbook", format!("no closed polylines {frame_height} mm high (sheet frames) in model space")));
     }

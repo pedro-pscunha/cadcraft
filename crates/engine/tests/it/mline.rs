@@ -267,7 +267,7 @@ fn snaps_selection_extents_and_render() {
     assert_eq!(hit.point, Vec2::new(5.0, 0.5));
     // Picking an element picks the multiline.
     assert_eq!(cadcraft_engine::select::pick(d, &Space::Model, Vec2::new(3.0, 0.52), 0.1), Some(a));
-    let ext = d.extents(&Space::Model);
+    let ext = cadcraft_render::space_extents(&d, &Space::Model).unwrap();
     assert!(ext.min.near(Vec2::new(0.0, -0.5), 1e-9) && ext.max.near(Vec2::new(10.0, 0.5), 1e-9), "{ext:?}");
     // Drawn: the fill, and each element in its own colour.
     let list = cadcraft_render::build(d, &Space::Model, &cadcraft_render::Options::default());

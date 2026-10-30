@@ -20,7 +20,13 @@ fn drawing(grid: usize) -> Drawing {
         std::process::exit(1);
     };
     let ents: Vec<_> = d.space(&Space::Model).map(|s| s.iter().map(|e| (**e).clone()).collect()).unwrap_or_default();
-    let ext = d.extents(&Space::Model);
+    let ext = match cadcraft_render::space_extents(&d, &Space::Model) {
+        Ok(bounds) => bounds,
+        Err(refused) => {
+            eprintln!("{refused}");
+            std::process::exit(1);
+        }
+    };
     let step = Vec2::new(ext.width() * 1.1, ext.height() * 1.1);
     for i in 0..grid {
         for j in 0..grid {
