@@ -395,6 +395,42 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
     out
 }
 
+/// The roles of the records CADCraft writes itself under a handle that follows the record it belongs to: the SEQEND of an INSERT or
+/// a polyline by its owner, the reactor object of an image's definition by the image, and a DIMASSOC and the extension dictionary
+/// that holds it by the dimension. A file and its save name the same owner, so the save can give the record the handle the file gave it.
+fn owned_roles(entities: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
+    let mut out: HashMap<String, ForeignKey> = HashMap::new();
+    let mut put = |h: Option<String>, kind: &str, owner: String| {
+        if let Some(h) = h {
+            out.entry(h).or_insert((kind.into(), owner));
+        }
+    };
+    for (_, _, t) in entities.iter().chain(blocks).filter(|(kind, _, _)| kind == "SEQEND") {
+        if let Some(owner) = head(t).owner {
+            put(head(t).handle, "SEQEND", owner);
+        }
+    }
+    for (kind, _, t) in objects {
+        let header = head(t);
+        match kind.as_str() {
+            "IMAGEDEF_REACTOR" => {
+                if let Some(owner) = header.owner {
+                    put(header.handle, "IMAGEDEF_REACTOR", owner);
+                }
+            }
+            // The dictionary that holds a DIMASSOC is the dimension's extension dictionary: its owner.
+            "DIMASSOC" => {
+                if let Some((_, dimension)) = cadcraft_doc::foreign::dimassoc_reference(t.iter().map(|t| (t.code, t.str()))) {
+                    put(header.owner, "DIMASSOC/XDICT", dimension.hex());
+                    put(header.handle, "DIMASSOC", dimension.hex());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Remember the file's handle of each role CADCraft writes itself. A role two records share (a
 /// repeated name) keeps the lowest.
 fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
@@ -544,7 +580,8 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) {
     let by_sec = |name: &str| -> Recs {
         recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
     };
-    let ids = identities(&by_sec("TABLES"), &by_sec("BLOCKS"), &by_sec("OBJECTS"));
+    let mut ids = identities(&by_sec("TABLES"), &by_sec("BLOCKS"), &by_sec("OBJECTS"));
+    ids.extend(owned_roles(&by_sec("ENTITIES"), &by_sec("BLOCKS"), &by_sec("OBJECTS")));
     let used: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
     let renamed: HashMap<String, String> = ids
         .iter()
@@ -855,7 +892,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &objects);
-    keep_source_handles(d, &ids);
+    keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities);
