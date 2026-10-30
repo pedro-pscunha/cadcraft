@@ -117,38 +117,44 @@ fn attribute_appearance(
     }
 }
 
-pub(crate) fn canonical_insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) -> cadcraft_doc::Result<()> {
+/// One cell of a canonical block reference: the children of `block` placed by `matrix` (block to WCS, relative to the parent of
+/// `ctx`), with the properties of the referencing entity `e` for ByBlock.
+fn canonical_block_cell(
+    b: &mut Builder,
+    ctx: &Ctx,
+    e: &Entity,
+    block: &cadcraft_doc::Block,
+    matrix: &cadcraft_geom::Mat4,
+) -> cadcraft_doc::Result<()> {
+    use cadcraft_doc::{DocError, GeometryRevision};
+    let xy = Mat3 { a: matrix.m[0][0], b: matrix.m[1][0], c: matrix.m[0][1], d: matrix.m[1][1], e: matrix.m[0][3], f: matrix.m[1][3] };
+    let sub = Ctx { world: ctx.world.mul(matrix), block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, xy) };
+    for child in block.entities.iter() {
+        if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || !resolve(&sub, child, b.plotting).4 {
+            continue;
+        }
+        if child.geometry_revision != GeometryRevision::CanonicalV2 {
+            return Err(DocError::Invalid("A canonical block cannot use a legacy child geometry payload.".into()));
+        }
+        if !b.expand() {
+            return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
+        }
+        super::draw::try_entity(b, &sub, child)?;
+    }
+    Ok(())
+}
+
+/// The attributes of a canonical block reference `ins` of `e`, each placed by `placement` (the parent for instances already in
+/// WCS; the parent after the block matrix for attributes kept in block coordinates), with the appearance their definition gives.
+fn canonical_attributes(
+    b: &mut Builder,
+    ctx: &Ctx,
+    e: &Entity,
+    ins: &cadcraft_doc::Insert,
+    placement: &cadcraft_geom::Mat4,
+    rgb: Ink,
+) -> cadcraft_doc::Result<()> {
     use cadcraft_doc::{DocError, GeometryRevision, WorldGeometry, attrib_primitives};
-    if ctx.depth > cadcraft_doc::MAX_BLOCK_DEPTH {
-        return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
-    }
-    if let Some(block) = ctx.d.block(&ins.block) {
-        if ins.cols == 0 || ins.rows == 0 || u64::from(ins.cols) * u64::from(ins.rows) > super::MAX_BLOCK_EXPANSION as u64 {
-            return Err(DocError::Invalid("The canonical INSERT array exceeds the display limits.".into()));
-        }
-        for row in 0..ins.rows {
-            for column in 0..ins.cols {
-                if !b.expand() {
-                    return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
-                }
-                let matrix = ins.world_transform(e.common.extrusion, block.base, column, row)?;
-                let xy = Mat3 { a: matrix.m[0][0], b: matrix.m[1][0], c: matrix.m[0][1], d: matrix.m[1][1], e: matrix.m[0][3], f: matrix.m[1][3] };
-                let sub = Ctx { world: ctx.world.mul(&matrix), block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, xy) };
-                for child in block.entities.iter() {
-                    if matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || !resolve(&sub, child, b.plotting).4 {
-                        continue;
-                    }
-                    if child.geometry_revision != GeometryRevision::CanonicalV2 {
-                        return Err(DocError::Invalid("A canonical block cannot use a legacy child geometry payload.".into()));
-                    }
-                    if !b.expand() {
-                        return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
-                    }
-                    super::draw::try_entity(b, &sub, child)?;
-                }
-            }
-        }
-    }
     if !b.opts.text {
         return Ok(());
     }
@@ -171,7 +177,7 @@ pub(crate) fn canonical_insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cad
             return Err(DocError::Invalid("Canonical attribute extrusion display is not available yet.".into()));
         }
         let owner = attribute.handle.unwrap_or(e.handle);
-        let geometry = WorldGeometry::from_primitives(owner, attrib_primitives(attribute, &ctx.world)?)?;
+        let geometry = WorldGeometry::from_primitives(owner, attrib_primitives(attribute, placement)?)?;
         let projected = Ctx { xf: Mat3::IDENTITY, ..ctx.clone() };
         b.transparency = transparency;
         let lineweight = if b.opts.lineweights { lineweight } else { 0.0 };
@@ -179,6 +185,66 @@ pub(crate) fn canonical_insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cad
     }
     b.transparency = reference;
     Ok(())
+}
+
+pub(crate) fn canonical_insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) -> cadcraft_doc::Result<()> {
+    use cadcraft_doc::DocError;
+    if ctx.depth > cadcraft_doc::MAX_BLOCK_DEPTH {
+        return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
+    }
+    if let Some(block) = ctx.d.block(&ins.block) {
+        if ins.cols == 0 || ins.rows == 0 || u64::from(ins.cols) * u64::from(ins.rows) > super::MAX_BLOCK_EXPANSION as u64 {
+            return Err(DocError::Invalid("The canonical INSERT array exceeds the display limits.".into()));
+        }
+        for row in 0..ins.rows {
+            for column in 0..ins.cols {
+                if !b.expand() {
+                    return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
+                }
+                let matrix = ins.world_transform(e.common.extrusion, block.base, column, row)?;
+                canonical_block_cell(b, ctx, e, block, &matrix)?;
+            }
+        }
+    }
+    canonical_attributes(b, ctx, e, ins, &ctx.world, rgb)
+}
+
+/// A canonical multileader with block content: its lines, doglegs, arrowheads and text, then the block placed by the multileader's
+/// block matrix and its attributes (kept in block coordinates), all with the multileader's own properties for ByBlock, like a
+/// block reference.
+pub(crate) fn canonical_mleader_block(
+    b: &mut Builder,
+    ctx: &Ctx,
+    e: &Entity,
+    leader: &cadcraft_doc::MLeader,
+    ins: &cadcraft_doc::Insert,
+    rgb: Ink,
+    lineweight: f32,
+) -> cadcraft_doc::Result<()> {
+    use cadcraft_doc::{DocError, WorldGeometry};
+    if ctx.depth > cadcraft_doc::MAX_BLOCK_DEPTH {
+        return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
+    }
+    leader.require_canonical()?;
+    let block = ctx.d.block(&ins.block);
+    let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
+    // The lines and text without the attributes, which are painted with the appearance of their definitions below.
+    let mut bare = leader.clone();
+    if let Some(content) = &mut bare.block {
+        content.attribs.clear();
+    }
+    let arrow = super::mleader_arrow_layout(ctx.d, leader);
+    let world = cadcraft_doc::mleader_primitives(&bare, base, &arrow, &ctx.world)?;
+    let projected = Ctx { xf: Mat3::IDENTITY, ..ctx.clone() };
+    super::world_paint::paint_geometry(b, &projected, &WorldGeometry::from_primitives(e.handle, world.primitives)?, e.handle, rgb, lineweight)?;
+    let matrix = leader.block_world_transform(base)?;
+    if let (Some(block), Some(matrix)) = (block, &matrix) {
+        if !b.expand() {
+            return Err(DocError::Invalid("The canonical block expansion limit was reached.".into()));
+        }
+        canonical_block_cell(b, ctx, e, block, matrix)?;
+    }
+    canonical_attributes(b, ctx, e, ins, &matrix.map_or(ctx.world, |m| ctx.world.mul(&m)), rgb)
 }
 
 /// Properties that follow the block reference's (an attribute without a definition).
