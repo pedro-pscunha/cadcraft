@@ -173,6 +173,14 @@ impl Spline {
             && self.knots.windows(2).all(|w| w.first() <= w.get(1))
     }
 
+    /// This spline when `is_valid` accepts it, for evaluating many points without walking the knot vector at each one.
+    pub fn validated(&self) -> Option<ValidSpline<'_>> {
+        self.is_valid().then(|| {
+            let (lo, hi) = self.domain();
+            ValidSpline { spline: self, lo, hi }
+        })
+    }
+
     pub fn domain(&self) -> (f64, f64) {
         let lo = self.knots.get(self.degree).copied().unwrap_or(0.0);
         let hi = self.knots.get(self.control.len()).copied().unwrap_or(1.0);
@@ -327,6 +335,25 @@ pub(crate) fn clamped_uniform_knots(n: usize, degree: usize) -> Vec<f64> {
     }
     k.extend(std::iter::repeat_n(1.0, degree + 1));
     k
+}
+
+/// A spline `is_valid` has accepted (see [`Spline::validated`]): its evaluation does not validate again.
+#[derive(Clone, Copy, Debug)]
+pub struct ValidSpline<'a> {
+    spline: &'a Spline,
+    lo: f64,
+    hi: f64,
+}
+
+impl ValidSpline<'_> {
+    pub fn domain(&self) -> (f64, f64) {
+        (self.lo, self.hi)
+    }
+
+    /// The point at `t`, clamped to the domain.
+    pub fn eval(&self, t: f64) -> Vec2 {
+        self.spline.eval_valid(t, self.lo, self.hi)
+    }
 }
 
 pub(crate) fn find_span(n: usize, p: usize, u: f64, knots: &[f64]) -> usize {
