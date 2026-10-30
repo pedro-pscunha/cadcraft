@@ -120,6 +120,7 @@ mod pdf_layers;
 mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
+mod plot_style_entries_kept;
 mod plot_styles;
 mod polyline3d_vertex_flags;
 #[cfg(not(target_arch = "wasm32"))]
@@ -130,6 +131,7 @@ mod polyline_parent_plot_style;
 mod raw_dwg_bridge;
 mod region_roundtrip;
 mod roundtrip_audit;
+mod scale_list_keys;
 mod skipped_records;
 mod sortents;
 mod sortents_emission;
