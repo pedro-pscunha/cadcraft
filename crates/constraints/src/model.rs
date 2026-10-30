@@ -114,9 +114,11 @@ pub fn supported(kind: &EntityKind) -> bool {
 /// World positions of a block reference's rigid points: the characteristic points (end points,
 /// centres, vertices, nested insertion points) of the block's own objects, at most
 /// [`MAX_RIGID_POINTS`]. Nested blocks are not entered.
-pub fn rigid_points(d: &Drawing, ins: &Insert) -> Vec<Vec2> {
+pub fn rigid_points(d: &Drawing, entity: &cadcraft_doc::Entity) -> Result<Vec<Vec2>, crate::SolveError> {
+    crate::admission::Admission::new(d).entity(entity, 0)?;
+    let EntityKind::Insert(ins) = &entity.kind else { return Ok(Vec::new()) };
     let mut members_left = MAX_RIGID_MEMBERS;
-    rigid_points_budgeted(d, ins, &mut members_left)
+    Ok(rigid_points_budgeted(d, ins, &mut members_left))
 }
 
 /// Sample finite block points within per-insert and caller-shared member limits.
@@ -188,7 +190,7 @@ impl Model {
     /// Build a model for the given entities. Unsupported or missing entities are skipped.
     pub fn build(d: &Drawing, handles: &[Handle]) -> Model {
         let mut members_left = MAX_RIGID_WORK;
-        Self::build_budgeted(d, handles, &mut members_left)
+        Self::build_budgeted(&mut crate::admission::Admission::new(d), handles, &mut members_left).unwrap_or_default()
     }
 
     /// Add the parameters of one supported entity to `m`, and return its shape; `None` when it is
@@ -263,7 +265,13 @@ impl Model {
     }
 
     /// Build solver parameters for supported entities while sharing rigid-member sampling work with other models.
-    pub(crate) fn build_budgeted(d: &Drawing, handles: &[Handle], members_left: &mut usize) -> Model {
+    pub(crate) fn build_budgeted(
+        admission: &mut crate::admission::Admission<'_>,
+        handles: &[Handle],
+        members_left: &mut usize,
+    ) -> Result<Model, crate::SolveError> {
+        admission.check(handles.iter().copied())?;
+        let d = admission.drawing();
         let mut m = Model::default();
         for &h in handles {
             if m.index.contains_key(&h) {
@@ -280,7 +288,7 @@ impl Model {
             m.index.insert(h, m.slots.len());
             m.slots.push(Slot { handle: h, shape, off, len });
         }
-        m
+        Ok(m)
     }
 
     pub fn slot(&self, h: Handle) -> Option<&Slot> {
@@ -739,10 +747,10 @@ mod budget_tests {
         };
         let h = d.add(&Space::Model, Common::default(), EntityKind::Insert(ins)).unwrap();
         let mut budget = 2;
-        let first = Model::build_budgeted(&d, &[h], &mut budget);
+        let first = Model::build_budgeted(&mut crate::admission::Admission::new(&d), &[h], &mut budget).unwrap();
         assert_eq!(first.rigid[&h].len(), 4);
         assert_eq!(budget, 0);
-        let next = Model::build_budgeted(&d, &[h], &mut budget);
+        let next = Model::build_budgeted(&mut crate::admission::Admission::new(&d), &[h], &mut budget).unwrap();
         assert!(next.rigid[&h].is_empty());
     }
 }

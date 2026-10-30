@@ -96,6 +96,9 @@ fn ang_between(d1: Vec2, d2: Vec2) -> f64 {
 /// vertical, collinear, perpendicular, parallel, equal). Apply them one by one with
 /// [`crate::add`], skipping the ones it refuses as redundant.
 pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Vec<Constraint> {
+    if crate::require_legacy_inputs(d, handles.iter().copied()).is_err() {
+        return Vec::new();
+    }
     let tol = if o.distance_tolerance.is_finite() { o.distance_tolerance.clamp(0.0, 1e9) } else { 0.05 };
     let atol = if o.angle_tolerance.is_finite() { o.angle_tolerance.clamp(0.0, 45.0).to_radians() } else { 1f64.to_radians() };
     // Resolve the allowed type names into a set once, so membership is O(1) per candidate instead
@@ -209,6 +212,9 @@ pub const INFER_TYPES: [ConstraintKind; 6] = [
 /// tolerances in `o` are expected to be tight. Only [`INFER_TYPES`] (and `o.types`, when set)
 /// are returned, each involving a placed object.
 pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &InferOptions) -> Vec<Constraint> {
+    if crate::require_legacy_inputs(d, placed.iter().chain(others).copied()).is_err() {
+        return Vec::new();
+    }
     let tol = if o.distance_tolerance.is_finite() { o.distance_tolerance.clamp(0.0, 1e9) } else { 0.0 };
     let mut all: Vec<Handle> = placed.iter().take(MAX_OBJECTS).copied().collect();
     for h in others {
