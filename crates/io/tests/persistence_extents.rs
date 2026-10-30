@@ -22,6 +22,41 @@ fn a_new_empty_drawing_omits_both_extent_variables() {
 }
 
 #[test]
+fn refusing_new_canonical_extents_omits_the_pair_and_notes_the_handle_once() {
+    let mut drawing = Drawing::new_metric();
+    let mut entity = Entity::new(Handle(0x2A0), EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 3.0), radius: 4.0 }));
+    entity.geometry_revision = GeometryRevision::CanonicalV2;
+    drawing.model.push(entity);
+    let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, "canonical.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
+    let reopened = cadcraft_io::read(&bytes, "canonical.dxf").unwrap();
+    assert_eq!(reopened.header.point("EXTMIN"), None);
+    assert_eq!(reopened.header.point("EXTMAX"), None);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("EXTMIN") && notes[0].contains("EXTMAX") && notes[0].contains("2A0"), "{notes:?}");
+}
+
+#[test]
+fn an_empty_extent_query_has_no_omission_note() {
+    let (_, notes) = cadcraft_io::write_with_noted(&Drawing::new_metric(), "empty.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
+fn one_saved_extent_is_preserved_without_computing_or_noting_the_other() {
+    let mut drawing = Drawing::new_metric();
+    let minimum = Vec3::new(-12.0, -13.0, -14.0);
+    drawing.header.set("EXTMIN", HVal::Point(minimum));
+    let mut entity = Entity::new(Handle(0x2A0), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 4.0 }));
+    entity.geometry_revision = GeometryRevision::CanonicalV2;
+    drawing.model.push(entity);
+    let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, "partial.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
+    let reopened = cadcraft_io::read(&bytes, "partial.dxf").unwrap();
+    assert_eq!(reopened.header.point("EXTMIN"), Some(minimum));
+    assert_eq!(reopened.header.point("EXTMAX"), None);
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
 fn a_native_save_keeps_header_extents_without_a_display_geometry_query() {
     let mut drawing = Drawing::new_metric();
     let minimum = Vec3::new(-12.0, -13.0, -14.0);

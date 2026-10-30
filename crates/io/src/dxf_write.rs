@@ -171,9 +171,8 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false)
 }
 
-/// Notes for the handles a save repairs (two objects held one), and for what a save at `target` leaves out of the multileaders that are split into parts (a file before R2007 has no
-/// MULTILEADER): the block attributes of a canonical multileader whose block matrix places no text exactly (a non-uniform
-/// scale), by multileader handle and count.
+/// Save notes for repaired handles, a refused unsaved extent pair, and block attributes lost when canonical multileaders split
+/// before R2007: a non-uniform block scale places no attribute text exactly.
 pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
         .committed()
@@ -194,6 +193,14 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
             )
         })
         .collect();
+    if d.header.point("EXTMIN").is_none()
+        && d.header.point("EXTMAX").is_none()
+        && let Some((entity, error)) =
+            d.model.iter().find_map(|entity| cadcraft_doc::legacy_entity_bounds(d, entity, 0).err().map(|error| (entity, error)))
+    {
+        let handle = if let cadcraft_doc::DocError::CanonicalExtent(handle) = &error { *handle } else { entity.handle };
+        notes.push(format!("EXTMIN/EXTMAX omitted: the legacy extent query refused object {} ({error}).", handle.hex()));
+    }
     if target >= Version::R2007 {
         return notes;
     }
