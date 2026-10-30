@@ -22,6 +22,7 @@ mod class_records;
 mod closed_spline;
 mod codepages;
 mod curve_canonical;
+mod dictionary_order;
 mod dictionary_reactors;
 mod dim_block_record_roundtrip;
 mod dim_block_resave_roundtrip;

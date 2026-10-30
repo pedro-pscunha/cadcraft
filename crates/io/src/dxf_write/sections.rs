@@ -1311,6 +1311,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         super::sortents::plan(&mut w, &mut sortents, &written, owner, table, entities.iter());
     }
     super::sortents::attach(&mut w, &sortents);
+    super::dictionary_order::sort(&mut w.t);
     if let Some(tag) = w.t.get_mut(seed_pos + 1) {
         *tag = Tag::s(5, format!("{:X}", w.next));
     }
