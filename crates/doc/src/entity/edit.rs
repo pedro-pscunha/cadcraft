@@ -159,6 +159,7 @@ impl Entity {
                 | EntityKind::XLine(_)
                 | EntityKind::Image(_)
                 | EntityKind::MLeader(_)
+                | EntityKind::Insert(_)
         )
     }
 
@@ -286,6 +287,12 @@ impl Entity {
             EntityKind::Image(i) => {
                 *i = i.transformed_canonical(transform)?;
                 None
+            }
+            // A block reference keeps its thickness; its normal follows the edit.
+            EntityKind::Insert(i) => {
+                let (moved, n) = i.transformed_canonical(normal, transform)?;
+                *i = moved;
+                Some((n, 1.0))
             }
             // WCS positions and directions only: a multileader has no plane or thickness of its own.
             EntityKind::MLeader(m) => {
