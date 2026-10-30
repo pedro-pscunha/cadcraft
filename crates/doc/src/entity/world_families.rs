@@ -81,7 +81,7 @@ mod tests {
         p.iter()
             .filter_map(|p| match p {
                 WorldPrimitive::Line { a, b } => Some((*a, *b)),
-                WorldPrimitive::Point(_) => None,
+                _ => None,
             })
             .collect()
     }
