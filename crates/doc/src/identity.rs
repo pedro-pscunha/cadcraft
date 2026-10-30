@@ -55,6 +55,30 @@ impl EntityKind {
         }
     }
 
+    /// The handles this entity holds beside its own: those of its attributes and of its polyline vertex and SEQEND records.
+    fn owned_handles_mut(&mut self) -> Vec<&mut Handle> {
+        let mut out: Vec<&mut Handle> = Vec::new();
+        match self {
+            Self::Insert(i) => out.extend(i.attribs.iter_mut().filter_map(|a| a.handle.as_mut())),
+            Self::MLeader(m) => {
+                out.extend(m.block.iter_mut().flat_map(|i| i.attribs.iter_mut()).filter_map(|a| a.handle.as_mut()));
+            }
+            Self::LwPolyline(p) => {
+                if let Some(fit) = &mut p.fit {
+                    out.extend(fit.vertices.iter_mut().filter_map(|v| v.record.handle.as_mut()));
+                }
+                out.extend(p.records.vertices.iter_mut().chain(p.records.seqend.as_mut()).filter_map(|r| r.handle.as_mut()));
+            }
+            Self::Polyline3d(p) => out.extend(p.records.vertices.iter_mut().chain(p.records.seqend.as_mut()).filter_map(|r| r.handle.as_mut())),
+            Self::PolylineMesh(m) => {
+                out.extend(m.vertices.iter_mut().filter_map(|v| v.vertex.record.handle.as_mut()));
+                out.extend(m.seqend.as_mut().and_then(|r| r.handle.as_mut()));
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// Attribute instances owned by this entity (including multileader block content).
     pub fn attributes(&self) -> &[Attrib] {
         match self {
@@ -121,5 +145,87 @@ impl Drawing {
                 fill_store(&mut std::sync::Arc::make_mut(block).entities, &mut allocate);
             }
         }
+    }
+}
+
+/// A handle two objects held, and the fresh one the later object got (see [`Drawing::with_unique_handles`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HandleRepair {
+    pub old: Handle,
+    pub new: Handle,
+    /// Where the first holder, which keeps the handle, is: `model space`, `layout NAME` or `block NAME`.
+    pub kept_in: String,
+    /// Where the later holder, which got `new`, is.
+    pub moved_in: String,
+}
+
+/// The handles of an entity: its own, those of its attributes, and those of its polyline vertex records.
+fn object_handles(e: &mut crate::Entity) -> Vec<&mut Handle> {
+    // Records with no handle yet get one when they are written.
+    let mut out: Vec<&mut Handle> = vec![&mut e.handle];
+    out.extend(e.kind.owned_handles_mut());
+    out
+}
+
+impl Drawing {
+    /// This drawing with no handle held twice, and what changed. A file names each object by its handle, so two entities with
+    /// one handle (for example a block's entity and a model entity) make one of them unreadable: the DWG conversion drops it.
+    /// The first holder in file order (model space, then the layouts, then the blocks) keeps the handle; every later holder gets a
+    /// fresh one. `None` when no handle is held twice. A reference to a repeated handle names the first holder.
+    pub fn with_unique_handles(&self) -> Option<(Drawing, Vec<HandleRepair>)> {
+        let stores = || {
+            std::iter::once(("model space".to_string(), &self.model))
+                .chain(self.layouts.iter().map(|l| (format!("layout {}", l.name), &l.entities)))
+                .chain(self.blocks.iter().map(|(n, b)| (format!("block {n}"), &b.entities)))
+        };
+        let mut all = std::collections::HashSet::new();
+        let mut repeated = false;
+        for (_, store) in stores() {
+            for e in store.iter() {
+                let mut e = e.as_ref().clone();
+                repeated |= object_handles(&mut e).into_iter().any(|h| !all.insert(*h));
+            }
+        }
+        if !repeated {
+            return None;
+        }
+        let mut out = self.clone();
+        let mut next = all.iter().map(|h| h.0).max().unwrap_or(0).max(self.handseed).saturating_add(1);
+        let mut owners: std::collections::HashMap<Handle, String> = std::collections::HashMap::new();
+        let mut repairs = Vec::new();
+        let rebuild = |name: &str,
+                       store: &EntityStore,
+                       owners: &mut std::collections::HashMap<Handle, String>,
+                       next: &mut u64,
+                       repairs: &mut Vec<HandleRepair>| {
+            let mut rebuilt = EntityStore::new();
+            for e in store.iter() {
+                let mut e = e.as_ref().clone();
+                for h in object_handles(&mut e) {
+                    if let Some(kept_in) = owners.get(h).cloned() {
+                        let new = Handle(*next);
+                        *next += 1;
+                        repairs.push(HandleRepair { old: *h, new, kept_in, moved_in: name.to_string() });
+                        *h = new;
+                    }
+                    owners.insert(*h, name.to_string());
+                }
+                rebuilt.push(e);
+            }
+            rebuilt
+        };
+        out.model = rebuild("model space", &self.model, &mut owners, &mut next, &mut repairs);
+        for (i, layout) in self.layouts.iter().enumerate() {
+            if let Some(l) = out.layouts.get_mut(i) {
+                l.entities = rebuild(&format!("layout {}", layout.name), &layout.entities, &mut owners, &mut next, &mut repairs);
+            }
+        }
+        for (name, block) in &self.blocks {
+            if let Some(b) = out.blocks.get_mut(name) {
+                std::sync::Arc::make_mut(b).entities = rebuild(&format!("block {name}"), &block.entities, &mut owners, &mut next, &mut repairs);
+            }
+        }
+        out.handseed = out.handseed.max(next);
+        Some((out, repairs))
     }
 }

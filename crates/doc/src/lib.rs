@@ -16,6 +16,7 @@ mod format;
 mod gdt;
 mod header;
 mod identity;
+pub use identity::HandleRepair;
 pub mod library;
 mod plotstyle;
 mod plotter;

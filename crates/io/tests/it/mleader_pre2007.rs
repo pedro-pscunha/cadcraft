@@ -95,7 +95,7 @@ fn drawing(m: &MLeader) -> Drawing {
     let mut d = Drawing::new_metric();
     let mut block = Block::new("B");
     block.base = BASE;
-    block.entities.push(Entity::new(Handle(0x100), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })));
+    block.entities.push(Entity::new(Handle(0x7000), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })));
     d.blocks.insert("B".into(), std::sync::Arc::new(block));
     let handle = d.new_handle();
     let mut e = Entity::new(handle, EntityKind::MLeader(m.clone()));
