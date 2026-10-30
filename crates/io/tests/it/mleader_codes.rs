@@ -187,3 +187,147 @@ fn the_codes_survive_a_dwg_save() {
         (3, 5, 2, 2, 1)
     );
 }
+
+/// A style with every field at a value that is not the default.
+fn full_style() -> MLeaderStyle {
+    // The colour method is the top byte: 0xC0 ByLayer, 0xC1 ByBlock, 0xC2 a true colour (0xC2RRGGBB), 0xC3 an index (0xC3000005).
+    let true_color = |rgb: u32| (0xC200_0000u32 | rgb) as i32 as i64;
+    MLeaderStyle {
+        name: "Full".into(),
+        arrow_size: 0.3,
+        text_height: 0.5,
+        landing_gap: 0.2,
+        dogleg: 0.7,
+        text_style: "Slanted".into(),
+        arrow_block: "_DOT".into(),
+        annotative: true,
+        text_left_attachment: 3,
+        text_right_attachment: 5,
+        text_angle_type: 2,
+        text_alignment: 2,
+        block_connection: 1,
+        version: 2,
+        content_type: 1,
+        draw_mleader_order: 0,
+        draw_leader_order: 1,
+        max_leader_points: 4,
+        first_segment_angle: 0.5,
+        second_segment_angle: 0.75,
+        leader_line_type: 2,
+        line_color: true_color(0x102030),
+        line_type: "DASHED".into(),
+        line_weight: 50,
+        enable_landing: false,
+        enable_dogleg: false,
+        description: "A description".into(),
+        default_text: "Default".into(),
+        text_color: (0xC300_0005u32) as i32 as i64,
+        text_frame: true,
+        text_always_left: true,
+        align_space: 3.5,
+        block: "B".into(),
+        block_color: true_color(0x708090),
+        block_scale: [2.0, 3.0, 4.0],
+        enable_block_scale: false,
+        block_rotation: 0.5,
+        enable_block_rotation: false,
+        scale: 2.5,
+        overwritten: true,
+        break_gap: 0.25,
+        attach_direction: 1,
+        attach_top: 4,
+        attach_bottom: 6,
+    }
+}
+
+fn drawing_with_full_style() -> Drawing {
+    let mut d = drawing(true);
+    d.text_styles.push(cadcraft_doc::TextStyle { name: "Slanted".into(), oblique: 0.2, ..cadcraft_doc::TextStyle::default() });
+    d.linetypes.push(cadcraft_doc::Linetype::simple("DASHED", "dashes", &[0.5, -0.25]));
+    d.mleader_styles.push(full_style());
+    d
+}
+
+fn style_of(d: &Drawing) -> MLeaderStyle {
+    d.mleader_styles.iter().find(|s| s.name == "Full").cloned().expect("the style")
+}
+
+#[test]
+fn every_field_of_a_multileader_style_survives_a_dxf_save() {
+    let d = drawing_with_full_style();
+    let out = dxf(&d);
+    let back = read_dxf(out.as_bytes()).unwrap();
+    assert_eq!(style_of(&back), full_style());
+    // The second save writes the same object.
+    let without_handles = |g: Vec<(i32, String)>| g.into_iter().filter(|(c, _)| !matches!(*c, 5 | 330 | 340 | 341 | 342 | 343)).collect::<Vec<_>>();
+    assert_eq!(without_handles(groups(&dxf(&back), "MLEADERSTYLE")), without_handles(groups(&out, "MLEADERSTYLE")));
+}
+
+#[test]
+fn a_style_made_in_cadcraft_is_written_with_the_defaults() {
+    let mut d = drawing(false);
+    d.mleader_styles.push(MLeaderStyle { name: "Plain".into(), ..MLeaderStyle::default() });
+    let g = groups(&dxf(&d), "MLEADERSTYLE");
+    let value = |code: i32| g.iter().filter(|(c, _)| *c == code).map(|(_, v)| v.clone()).collect::<Vec<_>>();
+    // The constants this writer always emitted.
+    for (code, want) in
+        [(179, "2"), (170, "2"), (171, "1"), (172, "0"), (90, "2"), (173, "1"), (91, "-1056964608"), (92, "-2"), (290, "1"), (291, "1")]
+    {
+        assert!(value(code).contains(&want.to_string()), "{code}: {:?}", value(code));
+    }
+}
+
+/// The style of the DWG `bytes`, field by field as acadrust reads it: the fields its DXF reader takes.
+fn assert_acadrust_fields(bytes: &[u8], want: &MLeaderStyle) {
+    use acadrust::objects::{BlockContentConnectionType, LeaderContentType, ObjectType, TextAlignmentType, TextAngleType, TextAttachmentType};
+    let stored = acadrust::DwgReader::from_stream(std::io::Cursor::new(bytes.to_vec())).read().unwrap();
+    let style = stored
+        .objects
+        .values()
+        .find_map(|o| {
+            if let ObjectType::MultiLeaderStyle(s) = o {
+                (s.text_left_attachment == TextAttachmentType::MiddleOfBottomLine).then(|| s.clone())
+            } else {
+                None
+            }
+        })
+        .expect("the style in the DWG");
+    assert_eq!(style.content_type, LeaderContentType::Block);
+    assert_eq!(style.block_content_connection, BlockContentConnectionType::BasePoint);
+    assert_eq!(
+        (style.text_right_attachment, style.text_angle_type, style.text_alignment),
+        (TextAttachmentType::BottomLine, TextAngleType::from(2), TextAlignmentType::Right)
+    );
+    assert!(
+        !style.enable_landing
+            && !style.enable_dogleg
+            && style.text_frame
+            && !style.enable_block_scale
+            && !style.enable_block_rotation
+            && style.is_annotative
+    );
+    assert_eq!(
+        (style.scale_factor, style.landing_gap, style.landing_distance, style.arrowhead_size, style.text_height),
+        (2.5, want.landing_gap, want.dogleg, want.arrow_size, want.text_height)
+    );
+    // The groups acadrust's DXF reader used to drop or mislabel.
+    assert_eq!((style.description.as_str(), style.default_text.as_str()), ("A description", "Default"));
+    assert_eq!((style.max_leader_points, style.first_segment_angle, style.second_segment_angle), (4, 0.5, 0.75));
+    assert!(style.text_always_left);
+    assert_eq!(style.line_color, acadrust::types::Color::Rgb { r: 0x10, g: 0x20, b: 0x30 });
+    assert_eq!(style.text_color, acadrust::types::Color::Index(5));
+    assert_eq!(style.block_content_color, acadrust::types::Color::Rgb { r: 0x70, g: 0x80, b: 0x90 });
+    assert_eq!((style.align_space, style.break_gap_size, style.block_content_rotation), (3.5, 0.25, 0.5));
+    assert_eq!((style.block_content_scale_x, style.block_content_scale_y, style.block_content_scale_z), (2.0, 3.0, 4.0));
+}
+
+#[test]
+fn every_field_of_a_multileader_style_survives_a_dwg_save() {
+    let bytes = write(&drawing_with_full_style(), "x.dwg").unwrap();
+    let want = full_style();
+    assert_acadrust_fields(&bytes, &want);
+    // CADCraft reads the DWG back to the same style, field for field, the name from the dictionary key.
+    let read_back = read(&bytes, "x.dwg").unwrap();
+    assert_eq!(style_of(&read_back), want);
+    assert_eq!(read_back.mleader_styles.iter().filter(|s| s.name == "Full").count(), 1);
+}

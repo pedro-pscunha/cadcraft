@@ -191,6 +191,11 @@ impl Objects {
             let def = MLeaderStyle::default();
             let num = |code: i32, d: f64, min: f64| t.f(code).filter(|v| v.is_finite() && *v >= min).unwrap_or(d);
             let text_style = t.s(342).and_then(|sh| rx.styles.get(&sh.trim().to_ascii_uppercase()).cloned()).filter(|n| !n.is_empty());
+            let int = |code: i32, d: i64| t.i(code).unwrap_or(d);
+            let flag = |code: i32, d: bool| t.i(code).map_or(d, |v| v != 0);
+            let real = |code: i32, d: f64| t.f(code).filter(|v| v.is_finite()).unwrap_or(d);
+            let block = t.s(343).and_then(|h| rx.brs.get(&h.trim().to_ascii_uppercase()).cloned());
+            let line_type = t.s(340).and_then(|h| rx.ltypes.get(&h.trim().to_ascii_uppercase()).cloned());
             let st = MLeaderStyle {
                 name: name.clone(),
                 arrow_size: num(44, def.arrow_size, 0.0),
@@ -200,11 +205,42 @@ impl Objects {
                 text_style: text_style.unwrap_or(def.text_style),
                 annotative: t.i(296).unwrap_or(0) != 0,
                 arrow_block: t.s(341).and_then(|h| rx.brs.get(&h.trim().to_ascii_uppercase()).cloned()).unwrap_or_default(),
-                text_left_attachment: t.i(174).unwrap_or(def.text_left_attachment),
-                text_right_attachment: t.i(178).unwrap_or(def.text_right_attachment),
-                text_angle_type: t.i(175).unwrap_or(def.text_angle_type),
-                text_alignment: t.i(176).unwrap_or(def.text_alignment),
-                block_connection: t.i(177).unwrap_or(def.block_connection),
+                text_left_attachment: int(174, def.text_left_attachment),
+                text_right_attachment: int(178, def.text_right_attachment),
+                text_angle_type: int(175, def.text_angle_type),
+                text_alignment: int(176, def.text_alignment),
+                block_connection: int(177, def.block_connection),
+                version: int(179, def.version),
+                content_type: int(170, def.content_type),
+                draw_mleader_order: int(171, def.draw_mleader_order),
+                draw_leader_order: int(172, def.draw_leader_order),
+                max_leader_points: int(90, def.max_leader_points),
+                first_segment_angle: real(40, def.first_segment_angle),
+                second_segment_angle: real(41, def.second_segment_angle),
+                leader_line_type: int(173, def.leader_line_type),
+                line_color: int(91, def.line_color),
+                line_type: line_type.unwrap_or(def.line_type),
+                line_weight: int(92, def.line_weight),
+                enable_landing: flag(290, def.enable_landing),
+                enable_dogleg: flag(291, def.enable_dogleg),
+                description: t.s(3).unwrap_or(def.description),
+                default_text: t.s(300).unwrap_or(def.default_text),
+                text_color: int(93, def.text_color),
+                text_frame: flag(292, def.text_frame),
+                text_always_left: flag(297, def.text_always_left),
+                align_space: real(46, def.align_space),
+                block: block.unwrap_or(def.block),
+                block_color: int(94, def.block_color),
+                block_scale: [real(47, def.block_scale[0]), real(49, def.block_scale[1]), real(140, def.block_scale[2])],
+                enable_block_scale: flag(293, def.enable_block_scale),
+                block_rotation: real(141, def.block_rotation),
+                enable_block_rotation: flag(294, def.enable_block_rotation),
+                scale: real(142, def.scale),
+                overwritten: flag(295, def.overwritten),
+                break_gap: real(143, def.break_gap),
+                attach_direction: int(271, def.attach_direction),
+                attach_top: int(272, def.attach_top),
+                attach_bottom: int(273, def.attach_bottom),
             };
             match d.mleader_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,
