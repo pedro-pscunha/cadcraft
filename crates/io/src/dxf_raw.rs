@@ -610,6 +610,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
     let viewports: HashSet<String> =
         blocks.iter().chain(&entities).filter(|(k, _, _)| k == "VIEWPORT").filter_map(|(_, _, t)| head(t).handle).collect();
+    let table_entities: HashSet<String> = all_entities(d).filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle.hex()).collect();
     let scan = Scan {
         objects: &objects,
         entities: &ents,
@@ -619,6 +620,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         xdict_of: &xdict_of,
         modelled_assoc: &modelled_assoc,
         viewports: &viewports,
+        tables: &table_entities,
     };
     let memo = retained_objects(&scan);
     let mut f = Foreign::default();
@@ -801,6 +803,8 @@ struct Scan<'a> {
     modelled_assoc: &'a HashSet<String>,
     /// The viewport entities of the file.
     viewports: &'a HashSet<String>,
+    /// The table entities of the file, which hard-own the FIELD objects of their cells.
+    tables: &'a HashSet<String>,
 }
 
 impl Scan<'_> {
@@ -865,7 +869,9 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 current = parent;
                 continue;
             }
-            break entities.get(&owner) == Some(&true) || (kind == "SUN" && scan.sun_owner(&owner));
+            break entities.get(&owner) == Some(&true)
+                || (kind == "SUN" && scan.sun_owner(&owner))
+                || (up(kind) == "FIELD" && scan.tables.contains(&owner));
         };
         for visited in path {
             retained.insert(visited, keep);
@@ -1426,6 +1432,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() && geometry.is_empty() {
         // No kept object a header pointer could name.
         remap_header_pointers(tags, |_| "0".into());
+        remap_table_fields(tags, |_| None);
         return;
     }
     // APPID roles must exist before handle remapping, not only after foreign xdata is emitted.
@@ -1508,6 +1515,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
     // Which kept objects are written: those whose owner chain ends at a written owner.
     let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
     let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
+    let table_handles: HashSet<String> = all_entities(d).filter(|e| matches!(e.kind, EntityKind::Table(_))).map(|e| e.handle.hex()).collect();
     let mut alive_memo: HashMap<String, bool> = HashMap::new();
     for o in f.objects.iter().filter(|o| is_proxy(&o.kind) && renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str())))).is_none()) {
         alive_memo.insert(o.handle.hex(), false);
@@ -1539,7 +1547,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
             let sun = o.kind.eq_ignore_ascii_case("SUN")
                 && (viewports.contains(&owner)
                     || handle(&owner).and_then(|h| f.targets.get(&h)).is_some_and(|key| key.0 == "VPORT" && roles.contains_key(key)));
-            break (unknown.contains(&owner) && written.contains(&owner)) || sun;
+            let field = objs.get(&cur).is_some_and(|c| up(&c.kind) == "FIELD") && table_handles.contains(&owner);
+            break (unknown.contains(&owner) && written.contains(&owner)) || (field && written.contains(&owner)) || sun;
         };
         for p in path {
             alive_memo.insert(p, verdict);
@@ -1631,6 +1640,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         *t = Tag::s(5, format!("{top:X}"));
     }
     remap_header_pointers(&mut out, |h| map.get(h).unwrap_or_else(|| "0".into()));
+    remap_table_fields(&mut out, |h| map.get(h).filter(|n| n != "0"));
     *tags = out;
 }
 
@@ -1857,6 +1867,25 @@ fn record(
 /// the handle read (see `header::preserved_header_vars`): point them at the saved object, or at
 /// the null handle when it is gone (`saved`). The writer generates no pointer-valued header
 /// variable.
+/// The FIELD handle (344) of each table cell, as the written FIELD object has it; a cell whose FIELD is not written shows its
+/// cached text.
+fn remap_table_fields(tags: &mut Vec<Tag>, saved: impl Fn(&str) -> Option<String>) {
+    let mut table = false;
+    let mut out = Vec::with_capacity(tags.len());
+    for t in tags.drain(..) {
+        if t.code == 0 {
+            table = t.str().trim().eq_ignore_ascii_case("ACAD_TABLE");
+        } else if table && t.code == 344 {
+            if let Some(new) = saved(&norm(&t.str())) {
+                out.push(Tag::s(344, new));
+            }
+            continue;
+        }
+        out.push(t);
+    }
+    *tags = out;
+}
+
 fn remap_header_pointers(out: &mut [Tag], saved: impl Fn(&str) -> String) {
     let Some(start) = out.windows(2).position(|w| w[0].code == 0 && w[1].code == 2 && w[1].str() == "HEADER") else { return };
     let mut variable = String::new();

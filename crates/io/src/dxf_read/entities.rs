@@ -391,6 +391,8 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
         }
         // A block cell (171 = 2): its block record handle (resolved to the name once the records are known), scale (144) and the
         // attribute values by their ATTDEF handle (331, 300).
+        let block_cell = t0.i64() == 2;
+        let field = if block_cell { None } else { c.s(344).and_then(|h| cadcraft_doc::Handle::parse_hex(h.trim())).filter(|h| h.0 != 0) };
         let block = (t0.i64() == 2).then(|| {
             let mut attribs: Vec<(cadcraft_doc::Handle, String)> = Vec::new();
             let mut open = false;
@@ -421,6 +423,7 @@ pub(super) fn acad_table(tags: &[Tag], table_cells_left: &mut usize) -> Table {
         });
         flat.push(TableCell {
             text,
+            field,
             block,
             merged,
             text_height,
