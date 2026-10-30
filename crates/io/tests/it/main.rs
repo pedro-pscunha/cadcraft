@@ -127,5 +127,9 @@ mod viewport_clip_roundtrip;
 mod vport_tiles;
 mod vx_table;
 #[cfg(not(target_arch = "wasm32"))]
+mod writer_plot_fields;
+#[cfg(not(target_arch = "wasm32"))]
 mod writer_view_fields;
+#[cfg(not(target_arch = "wasm32"))]
+mod writer_vport_snap;
 mod xref_roundtrip;

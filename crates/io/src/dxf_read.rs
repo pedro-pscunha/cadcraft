@@ -46,6 +46,10 @@ use tables::{header, tables};
 
 pub(crate) mod mtext_dxf;
 
+pub(crate) fn page_setup_from_groups(tags: &[Tag]) -> PageSetup {
+    objects::page_setup(&common::T(tags))
+}
+
 /// Handle maps and references gathered while reading.
 #[derive(Default)]
 struct Rx {

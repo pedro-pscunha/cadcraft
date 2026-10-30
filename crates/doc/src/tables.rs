@@ -971,7 +971,7 @@ pub struct PageSetup {
     pub height_mm: f64,
     pub margins_mm: [f64; 4],
     pub landscape: bool,
-    /// "layout" | "extents" | "display" | "window" | "limits".
+    /// "layout" | "extents" | "display" | "window" | "limits" | "view".
     pub plot_area: String,
     /// Plot window corners `[x1, y1, x2, y2]` (DXF plot layout groups 48, 49, 140, 141); used when `plot_area` is "window".
     pub plot_window: [f64; 4],
