@@ -87,6 +87,7 @@ mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
+mod polyline3d_vertex_flags;
 #[cfg(not(target_arch = "wasm32"))]
 mod polyline_fit;
 mod polyline_owned_vertices;
