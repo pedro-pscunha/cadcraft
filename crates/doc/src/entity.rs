@@ -91,6 +91,7 @@ pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geomet
 pub use layout::{Image, ImageDefinition, Table, TableCell, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
 pub use mleader::{MLeader, MLeaderBranch, MLeaderContext, MLeaderRoot};
+pub use mleader_canonical::MLeaderParts;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

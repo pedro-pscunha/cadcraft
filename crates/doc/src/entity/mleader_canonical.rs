@@ -16,8 +16,12 @@
 
 use cadcraft_geom::{Mat4, OcsFrame, Vec2, Vec3};
 
-use super::{GeometryRevision, Insert, MLeader, Similarity};
+use super::{GeometryRevision, Insert, Leader, LeaderFrame, MLeader, MText, Similarity};
 use crate::{DocError, Result};
+
+fn frame_of(normal: Vec3) -> Result<OcsFrame> {
+    frame(normal, "block")
+}
 
 fn frame(normal: Vec3, what: &str) -> Result<OcsFrame> {
     OcsFrame::new(normal).ok_or_else(|| DocError::Invalid(format!("A canonical multileader needs a finite, non-zero {what} normal.")))
@@ -89,6 +93,51 @@ impl MLeader {
             });
         }
         Ok(moved)
+    }
+}
+
+/// A canonical multileader as the entities a file older than R2007 holds (no MULTILEADER), each in its own plane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MLeaderParts {
+    /// A LEADER for each leader line, through its vertices to its root's landing, then a LEADER without arrowhead for
+    /// each dogleg; all in the plane of `leader_normal`.
+    pub leaders: Vec<Leader>,
+    pub leader_normal: Vec3,
+    /// The text, with the normal of its plane.
+    pub text: Option<(MText, Vec3)>,
+    /// The block reference, its insertion point an OCS point of its normal, and that normal. The attributes are placed in
+    /// WCS by the block matrix; one the matrix cannot place exactly (a non-uniform scale) is left out.
+    pub block: Option<(Insert, Vec3)>,
+}
+
+impl MLeader {
+    /// The entities of a file older than R2007 for this multileader: `style` is the dimension style of its leaders and
+    /// `block_base` the base point of its block definition.
+    pub fn split_canonical(&self, style: &str, block_base: Vec3) -> Result<MLeaderParts> {
+        self.require_canonical()?;
+        let normal = self.leader_plane_normal()?;
+        let direction = self.context.x_axis.normalized();
+        let (text_height, text_width) = self.text.as_ref().map_or((0.0, 0.0), |t| (t.height, t.width));
+        let frame = LeaderFrame { direction, block_offset: Vec3::ZERO, annotation_offset: Vec3::ZERO, text_height, text_width };
+        let leader =
+            |vertices: Vec<Vec3>, arrow: bool, spline: bool| Leader { vertices, arrow, spline, style: style.to_string(), frame: Some(frame.clone()) };
+        let mut leaders: Vec<Leader> = self
+            .lines()
+            .map(|(root, branch)| leader(branch.vertices.iter().copied().chain(std::iter::once(root.landing)).collect(), true, self.spline))
+            .collect();
+        leaders.extend(
+            self.roots.iter().filter(|r| r.dogleg > 0.0 && !r.branches.is_empty()).map(|r| leader(vec![r.landing, r.dogleg_end()], false, false)),
+        );
+        let block = match (&self.block, self.block_world_transform(block_base)?) {
+            (Some(block), Some(matrix)) => {
+                let to = frame_of(self.context.block_normal)?;
+                let attribs = block.attribs.iter().filter_map(|a| a.transformed_canonical(&matrix).ok()).collect();
+                Some((Insert { insert: to.to_ocs(block.insert), attribs, ..block.clone() }, self.context.block_normal))
+            }
+            _ => None,
+        };
+        let text = self.text.clone().map(|t| (t, self.context.text_normal));
+        Ok(MLeaderParts { leaders, leader_normal: normal, text, block })
     }
 }
 

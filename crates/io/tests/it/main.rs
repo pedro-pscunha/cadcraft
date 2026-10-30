@@ -65,6 +65,7 @@ mod low_handseed;
 mod minsert_subclass;
 mod mleader_canonical;
 mod mleader_content;
+mod mleader_pre2007;
 mod mleader_roots;
 mod mleader_roundtrip;
 mod mline_dictionary_names;
