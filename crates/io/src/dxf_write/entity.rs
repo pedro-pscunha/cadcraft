@@ -423,7 +423,13 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
                     w.f(42, ew);
                     w.f(43, eh);
                 }
-                w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t));
+                // A DWG of 2007 to 2017 keeps the columns in the entity's ACAD extended data (it has no place for the object): the bridge
+                // writes that record for the DWG's own version, as AutoCAD does, and the object only from 2018.
+                if cx.dwg_bridge && t.columns.is_some() && cx.target >= Version::R2007 && cx.target < Version::R2018 {
+                    w.t.extend(crate::dxf_read::mtext_dxf::xdata_column_chunk(t, &e.common.xdata));
+                } else {
+                    w.t.extend(crate::dxf_read::mtext_dxf::embedded_tags(t));
+                }
             } else if t.columns.is_some() && cx.target >= Version::R2007 && !cx.entget {
                 // 2007 to 2017: the columns are the ACAD extended data of the entity.
                 w.t.extend(crate::dxf_read::mtext_dxf::xdata_column_chunk(t, &e.common.xdata));

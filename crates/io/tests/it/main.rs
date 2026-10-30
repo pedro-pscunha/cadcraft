@@ -98,6 +98,7 @@ mod mline_vectors_edit;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_layout_plot_type;
 mod mtext_background_fill;
+mod mtext_columns_dwg;
 mod mtext_columns_roundtrip;
 mod mtext_embedded_columns;
 mod mtext_embedded_object;
