@@ -11,6 +11,7 @@ use cadcraft_geom::{SplineSpace, Vec3};
 
 use super::dim::LeaderFrame;
 use super::{Common, Entity, EntityKind, GeometryRevision, Handle};
+use crate::{Family, FamilySet};
 
 #[derive(serde::Deserialize)]
 pub(super) struct SerializedEntity {
@@ -22,9 +23,9 @@ pub(super) struct SerializedEntity {
     kind: EntityKind,
 }
 
-// Deserialization does not promote yet: until display, snaps, pick and grips read canonical payloads, a promoted
-// spline or leader would be refused by every edit that still takes the legacy path. Reader activation calls
-// `promote_legacy_spline_leader` here.
+// Deserialization does not promote: until display, snaps, pick and grips read canonical payloads, a promoted
+// spline or leader would be refused by every edit that still takes the legacy path. A load promotes with
+// `apply_load_policy`, after it, with the families of its caller.
 impl TryFrom<SerializedEntity> for Entity {
     type Error = crate::DocError;
     fn try_from(value: SerializedEntity) -> crate::Result<Self> {
@@ -57,6 +58,28 @@ pub enum Promotion {
 
 fn is_plus_z(normal: Vec3) -> bool {
     normal.x == 0.0 && normal.y == 0.0 && normal.z > 0.0 && normal.z.is_finite()
+}
+
+/// What a load does to the entities it deserializes: it promotes the old payloads of the families in its mask. The mask is
+/// the caller's, so concurrent loads with different masks share nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoadPolicy {
+    pub families: FamilySet,
+}
+
+impl LoadPolicy {
+    pub fn new(families: FamilySet) -> Self {
+        LoadPolicy { families }
+    }
+}
+
+/// Apply a load policy to an entity just deserialized: [`promote_legacy_spline_leader`] when the policy has the entity's family,
+/// nothing otherwise. An explicit revision is never overridden, and a raw unit is neither promoted nor demoted.
+pub fn apply_load_policy(entity: &mut Entity, policy: &LoadPolicy) -> Promotion {
+    match Family::of(&entity.kind) {
+        Some(family) if policy.families.contains(family) => promote_legacy_spline_leader(entity),
+        _ => Promotion::NotApplicable,
+    }
 }
 
 /// Promote an old SPLINE or LEADER on a +Z plane to the canonical revision, or leave it as it is.
