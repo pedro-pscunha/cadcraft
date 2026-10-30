@@ -157,7 +157,14 @@ fn selectable(d: &Drawing, e: &Entity) -> bool {
 pub(crate) type Cands<'a> = Box<dyn Iterator<Item = (&'a Entity, Option<Bounds2>)> + 'a>;
 
 pub(crate) fn bounds_of(d: &Drawing, e: &Entity, known: Option<Bounds2>) -> Bounds2 {
-    known.unwrap_or_else(|| entity_bounds(d, e, 0))
+    known.unwrap_or_else(|| {
+        // A canonical entity's bounds are those of its WCS geometry; one the resolver refuses has none.
+        if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 {
+            cadcraft_render::entity_world_bounds(d, e, &cadcraft_geom::Mat4::IDENTITY).unwrap_or(Bounds2::EMPTY)
+        } else {
+            entity_bounds(d, e, 0)
+        }
+    })
 }
 
 pub(crate) fn is_infinite(e: &Entity) -> bool {
