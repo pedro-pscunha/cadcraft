@@ -355,6 +355,26 @@ mod native {
         }
     }
 
+    /// How AutoCAD stores the height of a dynamic column of an R2018 MTEXT: the negative of the text's extents height when the column has
+    /// no height of its own. AutoCAD's DXF of the same text writes 0 there (group 46 of the embedded object), which is what the DXF text
+    /// holds; measured on the 2,102 dynamic-column MTEXTs of DPInc-2018, whose DWG fields equal the negated extents height in 2,100 and
+    /// 1 of 2 columns, and carry a positive height only where one was set (366), without an exception. The DWG written from the DXF's 0
+    /// reads back as 0 where AutoCAD's reads as -0.40327 (DXF group 46: 2,100 of DPInc-2018's findings).
+    fn mtext_column_heights(doc: &mut acadrust::CadDocument) {
+        if doc.version < acadrust::DxfVersion::AC1032 {
+            return;
+        }
+        for e in doc.entities_mut() {
+            let acadrust::entities::EntityType::MText(m) = e else { continue };
+            let columns = &mut m.column_data;
+            if columns.column_type == 2 && !columns.auto_height && m.extents_height > 0.0 {
+                for height in columns.heights.iter_mut().filter(|height| **height == 0.0) {
+                    *height = -m.extents_height;
+                }
+            }
+        }
+    }
+
     /// Leave out DGN line style components (`LS*COMPONENT`) that no line style definition uses
     /// (#1482). A drawing that once came from MicroStation can carry hundreds of thousands of
     /// them, orphaned copies piled up by earlier DGN imports and copy-pastes (AutoCAD's PURGE
@@ -581,6 +601,7 @@ mod native {
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
         spline_flags(&mut doc);
+        mtext_column_heights(&mut doc);
         add_variable_dictionary(&mut doc);
         current_layer(&mut doc);
         std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec_omitting_unwritable(&doc)))
@@ -821,6 +842,40 @@ mod tests {
                 (Some(2), 9, 0, 4, false, false)
             ]
         );
+    }
+
+    /// An MTEXT of two dynamic columns as CADCraft's DXF writes it from AutoCAD's: the embedded object's heights are 0 where the column
+    /// has none of its own and 2.5 where one was set, and the outer extents height (group 43) is 0.4. AutoCAD's DWG of the same text
+    /// holds -0.4 and 2.5.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn column_mtext(version: &str, first_height: &str, second_height: &str) -> String {
+        let record = "  0\nMTEXT\n  5\nE76F4\n100\nAcDbEntity\n  8\n0\n100\nAcDbMText\n 10\n10\n 20\n20\n 30\n0\n 40\n0.15\n 41\n2.8\n 46\n0\n 71\n1\n 72\n5\n  1\nvent\n  7\nStandard\n 11\n1\n 21\n0\n 31\n0\n 42\n0.87\n 43\n0.4\n 73\n1\n 44\n1\n";
+        let embedded = format!(
+            "101\nEmbedded Object\n 70\n1\n 10\n1\n 20\n0\n 30\n0\n 11\n10\n 21\n20\n 31\n0\n 40\n2.8\n 41\n0\n 42\n0.87\n 43\n0.4\n 71\n2\n 72\n2\n 44\n2.8\n 45\n1\n 73\n0\n 74\n0\n 46\n{first_height}\n 46\n{second_height}\n"
+        );
+        format!(
+            "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\n{version}\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n{record}{embedded}  0\nENDSEC\n  0\nEOF\n"
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn column_heights_of(dwg: &[u8]) -> Vec<Vec<f64>> {
+        let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+        doc.entities()
+            .filter_map(|e| if let acadrust::entities::EntityType::MText(m) = e { Some(m.column_data.heights.clone()) } else { None })
+            .collect()
+    }
+
+    /// A dynamic column without a height of its own is stored as -extents height in an R2018 DWG, as AutoCAD stores it (DPInc-2018: 2,100
+    /// of 2,102 texts read back 0 before); a height that was set stays; before R2018 the DWG has no column heights at all.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_dynamic_column_without_a_height_is_stored_as_the_negative_extents_height() {
+        let dwg = dxf_to_dwg(column_mtext("AC1032", "0", "2.5").as_bytes()).unwrap();
+        assert_eq!(column_heights_of(&dwg), vec![vec![-0.4, 2.5]]);
+        // No extents height: nothing to negate.
+        let none = column_mtext("AC1032", "0", "2.5").replace(" 43\n0.4\n", " 43\n0\n");
+        assert_eq!(column_heights_of(&dxf_to_dwg(none.as_bytes()).unwrap()), vec![vec![0.0, 2.5]]);
     }
 
     #[test]
