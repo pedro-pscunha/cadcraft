@@ -74,12 +74,28 @@ pub(crate) fn draw(
     if let EntityKind::LwPolyline(polyline) = &entity.kind
         && (polyline.const_width > 0.0 || polyline.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0))
     {
-        return Err(unsupported("wide-polyline paint roles"));
+        return super::world_roles::wide_polyline(builder, context, entity, polyline, color, lineweight, linetype, linetype_scale);
     }
-    if matches!(entity.kind, EntityKind::Point(_)) && context.d.header.i64("PDMODE", 0) != 0 {
-        return Err(unsupported("point-marker frames"));
+    if let EntityKind::Point(point) = &entity.kind
+        && context.d.header.i64("PDMODE", 0) != 0
+    {
+        return super::world_roles::point_marker(builder, context, entity, point, color, lineweight);
     }
+    // A line pattern runs along the curve in WCS. The kinds the legacy painter strokes one primitive at a time have it; a polyline
+    // with generation on strokes its vertices as one line, which has no per-primitive form here.
+    let patterned = matches!(
+        entity.kind,
+        EntityKind::Line(_)
+            | EntityKind::Circle(_)
+            | EntityKind::Arc(_)
+            | EntityKind::Ellipse(_)
+            | EntityKind::LwPolyline(_)
+            | EntityKind::Polyline3d(_)
+            | EntityKind::Spline(_)
+            | EntityKind::Helix(_)
+    );
     if linetype.is_some()
+        && !patterned
         && !matches!(
             entity.kind,
             EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::Solid(_) | EntityKind::Trace(_) | EntityKind::Hatch(_) | EntityKind::Wipeout(_)
@@ -87,8 +103,30 @@ pub(crate) fn draw(
     {
         return Err(unsupported("spatial line patterns"));
     }
+    if linetype.is_some() && matches!(&entity.kind, EntityKind::LwPolyline(p) if p.plinegen) {
+        return Err(unsupported("polyline linetype generation"));
+    }
     let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
     let projected = Ctx { xf: Mat3::IDENTITY, ..context.clone() };
+    if let (true, Some(lt)) = (patterned, linetype) {
+        let pattern =
+            super::world_roles::Pattern { linetype: lt, scale: linetype_scale * context.xf.scale_factor().max(1e-12), min: builder.opts.min_dash };
+        for primitive in geometry.primitives() {
+            if let Some(result) = super::world_roles::dashed(builder, &projected, color, lineweight, &pattern, primitive) {
+                result?;
+            } else {
+                paint_geometry(
+                    builder,
+                    &projected,
+                    &WorldGeometry::from_primitives(entity.handle, vec![primitive.clone()])?,
+                    entity.handle,
+                    color,
+                    lineweight,
+                )?;
+            }
+        }
+        return Ok(());
+    }
     if matches!(entity.kind, EntityKind::Solid(_) | EntityKind::Trace(_) | EntityKind::Wipeout(_)) {
         let polygon: Vec<_> = geometry
             .primitives()
