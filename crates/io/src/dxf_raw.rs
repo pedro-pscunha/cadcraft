@@ -725,6 +725,9 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
         }
         x.props = props.iter().filter(|t| matches!(t.code, 347 | 348 | 284)).map(raw).collect();
         x.subclass = subclass_groups(kind, tags);
+        // A group the record's own subclass keeps (a VPORT's visual style, 348) is not kept a second time as a property.
+        let kept = &x.subclass;
+        x.props.retain(|p| !kept.iter().any(|k| k.code == p.code && k.value == p.value));
     }
     if matches!(kind, "BLOCK" | "ENDBLK") {
         x.props.extend(tags.iter().find(|t| t.code == 8).map(raw));
