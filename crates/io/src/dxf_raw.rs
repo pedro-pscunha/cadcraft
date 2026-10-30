@@ -516,8 +516,9 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
 /// - `AcDbDimension`: the version (280) first, then the block, the points, the type and presentation groups, the measurement, the text,
 ///   the rotation, the normal and the style (DXF Reference).
 /// - `AcDbEntity`: measured on the entities of the AutoCAD 2010 and 2018 saves of Citycon, DPInc and Planeta.
-/// - `AcDbMText`, `AcDbText`, `AcDbWipeout`, `AcDbRasterImage`, `AcDbTextStyleTableRecord`, `AcDbLeader`, `AcDbPlotSettings`: the same.
-const SUBCLASS_ORDER: [(&str, &[i32]); 9] = [
+/// - `AcDbMText`, `AcDbText`, `AcDbWipeout`, `AcDbRasterImage`, `AcDbTextStyleTableRecord`, `AcDbLeader`, `AcDbPlotSettings`, `AcDbViewport`, `AcDbLayerTableRecord`: the same.
+/// - The embedded multiline text of an attribute (`AcDbAttribute`, `AcDbAttributeDefinition`, after their 101) follows the `AcDbMText` order.
+const SUBCLASS_ORDER: [(&str, &[i32]); 11] = [
     ("AcDbDimension", &[280, 2, 10, 11, 12, 70, 1, 71, 72, 41, 42, 73, 74, 75, 53, 51, 54, 210, 3]),
     ("AcDbEntity", &[67, 410, 8, 6, 347, 62, 420, 430, 440, 48, 60, 92, 160, 310, 370, 380, 390, 284, 348]),
     ("AcDbMText", &[10, 40, 41, 46, 71, 72, 3, 1, 7, 210, 11, 73, 44, 90, 63, 421, 45, 441]),
@@ -525,6 +526,14 @@ const SUBCLASS_ORDER: [(&str, &[i32]); 9] = [
     ("AcDbWipeout", &[90, 10, 11, 12, 13, 340, 70, 280, 281, 282, 283, 290, 360, 71, 91, 14]),
     ("AcDbRasterImage", &[90, 10, 11, 12, 13, 340, 70, 280, 281, 282, 283, 290, 360, 71, 91, 14]),
     ("AcDbTextStyleTableRecord", &[2, 70, 40, 41, 50, 71, 42, 3, 4]),
+    (
+        "AcDbViewport",
+        &[
+            10, 40, 41, 68, 69, 12, 13, 14, 15, 16, 17, 42, 43, 44, 45, 50, 51, 72, 331, 90, 1, 281, 71, 74, 110, 120, 130, 111, 121, 131, 112, 122,
+            132, 79, 146, 170, 61, 348, 292, 282, 141, 142, 63, 421, 361,
+        ],
+    ),
+    ("AcDbLayerTableRecord", &[2, 70, 62, 420, 430, 6, 290, 370, 390, 347, 348]),
     ("AcDbLeader", &[3, 71, 72, 73, 74, 75, 40, 41, 76, 10, 77, 340, 210, 211, 212, 213]),
     ("AcDbPlotSettings", &[1, 2, 4, 6, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 140, 141, 142, 143, 70, 72, 73, 74, 7, 75, 147, 76, 77, 78, 148, 149]),
 ];
@@ -537,6 +546,9 @@ fn group_rank(order: &[i32], code: i32) -> usize {
         22 | 32 => 12,
         23 => 13,
         24 => 14,
+        25 => 15,
+        26 | 36 => 16,
+        27 | 37 => 17,
         220 | 230 => 210,
         221 | 231 => 211,
         222 | 232 => 212,
@@ -551,6 +563,7 @@ fn group_rank(order: &[i32], code: i32) -> usize {
 /// whose version group (280) does not follow a dimension's subclass marker ("unexpected DXF group code: 280"). A multiline text's
 /// embedded object (after its 101) and the xdata are not subclass groups.
 pub(crate) fn order_subclass_groups(tags: &mut [Tag]) {
+    let mtext = SUBCLASS_ORDER.iter().find(|(m, _)| *m == "AcDbMText").map_or(&[][..], |(_, order)| order);
     let mut at = 0;
     while at < tags.len() {
         if tags[at].code != 100 {
@@ -559,11 +572,17 @@ pub(crate) fn order_subclass_groups(tags: &mut [Tag]) {
         }
         let marker = tags[at].str();
         let start = at + 1;
-        let stop = tags[start..].iter().position(|t| matches!(t.code, 0 | 100 | 101) || t.code >= 1000).map_or(tags.len(), |n| start + n);
+        let ends = |t: &Tag| matches!(t.code, 0 | 100) || t.code >= 1000;
+        let stop = tags[start..].iter().position(|t| ends(t) || t.code == 101).map_or(tags.len(), |n| start + n);
         if let Some((_, order)) = SUBCLASS_ORDER.iter().find(|(m, _)| *m == marker.trim()) {
             tags[start..stop].sort_by_key(|t| group_rank(order, t.code));
         }
-        at = stop;
+        let mut end = stop;
+        if tags.get(stop).is_some_and(|t| t.code == 101) && matches!(marker.trim(), "AcDbAttribute" | "AcDbAttributeDefinition") {
+            end = tags[stop + 1..].iter().position(ends).map_or(tags.len(), |n| stop + 1 + n);
+            tags[stop + 1..end].sort_by_key(|t| group_rank(mtext, t.code));
+        }
+        at = end;
     }
 }
 
