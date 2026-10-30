@@ -14,17 +14,22 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
     if !dm.assoc.is_empty() {
         return;
     }
+    let links = links_of(d, dim_h, dm, tail);
+    if !links.is_empty() {
+        let _ = d.modify_entity_including_blocks(dim_h, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind {
+                dm.assoc = links;
+            }
+        });
+    }
+}
+
+/// The links a DIMASSOC object (`tail`: its groups after the dimension pointer) gives dimension `dim_h`, which the reader sets and which
+/// the writer compares against the dimension's own to know whether the standard object says all of them.
+pub(crate) fn links_of(d: &Drawing, dim_h: Handle, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
     // A radial or diametric dimension names its circle once, by its centre.
     if matches!(dm.kind, DimKind::Radius | DimKind::Diameter) {
-        let links = radial_links(d, dim_h, dm, tail);
-        if !links.is_empty() {
-            let _ = d.modify_entity_including_blocks(dim_h, |e| {
-                if let EntityKind::Dimension(dm) = &mut e.kind {
-                    dm.assoc = links;
-                }
-            });
-        }
-        return;
+        return radial_links(d, dim_h, dm, tail);
     }
     let slots = dm.kind.association_points();
     let flags = T(tail).i(90).unwrap_or(0);
@@ -45,13 +50,7 @@ pub(super) fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
             links.push(DimAssoc { point: (*point).to_string(), handle: main, snap });
         }
     }
-    if !links.is_empty() {
-        let _ = d.modify_entity_including_blocks(dim_h, |e| {
-            if let EntityKind::Dimension(dm) = &mut e.kind {
-                dm.assoc = links;
-            }
-        });
-    }
+    links
 }
 
 /// Associations of a radial or diametric dimension from its one standard reference: the circle

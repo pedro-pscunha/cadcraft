@@ -14,8 +14,8 @@ pub(super) fn annotative_xdata(w: &mut W) {
     w.s(1002, "}");
 }
 
-/// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
-pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
+/// Override (`ACAD` DSTYLE) and, when the DIMASSOC object does not hold every link (`standard_assoc`), associativity (`CADCRAFT` ASSOC) xdata of a dimension.
+pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx, standard_assoc: bool) {
     let mut entries: Vec<(i64, Vec<cadcraft_dxf::Tag>)> = Vec::new();
     let mut sah = false;
     for (k, v) in &dm.overrides {
@@ -54,7 +54,9 @@ pub(super) fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
     if matches!(dm.kind, DimKind::ArcLength) {
         ours.extend(dxf_ext::arclen_xdata(dm.p15));
     }
-    if !dm.assoc.is_empty() {
+    // The links travel as CADCraft xdata only when the DIMASSOC object AutoCAD uses does not hold them all: a public file carries what
+    // AutoCAD writes. The reader still reads the xdata of files CADCraft saved before.
+    if !dm.assoc.is_empty() && !standard_assoc {
         ours.extend(dxf_ext::assoc_xdata(&dm.assoc));
     }
     ours.extend(dxf_ext::marks_xdata(&dm.marks));
@@ -78,11 +80,18 @@ pub(super) fn oblique_52(w: &mut W, dm: &Dimension, base: f64) {
 
 /// An entity's group 440 (DXF Reference): ByBlock is `0x01000000`, a fixed transparency its alpha
 /// with the "by alpha" flag `0x02000000` (the alpha mapping layers use). ByLayer writes nothing.
-fn transparency_440(t: Transparency) -> Option<i64> {
-    match t {
+fn transparency_440(c: &Common) -> Option<i64> {
+    match c.transparency {
         Transparency::ByLayer => None,
         Transparency::ByBlock => Some(0x0100_0000),
-        Transparency::Percent(p) => Some(i64::from(0x0200_0000 | ((100 - u32::from(p.min(90))) * 255 / 100))),
+        Transparency::Percent(p) => {
+            // The alpha the file gave, while the percentage still shows it; else the one AutoCAD stores for the percentage.
+            let alpha = c
+                .transparency_alpha
+                .filter(|a| Transparency::from_alpha(*a) == Transparency::Percent(p))
+                .unwrap_or_else(|| Transparency::default_alpha(p));
+            Some(0x0200_0000 | i64::from(alpha))
+        }
     }
 }
 
@@ -114,7 +123,7 @@ pub(super) fn common_x(w: &mut W, e: &Entity, owner: &str, paper: bool, subclass
     if !e.common.visible {
         w.i(60, 1);
     }
-    if let Some(v) = transparency_440(e.common.transparency) {
+    if let Some(v) = transparency_440(&e.common) {
         w.i(440, v);
     }
     plot_style(w, &e.common.plot_style);
