@@ -117,7 +117,10 @@ pub(super) fn run_move(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     let d = delta_of("copy", p)?;
-    let n = p.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, 10_000);
+    let n = match p.get("count") {
+        None => 1,
+        Some(v) => v.as_u64().filter(|n| (1..=10_000).contains(n)).ok_or_else(|| bad("copy", "`count` must be an integer from 1 to 10000"))?,
+    };
     let out = copy_transformed(s, &hs, (1..=n).map(|k| Mat3::translate(d * k as f64)))?;
     Ok(json!({ "handles": out.into_iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }

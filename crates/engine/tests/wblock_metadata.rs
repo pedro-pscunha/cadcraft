@@ -73,7 +73,7 @@ fn wblock_keeps_selected_metadata_and_only_its_referenced_foreign_objects() {
         for unwanted in ["unselected-owned", "unrelated-root", "UnusedMaterial"] {
             assert!(!tags.iter().any(|t| t.str() == unwanted), "{format}: {unwanted}");
         }
-        let back = cadcraft_io::read(&bytes, &format!("block.{format}")).unwrap();
+        let back = cadcraft_io::read(&bytes, format!("block.{format}")).unwrap();
         assert_eq!(back.model.iter().next().unwrap().common.plot_style, "SelectedPen");
         assert_eq!(session.doc().unwrap().entity_count(), 2, "WBLOCK does not mutate the source");
         std::fs::remove_file(path).unwrap();
