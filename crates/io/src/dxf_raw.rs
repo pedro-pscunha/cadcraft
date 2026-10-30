@@ -1013,36 +1013,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     link_suns(&mut f, &viewports, &ids);
-    // The classes of kept objects and of entities of types CADCraft doesn't model.
-    let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
-    types.extend(all_entities(d).filter_map(|e| match &e.kind {
-        EntityKind::Unknown(u) => Some(up(&u.dxf_type)),
-        _ => None,
-    }));
-    // A proxy's class is the one its group 91 numbers in the file's CLASSES: keep it too, and the
-    // file's class order, by which saving renumbers the proxy.
-    let class_order: Vec<String> =
-        classes.iter().filter(|(k, _, _)| k == "CLASS").take(MAX_OBJECTS).map(|(_, _, t)| up(&val(t, 1).unwrap_or_default())).collect();
-    let mut proxies = false;
-    let proxy_tags = f.objects.iter().filter(|o| is_proxy(&o.kind)).map(|o| &o.tags);
-    let proxy_tags = proxy_tags.chain(all_entities(d).filter_map(|e| match &e.kind {
-        EntityKind::Unknown(u) if is_proxy(&u.dxf_type) => Some(&u.tags),
-        _ => None,
-    }));
-    for tags in proxy_tags {
-        proxies = true;
-        if let Some(name) = class_index(class_number(tags.iter().map(|r| (r.code, r.value.as_str())))).and_then(|i| class_order.get(i)) {
-            types.insert(name.clone());
-        }
-    }
-    if proxies {
-        f.class_order = class_order;
-    }
-    for (kind, _, t) in &classes {
-        if kind == "CLASS" && val(t, 1).is_some_and(|n| types.contains(&up(&n))) && f.classes.len() < MAX_OBJECTS {
-            f.classes.push(t.iter().map(raw).collect());
-        }
-    }
+    keep_object_classes(&mut f, d, &classes);
     // The roles of the handles kept data refers to.
     let mut refs: Vec<String> = Vec::new();
     let mut note = |tags: &[RawTag]| refs.extend(tags.iter().filter(|r| is_pointer(r.code)).map(|r| norm(&r.value)));
@@ -1074,6 +1045,39 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
     if !f.is_empty() {
         d.foreign = Arc::new(f);
+    }
+}
+
+/// The classes of kept objects and of entities of types CADCraft doesn't model.
+fn keep_object_classes(f: &mut Foreign, d: &Drawing, classes: &Recs<'_>) {
+    let mut types: HashSet<String> = f.objects.iter().map(|o| up(&o.kind)).collect();
+    types.extend(all_entities(d).filter_map(|e| match &e.kind {
+        EntityKind::Unknown(u) => Some(up(&u.dxf_type)),
+        _ => None,
+    }));
+    // A proxy's class is the one its group 91 numbers in the file's CLASSES: keep it too, and the
+    // file's class order, by which saving renumbers the proxy.
+    let class_order: Vec<String> =
+        classes.iter().filter(|(k, _, _)| k == "CLASS").take(MAX_OBJECTS).map(|(_, _, t)| up(&val(t, 1).unwrap_or_default())).collect();
+    let mut proxies = false;
+    let proxy_tags = f.objects.iter().filter(|o| is_proxy(&o.kind)).map(|o| &o.tags);
+    let proxy_tags = proxy_tags.chain(all_entities(d).filter_map(|e| match &e.kind {
+        EntityKind::Unknown(u) if is_proxy(&u.dxf_type) => Some(&u.tags),
+        _ => None,
+    }));
+    for tags in proxy_tags {
+        proxies = true;
+        if let Some(name) = class_index(class_number(tags.iter().map(|r| (r.code, r.value.as_str())))).and_then(|i| class_order.get(i)) {
+            types.insert(name.clone());
+        }
+    }
+    if proxies {
+        f.class_order = class_order;
+    }
+    for (kind, _, t) in classes {
+        if kind == "CLASS" && val(t, 1).is_some_and(|n| types.contains(&up(&n))) && f.classes.len() < MAX_OBJECTS {
+            f.classes.push(t.iter().map(raw).collect());
+        }
     }
 }
 
