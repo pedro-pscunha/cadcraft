@@ -176,11 +176,21 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
         }
         "DIMENSION" => EntityKind::Dimension(dimension_from(&t, if c.extrusion.z < 0.0 { Some(c.extrusion) } else { None })),
         "LEADER" => EntityKind::Leader(Leader {
-            vertices: t.pts(10).into_iter().map(|p| p.to3(0.0)).collect(),
+            // The vertices are WCS points: their Z stays when the record has one for each.
+            vertices: {
+                let (xs, ys, zs) = (t.all_f(10), t.all_f(20), t.all_f(30));
+                if xs.len() == ys.len() && xs.len() == zs.len() {
+                    xs.into_iter().zip(ys).zip(zs).map(|((x, y), z)| Vec3::new(x, y, z)).collect()
+                } else {
+                    t.pts(10).into_iter().map(|p| p.to3(0.0)).collect()
+                }
+            },
             arrow: t.i(71).unwrap_or(1) != 0,
             spline: t.i(72).unwrap_or(0) != 0,
             style: t.s(3).unwrap_or_else(|| "Standard".into()),
-            frame: None,
+            // The direction, offsets and annotation size are kept as the record has them (a record with none keeps none).
+            frame: [40, 41, 211, 212, 213].iter().any(|c| t.f(*c).is_some()).then(|| leader_frame(&t)),
+            links: leader_links(&t),
         }),
         // Names behind handles follow in `entity_extras` and `Objects::apply`.
         "MULTILEADER" | "MLEADER" => EntityKind::MLeader(crate::dxf_mleader::read(tags)),
@@ -232,8 +242,15 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             let u = t.p(11);
             let v = t.p(12);
             // Clip vertices are in pixel space: origin at the image's top-left corner, y pointing down.
-            let pts: Vec<Vec2> = t.pts(14).into_iter().map(|q| o.xy() + u.xy() * (q.x + 0.5) + v.xy() * (0.5 - q.y)).collect();
-            EntityKind::Wipeout(Wipeout { boundary: pts, display: wipeout_display(&t), frame: None })
+            let image = cadcraft_doc::WipeoutFrame {
+                origin: o,
+                u,
+                v,
+                size: Vec2::new(t.fd(13, 1.0), t.fd(23, 1.0)),
+                clip_type: u8::try_from(t.i(71).unwrap_or(2)).unwrap_or(2),
+                clip: t.pts(14),
+            };
+            EntityKind::Wipeout(Wipeout { boundary: image.legacy_outline(), display: wipeout_display(&t), frame: None, image: Some(image) })
         }
         // The file path comes from the IMAGEDEF object (`dxf_image::resolve`).
         "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
@@ -259,6 +276,28 @@ pub(super) fn wipeout_display(t: &T) -> cadcraft_doc::WipeoutDisplay {
         brightness: t.i(281).unwrap_or(d.brightness),
         contrast: t.i(282).unwrap_or(d.contrast),
         fade: t.i(283).unwrap_or(d.fade),
+    }
+}
+
+/// The direction, offsets and annotation size of a LEADER (groups 211, 212, 213, 40, 41), the defaults of a record for a group it lacks.
+pub(super) fn leader_frame(t: &T) -> cadcraft_doc::LeaderFrame {
+    let vector = |code: i32, default: Vec3| if t.f(code).is_some() { t.p(code) } else { default };
+    cadcraft_doc::LeaderFrame {
+        direction: vector(211, Vec3::new(1.0, 0.0, 0.0)),
+        block_offset: vector(212, Vec3::ZERO),
+        annotation_offset: vector(213, Vec3::ZERO),
+        text_height: t.fd(40, 0.0),
+        text_width: t.fd(41, 0.0),
+    }
+}
+
+/// The annotation type, hookline settings and annotation handle of a LEADER (groups 73, 74, 75, 340).
+pub(super) fn leader_links(t: &T) -> cadcraft_doc::LeaderLinks {
+    cadcraft_doc::LeaderLinks {
+        creation: t.i(73),
+        hookline_direction: t.i(74),
+        hookline: t.i(75),
+        annotation: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
     }
 }
 

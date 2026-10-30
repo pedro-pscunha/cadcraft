@@ -43,7 +43,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 fn wipeout(frame: WipeoutFrame) -> Wipeout {
-    Wipeout { boundary: Vec::new(), display: Default::default(), frame: Some(frame) }
+    Wipeout { boundary: Vec::new(), display: Default::default(), frame: Some(frame), image: None }
 }
 
 fn frame() -> WipeoutFrame {
@@ -104,7 +104,12 @@ fn each_wipeout_frame_field_alone_reaches_the_dxf_and_the_dwg() {
 fn the_display_settings_of_a_wipeout_survive_the_dxf_and_the_dwg() {
     let display = WipeoutDisplay { flags: 15, clipping: 0, brightness: 70, contrast: 30, fade: 20 };
     let canonical = Wipeout { display, ..wipeout(frame()) };
-    let legacy = Wipeout { boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 3.0), Vec2::new(0.0, 3.0)], display, frame: None };
+    let legacy = Wipeout {
+        boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 3.0), Vec2::new(0.0, 3.0)],
+        display,
+        frame: None,
+        image: None,
+    };
     for (name, w, revision) in [("canonical", canonical, GeometryRevision::CanonicalV2), ("legacy", legacy, GeometryRevision::LegacyProjectedV1)] {
         let mut d = Drawing::new_metric();
         let handle = d.new_handle();

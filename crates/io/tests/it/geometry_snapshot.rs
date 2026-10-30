@@ -287,7 +287,7 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
             assert_eq!(got.iter().filter(|t| t.code == code).count(), 1, "group {code} once: {got:?}");
         }
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3);
-        // A vertex edit writes the model: its vertices once and no plane from the source.
+        // A vertex edit writes the model: its vertices once, and the plane, direction, offsets and sizes the leader keeps.
         let mut d = d;
         let h = first_handle(&d);
         d.modify_entity(h, |e| {
@@ -298,7 +298,9 @@ fn a_leader_keeps_its_z_values_plane_and_offsets_without_a_second_owner() {
         .unwrap();
         let got = record(&cadcraft_io::write_dxf(&d), "LEADER");
         assert_eq!(got.iter().filter(|t| t.code == 10).count(), 3, "{got:?}");
-        assert!(!got.iter().any(|t| (210..=213).contains(&t.code)), "{got:?}");
+        for code in [40, 41, 210, 211, 212, 213] {
+            assert_eq!(got.iter().filter(|t| t.code == code).count(), 1, "group {code} once after the edit: {got:?}");
+        }
     }
 }
 

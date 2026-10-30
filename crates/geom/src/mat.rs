@@ -98,6 +98,12 @@ impl Mat3 {
     pub fn is_mirroring(&self) -> bool {
         self.det() < 0.0
     }
+    /// Whether the map keeps shapes: its columns are perpendicular and of one length (a rotation, a uniform scale, a reflection).
+    pub fn is_similarity(&self) -> bool {
+        let k = self.scale_factor();
+        (self.a * self.c + self.b * self.d).abs() <= 1e-9 * k * k
+            && (self.a * self.a + self.b * self.b - self.c * self.c - self.d * self.d).abs() <= 1e-9 * k * k
+    }
 }
 
 /// A 4x4 transform, row-major, for 3D views and block transforms with elevation.

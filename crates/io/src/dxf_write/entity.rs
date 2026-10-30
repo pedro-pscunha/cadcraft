@@ -689,8 +689,14 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             w.s(3, &l.style);
             w.i(71, i64::from(l.arrow));
             w.i(72, i64::from(l.spline));
-            // A canonical leader writes its annotation size, its plane, direction and offsets as it holds them.
-            if let (Some(f), Some(_)) = (&l.frame, canonical_plane(e)) {
+            // The annotation type and hookline settings of the record, then its annotation size, plane, direction and offsets as
+            // the leader holds them (a leader made here has none of them).
+            for (code, value) in [(73, l.links.creation), (74, l.links.hookline_direction), (75, l.links.hookline)] {
+                if let Some(value) = value {
+                    w.i(code, value);
+                }
+            }
+            if let Some(f) = &l.frame {
                 w.f(40, f.text_height);
                 w.f(41, f.text_width);
             }
@@ -698,8 +704,12 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             for v in &l.vertices {
                 w.p(10, *v);
             }
-            if let (Some(f), Some(normal)) = (&l.frame, canonical_plane(e)) {
-                w.p(210, normal);
+            // The annotation it points at, while that entity is still in the drawing.
+            if let Some(h) = l.links.annotation.filter(|h| w.used.contains(h)) {
+                w.s(340, h.hex());
+            }
+            if let Some(f) = &l.frame {
+                w.p(210, canonical_plane(e).unwrap_or(e.common.extrusion));
                 w.p(211, f.direction);
                 w.p(212, f.block_offset);
                 w.p(213, f.annotation_offset);
@@ -964,7 +974,8 @@ fn wipeout_display(w: &mut W, d: &cadcraft_doc::WipeoutDisplay) {
 
 fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: bool, _cx: &Ctx) {
     if let EntityKind::Wipeout(wo) = &e.kind {
-        if let Some(frame) = &wo.frame {
+        // The frame of a canonical wipeout, or the source frame of a legacy one while it still describes its boundary.
+        if let Some(frame) = wo.frame.as_ref().or_else(|| wo.source_image()) {
             write_canonical_wipeout(w, e, owner, paper, frame, &wo.display);
             return;
         }
@@ -1052,7 +1063,10 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
     for (root, arm) in m.lines().take(64) {
         let mut vertices = arm.vertices.clone();
         vertices.push(root.landing);
-        let le = part(w, EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), frame: None }));
+        let le = part(
+            w,
+            EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), frame: None, links: Default::default() }),
+        );
         entity(w, d, &le, owner, paper, cx);
     }
     if let Some(t) = &m.text {

@@ -29,8 +29,12 @@ fn wipeout_from_polyline(s: &mut Session, h: Handle, erase: bool) -> Result<Hand
     if p.vertices.iter().any(|v| v.bulge.abs() > 1e-12) {
         return Err(other("Polylines with arc segments cannot be used for wipeouts."));
     }
-    let nh =
-        s.add_entity(EntityKind::Wipeout(Wipeout { boundary: p.vertices.iter().map(|v| v.p).collect(), display: Default::default(), frame: None }))?;
+    let nh = s.add_entity(EntityKind::Wipeout(Wipeout {
+        boundary: p.vertices.iter().map(|v| v.p).collect(),
+        display: Default::default(),
+        frame: None,
+        image: None,
+    }))?;
     if erase {
         s.doc_mut()?.remove_entity(h);
     }
@@ -49,7 +53,7 @@ pub(super) fn run_wipeout(s: &mut Session, p: &Value) -> Result<Value> {
     if pts.len() < 3 || pts.len() > MAX_GEN || shoelace(&pts).abs() < 1e-12 {
         return Err(bad("wipeout", "need 3+ points enclosing an area"));
     }
-    added(s.add_entity(EntityKind::Wipeout(Wipeout { boundary: pts, display: Default::default(), frame: None }))?)
+    added(s.add_entity(EntityKind::Wipeout(Wipeout { boundary: pts, display: Default::default(), frame: None, image: None }))?)
 }
 
 #[derive(Default)]
@@ -125,7 +129,7 @@ impl Interactive for WipeoutM {
                 if self.pts.len() < 3 || shoelace(&self.pts).abs() < 1e-12 {
                     return Err(other("A wipeout needs three or more points enclosing an area."));
                 }
-                s.add_entity(EntityKind::Wipeout(Wipeout { boundary: self.pts.clone(), display: Default::default(), frame: None }))?;
+                s.add_entity(EntityKind::Wipeout(Wipeout { boundary: self.pts.clone(), display: Default::default(), frame: None, image: None }))?;
                 Ok(Step::Done)
             }
             (_, Input::Enter) => Ok(Step::Cancel),

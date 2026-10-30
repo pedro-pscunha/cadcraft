@@ -494,14 +494,16 @@ fn each_leader_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
 }
 
 #[test]
-fn the_canonical_leader_reader_keeps_z_and_the_legacy_one_drops_it() {
+fn the_canonical_leader_reader_and_the_legacy_one_both_keep_z_and_the_frame() {
     let out = dxf(&drawing(EntityKind::Leader(leader()), Vec3::Z, 0.0));
     let (_, kind) = cadcraft_io::canonical_curve_from_groups("LEADER", &record(&out, "LEADER")).unwrap();
     let EntityKind::Leader(read) = kind else { panic!("not a leader") };
     assert_eq!(read.vertices[1].z, 2.0);
     let legacy = cadcraft_io::read(out.as_bytes(), "x.dxf").unwrap();
     let EntityKind::Leader(l) = &legacy.model.iter().find(|e| matches!(e.kind, EntityKind::Leader(_))).unwrap().kind else { panic!("leader") };
-    assert!(l.vertices.iter().all(|v| v.z == 0.0) && l.frame.is_none(), "no canonical import is active");
+    // The legacy reader keeps the vertices' Z and the direction, offsets and annotation size the record has.
+    assert_eq!(l.vertices[1].z, 2.0);
+    assert_eq!(l.frame, read.frame);
     let tags = vec![Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(10, 1.0)];
     assert!(cadcraft_io::canonical_curve_from_groups("LEADER", &tags).is_none(), "the vertex coordinates must match in count");
 }

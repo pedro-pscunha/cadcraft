@@ -27,7 +27,7 @@ pub fn canonical_fill_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, E
                 clip: t.pts(14),
             };
             frame.world_boundary().ok()?;
-            EntityKind::Wipeout(Wipeout { boundary: Vec::new(), display: super::entities::wipeout_display(&t), frame: Some(frame) })
+            EntityKind::Wipeout(Wipeout { boundary: Vec::new(), display: super::entities::wipeout_display(&t), frame: Some(frame), image: None })
         }
         "MLINE" => {
             let normal = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));

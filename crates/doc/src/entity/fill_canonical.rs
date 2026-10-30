@@ -30,6 +30,11 @@ impl WipeoutFrame {
         Ok(())
     }
 
+    /// The clip's vertices in XY, one for each, as the legacy wipeout holds its boundary (a rectangular clip gives its two corners).
+    pub fn legacy_outline(&self) -> Vec<cadcraft_geom::Vec2> {
+        self.clip.iter().map(|q| self.origin.xy() + self.u.xy() * (q.x + 0.5) + self.v.xy() * (0.5 - q.y)).collect()
+    }
+
     /// The outline in WCS: the polygon's vertices, or the four corners of a rectangular clip.
     pub fn world_boundary(&self) -> Result<Vec<Vec3>> {
         self.check()?;
@@ -148,6 +153,7 @@ mod tests {
                 clip_type: 2,
                 clip: vec![Vec2::new(-0.5, -0.5), Vec2::new(0.5, -0.5), Vec2::new(0.5, 0.5), Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5)],
             }),
+            image: None,
         }
     }
 
