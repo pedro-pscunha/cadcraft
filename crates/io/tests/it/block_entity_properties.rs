@@ -1,10 +1,11 @@
 //! The BLOCK and ENDBLK entities of a block definition keep the properties a file gave them that the model has no field for:
-//! linetype, linetype scale, colour, lineweight (AutoCAD writes `370 -2`, by block) and transparency.
+//! linetype, linetype scale, colour (true colour and colour book too), lineweight (AutoCAD writes `370 -2`, by block) and transparency.
 
 use super::foreign_passthrough::{dxf, saved_twice, section, val};
 
 fn source() -> String {
-    let props = [(6, "DASHED"), (48, "0.5"), (62, "3"), (370, "-2"), (440, "33554687")];
+    let props =
+        [(6, "DASHED"), (48, "0.5"), (62, "3"), (420, "14931117"), (430, "PANTONE(R) solid coated$PANTONE 7501 C"), (370, "-2"), (440, "33554687")];
     let mut groups: Vec<(i32, &str)> = vec![(0, "SECTION"), (2, "BLOCKS"), (0, "BLOCK"), (5, "A0"), (330, "A1"), (100, "AcDbEntity"), (8, "0")];
     groups.extend(props);
     groups.extend([(100, "AcDbBlockBegin"), (2, "Box"), (70, "0"), (10, "0"), (20, "0"), (30, "0"), (3, "Box"), (1, "")]);
@@ -23,12 +24,17 @@ fn block_and_endblk_keep_their_line_properties() {
         for (kind, at) in [("BLOCK", begin), ("ENDBLK", begin + 1)] {
             let (found, tags) = &blocks[at];
             assert_eq!(found, kind);
-            // A DWG keeps what its objects hold: the lineweight and the colour of the block entities.
+            // A DWG keeps what its objects hold: the lineweight of the block entities (its colour is the true one).
             assert_eq!(val(tags, 370), "-2", "{what} {kind}: lineweight");
-            assert_eq!(val(tags, 62), "3", "{what} {kind}: colour");
             if what == "DXF" {
+                assert_eq!(val(tags, 62), "3", "{kind}: colour");
                 assert_eq!(val(tags, 6), "DASHED", "{kind}: linetype");
                 assert_eq!(val(tags, 440), "33554687", "{kind}: transparency");
+                assert_eq!(
+                    (val(tags, 420).as_str(), val(tags, 430).as_str()),
+                    ("14931117", "PANTONE(R) solid coated$PANTONE 7501 C"),
+                    "{kind}: true colour and book"
+                );
             }
         }
     }
