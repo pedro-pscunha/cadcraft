@@ -504,9 +504,9 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         w.s(2, bname);
         w.p(10, dm.defpt);
         let style = d.dim_style(&dm.style).cloned().unwrap_or_default();
-        // A canonical dimension is measured and laid out in its plane; its text midpoint is an OCS point with its Z.
+        // Definition points are WCS on legacy records too. Measure in the record's plane, never projected XY.
         let plane = canonical_plane(e);
-        let Some(drawn) = plane.map_or(Some(dm.clone()), |n| dm.localized(n).ok()) else { return };
+        let Ok(drawn) = dm.localized(e.common.extrusion) else { return };
         let g = cadcraft_render::dimension_geometry(&drawn, &style, d.header.f64("DIMSCALE", 1.0));
         // The text position is the file's while the dimension only moved, turned or mirrored since it was read (its text moved with it):
         // else AutoCAD's default position for the text, which depends on the dimension's lines, is laid out again.
