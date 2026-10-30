@@ -1,5 +1,5 @@
 //! Group 70 as AutoCAD writes it: a 3DFACE has it only while an edge is invisible; a DIMENSION has bit 32 (its block is its own) in
-//! model space and paper space, not inside a block definition, and has no group 70 at all inside a block when no bit is set.
+//! model space and paper space, not inside a block definition; the group stays at 0 there (AutoCAD refuses a file without it).
 
 use std::sync::Arc;
 
@@ -64,5 +64,5 @@ fn bit_32_is_set_outside_blocks_only() {
     assert_eq!(flags(&text, "ENTITIES", "DIMENSION"), ["32"], "model space");
     let in_block = flags(&text, "BLOCKS", "DIMENSION");
     // The dimensions of the block are the ones with a handle of the block; the anonymous blocks of the others may come first.
-    assert!(in_block.ends_with(&["".to_string(), "1".to_string(), "129".to_string()]), "{in_block:?}");
+    assert!(in_block.ends_with(&["0".to_string(), "1".to_string(), "129".to_string()]), "{in_block:?}");
 }
