@@ -602,7 +602,8 @@ fn write_table_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
         w.s(343, brh);
         w.p(11, t.dir);
         let o = &t.overrides;
-        w.i(90, i64::from(o.value_flags));
+        // The flags of the file; a table made here has AutoCAD's (0x16 for a table with a title, as AutoCAD writes a -TABLE).
+        w.i(90, i64::from(o.value_flags.unwrap_or_else(|| cadcraft_doc::TableOverrides::default_value_flags(t.title))));
         let (rows, cols) = table_size(t);
         w.i(91, rows as i64);
         w.i(92, cols as i64);
