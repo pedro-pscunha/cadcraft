@@ -71,7 +71,7 @@ fn copied_polyline_children_get_distinct_identities_and_owned_extras() {
     for flags in [0, 4, 8] {
         let mut drawing = cadcraft_io::read_dxf(&fixture(flags)).unwrap();
         let original = (**drawing.entity(cadcraft_doc::Handle(0x100)).unwrap()).clone();
-        for copy in drawing.duplicate_entities(vec![vec![original]], cadcraft_doc::DuplicationSource::SameDrawing) {
+        for copy in drawing.duplicate_entities(vec![vec![original]], cadcraft_doc::DuplicationSource::SameDrawing).unwrap() {
             drawing.model.push(copy);
         }
         let output = cadcraft_io::write_dxf(&drawing);

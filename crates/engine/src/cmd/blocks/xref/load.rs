@@ -432,14 +432,14 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
             a
         });
         let entities = b.entities.iter().map(|e| adopt(e)).collect();
-        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing).map_err(|error| error.to_string())? {
             nb.entities.push(e);
         }
         d.blocks.insert(nb.name.clone(), Arc::new(nb));
     }
     let mut store = EntityStore::new();
     let entities = x.model.iter().map(|e| adopt(e)).collect();
-    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing).map_err(|error| error.to_string())? {
         store.push(e);
     }
     let base = x.header.point("INSBASE").filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).unwrap_or_default();

@@ -11,7 +11,7 @@ mod mline;
 pub use mline::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(from = "legacy_recovery::SerializedEntity")]
+#[serde(try_from = "legacy_recovery::SerializedEntity")]
 pub struct Entity {
     #[serde(default, rename = "geometryRevision")]
     pub geometry_revision: GeometryRevision,
@@ -23,7 +23,16 @@ pub struct Entity {
 
 impl Entity {
     pub fn new(handle: Handle, kind: EntityKind) -> Self {
-        Entity { geometry_revision: Default::default(), handle, common: Common::default(), kind }
+        let (geometry_revision, common) = match &kind {
+            EntityKind::Raw(raw) => (GeometryRevision::RawSource, raw.source_common().clone()),
+            _ => (GeometryRevision::default(), Common::default()),
+        };
+        Entity { geometry_revision, handle, common, kind }
+    }
+
+    /// Keep the identity and properties of one opaque source unit.
+    pub fn from_raw(raw: RawCompound) -> Self {
+        Self::new(raw.parent().handle(), EntityKind::Raw(raw))
     }
 }
 fn one() -> f64 {
@@ -64,6 +73,8 @@ mod mesh;
 mod mleader;
 mod mleader_canonical;
 mod mline_canonical;
+mod raw;
+pub use raw::{RawCompound, RawRecord};
 mod spline_canonical;
 mod text;
 mod text_canonical;
@@ -137,6 +148,7 @@ pub enum EntityKind {
     Table(Table),
     Tolerance(crate::Tolerance),
     Unknown(Unknown),
+    Raw(RawCompound),
 }
 
 /// A primitive the entity decomposes into, for snapping, selection, trimming and rendering.
@@ -195,6 +207,7 @@ impl EntityKind {
             EntityKind::Table(_) => "Table",
             EntityKind::Tolerance(_) => "Tolerance",
             EntityKind::Unknown(_) => "Proxy",
+            EntityKind::Raw(_) => "Raw record",
         }
     }
     /// DXF entity type name.
@@ -230,6 +243,7 @@ impl EntityKind {
             EntityKind::Table(_) => "ACAD_TABLE",
             EntityKind::Tolerance(_) => "TOLERANCE",
             EntityKind::Unknown(u) => u.dxf_type.as_str(),
+            EntityKind::Raw(raw) => raw.parent().kind(),
         }
     }
 
@@ -306,7 +320,7 @@ impl EntityKind {
             EntityKind::Image(i) => vec![Prim::Point(i.insert.xy())],
             EntityKind::Table(t) => vec![Prim::Point(t.insert.xy())],
             EntityKind::Tolerance(t) => vec![Prim::Point(t.insert.xy())],
-            EntityKind::Unknown(_) => Vec::new(),
+            EntityKind::Unknown(_) | EntityKind::Raw(_) => Vec::new(),
         }
     }
 
@@ -561,6 +575,7 @@ impl EntityKind {
                 t.dir = Vec2::from_angle(cadcraft_geom::norm_angle(a)).to3(0.0);
             }
             EntityKind::Unknown(_) => return Err(crate::DocError::Invalid("This entity has no supported geometry transform.".into())),
+            EntityKind::Raw(raw) => return Err(raw.edit_refusal()),
         }
         Ok(())
     }
@@ -645,7 +660,7 @@ impl EntityKind {
             EntityKind::Wipeout(w) => w.boundary.clone(),
             EntityKind::Table(t) => vec![t.insert.xy()],
             EntityKind::Tolerance(t) => vec![t.insert.xy()],
-            EntityKind::Unknown(_) => Vec::new(),
+            EntityKind::Unknown(_) | EntityKind::Raw(_) => Vec::new(),
         }
     }
 }

@@ -168,7 +168,7 @@ fn block_from(s: &mut Session, h: Handle, hs: &[Handle], base: Vec2) -> Result<S
     let name = d.anonymous_block_name("*U");
     let mut b = Block::new(&name);
     b.base = v3(inv.apply(base));
-    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing)? {
         e.try_transform(&cadcraft_geom::Mat4::from_mat3(&inv))?;
         b.entities.push(e);
     }
@@ -236,7 +236,7 @@ fn rebase(s: &mut Session, h: Handle, base: Vec2) -> Result<()> {
     let d = s.doc_mut()?;
     ns.name = d.anonymous_block_name("*U");
     ns.entities = Default::default();
-    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing)? {
         ns.entities.push(e);
     }
     p.source.clone_from(&ns.name);
@@ -261,7 +261,7 @@ fn open_source(s: &mut Session, h: Handle, item: (u32, u32, u32)) -> Result<Vec<
     let d = s.doc_mut()?;
     let mut out = Vec::new();
     let entities = src.entities.iter().map(|e| (**e).clone()).collect();
-    for mut ne in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for mut ne in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing)? {
         ne.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
         out.push(ne.handle);
         d.ensure_layer(&ne.common.layer);
@@ -346,7 +346,7 @@ fn close_source(s: &mut Session, save: bool) -> Result<Value> {
     let d = s.doc_mut()?;
     let name = d.anonymous_block_name("*U");
     let mut nb = Block::new(&name);
-    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for mut e in d.duplicate_entities(vec![ents], cadcraft_doc::DuplicationSource::SameDrawing)? {
         e.try_transform(&cadcraft_geom::Mat4::from_mat3(&inv))?;
         nb.entities.push(e);
     }

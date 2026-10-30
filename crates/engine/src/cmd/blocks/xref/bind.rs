@@ -227,7 +227,7 @@ fn xbind_in(d: &mut Drawing, sym: Sym, name: &str, depth: usize) -> Result<Strin
             nb.units = b.units;
             nb.scale_uniformly = b.scale_uniformly;
             let entities = b.entities.iter().map(|e| (**e).clone()).collect();
-            for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+            for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing).map_err(|error| error.to_string())? {
                 rename_refs(&mut e, &get);
                 nb.entities.push(e);
             }

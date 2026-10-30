@@ -172,14 +172,14 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
         nb.name = to.clone();
         nb.entities = Default::default();
         let entities = b.entities.iter().map(|e| adopt(e, &renames)).collect();
-        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+        for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
             nb.entities.push(e);
         }
         d.blocks.insert(to.clone(), Arc::new(nb));
     }
     let mut handles = Vec::new();
     let entities = src.model.iter().map(|e| adopt(e, &renames)).collect();
-    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing) {
+    for mut e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing)? {
         if moved {
             e.try_transform(&cadcraft_geom::Mat4::from_mat3(&m))?;
         }

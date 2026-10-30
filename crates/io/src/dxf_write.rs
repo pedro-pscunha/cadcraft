@@ -24,6 +24,7 @@ mod entity;
 mod header;
 mod layout;
 mod objects;
+mod raw;
 mod sections;
 mod sortents;
 #[cfg(test)]
@@ -37,6 +38,7 @@ pub(crate) use blocks::is_generated_arrow;
 pub(crate) use blocks::table_block_entities;
 use ctx::Ctx;
 use entity::entity;
+pub(crate) use raw::remap_raw_references;
 use sections::tags_for;
 
 #[derive(Default)]
@@ -63,7 +65,11 @@ impl W {
         let used: HashSet<_> = std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
             .chain(d.blocks.values().map(|b| &b.entities))
-            .flat_map(|s| s.iter().map(|e| e.handle))
+            .flat_map(|s| s.iter())
+            .flat_map(|e| {
+                let followers = if let EntityKind::Raw(raw) = &e.kind { Some(raw.followers()) } else { None };
+                std::iter::once(e.handle).chain(followers.into_iter().flatten().map(|record| record.handle()))
+            })
             .collect();
         #[cfg(test)]
         tests::SCANNED.with(|count| count.set(count.get().saturating_add(used.len())));

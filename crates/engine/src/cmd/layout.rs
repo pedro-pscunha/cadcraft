@@ -310,7 +310,7 @@ fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let order = d.layouts.iter().map(|l| l.tab_order).max().unwrap_or(0).saturating_add(1);
     let mut store = EntityStore::new();
     let entities = src.entities.iter().map(|e| (**e).clone()).collect();
-    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing) {
+    for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::SameDrawing)? {
         store.push(e);
     }
     d.layouts.push(Layout { name: to.clone(), tab_order: order, page: src.page, entities: store, view: src.view });

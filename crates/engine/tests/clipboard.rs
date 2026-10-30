@@ -305,7 +305,7 @@ fn clipboard_travels_as_text() {
     let mut s = Session::empty();
     let a = s.open_drawing(drawing_a(), "A", None);
     s.execute("copybase", &json!({ "handles": handles(&s), "base": [10, 0] })).unwrap();
-    let text = clipboard::system_text(&s).expect("DXF text");
+    let text = clipboard::system_text(&s).unwrap().expect("DXF text");
     let written = WRITTEN.lock().unwrap().clone().unwrap();
     assert_eq!(written.model.len(), 2);
     assert!(written.block("DOOR").is_some() && written.layer("HINGE").is_some());

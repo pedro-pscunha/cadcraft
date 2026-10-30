@@ -551,7 +551,7 @@ fn apply_candidate(
     let mut b =
         Block { name: name.clone(), anonymous: true, xref_path: None, array: None, units: 0, entities: crate::EntityStore::new(), ..(*src).clone() };
     let entities = src.entities.iter().map(|e| (**e).clone()).collect();
-    let duplicated = d.duplicate_entities(vec![entities], crate::DuplicationSource::SameDrawing);
+    let duplicated = d.duplicate_entities(vec![entities], crate::DuplicationSource::SameDrawing).map_err(|error| error.to_string())?;
     let copies: HashMap<Handle, Handle> = src.entities.iter().zip(&duplicated).map(|(old, new)| (old.handle, new.handle)).collect();
     // How far each attribute definition moves (block coordinates): the reference's attribute of
     // that tag moves with it, as AutoCAD moves it.

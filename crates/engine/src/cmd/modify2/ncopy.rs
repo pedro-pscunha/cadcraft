@@ -64,7 +64,7 @@ fn place_copies(s: &mut Session, items: &[NestedLeaf], delta: Vec2) -> Result<Ve
         sets.entry(&source.occurrence).or_default().push(copy);
     }
     let d = s.doc_mut()?;
-    let copies = d.duplicate_entities(sets.into_values().collect(), cadcraft_doc::DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(sets.into_values().collect(), cadcraft_doc::DuplicationSource::SameDrawing)?;
     let store = d.space_mut(&space).ok_or_else(|| other("no such space"))?;
     let mut out = Vec::with_capacity(copies.len());
     for copy in copies {

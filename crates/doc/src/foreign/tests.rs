@@ -25,7 +25,7 @@ fn many_dictionary_roots_need_only_linear_owner_inspection() {
         });
     }
     OWNERS.with(|count| count.set(0));
-    let copies = d.duplicate_entities(vec![originals], DuplicationSource::SameDrawing);
+    let copies = d.duplicate_entities(vec![originals], DuplicationSource::SameDrawing).unwrap();
     assert_eq!(copies.len(), 200);
     assert!(copies.iter().all(|e| d.foreign.entities.get(&e.handle).is_none_or(|extra| extra.xdict.is_none())));
     OWNERS.with(|count| assert!(count.get() <= 1000, "dictionary roots repeatedly scanned their object set: {} owner inspections", count.get()));
