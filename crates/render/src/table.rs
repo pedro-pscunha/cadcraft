@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use cadcraft_color::Color;
-use cadcraft_doc::{CellBorder, CellStyle, Drawing, Lineweight, Table, TableStyle};
+use cadcraft_doc::{CellBorder, CellStyle, Drawing, Lineweight, Table, TableLayout, TableLayoutText, TableStyle};
 use cadcraft_geom::Vec2;
 
 use crate::{Builder, Ctx, Ink, ink};
@@ -125,6 +125,24 @@ struct Anchor {
     rows: usize,
     cols: usize,
     style: usize,
+}
+
+/// The layout of table `t` in the local coordinates of its frame, for the world builders: laid out as a table at the
+/// origin with the horizontal direction +X, so the insertion point is the top left corner at (0, 0), x runs along the
+/// table and rows have negative y. A broken table lays out every part. Colors and line weights are properties and stay
+/// with the entity.
+pub fn table_layout(d: &Drawing, t: &Table) -> TableLayout {
+    let at_origin = Table { insert: cadcraft_geom::Vec3::ZERO, dir: cadcraft_geom::Vec3::new(1.0, 0.0, 0.0), ..t.clone() };
+    let g = table_geometry(d, &at_origin);
+    TableLayout {
+        fills: g.fills.iter().map(|f| f.corners).collect(),
+        lines: g.lines.iter().map(|l| [l.a, l.b]).collect(),
+        texts: g
+            .texts
+            .iter()
+            .map(|x| TableLayoutText { at: x.at, attach: x.attach, height: x.height, style: x.style.clone(), text: x.text.clone() })
+            .collect(),
+    }
 }
 
 /// Lay out table `t` of drawing `d`, every part of a broken table.
