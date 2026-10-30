@@ -535,9 +535,10 @@ fn source_record_group(t: &Tag, extra: Option<&ForeignExtra>, kind: &str, attrib
 /// remapped, apart from the `AcDbEntity` properties. A group the model writes, or keeps elsewhere
 /// (frozen layers by 331 and xdata, the sun by link), is not one.
 fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
-    let retain_listed = kind == "MTEXT";
+    let retain_listed = matches!(kind, "MTEXT" | "DIMENSION");
     let (marker, codes): (&str, &[i32]) = match kind {
         "MTEXT" => ("AcDbMText", &[46]),
+        "DIMENSION" => ("AcDbDimension", &[71, 72, 41, 73, 74, 75, 280]),
         "VIEWPORT" => ("AcDbViewport", &[10, 20, 30, 40, 41, 12, 22, 45, 68, 69, 90, 331, 340, 341, 361]),
         // The vertices, the plane and the annotation's size and offsets are the geometry snapshot's.
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
@@ -1899,8 +1900,15 @@ fn record(
         None
     }
     .unwrap_or(xdata_at);
-    // MTEXT's own fields precede the embedded column object, whose codes have other meanings.
-    let subclass_at = if r.kind == "MTEXT" { b.iter().position(|t| t.code == 101).unwrap_or(xdata_at) } else { xdata_at };
+    // Keep presentation fields in their own subclass, before subtype or embedded-object groups.
+    let subclass_at = match r.kind.as_str() {
+        "MTEXT" => b.iter().position(|t| t.code == 101).unwrap_or(xdata_at),
+        "DIMENSION" => b
+            .iter()
+            .position(|t| t.code == 100 && t.str() == "AcDbDimension")
+            .map_or(xdata_at, |start| start + 1 + b.iter().skip(start + 1).take_while(|t| t.code != 100 && t.code < 1000).count()),
+        _ => xdata_at,
+    };
     let rgb = b.iter().take(xdata_at).find(|t| t.code == 420).map(Tag::str);
     let has_book = b.iter().take(xdata_at).any(|t| t.code == 430);
     let handle_at = b.iter().position(|t| matches!(t.code, 5 | 105));
