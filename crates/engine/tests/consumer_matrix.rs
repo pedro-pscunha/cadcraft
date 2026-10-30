@@ -4,7 +4,7 @@
 //! - A live row states `Ok(numbers)` or `Refuses(reason)` and is checked: an `Ok` row must reach the operand and give the independent
 //!   number, a refusal must name the reason and leave the model and the handle counter as they were. A missing-argument error
 //!   does not count: every row's control with the same parameters on a legacy drawing must succeed.
-//! - A pending row belongs to an open finding of the plan (F2, F3). Its expectation is what the fix must deliver, it must still
+//! - A pending row belongs to an open finding of the plan (F3). Its expectation is what the fix must deliver, it must still
 //!   fail today, and the test that checks it fails the day it passes, so the row cannot outlive its fix silently.
 //! - The registry lint: every registered command is declared here with the roles its rows cover, or is in
 //!   `consumer_matrix/undeclared.txt`. A new command gets rows or an explicit entry; a declared command leaves the list.
@@ -525,20 +525,12 @@ struct Pending {
 }
 
 fn pending() -> Vec<Pending> {
-    vec![
-        Pending {
-            finding: "F2",
-            what: "ID/DIST/snap on a canonical spatial spline with 10,000 controls: the sampler validates the knots once and bounds its search; \
-                   the test counts the evaluations, not the elapsed time",
-            row: None,
-        },
-        Pending {
-            finding: "F3",
-            what: "DIMTEDIT preview of a canonical dimension in the plane (0,3,4): the cursor is converted to the dimension plane (or the command refuses) \
+    vec![Pending {
+        finding: "F3",
+        what: "DIMTEDIT preview of a canonical dimension in the plane (0,3,4): the cursor is converted to the dimension plane (or the command refuses) \
                    and the preview's text position equals an independent world position; an interactive row, not a run() row",
-            row: None,
-        },
-    ]
+        row: None,
+    }]
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -566,7 +558,7 @@ fn a_pending_row_still_fails_and_is_removed_when_its_fix_lands() {
 #[test]
 fn the_pending_rows_are_exactly_the_open_findings() {
     let findings: Vec<&str> = pending().iter().map(|p| p.finding).collect();
-    assert_eq!(findings, vec!["F2", "F3"]);
+    assert_eq!(findings, vec!["F3"]);
     assert!(pending().iter().all(|p| !p.what.is_empty()));
 }
 

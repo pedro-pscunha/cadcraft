@@ -299,14 +299,35 @@ enum SplineProbe {
     Unsupported(&'static str),
 }
 
+/// Samples per knot span in the search for the passes of a spline.
+const SPAN_SAMPLES: usize = 32;
+/// Most plan-view samples one probe of a spline takes; a spline with more candidate spans than this allows is Unsupported at the point.
+const MAX_SAMPLES: usize = 16_384;
+/// Most separate passes (local minima) one probe refines.
+const MAX_PASSES: usize = 64;
+/// The evaluations one probe makes at most: the plan-view samples, the height of the samples of a stretch, and a refinement per pass
+/// (two evaluations for each of 60 steps, then the end point's two). The tests check the bound; nothing needs it at run time.
+#[cfg(test)]
+const MAX_EVALS: usize = 2 * MAX_SAMPLES + MAX_PASSES * 125;
+
 /// The WCS points of a (rational) B-spline whose XY is within `tol` of `p`. Z is evaluated as a second spline over the same knots and
 /// weights (the Z of the control points on the first axis), which is the Z of the same rational curve.
 ///
 /// A curve can pass a plan-view point more than once (a self-crossing at different heights) or stay on it over a stretch (a vertical
 /// segment), so the answer is every place where the distance to `p` has a local minimum within `tol`, and a stretch that stays on `p`
-/// (within a thousandth of `tol`) gives the points at its lowest and highest Z. Sampling cannot prove that two passes are not closer than one sample step: the
-/// ceiling is one sample per 1/32 of a control interval.
+/// (within a thousandth of `tol`) gives the points at its lowest and highest Z. Sampling cannot prove that two passes are not closer
+/// than one sample step: the ceiling is one sample per 1/32 of a knot span.
+///
+/// The work is bounded whatever the spline: the knot spans are tested by the box of their control points (a span lies in the convex
+/// hull of its `degree + 1` control points when the weights are positive), so only the spans that can reach `p` are sampled, and a
+/// probe that would take more than [`MAX_SAMPLES`] samples or find more than [`MAX_PASSES`] passes is Unsupported. The knot vector is
+/// validated once.
 fn spline_hits(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], p: Vec2, tol: f64) -> SplineProbe {
+    spline_search(degree, knots, control, weights, p, tol).0
+}
+
+/// `spline_hits` and the number of curve evaluations it made.
+fn spline_search(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], p: Vec2, tol: f64) -> (SplineProbe, usize) {
     let plan = cadcraft_geom::Spline {
         degree,
         knots: knots.to_vec(),
@@ -314,72 +335,124 @@ fn spline_hits(degree: usize, knots: &[f64], control: &[Vec3], weights: &[f64], 
         weights: weights.to_vec(),
         ..Default::default()
     };
-    if !plan.is_valid() {
-        return SplineProbe::Points(Vec::new());
-    }
+    let Some(plan_curve) = plan.validated() else { return (SplineProbe::Points(Vec::new()), 0) };
     if !(control.iter().all(|c| c.x.is_finite() && c.y.is_finite() && c.z.is_finite()) && knots.iter().all(|k| k.is_finite())) {
-        return SplineProbe::Unsupported("its spline has a non-finite control point or knot");
+        return (SplineProbe::Unsupported("its spline has a non-finite control point or knot"), 0);
+    }
+    if weights.iter().any(|w| !(*w > 0.0 && w.is_finite())) {
+        return (SplineProbe::Unsupported("its spline has a weight that is not positive"), 0);
+    }
+    let (lo, hi) = plan_curve.domain();
+    if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
+        return (SplineProbe::Points(Vec::new()), 0);
     }
     let height = cadcraft_geom::Spline { control: control.iter().map(|c| Vec2::new(c.z, 0.0)).collect(), ..plan.clone() };
-    let (lo, hi) = plan.domain();
-    if !(lo.is_finite() && hi.is_finite()) || hi <= lo {
-        return SplineProbe::Points(Vec::new());
-    }
-    let n = (control.len() * 32).max(256);
-    let ts: Vec<f64> = (0..=n).map(|i| lo + (hi - lo) * i as f64 / n as f64).collect();
-    let dist: Vec<f64> = ts.iter().map(|t| plan.eval(*t).dist(p)).collect();
-    let point_at = |t: f64| {
-        let at = plan.eval(t);
-        Vec3::new(at.x, at.y, height.eval(t).x)
+    let Some(height_curve) = height.validated() else { return (SplineProbe::Points(Vec::new()), 0) };
+
+    // The knot spans whose control points' box reaches `p`, in parameter order, grouped into runs of neighbouring spans.
+    let reach = |span: usize| {
+        let first = span.saturating_sub(degree);
+        let points = plan.control.get(first..=span).unwrap_or(&[]);
+        let b = cadcraft_geom::Bounds2::from_points(points.iter().copied());
+        !b.is_empty() && p.x >= b.min.x - tol && p.x <= b.max.x + tol && p.y >= b.min.y - tol && p.y <= b.max.y + tol
     };
-    let mut hits: Vec<Vec3> = Vec::new();
-    // `tol` is a pick radius, so a curve passes within it over many samples. The curve stays ON the point (a vertical stretch) only where it
-    // is within a thousandth of the radius.
-    let stay = (tol * 1e-3).max(1e-9);
-    let mut i = 0;
-    while i <= n {
-        if dist[i] <= stay {
-            // A stretch of samples on the point: the curve stays there over it, whatever its Z does.
-            let start = i;
-            while i < n && dist[i + 1] <= stay {
-                i += 1;
-            }
-            let zs = (start..=i).map(|k| point_at(ts[k]));
-            let low = zs.clone().min_by(|a, b| a.z.total_cmp(&b.z));
-            let high = zs.max_by(|a, b| a.z.total_cmp(&b.z));
-            hits.extend(low);
-            hits.extend(high);
-            i += 1;
+    let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut open = false;
+    let mut candidates = 0usize;
+    for span in degree..control.len() {
+        let (a, b) = (knots.get(span).copied().unwrap_or(0.0), knots.get(span + 1).copied().unwrap_or(0.0));
+        if b <= a {
             continue;
         }
-        // A local minimum of the distance: refine between its neighbours (the curve is smooth between samples).
-        let left = if i == 0 { f64::INFINITY } else { dist[i - 1] };
-        let right = if i == n { f64::INFINITY } else { dist[i + 1] };
-        if dist[i] <= left && dist[i] < right {
-            let (mut a, mut b) = (ts[i.saturating_sub(1)], ts[(i + 1).min(n)]);
-            for _ in 0..60 {
-                let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
-                if plan.eval(m1).dist(p) < plan.eval(m2).dist(p) {
-                    b = m2;
-                } else {
-                    a = m1;
+        if reach(span) {
+            if !open {
+                runs.push(Vec::new());
+                open = true;
+            }
+            if let Some(run) = runs.last_mut() {
+                run.push((a, b));
+            }
+            candidates += 1;
+        } else {
+            open = false;
+        }
+    }
+    if candidates == 0 {
+        return (SplineProbe::Points(Vec::new()), 0);
+    }
+    if candidates.saturating_mul(SPAN_SAMPLES) + runs.len() > MAX_SAMPLES {
+        return (SplineProbe::Unsupported("too many parts of its spline pass near that point"), 0);
+    }
+
+    let evals = std::cell::Cell::new(0usize);
+    let plan_at = |t: f64| {
+        evals.set(evals.get() + 1);
+        plan_curve.eval(t)
+    };
+    let height_at = |t: f64| {
+        evals.set(evals.get() + 1);
+        height_curve.eval(t).x
+    };
+    let stay = (tol * 1e-3).max(1e-9);
+    let mut hits: Vec<Vec3> = Vec::new();
+    let mut passes = 0usize;
+    for run in &runs {
+        let mut ts: Vec<f64> = Vec::new();
+        for (a, b) in run {
+            let from = usize::from(!ts.is_empty());
+            ts.extend((from..=SPAN_SAMPLES).map(|k| a + (b - a) * k as f64 / SPAN_SAMPLES as f64));
+        }
+        let at: Vec<Vec2> = ts.iter().map(|t| plan_at(*t)).collect();
+        let dist: Vec<f64> = at.iter().map(|q| q.dist(p)).collect();
+        let n = ts.len() - 1;
+        let mut i = 0;
+        while i <= n {
+            if dist[i] <= stay {
+                // A stretch of samples on the point: the curve stays there over it, whatever its Z does.
+                let start = i;
+                while i < n && dist[i + 1] <= stay {
+                    i += 1;
+                }
+                let on: Vec<Vec3> = (start..=i).map(|k| Vec3::new(at[k].x, at[k].y, height_at(ts[k]))).collect();
+                hits.extend(on.iter().copied().min_by(|a, b| a.z.total_cmp(&b.z)));
+                hits.extend(on.iter().copied().max_by(|a, b| a.z.total_cmp(&b.z)));
+                i += 1;
+                continue;
+            }
+            // A local minimum of the distance: refine between its neighbours (the curve is smooth between samples).
+            let left = if i == 0 { f64::INFINITY } else { dist[i - 1] };
+            let right = if i == n { f64::INFINITY } else { dist[i + 1] };
+            if dist[i] <= left && dist[i] < right {
+                passes += 1;
+                if passes > MAX_PASSES {
+                    return (SplineProbe::Unsupported("too many parts of its spline pass near that point"), evals.get());
+                }
+                let (mut a, mut b) = (ts[i.saturating_sub(1)], ts[(i + 1).min(n)]);
+                for _ in 0..60 {
+                    let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
+                    if plan_at(m1).dist(p) < plan_at(m2).dist(p) {
+                        b = m2;
+                    } else {
+                        a = m1;
+                    }
+                }
+                let t = (a + b) / 2.0;
+                let found = plan_at(t);
+                if found.dist(p) <= tol {
+                    hits.push(Vec3::new(found.x, found.y, height_at(t)));
                 }
             }
-            let t = (a + b) / 2.0;
-            if plan.eval(t).dist(p) <= tol {
-                hits.push(point_at(t));
-            }
+            i += 1;
         }
-        i += 1;
     }
-    // The same place found twice (the end of a refined minimum and a sample on it) is one point.
+    // The same place found twice (the end of a refined minimum and a sample on it, or the two ends of a span) is one point.
     let mut points: Vec<Vec3> = Vec::new();
     for hit in hits {
         if !points.iter().any(|q| (q.x - hit.x).abs() <= tol && (q.y - hit.y).abs() <= tol && (q.z - hit.z).abs() <= tol) {
             points.push(hit);
         }
     }
-    SplineProbe::Points(points)
+    (SplineProbe::Points(points), evals.get())
 }
 
 /// What a plan-view sample of a canonical entity finds.
@@ -566,6 +639,64 @@ mod tests {
     fn a_spline_with_a_non_finite_control_point_is_unsupported_not_a_miss() {
         let flat = Flat { world: vec![polyline_spline(&[(0.0, 0.0, 0.0), (f64::NAN, 1.0, 2.0)])], ..Flat::default() };
         assert!(matches!(flat.sample(Vec2::new(0.0, 0.0), 1e-6), WorldSample::Unsupported(_)));
+    }
+
+    /// A cubic B-spline with `n` clamped, uniformly spaced knots through the controls `control(i)`.
+    fn cubic(n: usize, control: impl Fn(usize) -> Vec3) -> (Vec<f64>, Vec<Vec3>) {
+        let mut knots = vec![0.0; 4];
+        knots.extend((1..=n - 4).map(|k| k as f64));
+        knots.extend([(n - 3) as f64; 4]);
+        (knots, (0..n).map(control).collect())
+    }
+
+    #[test]
+    fn a_spline_of_ten_thousand_controls_is_probed_within_the_work_bound() {
+        // The controls (i, 0, i / 1000) reproduce the line z = x / 1000: the curve is x = t + 1.5.
+        let (knots, control) = cubic(10_000, |i| Vec3::new(i as f64, 0.0, i as f64 / 1000.0));
+        let (probe, evals) = spline_search(3, &knots, &control, &[], Vec2::new(5000.5, 0.0), 1e-6);
+        let SplineProbe::Points(points) = probe else { panic!("unsupported") };
+        assert_eq!(points.len(), 1);
+        assert!((points[0].x - 5000.5).abs() < 1e-6 && (points[0].z - 5.0005).abs() < 1e-6, "{:?}", points[0]);
+        // Only the few spans whose controls' box reaches the point are sampled, not every span of the curve (the full-domain search took
+        // 320,001 evaluations here).
+        assert!(evals <= 1000, "{evals} evaluations");
+        // A point far from every span costs none.
+        let (probe, evals) = spline_search(3, &knots, &control, &[], Vec2::new(-100.0, 0.0), 1e-6);
+        assert!(matches!(probe, SplineProbe::Points(p) if p.is_empty()));
+        assert_eq!(evals, 0);
+    }
+
+    #[test]
+    fn a_probe_that_would_exceed_the_budget_is_unsupported_before_it_evaluates() {
+        // Every span of the spline lies on the point: 9,997 spans of 32 samples are over the budget.
+        let (knots, control) = cubic(10_000, |i| Vec3::new(0.0, 0.0, i as f64));
+        let (probe, evals) = spline_search(3, &knots, &control, &[], Vec2::ZERO, 1e-6);
+        assert!(matches!(probe, SplineProbe::Unsupported(_)));
+        assert_eq!(evals, 0);
+        // Under the budget the same curve is answered, and the answer stays within the bound on the evaluations.
+        let (knots, control) = cubic(400, |i| Vec3::new(0.0, 0.0, i as f64));
+        let (probe, evals) = spline_search(3, &knots, &control, &[], Vec2::ZERO, 1e-6);
+        let SplineProbe::Points(points) = probe else { panic!("unsupported") };
+        assert!(points.len() >= 2 && points.iter().any(|q| q.z > 300.0) && points.iter().any(|q| q.z < 100.0), "{points:?}");
+        assert!(evals <= MAX_EVALS, "{evals} evaluations");
+    }
+
+    #[test]
+    fn more_passes_than_the_budget_allows_are_unsupported_within_the_bound() {
+        // A zigzag that crosses the point in every span at a different height, off the sample grid: every crossing is a pass, and only 64 are
+        // refined.
+        let (knots, control) = cubic(400, |i| Vec3::new(if i % 2 == 0 { -1.0 } else { 1.37 }, 0.0, i as f64));
+        let (probe, evals) = spline_search(3, &knots, &control, &[], Vec2::ZERO, 1e-6);
+        assert!(matches!(probe, SplineProbe::Unsupported(_)), "the passes were not limited");
+        assert!(evals <= MAX_EVALS, "{evals} evaluations");
+    }
+
+    #[test]
+    fn a_spline_with_a_weight_that_is_not_positive_is_unsupported() {
+        let (knots, control) = cubic(8, |i| Vec3::new(i as f64, 0.0, 0.0));
+        let mut weights = vec![1.0; 8];
+        weights[3] = 0.0;
+        assert!(matches!(spline_search(3, &knots, &control, &weights, Vec2::new(2.0, 0.0), 1e-6).0, SplineProbe::Unsupported(_)));
     }
 
     /// The sample is a hit at `at` with the height `z` (the refinement finds the point to about 1e-9).
