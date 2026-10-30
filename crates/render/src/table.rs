@@ -51,6 +51,15 @@ pub struct TableBlock {
     pub insert: cadcraft_doc::Insert,
 }
 
+/// A block cell whose block the table could not place: its extents were refused. The cell is drawn without the block; the cell
+/// itself is unchanged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableBlockRefusal {
+    pub row: usize,
+    pub col: usize,
+    pub reason: String,
+}
+
 /// Everything a table draws, in world coordinates.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableGeom {
@@ -58,6 +67,7 @@ pub struct TableGeom {
     pub lines: Vec<TableLine>,
     pub texts: Vec<TableText>,
     pub blocks: Vec<TableBlock>,
+    pub block_refusals: Vec<TableBlockRefusal>,
 }
 
 /// Which cells are covered by a merge (and so not drawn on their own).
@@ -172,10 +182,14 @@ pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
         for b in &mut pg.blocks {
             b.row = p.rows.get(b.row).copied().unwrap_or(b.row);
         }
+        for r in &mut pg.block_refusals {
+            r.row = p.rows.get(r.row).copied().unwrap_or(r.row);
+        }
         g.fills.extend(pg.fills);
         g.lines.extend(pg.lines);
         g.texts.extend(pg.texts);
         g.blocks.extend(pg.blocks);
+        g.block_refusals.extend(pg.block_refusals);
     }
     g
 }
@@ -224,11 +238,17 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
 
 /// The reference of a cell's block, placed so that its extents sit on the cell's alignment point `at` by the cell's alignment
 /// `attach` (MTEXT numbering).
-fn place_block(d: &Drawing, content: &cadcraft_doc::TableCellBlock, rotation: f64, at: Vec2, attach: u8) -> cadcraft_doc::Insert {
+fn place_block(d: &Drawing, content: &cadcraft_doc::TableCellBlock, rotation: f64, at: Vec2, attach: u8) -> Result<cadcraft_doc::Insert, String> {
     let origin = content.insert(d, cadcraft_geom::Vec3::ZERO, rotation);
-    // A block whose extents are refused is anchored by its insertion point (TODO fix-acadrust: refuse the cell instead).
-    let reference = cadcraft_doc::Entity::new(cadcraft_doc::Handle(0), cadcraft_doc::EntityKind::Insert(origin));
-    let bounds = crate::extents::entity_extents(d, &reference, 0).unwrap_or(cadcraft_geom::Bounds2::EMPTY);
+    // A block whose extents are refused is not placed: the cell is drawn without it, and the refusal is reported.
+    // A block of canonical entities is measured by the canonical path.
+    let canonical =
+        d.block(&content.block).is_some_and(|b| b.entities.iter().any(|e| e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2));
+    let reference = cadcraft_doc::Entity {
+        geometry_revision: if canonical { cadcraft_doc::GeometryRevision::CanonicalV2 } else { cadcraft_doc::GeometryRevision::default() },
+        ..cadcraft_doc::Entity::new(cadcraft_doc::Handle(0), cadcraft_doc::EntityKind::Insert(origin))
+    };
+    let bounds = crate::extents::entity_extents(d, &reference, 0).map_err(|refusal| refusal.to_string())?;
     let anchor = if bounds.is_empty() {
         Vec2::ZERO
     } else {
@@ -244,7 +264,23 @@ fn place_block(d: &Drawing, content: &cadcraft_doc::TableCellBlock, rotation: f6
         };
         Vec2::new(x, y)
     };
-    content.insert(d, (at - anchor).to3(0.0), rotation)
+    Ok(content.insert(d, (at - anchor).to3(0.0), rotation))
+}
+
+/// Put a cell's block in `g` at the cell's alignment point, or note that its extents were refused.
+fn add_block(
+    g: &mut TableGeom,
+    d: &Drawing,
+    (row, col): (usize, usize),
+    content: &cadcraft_doc::TableCellBlock,
+    rotation: f64,
+    at: Vec2,
+    attach: u8,
+) {
+    match place_block(d, content, rotation, at, attach) {
+        Ok(insert) => g.blocks.push(TableBlock { row, col, insert }),
+        Err(reason) => g.block_refusals.push(TableBlockRefusal { row, col, reason }),
+    }
 }
 
 /// Lay out one part.
@@ -393,8 +429,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             _ => y1 - cs.margin_v,
         };
         if let Some(content) = &cell.block {
-            let insert = place_block(d, content, cell.rotation, p(x, y), attach);
-            g.blocks.push(TableBlock { row: a.row, col: a.col, insert });
+            add_block(&mut g, d, (a.row, a.col), content, cell.rotation, p(x, y), attach);
             continue;
         }
         g.texts.push(TableText {
@@ -438,6 +473,10 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, e: &cadcraft_doc::Entity, t: &Tab
     }
     for block in &g.blocks {
         crate::blocks::insert(b, ctx, e, &block.insert, rgb);
+    }
+    for r in &g.block_refusals {
+        let reason = format!("table cell ({}, {}): {}", r.row + 1, r.col + 1, r.reason);
+        b.list.geometry_refusals.push(crate::GeometryRefusal { handle: e.handle, reason });
     }
     if !b.opts.text {
         return;
