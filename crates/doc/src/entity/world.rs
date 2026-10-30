@@ -282,6 +282,14 @@ fn loop_polygon(loop_: &[WorldPrimitive], owner: Handle) -> Result<Vec<Vec2>> {
     Ok(out)
 }
 
+/// Style-dependent graphics in local coordinates. The caller supplies the same layout that it draws.
+#[derive(Clone, Copy, Debug)]
+pub enum WorldLayout<'a> {
+    Leader(&'a super::LeaderArrowLayout),
+    Tolerance { layout: &'a crate::GdtLayout, text_style: &'a str },
+    Table(&'a super::TableLayout),
+}
+
 /// Finite spatial geometry, kept separate from its view projection and the source payload.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldGeometry {
@@ -333,6 +341,11 @@ impl Entity {
 
     /// Resolve canonical geometry in WCS before any display, pick, or spatial-query projection.
     pub fn world_geometry(&self, parent: &Mat4) -> Result<WorldGeometry> {
+        self.world_geometry_with_layout(parent, None)
+    }
+
+    /// Resolve geometry with an explicit style-dependent layout. Missing or mismatched layouts refuse.
+    pub fn world_geometry_with_layout(&self, parent: &Mat4, layout: Option<WorldLayout<'_>>) -> Result<WorldGeometry> {
         if self.geometry_revision == GeometryRevision::LegacyProjectedV1 {
             return Err(DocError::Invalid("The legacy geometry payload needs recovery before world adaptation. Reopen the original DXF/DWG.".into()));
         }
@@ -341,6 +354,17 @@ impl Entity {
         }
         if parent.m[3] != [0.0, 0.0, 0.0, 1.0] {
             return Err(DocError::Invalid("A world geometry parent must be an affine transform.".into()));
+        }
+        if let Some(layout) = layout {
+            let primitives = match (&self.kind, layout) {
+                (EntityKind::Leader(leader), WorldLayout::Leader(arrow)) => super::leader_primitives(leader, self.common.extrusion, arrow, parent)?,
+                (EntityKind::Tolerance(tolerance), WorldLayout::Tolerance { layout, text_style }) => {
+                    super::tolerance_primitives(tolerance, self.common.extrusion, layout, text_style, parent)?
+                }
+                (EntityKind::Table(table), WorldLayout::Table(layout)) => super::table_primitives(table, self.common.extrusion, layout, parent)?,
+                _ => return Err(DocError::Invalid(format!("Entity {} has a mismatched world layout.", self.handle.hex()))),
+            };
+            return WorldGeometry::from_primitives(self.handle, primitives);
         }
         // Each family adds its complete field contract here, not a projected legacy fallback.
         let primitives = match &self.kind {

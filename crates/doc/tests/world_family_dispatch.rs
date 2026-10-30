@@ -1,5 +1,6 @@
 use cadcraft_doc::{
-    Entity, EntityKind, GeometryRevision, Handle, Solid, Text, WorldPrimitive, WorldTextContent, solid_primitives, spline_primitives, text_primitives,
+    Entity, EntityKind, GeometryRevision, Handle, LeaderArrowLayout, Solid, Table, TableLayout, Text, WorldLayout, WorldPrimitive, WorldTextContent,
+    solid_primitives, spline_primitives, text_primitives,
 };
 use cadcraft_geom::{Mat4, Spline, SplineSpace, Vec2, Vec3};
 
@@ -12,6 +13,18 @@ fn canonical(kind: EntityKind, normal: Vec3) -> Entity {
 
 fn parent() -> Mat4 {
     Mat4 { m: [[2.0, 0.5, 1.0, 4.0], [0.0, 1.0, 0.0, 5.0], [0.0, 0.0, 1.0, 6.0], [0.0, 0.0, 0.0, 1.0]] }
+}
+
+#[test]
+fn annotation_dispatch_requires_the_correct_layout_and_keeps_the_full_parent() {
+    let table = Table { insert: Vec3::new(1.0, 2.0, 3.0), ..Table::default() };
+    let entity = canonical(EntityKind::Table(table), Vec3::new(0.0, 1.0, 0.0));
+    assert!(entity.world_geometry(&parent()).is_err());
+    let wrong = LeaderArrowLayout::default();
+    assert!(entity.world_geometry_with_layout(&parent(), Some(WorldLayout::Leader(&wrong))).is_err());
+    let layout = TableLayout { lines: vec![[Vec2::ZERO, Vec2::new(2.0, -1.0)]], ..TableLayout::default() };
+    let geometry = entity.world_geometry_with_layout(&parent(), Some(WorldLayout::Table(&layout))).unwrap();
+    assert_eq!(geometry.primitives(), [WorldPrimitive::Line { a: Vec3::new(10.0, 7.0, 9.0), b: Vec3::new(15.0, 7.0, 10.0) }]);
 }
 
 #[test]
