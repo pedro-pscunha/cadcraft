@@ -243,7 +243,7 @@ impl Ellipse {
         let (s0, c0) = t0.sin_cos();
         let (u, v) = (am * c0 + an * s0, an * c0 - am * s0);
         let ratio = if u.len() > 0.0 { (v.len() / u.len()).min(1.0) } else { 0.0 };
-        if (ccw_sweep(start, end) - TAU).abs() < 1e-9 {
+        if ccw_sweep(start, end) == TAU {
             return Self::full(center, u * scale, ratio);
         }
         let (start, end) = if u.cross(v) >= 0.0 { (start - t0, end - t0) } else { (t0 - end, t0 - start) };
@@ -254,7 +254,7 @@ impl Ellipse {
         Ellipse { center, major, ratio, start: 0.0, end: TAU }
     }
     pub fn is_full(&self) -> bool {
-        (ccw_sweep(self.start, self.end) - TAU).abs() < 1e-9
+        ccw_sweep(self.start, self.end) == TAU
     }
     pub fn minor(&self) -> Vec2 {
         self.major.perp() * self.ratio
