@@ -346,7 +346,14 @@ fn hatch_restore(generated: &[Tag], kept: &[RawTag], version: u32, convert: impl
 fn nested_capture(tags: &[Tag], marker: &str) -> Option<Vec<RawTag>> {
     let range = subclass(tags, marker, 0)?;
     let mut out = vec![RawTag { code: 100, value: marker.to_string() }];
-    out.extend(tags.get(range)?.iter().map(|t| RawTag { code: t.code, value: t.str() }));
+    let mut context = false;
+    for tag in tags.get(range)? {
+        context |= tag.code == 300;
+        // Proxy bytes belong to the guarded graphics snapshot, not numeric geometry replay.
+        if context || !matches!(tag.code, 160 | 310) {
+            out.push(RawTag { code: tag.code, value: tag.str() });
+        }
+    }
     Some(out)
 }
 

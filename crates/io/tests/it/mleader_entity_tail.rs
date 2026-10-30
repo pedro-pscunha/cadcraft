@@ -61,6 +61,16 @@ fn a_text_multileader_ends_like_the_autocad_entity() {
 }
 
 #[test]
+fn old_targets_omit_newer_attachment_fields_even_after_source_replay() {
+    let source = cadcraft_io::read_dxf(dxf_with(AUTOCAD_TEXT_BODY).as_bytes()).unwrap();
+    for version in [Version::R2000, Version::R2004, Version::R2007] {
+        let record = write_at(&source, version);
+        assert!(record.iter().all(|group| !matches!(group.0, 271..=273)), "{version:?}");
+        assert!(entity_part(&record).iter().all(|group| group.0 != 295), "{version:?}");
+    }
+}
+
+#[test]
 fn group_295_ends_an_ac1032_entity_only() {
     let record = write_at(&moved_autocad_text(), Version::R2010);
     let part = entity_part(&record);

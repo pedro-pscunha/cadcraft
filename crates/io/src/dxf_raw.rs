@@ -803,6 +803,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     put_xdata(d, xdata_of);
     let source = blocks.iter().chain(&entities).filter(|(k, ..)| !matches!(k.as_str(), "BLOCK" | "ENDBLK"));
     crate::dxf_geometry::capture_all(d, source.map(|(k, _, t)| (k.as_str(), *t)));
+    crate::dxf_mleader_proxy::capture_all(d, blocks.iter().chain(&entities).map(|(kind, _, tags)| (kind.as_str(), *tags)), &mut f);
     let block_attributes: HashMap<_, _> = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| matches!(k.as_str(), "BLOCK" | "ENDBLK"))).chain(modelled_objects) {

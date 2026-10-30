@@ -361,11 +361,9 @@ fn block_units_before_2007_are_design_center_xdata() {
     }
 }
 
-/// MULTILEADER is AutoCAD 2007's. Before it a multileader is one LEADER per leader line and its MTEXT, so the
-/// entity count differs from the drawing's (AutoCAD's own R2000 DXFOUT keeps a graphics-only proxy MULTILEADER,
-/// which CADCraft cannot make: it writes entities that stay editable).
+/// MULTILEADER remains native at every supported DXF version.
 #[test]
-fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
+fn a_multileader_remains_one_native_record_at_every_target() {
     let mleader = cadcraft_doc::MLeader {
         roots: vec![cadcraft_doc::MLeaderRoot::new(
             cadcraft_geom::Vec3::new(5.0, 4.0, 0.0),
@@ -403,10 +401,6 @@ fn a_multileader_before_2007_is_a_leader_per_line_and_its_text() {
     for version in Version::ALL {
         let kinds: Vec<String> = section(&save(&d, version), "ENTITIES").into_iter().map(|(k, _)| k).filter(|k| k != "ENDSEC").collect();
         let count = |k: &str| kinds.iter().filter(|x| *x == k).count();
-        if version >= Version::R2007 {
-            assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (1, 0, 0), "{version:?}: {kinds:?}");
-        } else {
-            assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (0, 2, 1), "{version:?}: {kinds:?}");
-        }
+        assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (1, 0, 0), "{version:?}: {kinds:?}");
     }
 }
