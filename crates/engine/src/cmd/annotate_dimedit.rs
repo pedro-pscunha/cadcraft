@@ -536,15 +536,19 @@ fn run_dimbreak(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let space = s.space();
             let store = d.space(&space).ok_or_else(|| bad("dimbreak", "no current space"))?;
-            let others: Vec<(Handle, Vec<Prim>)> = store
+            let breakers: Vec<_> = store
                 .iter()
                 .filter(|e| match &given {
                     Some(g) => g.contains(&e.handle),
                     None => !matches!(e.kind, EntityKind::Dimension(_) | EntityKind::Text(_) | EntityKind::MText(_)),
                 })
                 .take(MAX_BREAK_OBJECTS)
-                .map(|e| (e.handle, e.kind.prims()))
                 .collect();
+            // A canonical obstruction has no legacy outline: refuse before the first dimension is edited.
+            for e in &breakers {
+                e.require_legacy_geometry()?;
+            }
+            let others: Vec<(Handle, Vec<Prim>)> = breakers.iter().map(|e| (e.handle, e.kind.prims())).collect();
             let mut plan = Vec::new();
             for h in &hs {
                 let Some(EntityKind::Dimension(dm)) = d.entity(*h).map(|e| &e.kind) else { continue };
