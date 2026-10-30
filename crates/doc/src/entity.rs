@@ -86,11 +86,13 @@ pub use curves::{
     Solid,
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame};
-pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutFrame};
+pub use fill::{Gradient, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
 pub use geometry::{GeometryRecord, GeometrySnapshot, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, TableOverrides, Viewport};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
-pub use mleader::{MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderRoot};
+pub use mleader::{
+    MLeader, MLeaderBranch, MLeaderCodes, MLeaderContext, MLeaderContextGroups, MLeaderEntityGroups, MLeaderGroups, MLeaderRoot, MLeaderRootGroups,
+};
 pub use mleader_canonical::MLeaderParts;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame};

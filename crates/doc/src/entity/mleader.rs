@@ -48,12 +48,105 @@ impl MLeaderRoot {
     }
 }
 
+/// A set of numeric groups of a MULTILEADER record that CADCraft does not interpret: each is the value the file gave
+/// (`None`: the writer emits the default of a multileader made in CADCraft). The DXF group code is the one in the
+/// field's name.
+macro_rules! numeric_groups {
+    ($(#[$meta:meta])* $name:ident { $($(#[$fmeta:meta])* $field:ident = $code:literal,)* }) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct $name {
+            $($(#[$fmeta])* #[serde(default)] pub $field: Option<f64>,)*
+        }
+
+        impl $name {
+            /// Keep the value `v` of group `code` if it is one of this set's; whether it is.
+            pub fn set(&mut self, code: i32, v: f64) -> bool {
+                match code {
+                    $($code => self.$field = Some(v),)*
+                    _ => return false,
+                }
+                true
+            }
+        }
+    };
+}
+
+numeric_groups! {
+    /// The groups of the content context (`CONTEXT_DATA{`) besides the content, frame and attachment ones the model has.
+    MLeaderContextGroups {
+        /// Content scale (40).
+        scale = 40,
+        /// Text height (41), the landing gap (145), the text boundary height (44).
+        text_height = 41,
+        landing_gap = 145,
+        column_height = 44,
+        /// Text flow direction (172), text colour (90), background fill colour (91), scale factor (141), transparency (92),
+        /// fill switch (291) and mask fill (292).
+        flow_direction = 172,
+        text_color = 90,
+        background_color = 91,
+        background_scale = 141,
+        background_transparency = 92,
+        background_fill = 291,
+        mask_fill = 292,
+        /// Column type (173), automatic text height (293), column width (142) and gutter (143), flow reversed (294), word break (295).
+        column_type = 173,
+        height_automatic = 293,
+        column_width = 142,
+        column_gutter = 143,
+        column_flow_reversed = 294,
+        word_break = 295,
+        /// Block content colour (93), normal reversed (297), top and bottom attachment (272, 273).
+        block_color = 93,
+        normal_reversed = 297,
+        attach_top = 272,
+        attach_bottom = 273,
+    }
+}
+
+numeric_groups! {
+    /// The groups of the entity itself besides its geometry and attachment codes: the property-override flags (90), colours (91,
+    /// 92, 93), lineweight (171), landing and dogleg switches (290, 291), text frame (292), annotation scale switch (293), text
+    /// direction negative (294), alignment in the in-place editor (178), attachment point (179), scale factor (45) and the
+    /// attachment direction and top and bottom attachments (271, 272, 273).
+    MLeaderEntityGroups {
+        override_flags = 90,
+        line_color = 91,
+        line_weight = 171,
+        landing_enabled = 290,
+        dogleg_enabled = 291,
+        text_color = 92,
+        text_frame = 292,
+        block_color = 93,
+        annotation_scale = 293,
+        text_direction_negative = 294,
+        text_align_in_editor = 178,
+        attachment_point = 179,
+        scale = 45,
+        attach_direction = 271,
+        attach_top = 272,
+        attach_bottom = 273,
+    }
+}
+
+numeric_groups! {
+    /// The groups of a leader root (`LEADER{`) besides its landing, direction, number and dogleg length: the last-point switch
+    /// (290), the dogleg switch (291) and the attachment direction (271). The first root's values stand for every root.
+    MLeaderRootGroups {
+        last_point_set = 290,
+        dogleg_set = 291,
+        attach_direction = 271,
+    }
+}
+
 /// The attachment and connection codes of a multileader's content as its file gave them (DXF groups 174 to 177 of the content
 /// context, and 173, 95, 174, 175 and 176 of the entity). They say how AutoCAD attached the text to the landing and connected the
 /// block; the writer derives what a code is `None` for from the text's attachment point. The codes of the context and of the entity
 /// that depend on the text's attachment apply while the text still has the attachment point they were read with
 /// (`derived_attach`); the block connection codes always apply.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MLeaderCodes {
     /// The text's attachment point (1..=9) when the codes were read.
@@ -71,11 +164,24 @@ pub struct MLeaderCodes {
     pub alignment: Option<i64>,
     /// Block attachment type of the entity (176): 0 centre extents, 1 insertion point.
     pub block_attachment: Option<i64>,
+    /// The other numeric groups of the context, the entity and its first root (boxed: the multileader is one of the larger
+    /// entity kinds).
+    #[serde(default)]
+    pub groups: Box<MLeaderGroups>,
+}
+
+/// The numeric groups of the content context, of the entity and of its first root that the model keeps as read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MLeaderGroups {
+    pub ctx: MLeaderContextGroups,
+    pub entity: MLeaderEntityGroups,
+    pub root: MLeaderRootGroups,
 }
 
 /// The frame of a multileader's content (the `CONTEXT_DATA{` groups): the basis of the context and the
 /// directions of its text and block.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MLeaderContext {
     /// Origin of the context's basis (group 110).

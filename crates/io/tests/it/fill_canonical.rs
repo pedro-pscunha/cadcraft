@@ -5,7 +5,7 @@ use acadrust::DwgReader;
 use acadrust::entities::EntityType;
 use cadcraft_doc::{
     Common, Drawing, Entity, EntityKind, GeometryRevision, Hatch, HatchEdge, HatchLoop, HatchSpline, Helix, HelixConstrain, HelixFrame, MLine,
-    MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, Wipeout, WipeoutFrame,
+    MLineJust, MLineStyle, MLineVertex, MLineVertexFrame, Wipeout, WipeoutDisplay, WipeoutFrame,
 };
 use cadcraft_dxf::{Tag, records, sections};
 use cadcraft_geom::{Vec2, Vec3};
@@ -43,7 +43,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 fn wipeout(frame: WipeoutFrame) -> Wipeout {
-    Wipeout { boundary: Vec::new(), frame: Some(frame) }
+    Wipeout { boundary: Vec::new(), display: Default::default(), frame: Some(frame) }
 }
 
 fn frame() -> WipeoutFrame {
@@ -97,6 +97,29 @@ fn each_wipeout_frame_field_alone_reaches_the_dxf_and_the_dwg() {
             "{name}: DWG clip {:?}",
             s.clip_boundary_vertices
         );
+    }
+}
+
+#[test]
+fn the_display_settings_of_a_wipeout_survive_the_dxf_and_the_dwg() {
+    let display = WipeoutDisplay { flags: 15, clipping: 0, brightness: 70, contrast: 30, fade: 20 };
+    let canonical = Wipeout { display, ..wipeout(frame()) };
+    let legacy = Wipeout { boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 3.0), Vec2::new(0.0, 3.0)], display, frame: None };
+    for (name, w, revision) in [("canonical", canonical, GeometryRevision::CanonicalV2), ("legacy", legacy, GeometryRevision::LegacyProjectedV1)] {
+        let mut d = Drawing::new_metric();
+        let handle = d.new_handle();
+        let mut e = Entity::new(handle, EntityKind::Wipeout(w));
+        e.geometry_revision = revision;
+        d.model.push(e);
+        let g = groups(&dxf(&d), "WIPEOUT");
+        let at = |code: i32| g.iter().find(|t| t.0 == code).map(|t| t.1.trim().to_string());
+        let shown = [70, 280, 281, 282, 283].map(|c| at(c).unwrap_or_default());
+        assert_eq!(shown, ["15", "0", "70", "30", "20"], "{name}: DXF groups {g:?}");
+        let back = cadcraft_io::read(&cadcraft_io::write(&d, "x.dxf").unwrap(), "x.dxf").unwrap();
+        let read = |d: &Drawing| d.model.iter().find_map(|e| if let EntityKind::Wipeout(w) = &e.kind { Some(w.display) } else { None });
+        assert_eq!(read(&back), Some(display), "{name}: DXF round trip");
+        let again = cadcraft_io::read(&cadcraft_io::write(&back, "x.dwg").unwrap(), "x.dwg").unwrap();
+        assert_eq!(read(&again), Some(display), "{name}: DWG round trip");
     }
 }
 

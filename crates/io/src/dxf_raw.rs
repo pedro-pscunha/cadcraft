@@ -444,7 +444,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
-    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT")) {
+    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT" | "VIEW" | "UCS")) {
         let props =
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
@@ -473,6 +473,8 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         "LEADER" => ("AcDbLeader", &[3, 10, 20, 30, 71, 72, 76, 40, 41, 210, 220, 230, 211, 221, 231, 212, 222, 232, 213, 223, 233]),
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 13, 23, 14, 24, 15, 25, 40, 41, 50, 361]),
+        "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
+        "UCS" => ("AcDbUCSTableRecord", &[2, 70, 10, 20, 30, 11, 21, 31, 12, 22, 32, 79]),
         _ => return Vec::new(),
     };
     let mut out = Vec::new();
@@ -1748,9 +1750,9 @@ fn record(
             out.extend(x.subclass.iter().map(|p| map.group(p)));
             xdata(map, x, &own_apps, out);
         }
-        // A VPORT record's kept view replaces the plan view the writer wrote.
+        // Kept table fields replace the defaults the writer wrote.
         if !entity
-            && r.kind == "VPORT"
+            && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS")
             && i < xdata_at
             && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code))
             && !matches!(t.code, 0 | 5 | 100 | 330)

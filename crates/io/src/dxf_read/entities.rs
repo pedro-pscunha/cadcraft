@@ -213,7 +213,7 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
             let v = t.p(12);
             // Clip vertices are in pixel space: origin at the image's top-left corner, y pointing down.
             let pts: Vec<Vec2> = t.pts(14).into_iter().map(|q| o.xy() + u.xy() * (q.x + 0.5) + v.xy() * (0.5 - q.y)).collect();
-            EntityKind::Wipeout(Wipeout { boundary: pts, frame: None })
+            EntityKind::Wipeout(Wipeout { boundary: pts, display: wipeout_display(&t), frame: None })
         }
         // The file path comes from the IMAGEDEF object (`dxf_image::resolve`).
         "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
@@ -228,6 +228,18 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
         }),
     };
     Some((c, k))
+}
+
+/// The display settings of a WIPEOUT record (groups 70, 280, 281, 282, 283), the defaults of a new wipeout for a group it lacks.
+pub(super) fn wipeout_display(t: &T) -> cadcraft_doc::WipeoutDisplay {
+    let d = cadcraft_doc::WipeoutDisplay::default();
+    cadcraft_doc::WipeoutDisplay {
+        flags: t.i(70).unwrap_or(d.flags),
+        clipping: t.i(280).unwrap_or(d.clipping),
+        brightness: t.i(281).unwrap_or(d.brightness),
+        contrast: t.i(282).unwrap_or(d.contrast),
+        fade: t.i(283).unwrap_or(d.fade),
+    }
 }
 
 /// A DIMENSION from its groups. The text midpoint is the one OCS point of the record the legacy model holds in WCS:

@@ -12,6 +12,8 @@ pub(super) fn attrib_props(t: &T, insert_layer: &str, plot_style: Option<String>
         linetype: t.s(6).filter(|l| !l.is_empty()),
         lineweight: t.i(370).is_some().then_some(c.lineweight),
         plot_style,
+        // Hidden by its own group 60, whatever its definition is; otherwise it follows its definition.
+        visible: (t.i(60) == Some(1)).then_some(false),
     }
 }
 

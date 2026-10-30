@@ -938,6 +938,7 @@ mod tests {
     fn a_wipeout_outline_is_its_closed_clip_in_the_parent_frame() {
         let w = Wipeout {
             boundary: Vec::new(),
+            display: Default::default(),
             frame: Some(WipeoutFrame {
                 origin: Vec3::new(10.0, 0.0, 0.0),
                 u: Vec3::new(4.0, 0.0, 0.0),
@@ -955,7 +956,7 @@ mod tests {
         for (i, (a, b)) in got.iter().enumerate() {
             assert!(near(*a, want[i]) && near(*b, want[(i + 1) % 4]), "edge {i}");
         }
-        assert!(wipeout_primitives(&Wipeout { boundary: Vec::new(), frame: None }, &parent()).is_err());
+        assert!(wipeout_primitives(&Wipeout { boundary: Vec::new(), display: Default::default(), frame: None }, &parent()).is_err());
     }
 
     /// The in-plane directions (x along the frame, y up the plane) and a direction for each of the three planes.
