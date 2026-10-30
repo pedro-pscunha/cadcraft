@@ -27,15 +27,19 @@ fn hash(text: &str) -> u64 {
 }
 
 /// Put a new copy (COPYCLIP, CUTCLIP, COPYBASE from anywhere) on the system clipboard, once.
-pub fn mirror(app: &CadApp, ctx: &egui::Context) {
+pub fn mirror(app: &mut CadApp, ctx: &egui::Context) {
     let Some(src) = &app.session.clipboard_source else { return };
     if src.uid.is_none() || ctx.data(|d| d.get_temp::<u64>(serial_id())) == Some(src.serial) {
         return;
     }
     ctx.data_mut(|d| d.insert_temp(serial_id(), src.serial));
-    if let Some(text) = clipboard::system_text(&app.session) {
-        ctx.data_mut(|d| d.insert_temp(text_id(), hash(&text)));
-        ctx.copy_text(text);
+    match clipboard::system_text(&app.session) {
+        Ok(Some(text)) => {
+            ctx.data_mut(|d| d.insert_temp(text_id(), hash(&text)));
+            ctx.copy_text(text);
+        }
+        Ok(None) => {}
+        Err(error) => app.session.echo(error.to_string()),
     }
 }
 
@@ -63,4 +67,26 @@ pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static 
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::{Common, Drawing, Entity, RawCompound, RawRecord, RawTag};
+    use cadcraft_engine::{Session, cmd::clipboard::ClipSource};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_refused_raw_clipboard_copy_reports_the_handle_and_publishes_no_text() {
+        let record = RawRecord::new("INSERT".into(), vec![RawTag { code: 5, value: "200".into() }]).unwrap();
+        let unit = RawCompound::new(record, vec![], Common::default(), "The source cannot be copied exactly.".into()).unwrap();
+        let mut app = CadApp::new(Session::new(), crate::Services::default());
+        app.session.clipboard = vec![Entity::from_raw(unit)];
+        app.session.clipboard_source = Some(ClipSource { uid: Some(1), defs: Arc::new(Drawing::new_metric()), serial: 1 });
+        let context = egui::Context::default();
+        let mut output = context.run_ui(Default::default(), |ui| mirror(&mut app, ui.ctx()));
+        assert!(app.session.log.iter().any(|line| line.contains("200") && line.contains("read-only")));
+        assert!(!output.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(_))));
+        output.textures_delta.clear();
+    }
 }

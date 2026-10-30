@@ -66,6 +66,9 @@ impl Drawing {
     /// Duplicate active block contents with the canonical remapper, including name-keyed
     /// record extras. The original definition keeps the host's metadata, not unsaved edits.
     pub fn duplicate_block_content(&mut self, entities: Vec<Entity>, source: &str, target: &str, host: &Drawing) -> crate::Result<BlockContentCopy> {
+        for entity in &entities {
+            entity.require_copyable()?;
+        }
         if source.eq_ignore_ascii_case(target) {
             return Err(crate::DocError::Invalid("a block copy needs a different target name".into()));
         }

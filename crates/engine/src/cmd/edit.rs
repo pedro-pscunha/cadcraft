@@ -444,6 +444,9 @@ fn copy_to_clip(s: &mut Session, hs: &[Handle], base: Option<Vec2>) -> Result<us
     let d = s.doc()?;
     let mut seen = std::collections::HashSet::new();
     let ents: Vec<Entity> = hs.iter().filter(|h| seen.insert(**h)).filter_map(|h| d.entity(*h).map(|e| (**e).clone())).collect();
+    for entity in &ents {
+        entity.require_copyable()?;
+    }
     let b = cadcraft_render::entities_extents(d, ents.iter(), 0)?;
     let base = base.unwrap_or(if b.min.is_finite() { b.min } else { Vec2::ZERO });
     let n = ents.len();

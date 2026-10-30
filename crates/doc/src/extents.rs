@@ -89,6 +89,9 @@ pub fn legacy_entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> crate::Res
 }
 
 fn require_legacy_tree<'a>(drawing: &'a Drawing, entity: &Entity, depth: usize, seen: &mut HashSet<(&'a str, usize)>) -> crate::Result<()> {
+    if let EntityKind::Raw(raw) = &entity.kind {
+        return Err(raw.geometry_refusal());
+    }
     entity.require_legacy_geometry().map_err(|_| crate::DocError::CanonicalExtent(entity.handle))?;
     if depth >= MAX_BLOCK_DEPTH {
         return Ok(());

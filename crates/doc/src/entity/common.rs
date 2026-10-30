@@ -4,6 +4,12 @@ use super::{Color, Deserialize, Serialize, Vec3};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Handle(pub u64);
 
+impl std::fmt::Display for Handle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:X}", self.0)
+    }
+}
+
 impl Handle {
     pub fn hex(self) -> String {
         format!("{:X}", self.0)

@@ -45,7 +45,7 @@ fn edit_insert_copy_and_reopen_cycles_keep_every_record_handle_unique() {
             }
             let h = d.add(&Space::Model, Common::default(), EntityKind::Insert(insert)).unwrap();
             let original = (**d.entity(h).unwrap()).clone();
-            for copy in d.duplicate_entities(vec![vec![original]], cadcraft_doc::DuplicationSource::SameDrawing) {
+            for copy in d.duplicate_entities(vec![vec![original]], cadcraft_doc::DuplicationSource::SameDrawing).unwrap() {
                 d.model.push(copy);
             }
             let text = if dwg {

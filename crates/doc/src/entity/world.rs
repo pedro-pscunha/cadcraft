@@ -444,6 +444,7 @@ impl Entity {
             | EntityKind::Unknown(_) => {
                 return Err(DocError::Invalid(format!("The canonical {} geometry adapter is not available.", self.kind.type_name())));
             }
+            EntityKind::Raw(raw) => return Err(raw.geometry_refusal()),
         };
         if primitives.iter().any(|primitive| primitive.validate().is_err()) {
             return Err(DocError::NonFinite(self.handle));

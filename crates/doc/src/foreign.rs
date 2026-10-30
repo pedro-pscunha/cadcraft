@@ -504,13 +504,26 @@ impl crate::Drawing {
     /// entire command, building the owner index once and mutating Foreign at most once.
     /// External drawings contribute model data only. Raw dimension associations are copied only
     /// when all their geometry is in the same set; dictionaries/reactors never retain old owners.
-    pub fn duplicate_entities(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource) -> Vec<Entity> {
-        self.duplicate_entity_sets(sets, source, &BTreeMap::new(), None)
+    pub fn duplicate_entities(&mut self, sets: Vec<Vec<Entity>>, source: DuplicationSource) -> crate::Result<Vec<Entity>> {
+        for entity in sets.iter().flatten() {
+            entity.require_copyable()?;
+        }
+        Ok(self.duplicate_entity_sets(sets, source, &BTreeMap::new(), None))
     }
 
     /// Give merged geometry a new identity and its chosen source's owned metadata. References
     /// to any consumed entity follow the result, without adopting those entities' metadata.
     pub fn merge_entity(&mut self, entity: Entity, consumed: &[Handle]) -> crate::Result<Entity> {
+        if let EntityKind::Raw(raw) = &entity.kind {
+            return Err(raw.edit_refusal());
+        }
+        for handle in consumed {
+            if let Some(entity) = self.entity(*handle)
+                && let EntityKind::Raw(raw) = &entity.kind
+            {
+                return Err(raw.edit_refusal());
+            }
+        }
         let aliases = consumed.iter().map(|h| (*h, entity.handle)).collect();
         let merged = self
             .duplicate_entity_sets(vec![vec![entity]], DuplicationSource::SameDrawing, &aliases, None)

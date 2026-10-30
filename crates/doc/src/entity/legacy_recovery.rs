@@ -5,7 +5,7 @@
 //! exactly: its Z values are 0 and its leader fields have their defaults, so it is promoted to the canonical revision
 //! without changing a number in it. A payload on any other plane lost its Z values and its projection when it was
 //! imported: it stays `LegacyProjectedV1`, opens, displays and saves as before, and its edits follow the legacy rules.
-//! The document always opens; nothing here fails.
+//! Recovery of pre-revision payloads does not fail. New raw units must keep their validated identity and raw revision.
 
 use cadcraft_geom::{SplineSpace, Vec3};
 
@@ -25,9 +25,22 @@ pub(super) struct SerializedEntity {
 // Deserialization does not promote yet: until display, snaps, pick and grips read canonical payloads, a promoted
 // spline or leader would be refused by every edit that still takes the legacy path. Reader activation calls
 // `promote_legacy_spline_leader` here.
-impl From<SerializedEntity> for Entity {
-    fn from(value: SerializedEntity) -> Self {
-        Entity { geometry_revision: value.geometry_revision, handle: value.handle, common: value.common, kind: value.kind }
+impl TryFrom<SerializedEntity> for Entity {
+    type Error = crate::DocError;
+    fn try_from(value: SerializedEntity) -> crate::Result<Self> {
+        let geometry_revision = if let EntityKind::Raw(raw) = &value.kind {
+            if value.geometry_revision != GeometryRevision::RawSource || value.handle != raw.parent().handle() {
+                return Err(crate::DocError::Invalid("A raw entity must keep its source identity and raw revision.".into()));
+            }
+            raw.validate_common(&value.common)?;
+            GeometryRevision::RawSource
+        } else {
+            if value.geometry_revision == GeometryRevision::RawSource {
+                return Err(crate::DocError::Invalid("Only an opaque raw unit can use the raw revision.".into()));
+            }
+            value.geometry_revision
+        };
+        Ok(Entity { geometry_revision, handle: value.handle, common: value.common, kind: value.kind })
     }
 }
 
