@@ -223,6 +223,11 @@ pub struct AttribProps {
     /// Whether the attribute is shown (its own group 60), independently of its definition's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visible: Option<bool>,
+    /// The attribute's own transparency (group 440) and the alpha the file gave for it (see `Common::transparency_alpha`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparency: Option<crate::Transparency>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transparency_alpha: Option<u8>,
 }
 
 impl AttribProps {
@@ -239,6 +244,8 @@ impl AttribProps {
             lineweight: self.lineweight.unwrap_or(base.lineweight),
             plot_style: self.plot_style.clone().unwrap_or_else(|| base.plot_style.clone()),
             visible: self.visible.unwrap_or(base.visible),
+            transparency: self.transparency.unwrap_or(base.transparency),
+            transparency_alpha: if self.transparency.is_some() { self.transparency_alpha } else { base.transparency_alpha },
             ..base.clone()
         }
     }

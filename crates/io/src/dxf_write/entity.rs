@@ -458,6 +458,9 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 w.s(100, "AcDbEntity");
                 let (c, base) = attrib_common(d, e, i, a);
                 layer_and_props(w, &c, Some(&base));
+                if let Some(v) = super::common::transparency_440(&c) {
+                    w.i(440, v);
+                }
                 plot_style(w, &c.plot_style);
                 // Hidden as the attribute is: its own visibility, else its definition's (a dynamic block's visibility state hides it).
                 if !c.visible {

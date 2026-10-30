@@ -81,6 +81,8 @@ fn attribute_properties_roundtrip() {
         lineweight: Some(Lineweight::Mm100(50)),
         plot_style: Some("ByBlock".into()),
         visible: Some(false),
+        transparency: Some(Transparency::Percent(50)),
+        transparency_alpha: Some(128),
     };
     let red = AttribProps { color: Some(Color::ByLayer), ..AttribProps::default() };
     let (d, h) = drawing(vec![attrib("OWN", 0.0, own.clone()), attrib("DEFLAYER", 10.0, AttribProps::default()), attrib("RED", 20.0, red.clone())]);

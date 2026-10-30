@@ -15,6 +15,8 @@ pub(super) fn attrib_props(t: &T, plot_style: Option<String>) -> AttribProps {
         plot_style,
         // Hidden by its own group 60, whatever its definition is; otherwise it follows its definition.
         visible: (t.i(60) == Some(1)).then_some(false),
+        transparency: t.i(440).map(|v| super::common::transparency_440(v).0),
+        transparency_alpha: t.i(440).and_then(|v| super::common::transparency_440(v).1),
     }
 }
 
