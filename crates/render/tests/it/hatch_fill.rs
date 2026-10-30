@@ -26,6 +26,9 @@ fn hatch(pattern: &str, loops: Vec<HatchLoop>) -> Hatch {
         origin: Vec2::ZERO,
         background: None,
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 
@@ -85,7 +88,7 @@ fn pattern_background_is_filled_under_the_lines() {
 }
 
 fn gradient(name: &str, angle: f64, color1: Color) -> Hatch {
-    let g = Gradient { name: name.into(), color1, color2: Color::Index(3), angle, centered: true };
+    let g = Gradient { name: name.into(), color1, color2: Color::Index(3), angle, centered: true, source: Default::default() };
     Hatch { gradient: Some(g), ..hatch("SOLID", vec![square(0.0, 10.0)]) }
 }
 

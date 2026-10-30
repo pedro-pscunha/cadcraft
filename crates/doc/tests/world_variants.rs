@@ -87,6 +87,7 @@ fn nonfinite_fill_payloads_and_source_frames_are_refused() {
             color2: cadcraft_color::Color::Index(5),
             angle: f64::NAN,
             centered: false,
+            source: Default::default(),
         },
         origin: Vec3::ZERO,
         x_axis: X,
@@ -218,6 +219,7 @@ fn a_gradient_retains_its_affine_basis_and_local_parameters() {
         color2: cadcraft_color::Color::Index(5),
         angle: 0.5,
         centered: false,
+        source: Default::default(),
     };
     let source = WorldGradient { gradient: gradient.clone(), origin: Vec3::new(1.0, 2.0, 3.0), x_axis: X, y_axis: Y };
     let WorldPrimitive::Fill(moved) = fill(WorldFillKind::Gradient(source.clone())).transformed(&shear()).unwrap() else { panic!("not fill") };

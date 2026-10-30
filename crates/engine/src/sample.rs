@@ -32,6 +32,7 @@ fn dim(kind: DimKind, p13: Vec2, p14: Vec2, defpt: Vec2) -> EntityKind {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     })
 }
 
@@ -150,6 +151,9 @@ pub fn bracket() -> Drawing {
             origin: Vec2::ZERO,
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         })
     };
     add(on("Hatch"), hatch(Vec2::new(sx, c.y + 0.875), Vec2::new(sx + 0.5, y0 + h)));
@@ -184,6 +188,7 @@ pub fn bracket() -> Drawing {
             overrides: Default::default(),
             assoc: Vec::new(),
             marks: Default::default(),
+            leader_length: 0.0,
         }),
     );
     add(
@@ -205,6 +210,7 @@ pub fn bracket() -> Drawing {
             overrides: Default::default(),
             assoc: Vec::new(),
             marks: Default::default(),
+            leader_length: 0.0,
         }),
     );
 

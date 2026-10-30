@@ -101,6 +101,33 @@ pub struct Hatch {
     /// standard library (unit scale and angle, like the library's; empty otherwise).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pattern_lines: Vec<crate::library::PatternLine>,
+    /// The pattern type (DXF 76): 0 user-defined, 1 predefined, 2 custom. A hatch made here is predefined.
+    #[serde(default = "predefined")]
+    pub pattern_type: u8,
+    /// The pattern is double (DXF 77): drawn a second time at right angles.
+    #[serde(default)]
+    pub pattern_double: bool,
+    /// The seed points (DXF 98): points of the hatched area that the boundary was found from, in the hatch's OCS.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seed_points: Vec<Vec2>,
+}
+
+fn predefined() -> u8 {
+    1
+}
+
+impl Hatch {
+    /// The seed points that still lie in the hatched area, which is where a seed point must be: after an edit that reshaped the
+    /// boundary, a seed point it left outside is dropped. The loops of a canonical hatch (exact edges) only move, turn and
+    /// scale with their seed points, so all of them stay.
+    pub fn kept_seed_points(&self) -> Vec<Vec2> {
+        if self.loops.iter().any(|l| !l.edges.is_empty()) {
+            return self.seed_points.clone();
+        }
+        let loops: Vec<cadcraft_geom::Polyline> =
+            self.loops.iter().map(|l| cadcraft_geom::Polyline { vertices: l.vertices.clone(), closed: true }).collect();
+        self.seed_points.iter().copied().filter(|p| loops.iter().filter(|l| l.contains(*p)).count() % 2 == 1).collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,6 +140,21 @@ pub struct Gradient {
     pub angle: f64,
     #[serde(default)]
     pub centered: bool,
+    /// The gradient groups the colours and `centered` do not hold, as a file gave them.
+    #[serde(default)]
+    pub source: GradientSource,
+}
+
+/// The groups of a gradient that [`Gradient`]'s own fields only partly hold: the shift (DXF 461, a real number between 0
+/// centred and 1 shifted), the colour mode (452: 0 two colours, 1 one colour), the tint (462) of a one-colour gradient, and
+/// the indexed colour (63) that goes with each true colour (421), with that true colour. All empty for a gradient made here.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientSource {
+    pub shift: Option<f64>,
+    pub color_mode: i64,
+    pub tint: f64,
+    pub aci: [Option<(i16, cadcraft_color::Rgb)>; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

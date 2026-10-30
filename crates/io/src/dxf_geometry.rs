@@ -10,7 +10,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cadcraft_doc::{Drawing, Entity, GeometryRecord, GeometrySnapshot, Handle, RawTag, attrib_geometry_key, geometry_key};
+use cadcraft_doc::{
+    DimensionAsRead, Drawing, Entity, EntityKind, GeometryRecord, GeometrySnapshot, Handle, RawTag, TextAsRead, attrib_geometry_key, geometry_key,
+};
 use cadcraft_dxf::Tag;
 
 type Spec = &'static [(&'static str, &'static [i32])];
@@ -453,6 +455,28 @@ fn keys(d: &Drawing, wanted: impl Fn(Handle) -> bool) -> HashMap<Handle, String>
     out
 }
 
+/// The justified texts of the drawing (a TEXT, an ATTDEF, the attributes of a reference) as they were read.
+fn texts_as_read(d: &Drawing) -> HashMap<Handle, TextAsRead> {
+    let mut out = HashMap::new();
+    for e in all_entities(d) {
+        let own = match &e.kind {
+            EntityKind::Text(t) => Some(t),
+            EntityKind::AttDef(a) => Some(&a.text),
+            _ => None,
+        };
+        out.extend(own.and_then(TextAsRead::of).map(|t| (e.handle, t)));
+        for a in e.kind.attributes() {
+            out.extend(a.handle.zip(TextAsRead::of(&a.text)));
+        }
+    }
+    out
+}
+
+/// The dimensions of the drawing as they were read.
+fn dimensions_as_read(d: &Drawing) -> HashMap<Handle, DimensionAsRead> {
+    all_entities(d).filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some((e.handle, DimensionAsRead::of(dm))) } else { None }).collect()
+}
+
 /// Every entity of the drawing (model space, layouts, blocks).
 fn all_entities(d: &Drawing) -> impl Iterator<Item = &Entity> {
     let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
@@ -472,6 +496,7 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
         *seen.entry(h).or_default() += 1;
     }
     let keys = keys(d, |h| seen.get(&h) == Some(&1));
+    let (texts, dimensions) = (texts_as_read(d), dimensions_as_read(d));
     let mut snapshots: HashMap<Handle, Arc<GeometrySnapshot>> = HashMap::new();
     for (i, (kind, tags, h)) in records.iter().enumerate() {
         let Some(h) = h else { continue };
@@ -487,7 +512,15 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
                 let Some(children) = children else { continue };
                 parts.extend(children);
             }
-            snapshots.insert(*h, Arc::new(GeometrySnapshot { records: parts, model: model.clone() }));
+            snapshots.insert(
+                *h,
+                Arc::new(GeometrySnapshot {
+                    records: parts,
+                    model: model.clone(),
+                    text: texts.get(h).copied(),
+                    dimension: dimensions.get(h).copied(),
+                }),
+            );
         }
     }
     if snapshots.is_empty() {

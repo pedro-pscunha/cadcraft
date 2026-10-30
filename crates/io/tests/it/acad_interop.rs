@@ -100,6 +100,7 @@ fn s25(kind: DimKind, p13: Vec3, p14: Vec3, defpt: Vec3) -> Drawing {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     };
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(dm)).unwrap();
     d

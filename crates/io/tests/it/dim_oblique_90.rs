@@ -23,6 +23,7 @@ fn dimension(kind: DimKind, oblique: f64) -> EntityKind {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: DimMarks { oblique: Some(oblique.to_radians()), ..Default::default() },
+        leader_length: 0.0,
     })
 }
 

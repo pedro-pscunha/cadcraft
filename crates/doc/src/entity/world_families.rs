@@ -822,6 +822,9 @@ mod tests {
             origin: Vec2::new(1.0, 1.0),
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         }
     }
 
@@ -858,6 +861,7 @@ mod tests {
             color2: cadcraft_color::Color::Index(5),
             angle: 0.5,
             centered: false,
+            source: Default::default(),
         };
         let gradient = hatch_primitives(&hatch(true, Some(g)), Vec3::Z, &Mat4::IDENTITY).unwrap();
         assert!(matches!(&gradient[0], WorldPrimitive::Fill(f) if matches!(f.kind, WorldFillKind::Gradient(_))));
@@ -1101,6 +1105,7 @@ mod tests {
             closed: false,
             fit_opts: FitOptions::default(),
             space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+            source: Default::default(),
         };
         let got = spline_primitives(&sp, &parent()).unwrap();
         let WorldPrimitive::Spline { degree, knots, control, weights } = &got[0] else { panic!("not a spline") };

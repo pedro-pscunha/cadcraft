@@ -289,6 +289,7 @@ fn linear_dimension() -> cadcraft_doc::Dimension {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     }
 }
 

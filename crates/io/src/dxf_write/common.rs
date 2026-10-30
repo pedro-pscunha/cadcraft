@@ -245,6 +245,10 @@ fn attrib_flags(a: &Attrib) -> i64 {
 /// from DWG as is (it recomputes it only for DXF): writing the alignment point there drew centred
 /// and right-aligned text from the wrong end in AutoCAD (#1050).
 ///
+/// While the text's layout is the one it was read with (`read`), a move or a rotation keeps its baseline start where it was
+/// relative to its alignment point: the source's own point, whatever font measured it. A text with another value, size, style
+/// or justification, or one made here, takes the rule below.
+///
 /// The stored point is kept when it is close to where CADCraft's font puts the baseline start:
 /// then it is AutoCAD's own (exact for its fonts). It is replaced when it is clearly stale: the
 /// alignment point itself (text made here) or a text whose length changed since. Close means
@@ -253,7 +257,10 @@ fn attrib_flags(a: &Attrib) -> i64 {
 /// across it within a fifth of its height: Left Middle and Left Bottom text made here, whose
 /// alignment point is only half or a third of a height from the baseline start, must not pass
 /// for AutoCAD's.
-fn text_insert(d: &Drawing, t: &Text) -> Vec3 {
+fn text_insert(d: &Drawing, t: &Text, read: Option<&cadcraft_doc::TextAsRead>) -> Vec3 {
+    if let Some(q) = read.and_then(|r| r.insert_after(t)) {
+        return q;
+    }
     let computed = computed_text_insert(d, t);
     if t.align_pt.is_some_and(|a| a.xy() == t.insert.xy()) {
         return computed;
@@ -295,8 +302,16 @@ fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
 
 /// `plane` is the normal of a canonical text's plane (the entity's, or the attribute's own): with it the text also writes
 /// its normal (210, 220, 230), which the legacy text does not keep. The generation flags (group 71) are written for both.
-pub(super) fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_prompt: Option<&str>, plane: Option<Vec3>) {
-    w.p(10, text_insert(d, t));
+pub(super) fn text_tags(
+    w: &mut W,
+    d: &Drawing,
+    t: &Text,
+    attrib: Option<(&Attrib, Version)>,
+    attdef_prompt: Option<&str>,
+    plane: Option<Vec3>,
+    read: Option<&cadcraft_doc::TextAsRead>,
+) {
+    w.p(10, text_insert(d, t, read));
     w.f(40, t.height);
     w.s(1, &t.value);
     if t.rotation != 0.0 {

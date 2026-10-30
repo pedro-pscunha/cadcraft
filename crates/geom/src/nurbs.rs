@@ -311,6 +311,7 @@ impl Spline {
                 start_tangent: -z.end_tangent,
                 end_tangent: -z.start_tangent,
             }),
+            source: Default::default(),
         }
     }
 

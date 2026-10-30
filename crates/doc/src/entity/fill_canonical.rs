@@ -116,13 +116,14 @@ impl Hatch {
         moved.loops = self.loops.iter().map(|l| HatchLoop { edges: l.edges.iter().map(edge).collect(), ..l.clone() }).collect();
         moved.elevation = place3(Vec2::ZERO).z;
         moved.origin = place(self.origin);
+        moved.seed_points = self.seed_points.iter().map(|p| place(*p)).collect();
         moved.scale *= k;
         moved.angle += delta;
         if let Some(g) = &mut moved.gradient {
             g.angle += delta;
         }
         let finite = moved.loops.iter().flat_map(|l| &l.edges).all(crate::has_finite_numbers);
-        if !finite || !moved.elevation.is_finite() || !moved.origin.is_finite() {
+        if !finite || !moved.elevation.is_finite() || !moved.origin.is_finite() || !moved.seed_points.iter().all(|p| p.is_finite()) {
             return Err(invalid("finite coordinates"));
         }
         Ok((moved, new_normal))
@@ -208,6 +209,9 @@ mod tests {
             origin: Vec2::new(1.0, 1.0),
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         }
     }
 

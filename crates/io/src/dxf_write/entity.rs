@@ -330,7 +330,7 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.s(0, "TEXT");
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
-            text_tags(w, d, t, None, None, canonical_plane(e));
+            text_tags(w, d, t, None, None, canonical_plane(e), e.common.geometry.as_deref().and_then(|g| g.text.as_ref()));
         }
         // Closed polylines, one per loop (`dxf_region`): REGION's own data is ACIS.
         EntityKind::Region(r) => {
@@ -356,7 +356,15 @@ fn write_text_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
             w.s(0, "ATTDEF");
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
-            text_tags(w, d, &a.text, Some((a, cx.target)), Some(&a.prompt), canonical_plane(e));
+            text_tags(
+                w,
+                d,
+                &a.text,
+                Some((a, cx.target)),
+                Some(&a.prompt),
+                canonical_plane(e),
+                e.common.geometry.as_deref().and_then(|g| g.text.as_ref()),
+            );
             if cx.target >= Version::R2007 {
                 multiline_tags(w, a, true);
             }
@@ -461,7 +469,7 @@ fn write_insert_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: b
                 if a.plane.thickness != 0.0 {
                     w.f(39, a.plane.thickness);
                 }
-                text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane);
+                text_tags(w, d, &a.text, Some((a, cx.target)), None, own_plane, a.geometry.as_deref().and_then(|g| g.text.as_ref()));
                 if cx.target >= Version::R2007 {
                     multiline_tags(w, a, false);
                 }
@@ -489,7 +497,10 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         let plane = canonical_plane(e);
         let Some(drawn) = plane.map_or(Some(dm.clone()), |n| dm.localized(n).ok()) else { return };
         let g = cadcraft_render::dimension_geometry(&drawn, &style, d.header.f64("DIMSCALE", 1.0));
-        w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(if plane.is_some() { dm.text_mid.z } else { 0.0 }) });
+        // The text position is the file's while the dimension only moved, turned or mirrored since it was read (its text moved with it):
+        // else AutoCAD's default position for the text, which depends on the dimension's lines, is laid out again.
+        let as_moved = e.common.geometry.as_deref().and_then(|g| g.dimension.as_ref()).is_some_and(|r| r.is_rigid_image(dm));
+        w.p(11, if dm.user_text_pos || as_moved { dm.text_mid } else { g.text_pos.to3(if plane.is_some() { dm.text_mid.z } else { 0.0 }) });
         let ty: i64 = match dm.kind {
             DimKind::Linear { .. } => 0,
             DimKind::Aligned => 1,
@@ -532,12 +543,12 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
             DimKind::Radius => {
                 w.s(100, "AcDbRadialDimension");
                 w.p(15, dm.p15);
-                w.f(40, 0.0);
+                w.f(40, dm.leader_length);
             }
             DimKind::Diameter => {
                 w.s(100, "AcDbDiametricDimension");
                 w.p(15, dm.p15);
-                w.f(40, 0.0);
+                w.f(40, dm.leader_length);
             }
             DimKind::Angular => {
                 w.s(100, "AcDb2LineAngularDimension");
@@ -835,11 +846,11 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
             }
         }
         w.i(75, i64::from(h.style));
-        w.i(76, 1);
+        w.i(76, i64::from(h.pattern_type));
         if !h.solid {
             w.f(52, h.angle.to_degrees());
             w.f(41, h.scale);
-            w.i(77, 0);
+            w.i(77, i64::from(h.pattern_double));
             // The lines read from the file, else the library's pattern of that name.
             let lines = if h.pattern_lines.is_empty() {
                 cadcraft_doc::library::pattern_for(d, &h.pattern).map(|p| p.lines).unwrap_or_default()
@@ -862,7 +873,12 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
                 }
             }
         }
-        w.i(98, 0);
+        // The seed points that are still in the hatched area.
+        let seeds = h.kept_seed_points();
+        w.i(98, seeds.len() as i64);
+        for p in seeds {
+            w.p2(10, p);
+        }
         // Gradient fills (450 to 470) exist from AutoCAD 2004; AutoCAD 2000 ends the hatch at the seed points
         // and the fill stays in CADCraft's xdata below.
         if let Some(g) = &h.gradient {
@@ -1062,15 +1078,21 @@ fn gradient_groups(w: &mut W, g: &Gradient) {
     w.i(450, 1);
     w.i(451, 0);
     w.f(460, g.angle);
-    w.f(461, if g.centered { 0.0 } else { 1.0 });
-    w.i(452, 0);
-    w.f(462, 0.0);
+    // The shift as the file gave it while it still says what `centered` does (0 centred, else shifted).
+    let shift = g.source.shift.filter(|s| (*s == 0.0) == g.centered);
+    w.f(461, shift.unwrap_or(if g.centered { 0.0 } else { 1.0 }));
+    w.i(452, g.source.color_mode);
+    w.f(462, g.source.tint);
     w.i(453, 2);
-    for (k, c) in [(0.0, g.color1), (1.0, g.color2)] {
+    for (i, (k, c)) in [(0.0, g.color1), (1.0, g.color2)].into_iter().enumerate() {
         w.f(463, k);
         match c {
             Color::True(rgb) => {
-                w.i(63, i64::from(cadcraft_color::nearest_aci(rgb)));
+                // The indexed colour the file gave this true colour, else the nearest.
+                let aci = g.source.aci[i]
+                    .filter(|(_, source)| *source == rgb)
+                    .map_or_else(|| i64::from(cadcraft_color::nearest_aci(rgb)), |(a, _)| i64::from(a));
+                w.i(63, aci);
                 w.i(421, i64::from(rgb.to_u32()));
             }
             c => w.i(63, i64::from(c.to_aci())),
@@ -1105,14 +1127,21 @@ fn spline_tags(w: &mut W, s: &cadcraft_geom::Spline, plane: Option<Vec3>) {
         let base = points.first().copied().unwrap_or(Vec3::ZERO);
         points.iter().all(|p| ((*p - base).dot(n)).abs() <= 1e-9 * (1.0 + p.len()))
     });
-    let flags = if planar { 8 } else { 0 } | i64::from(s.closed) | if s.is_periodic() { 2 } else { 0 } | if s.weights.is_empty() { 0 } else { 4 };
+    // A linear spline (bit 16, with the planar bit) stays linear while it is degree 1.
+    let source = s.source();
+    let linear = source.linear && s.degree == 1;
+    let flags = if planar || linear { 8 } else { 0 }
+        | i64::from(s.closed)
+        | if s.is_periodic() { 2 } else { 0 }
+        | if s.weights.is_empty() { 0 } else { 4 }
+        | if linear { 16 } else { 0 };
     w.i(70, flags);
     w.i(71, s.degree as i64);
     w.i(72, s.knots.len() as i64);
     w.i(73, s.control.len() as i64);
     w.i(74, s.fit.len() as i64);
-    w.f(42, 1e-10);
-    w.f(43, 1e-10);
+    w.f(42, source.knot_tolerance);
+    w.f(43, source.control_tolerance);
     // Fit data: tolerance and end tangents (the knot parametrisation is implied by the knots).
     if !s.fit.is_empty() {
         w.f(44, s.fit_opts.tolerance);

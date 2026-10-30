@@ -89,6 +89,9 @@ fn hatch_pattern_and_solid() {
         origin: Vec2::ZERO,
         background: None,
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     };
     d.add(&Space::Model, Common::default(), EntityKind::Hatch(h.clone())).unwrap();
     let l = build(&d, &Space::Model, &Options::default());
@@ -377,6 +380,7 @@ fn lin_dim() -> cadcraft_doc::Dimension {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     }
 }
 
@@ -488,6 +492,9 @@ fn pattern_hatch(pattern: &str, scale: f64, (x0, y0, x1, y1): (f64, f64, f64, f6
         origin: Vec2::ZERO,
         background: None,
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 

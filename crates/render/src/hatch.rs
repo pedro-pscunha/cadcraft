@@ -439,6 +439,9 @@ pub fn pattern_swatch(lines: &[PatternLine], side: f64) -> Vec<Vec<Vec2>> {
         origin: Vec2::ZERO,
         background: None,
         pattern_lines: lines.to_vec(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     };
     let square = vec![Vec2::new(0.0, 0.0), Vec2::new(side, 0.0), Vec2::new(side, side), Vec2::new(0.0, side)];
     let mut runs = pattern_lines(&Drawing::default(), &h, &[square], 0.0, None);
@@ -610,6 +613,9 @@ mod tests {
             gradient: None,
             background: None,
             pattern_lines: vec![],
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         };
         let loops = fill_loops(&hatch, 1e-4);
         assert_eq!(loops.len(), 1, "fill_loops must deduplicate duplicate loops");

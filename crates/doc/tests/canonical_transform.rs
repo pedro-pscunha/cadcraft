@@ -144,6 +144,9 @@ fn hatch() -> Hatch {
         origin: Vec2::new(1.0, 1.0),
         background: None,
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 
@@ -174,6 +177,7 @@ fn spline() -> Spline {
         closed: false,
         fit_opts: FitOptions::default(),
         space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+        source: Default::default(),
     }
 }
 
@@ -209,6 +213,7 @@ fn dimension() -> Dimension {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     }
 }
 

@@ -198,6 +198,7 @@ fn a_spline_control_point_moves_in_xy_and_keeps_its_z() {
         closed: false,
         fit_opts: FitOptions::default(),
         space: Some(SplineSpace { control: vec![0.0, 2.5, 1.0], fit: Vec::new(), start_tangent: 0.0, end_tangent: 0.0 }),
+        source: Default::default(),
     };
     let (mut session, h) = session_with(EntityKind::Spline(spline), Vec3::Z);
     session.grip_edit(h, 1, Vec2::new(3.0, 6.0), GripMode::Stretch).unwrap();

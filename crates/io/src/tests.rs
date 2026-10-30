@@ -106,6 +106,7 @@ fn sample() -> Drawing {
             overrides: Default::default(),
             assoc: Vec::new(),
             marks: Default::default(),
+            leader_length: 0.0,
         }),
     )
     .unwrap();
@@ -130,6 +131,9 @@ fn sample() -> Drawing {
             origin: Vec2::ZERO,
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         }),
     )
     .unwrap();
@@ -564,6 +568,7 @@ fn dim(kind: DimKind, p13: Vec3, p14: Vec3) -> Dimension {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     }
 }
 
@@ -1868,8 +1873,16 @@ fn gradient_sample() -> (Drawing, Vec<Option<Gradient>>) {
             color2: Color::True(cadcraft_color::Rgb(0, 0, 255)),
             angle: 30f64.to_radians(),
             centered: false,
+            source: Default::default(),
         }),
-        Some(Gradient { name: "CURVED".into(), color1: Color::Index(5), color2: Color::ByLayer, angle: 0.0, centered: true }),
+        Some(Gradient {
+            name: "CURVED".into(),
+            color1: Color::Index(5),
+            color2: Color::ByLayer,
+            angle: 0.0,
+            centered: true,
+            source: Default::default(),
+        }),
         None,
     ];
     for g in &gradients {
@@ -1886,10 +1899,18 @@ fn gradient_sample() -> (Drawing, Vec<Option<Gradient>>) {
             origin: Vec2::ZERO,
             background: None,
             pattern_lines: Vec::new(),
+            pattern_type: 1,
+            pattern_double: false,
+            seed_points: Vec::new(),
         };
         d.add(&Space::Model, Common::default(), EntityKind::Hatch(h)).unwrap();
     }
     (d, gradients)
+}
+
+/// A gradient without the groups of its file that `Gradient` keeps beside its colours (see `GradientSource`).
+fn plain(g: Option<cadcraft_doc::Gradient>) -> Option<cadcraft_doc::Gradient> {
+    g.map(|g| cadcraft_doc::Gradient { source: Default::default(), ..g })
 }
 
 fn hatches(d: &Drawing) -> Vec<Hatch> {
@@ -1909,10 +1930,12 @@ fn gradient_hatch_roundtrips_through_dxf() {
     let (a, b) = (hatches(&d), hatches(&back));
     assert_eq!(b.len(), gradients.len());
     for ((x, y), g) in a.iter().zip(&b).zip(&gradients) {
-        assert_eq!(&y.gradient, g);
+        assert_eq!(&plain(y.gradient.clone()), g);
         assert_eq!(x.loops, y.loops);
     }
-    assert_eq!(roundtrip(&back).model.iter().map(|e| &e.kind).collect::<Vec<_>>(), back.model.iter().map(|e| &e.kind).collect::<Vec<_>>());
+    // A save before 2004 has no native gradient groups: the file's extra gradient groups are not kept (`GradientSource`).
+    let plain_hatches = |d: &Drawing| hatches(d).into_iter().map(|h| Hatch { gradient: plain(h.gradient.clone()), ..h }).collect::<Vec<_>>();
+    assert_eq!(plain_hatches(&roundtrip(&back)), plain_hatches(&back));
 }
 
 /// R2000 readers and DWG conversions drop the native groups; CADCraft's xdata copy restores the
@@ -1954,7 +1977,7 @@ fn gradient_hatch_roundtrips_through_dwg() {
     let (d, gradients) = gradient_sample();
     let back = read(&write(&d, "x.dwg").unwrap(), "x.dwg").unwrap();
     let hs = hatches(&back);
-    assert_eq!(hs.iter().map(|h| h.gradient.clone()).collect::<Vec<_>>(), gradients);
+    assert_eq!(hs.iter().map(|h| plain(h.gradient.clone())).collect::<Vec<_>>(), gradients);
     assert_eq!(hs.iter().map(|h| h.loops.clone()).collect::<Vec<_>>(), hatches(&d).into_iter().map(|h| h.loops).collect::<Vec<_>>());
 }
 
@@ -1989,8 +2012,8 @@ fn hostile_gradient_groups_never_panic() {
         let _ = cadcraft_render::build(&d, &Space::Model, &cadcraft_render::Options::default());
         let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
         assert_eq!(
-            hatches(&back).into_iter().map(|h| h.gradient).collect::<Vec<_>>(),
-            hatches(&d).into_iter().map(|h| h.gradient).collect::<Vec<_>>()
+            hatches(&back).into_iter().map(|h| plain(h.gradient)).collect::<Vec<_>>(),
+            hatches(&d).into_iter().map(|h| plain(h.gradient)).collect::<Vec<_>>()
         );
     }
 }

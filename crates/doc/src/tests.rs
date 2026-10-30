@@ -557,6 +557,7 @@ fn invisible_dimblock_entity_is_ignored_in_dimension_extents() {
                 overrides: Default::default(),
                 assoc: vec![],
                 marks: Default::default(),
+                leader_length: 0.0,
             }),
         )
         .unwrap();

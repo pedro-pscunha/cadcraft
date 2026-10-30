@@ -95,6 +95,9 @@ fn hatch(pattern: &str, gradient: Option<Gradient>) -> Hatch {
         origin: Vec2::new(1.0, 2.0),
         background: Some(Color::Index(2)),
         pattern_lines: Vec::new(),
+        pattern_type: 1,
+        pattern_double: false,
+        seed_points: Vec::new(),
     }
 }
 
@@ -102,7 +105,14 @@ fn hatch(pattern: &str, gradient: Option<Gradient>) -> Hatch {
 fn hatch_origin_background_and_elevation_roundtrip() {
     let mut d = Drawing::new_metric();
     let patterned = add(&mut d, 0.0, EntityKind::Hatch(hatch("ANSI31", None)));
-    let g = Gradient { name: "CYLINDER".into(), color1: Color::Index(1), color2: Color::True(Rgb(10, 20, 30)), angle: 0.5, centered: false };
+    let g = Gradient {
+        name: "CYLINDER".into(),
+        color1: Color::Index(1),
+        color2: Color::True(Rgb(10, 20, 30)),
+        angle: 0.5,
+        centered: false,
+        source: Default::default(),
+    };
     let mut with_gradient = hatch("SOLID", Some(g.clone()));
     with_gradient.background = Some(Color::True(Rgb(1, 2, 3)));
     let graded = add(&mut d, 0.0, EntityKind::Hatch(with_gradient));

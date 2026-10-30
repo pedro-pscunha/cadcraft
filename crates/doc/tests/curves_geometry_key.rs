@@ -124,6 +124,7 @@ fn spline() -> cadcraft_geom::Spline {
             ..FitOptions::default()
         },
         space: Some(SplineSpace { control: vec![0.0, 4.0, 1.0], fit: vec![0.0, 1.5], start_tangent: 0.5, end_tangent: -0.5 }),
+        source: Default::default(),
     }
 }
 
@@ -221,6 +222,7 @@ fn each_canonical_dimension_field_alone_changes_the_key() {
         overrides: Default::default(),
         assoc: Vec::new(),
         marks: Default::default(),
+        leader_length: 0.0,
     };
     let key = |d: &Dimension, c: &Common| geometry_key(&EntityKind::Dimension(d.clone()), c).unwrap();
     let base = key(&dimension(), &common());
