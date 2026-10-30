@@ -68,6 +68,8 @@ pub(crate) fn cloud_vertices(boundary: &[Vec2], arc_len: f64, per_edge: bool, re
 
 fn object_outline(s: &Session, h: Handle) -> Result<Vec<Vec2>> {
     let e = curves::entity(s, h)?;
+    // A canonical source cannot become a legacy cloud (the cloud replaces it): refuse before anything is made or erased.
+    e.require_legacy_geometry()?;
     let tol = 1e-3;
     let pts = match &e.kind {
         EntityKind::LwPolyline(p) if p.closed => Polyline { vertices: p.vertices.clone(), closed: true }.tessellate(tol),

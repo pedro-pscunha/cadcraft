@@ -621,6 +621,13 @@ fn block_box(s: &Session, ins: &Insert) -> Result<(Vec2, Vec2)> {
 }
 
 fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Option<f64>) -> Result<Value> {
+    // Every selected multileader is checked before the first write: a canonical one has a plane the merge would drop (and the merge
+    // deletes it), so a mixed selection is refused whole, whatever the order.
+    for h in hs {
+        if let Some(e) = s.doc()?.entity(*h).filter(|e| matches!(e.kind, EntityKind::MLeader(_))) {
+            e.require_legacy_geometry()?;
+        }
+    }
     let mut items: Vec<(Handle, MLeader)> = Vec::new();
     for h in hs {
         if items.iter().any(|(x, _)| x == h) || locked(s, *h) {

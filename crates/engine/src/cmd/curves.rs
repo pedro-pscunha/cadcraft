@@ -115,16 +115,22 @@ pub fn arc_ser(st: Vec2, en: Vec2, radius: f64) -> Option<Arc> {
 
 /// End point and outgoing unit tangent of the last line/arc/open polyline in the current space
 /// (ARC "Continue" and LINE continuation).
-pub fn last_curve_end(s: &Session) -> Option<(Vec2, Vec2)> {
-    let d = s.doc().ok()?;
+///
+/// The curve is the last line, arc or open polyline; if that one is canonical its end and tangent are in a plane or in space the
+/// legacy continuation cannot follow, and the continuation is refused.
+pub fn last_curve_end(s: &Session) -> crate::Result<Option<(Vec2, Vec2)>> {
+    let Ok(d) = s.doc() else { return Ok(None) };
     let space = s.space();
-    let store = d.space(&space)?;
+    let Some(store) = d.space(&space) else { return Ok(None) };
     for e in store.iter().collect::<Vec<_>>().into_iter().rev() {
+        if matches!(&e.kind, EntityKind::Line(_) | EntityKind::Arc(_)) || matches!(&e.kind, EntityKind::LwPolyline(p) if !p.closed) {
+            e.require_legacy_geometry()?;
+        }
         match &e.kind {
             EntityKind::Line(l) => {
                 let dir = (l.b.xy() - l.a.xy()).normalized();
                 if dir != Vec2::ZERO {
-                    return Some((l.b.xy(), dir));
+                    return Ok(Some((l.b.xy(), dir)));
                 }
             }
             EntityKind::Arc(a) => {
@@ -133,20 +139,20 @@ pub fn last_curve_end(s: &Session) -> Option<(Vec2, Vec2)> {
                 // from the last picked point (LASTPOINT), leaving it in the drawing direction.
                 let tol = 1e-9 * g.radius.max(1.0);
                 if g.start_point().near(s.last_point, tol) && !g.end_point().near(s.last_point, tol) {
-                    return Some((g.start_point(), -Vec2::from_angle(g.start).perp()));
+                    return Ok(Some((g.start_point(), -Vec2::from_angle(g.start).perp())));
                 }
-                return Some((g.end_point(), Vec2::from_angle(g.end).perp()));
+                return Ok(Some((g.end_point(), Vec2::from_angle(g.end).perp())));
             }
             EntityKind::LwPolyline(p) if !p.closed => {
                 let segs = Polyline { vertices: p.vertices.clone(), closed: false }.segments();
                 if let Some(sg) = segs.last() {
-                    return Some((sg.end(), sg.tangent(1.0)));
+                    return Ok(Some((sg.end(), sg.tangent(1.0))));
                 }
             }
             _ => {}
         }
     }
-    None
+    Ok(None)
 }
 
 /// Signed bulge of the arc from `a` through `m` to `b` (0 when collinear).

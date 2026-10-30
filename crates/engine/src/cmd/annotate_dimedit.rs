@@ -296,6 +296,7 @@ fn jogged_kind(s: &Session, c: Vec2, r: f64, center: Vec2, at: Vec2, jog: Option
 
 fn run_jogged(s: &mut Session, p: &Value) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("dimjogged", "`handle` of an arc or circle is required"))?;
+    super::common::require_legacy_source(s, h)?;
     let (c, r) = circle_of(s, h).ok_or_else(|| bad("dimjogged", "object is not a circle or arc"))?;
     let center = point_req("dimjogged", p, "centerOverride")?;
     let at = point_req("dimjogged", p, "at")?;
@@ -332,10 +333,16 @@ impl Interactive for JoggedM {
             return Ok(Step::Continue);
         }
         match (self.circle, self.center, self.at, i) {
-            (None, _, _, Input::Point(p)) => match pick_at(s, p).and_then(|h| circle_of(s, h)) {
-                Some(t) => self.circle = Some(t),
-                None => s.echo("Object selected is not a circle or arc."),
-            },
+            (None, _, _, Input::Point(p)) => {
+                let picked = pick_at(s, p);
+                if let Some(h) = picked {
+                    super::common::require_legacy_source(s, h)?;
+                }
+                match picked.and_then(|h| circle_of(s, h)) {
+                    Some(t) => self.circle = Some(t),
+                    None => s.echo("Object selected is not a circle or arc."),
+                }
+            }
             (Some(_), None, _, Input::Point(p)) => self.center = Some(p),
             (Some(_), Some(_), None, Input::Keyword(k)) => {
                 self.text.keyword(&k);
@@ -529,15 +536,19 @@ fn run_dimbreak(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let space = s.space();
             let store = d.space(&space).ok_or_else(|| bad("dimbreak", "no current space"))?;
-            let others: Vec<(Handle, Vec<Prim>)> = store
+            let breakers: Vec<_> = store
                 .iter()
                 .filter(|e| match &given {
                     Some(g) => g.contains(&e.handle),
                     None => !matches!(e.kind, EntityKind::Dimension(_) | EntityKind::Text(_) | EntityKind::MText(_)),
                 })
                 .take(MAX_BREAK_OBJECTS)
-                .map(|e| (e.handle, e.kind.prims()))
                 .collect();
+            // A canonical obstruction has no legacy outline: refuse before the first dimension is edited.
+            for e in &breakers {
+                e.require_legacy_geometry()?;
+            }
+            let others: Vec<(Handle, Vec<Prim>)> = breakers.iter().map(|e| (e.handle, e.kind.prims())).collect();
             let mut plan = Vec::new();
             for h in &hs {
                 let Some(EntityKind::Dimension(dm)) = d.entity(*h).map(|e| &e.kind) else { continue };

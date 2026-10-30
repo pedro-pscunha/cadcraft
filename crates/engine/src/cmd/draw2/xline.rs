@@ -19,6 +19,8 @@ fn add_xline(s: &mut Session, base: Vec2, dir: Vec2) -> Result<Handle> {
 /// segment nearest `pick` (the first without one), which must be straight.
 fn linear_of(s: &Session, h: Handle, pick: Option<Vec2>) -> Result<(Vec2, Vec2)> {
     let e = curves::entity(s, h)?;
+    // A canonical source is a segment in a plane or in space: refuse it, an XLINE here is a projected base and direction.
+    e.require_legacy_geometry()?;
     match &e.kind {
         EntityKind::Line(l) => Ok((l.a.xy(), (l.b.xy() - l.a.xy()).normalized())),
         EntityKind::XLine(r) | EntityKind::Ray(r) => Ok((r.base.xy(), r.dir.xy().normalized())),

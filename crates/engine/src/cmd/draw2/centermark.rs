@@ -27,6 +27,8 @@ fn center_ext(s: &Session) -> f64 {
 
 fn center_mark(s: &mut Session, h: Handle) -> Result<Vec<String>> {
     let e = curves::entity(s, h)?;
+    // The centre of a canonical circle is in its plane: refuse before any line is made.
+    e.require_legacy_geometry()?;
     let (c, r) = match &e.kind {
         EntityKind::Circle(c) => (c.center.xy(), c.radius),
         EntityKind::Arc(a) => (a.center.xy(), a.radius),
@@ -40,7 +42,10 @@ fn center_mark(s: &mut Session, h: Handle) -> Result<Vec<String>> {
 
 fn center_line(s: &mut Session, h1: Handle, h2: Handle) -> Result<Handle> {
     let l = |h: Handle| -> Result<(Vec2, Vec2)> {
-        match curves::entity(s, h)?.kind {
+        let e = curves::entity(s, h)?;
+        // A spatial line's ends are not the projected ends: refuse a canonical one.
+        e.require_legacy_geometry()?;
+        match e.kind {
             EntityKind::Line(l) => Ok((l.a.xy(), l.b.xy())),
             _ => Err(other("Select a line.")),
         }

@@ -226,7 +226,7 @@ impl Interactive for SeqM {
             return Ok(Step::Continue);
         }
         if i == Input::Enter && self.v == ArcV::ThreeP && self.vals.is_empty() {
-            self.cont = curves::last_curve_end(s);
+            self.cont = curves::last_curve_end(s)?;
             if self.cont.is_none() {
                 s.echo("No line or arc to continue.");
                 return Ok(Step::Cancel);
@@ -329,7 +329,7 @@ pub(super) fn run_arc_continue(s: &mut Session, p: &Value) -> Result<Value> {
     let e = point_req("arc.continue", p, "end")?;
     let (st, dir) = match (point_param(p, "start"), direction_param(p)) {
         (Some(st), Some(d)) => (st, Vec2::from_angle(d)),
-        _ => curves::last_curve_end(s).ok_or_else(|| bad("arc.continue", "no line or arc to continue from"))?,
+        _ => curves::last_curve_end(s)?.ok_or_else(|| bad("arc.continue", "no line or arc to continue from"))?,
     };
     let a = curves::arc_sed(st, e, dir).ok_or_else(|| bad("arc.continue", "end point is on the tangent line"))?;
     let h = s.add_entity(arc(&a))?;
@@ -348,7 +348,7 @@ impl Interactive for ArcContinueM {
         "ARC"
     }
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
-        self.from = curves::last_curve_end(s);
+        self.from = curves::last_curve_end(s)?;
         if self.from.is_none() {
             s.echo("No line or arc to continue.");
             return Ok(Step::Cancel);

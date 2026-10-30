@@ -20,6 +20,8 @@ fn set_frames(s: &mut Session, mode: &str) -> Result<i64> {
 
 fn wipeout_from_polyline(s: &mut Session, h: Handle, erase: bool) -> Result<Handle> {
     let e = curves::entity(s, h)?;
+    // A canonical polyline has a plane and an elevation a legacy wipeout cannot hold: refuse before anything is made or erased.
+    e.require_legacy_geometry()?;
     let EntityKind::LwPolyline(p) = &e.kind else { return Err(other("Select a closed polyline.")) };
     if !p.closed || p.vertices.len() < 3 {
         return Err(other("The polyline must be closed with at least three vertices."));
