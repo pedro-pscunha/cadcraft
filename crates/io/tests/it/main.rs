@@ -129,6 +129,7 @@ mod roundtrip_audit;
 mod skipped_records;
 mod sortents;
 mod sortents_emission;
+mod sortents_keep;
 mod sortents_read;
 mod sortents_roundtrip;
 mod source_handles;

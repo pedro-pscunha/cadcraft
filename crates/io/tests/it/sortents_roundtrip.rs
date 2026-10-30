@@ -143,7 +143,11 @@ fn handle_order_spaces_need_no_table_even_beside_a_reordered_block() {
     let ordered =
         cadcraft_io::read_dxf(source().replace("331\nA2\n5\nA1\n331\nA1\n5\nA2\n", "").replace("331\nA4\n5\nA3\n331\nA3\n5\nA4\n", "").as_bytes())
             .unwrap();
-    assert!(!all_records(&cadcraft_io::write_dxf(&ordered)).iter().any(|(k, _)| k == "SORTENTSTABLE"));
+    // The tables AutoCAD keeps stay, empty: they draw in handle order, so they list nothing.
+    let records = all_records(&cadcraft_io::write_dxf(&ordered));
+    let tables: Vec<_> = records.iter().filter(|(k, _)| k == "SORTENTSTABLE").collect();
+    assert_eq!(tables.len(), 2);
+    assert!(tables.iter().all(|(_, t)| !t.iter().any(|t| t.code == 331)));
 }
 
 #[test]

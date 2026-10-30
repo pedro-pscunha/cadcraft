@@ -13,15 +13,21 @@ pub(super) struct SortentsTable {
 
 impl SortentsTable {
     /// AutoCAD drops dead entries and later duplicate keys when it opens a damaged table.
-    pub(super) fn keys(&self, members: &HashSet<Handle>) -> HashMap<Handle, u64> {
-        let mut keys = HashMap::new();
+    pub(super) fn valid_entries(&self, members: &HashSet<Handle>) -> Vec<(Handle, u64)> {
+        let mut seen = HashSet::new();
         let mut used = HashSet::new();
+        let mut valid = Vec::new();
         for &(entity, key) in &self.entries {
-            if members.contains(&entity) && !keys.contains_key(&entity) && used.insert(key) {
-                keys.insert(entity, key);
+            if members.contains(&entity) && !seen.contains(&entity) && used.insert(key) {
+                seen.insert(entity);
+                valid.push((entity, key));
             }
         }
-        keys
+        valid
+    }
+
+    pub(super) fn keys(&self, members: &HashSet<Handle>) -> HashMap<Handle, u64> {
+        self.valid_entries(members).into_iter().collect()
     }
 }
 

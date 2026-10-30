@@ -186,6 +186,29 @@ impl ForeignExtra {
     }
 }
 
+/// The SORTENTSTABLE a space had in the file: pairs of an entity handle and the sort handle it is
+/// drawn by, in the file's order (AutoCAD lists them by ascending entity handle). An empty table
+/// is kept too: AutoCAD keeps it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SortTable {
+    pub entries: Vec<(Handle, u64)>,
+}
+
+impl SortTable {
+    /// The entries whose entity is in `members`.
+    pub fn restricted(&self, members: &BTreeSet<Handle>) -> Vec<(Handle, u64)> {
+        self.entries.iter().copied().filter(|(entity, _)| members.contains(entity)).collect()
+    }
+
+    /// `members` in the order `entries` draw them: by sort handle, an unlisted one by its own handle.
+    pub fn draw_order(entries: &[(Handle, u64)], members: &BTreeSet<Handle>) -> Vec<Handle> {
+        let keys: BTreeMap<Handle, u64> = entries.iter().copied().collect();
+        let mut order: Vec<Handle> = members.iter().copied().collect();
+        order.sort_by_key(|h| (keys.get(h).copied().unwrap_or(h.0), *h));
+        order
+    }
+}
+
 /// Everything of a file CADCraft keeps without modelling it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Foreign {
@@ -210,6 +233,10 @@ pub struct Foreign {
     /// proxy objects or entities: a proxy's class number (group 91) is 500 plus its class's place
     /// here, and saving renumbers it to the written CLASSES (#1812).
     pub class_order: Vec<String>,
+    /// The SORTENTSTABLE of each space, by the model (`("MODEL", "")`), a layout (`("LAYOUT", name)`)
+    /// or a block (`("BLOCK", NAME)`): the save writes it back while the space still draws in the
+    /// order it gives.
+    pub sort_tables: BTreeMap<ForeignKey, SortTable>,
     /// The file's data store section (ACDSDATA, AutoCAD 2013 and later), as read: its groups
     /// after the section name. It holds the ACIS geometry of 3D solids, regions, bodies and
     /// surfaces, which from 2013 on those entities don't carry themselves: each `ACDSRECORD`
@@ -228,6 +255,7 @@ impl Foreign {
             && self.classes.is_empty()
             && self.targets.is_empty()
             && self.class_order.is_empty()
+            && self.sort_tables.is_empty()
             && self.data_store.is_empty()
     }
 
