@@ -97,7 +97,8 @@ fn valid_cache(tags: &[RawTag]) -> bool {
 fn capture(d: &Drawing, entity: &Entity, source: &[Tag]) -> Option<ProxyGraphics> {
     let start = source.iter().position(|tag| tag.code == 100 && tag.str() == "AcDbEntity")? + 1;
     let mut common: Vec<_> = source.iter().skip(start).take_while(|tag| tag.code != 100 && tag.code < 1000).collect();
-    if !common.iter().any(|tag| matches!(tag.code, 92 | 160) && tag.i64() > 0) {
+    let in_mleader = !common.iter().any(|tag| matches!(tag.code, 92 | 160) && tag.i64() > 0);
+    if in_mleader {
         let start = source.iter().position(|tag| tag.code == 100 && tag.str() == "AcDbMLeader")? + 1;
         common = source.iter().skip(start).take_while(|tag| tag.code != 300 && tag.code < 1000).collect();
     }
@@ -107,7 +108,7 @@ fn capture(d: &Drawing, entity: &Entity, source: &[Tag]) -> Option<ProxyGraphics
     let tags: Vec<_> =
         common.into_iter().filter(|tag| matches!(tag.code, 92 | 160 | 310)).map(|tag| RawTag { code: tag.code, value: tag.str() }).collect();
     let display = if valid_cache(&tags) { display_key(d, entity) } else { None };
-    Some(ProxyGraphics { geometry: geometry_key(&entity.kind, &entity.common)?, display, tags })
+    Some(ProxyGraphics { geometry: geometry_key(&entity.kind, &entity.common)?, display, tags, in_mleader })
 }
 pub(crate) fn eligible<'a>(d: &'a Drawing, entity: &Entity) -> Option<&'a ProxyGraphics> {
     let proxy = d.foreign.entities.get(&entity.handle)?.proxy_graphics.as_ref()?;
@@ -120,9 +121,10 @@ pub(crate) fn eligible<'a>(d: &'a Drawing, entity: &Entity) -> Option<&'a ProxyG
     }
     Some(proxy)
 }
-pub(crate) fn tags(d: &Drawing, entity: &Entity, target: Version) -> Vec<Tag> {
-    let Some(proxy) = eligible(d, entity) else { return Vec::new() };
-    proxy
+/// The graphics to write for `entity` and whether they belong in the `AcDbMLeader` subclass (else after the layer, in `AcDbEntity`).
+pub(crate) fn tags(d: &Drawing, entity: &Entity, target: Version) -> (Vec<Tag>, bool) {
+    let Some(proxy) = eligible(d, entity) else { return (Vec::new(), false) };
+    let tags = proxy
         .tags
         .iter()
         .map(|raw| {
@@ -132,5 +134,6 @@ pub(crate) fn tags(d: &Drawing, entity: &Entity, target: Version) -> Vec<Tag> {
             }
             crate::dxf_raw::tag(&raw)
         })
-        .collect()
+        .collect();
+    (tags, proxy.in_mleader)
 }

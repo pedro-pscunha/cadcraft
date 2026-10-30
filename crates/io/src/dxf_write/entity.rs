@@ -721,8 +721,10 @@ fn write_annotations_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, pap
             };
             let canonical = e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 && m.require_canonical().is_ok();
             w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs, canonical, cx.target));
-            let proxy = crate::dxf_mleader_proxy::tags(d, e, cx.target);
-            let anchor = if proxy.iter().any(|tag| tag.code == 160) { 270 } else { 8 };
+            let (proxy, in_mleader) = crate::dxf_mleader_proxy::tags(d, e, cx.target);
+            // Where the source had them: after the layer in AcDbEntity, or after the version (270) in AcDbMLeader (a file before 2007 has them in
+            // AcDbEntity only).
+            let anchor = if in_mleader && cx.target >= Version::R2007 { 270 } else { 8 };
             if !proxy.is_empty()
                 && let Some(position) = w.t.iter().skip(start).position(|tag| tag.code == anchor)
             {
