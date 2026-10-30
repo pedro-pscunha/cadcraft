@@ -86,28 +86,80 @@ fn mirror_drag_keeps_the_text_entity_properties() {
     assert_eq!(text.geometry_revision, GeometryRevision::LegacyProjectedV1);
     assert_eq!(text.common, common);
 }
+fn dimension_fixture(canonical: bool) -> (Session, Entity) {
+    let mut s = Session::new();
+    s.script("dimlinear 0,0 10,0 5,3\n").unwrap();
+    let handle = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).unwrap().handle;
+    let mut entity = (**s.doc().unwrap().entity(handle).unwrap()).clone();
+    s.doc_mut().unwrap().model = Default::default();
+    entity.common.thickness = 2.0;
+    if canonical {
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        entity.common.extrusion = Vec3::new(0.0, 3.0, 4.0);
+        let EntityKind::Dimension(dimension) = &mut entity.kind else { panic!("dimension") };
+        dimension.p13 = Vec3::new(0.0, 3.0, 4.0);
+        dimension.p14 = Vec3::new(-10.0, 3.0, 4.0);
+        dimension.defpt = Vec3::new(-5.0, 0.6, 5.8);
+        dimension.text_mid = Vec3::new(1.0, 2.0, 5.0);
+        dimension.block = None;
+    }
+    s.doc_mut().unwrap().model.push(entity.clone());
+    (s, entity)
+}
+
 #[test]
-fn dimension_text_preview_keeps_its_revision_and_common() {
-    for canonical in [false, true] {
-        let mut s = Session::new();
-        s.script("dimlinear 0,0 10,0 5,3\n").unwrap();
-        let old = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).unwrap().handle;
-        let mut entity = (**s.doc().unwrap().entity(old).unwrap()).clone();
-        s.doc_mut().unwrap().model = Default::default();
-        entity.common.thickness = 2.0;
-        if canonical {
-            entity.geometry_revision = GeometryRevision::CanonicalV2;
+fn dimension_text_preview_keeps_legacy_geometry_and_common() {
+    let (mut s, source) = dimension_fixture(false);
+    s.set_selection(vec![source.handle]);
+    s.start("dimtedit").unwrap();
+    let preview = s.preview(Vec2::new(7.0, 6.0));
+    let entity = preview.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).expect("dimension preview");
+    assert_eq!(entity.geometry_revision, source.geometry_revision);
+    assert_eq!(entity.common, source.common);
+    let EntityKind::Dimension(dimension) = &entity.kind else { panic!("dimension") };
+    assert_eq!(dimension.text_mid, Vec3::new(7.0, 6.0, 0.0));
+}
+
+#[test]
+fn dimtedit_refuses_a_tilted_canonical_dimension_before_preselection_or_picking() {
+    for preselected in [false, true] {
+        let (mut s, source) = dimension_fixture(true);
+        let before = s.doc().unwrap().model.clone();
+        if preselected {
+            s.set_selection(vec![source.handle]);
+            s.start("dimtedit").unwrap();
+        } else {
+            s.start("dimtedit").unwrap();
+            s.input(cadcraft_engine::Input::Pick(vec![source.handle])).unwrap();
         }
-        let source = entity.clone();
-        s.doc_mut().unwrap().model.push(entity);
-        s.set_selection(vec![old]);
-        s.cmdline("DIMTEDIT").unwrap();
-        let preview = s.preview(Vec2::new(7.0, 6.0));
-        let entity = preview.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).expect("dimension preview");
-        assert_eq!(entity.geometry_revision, source.geometry_revision);
-        assert_eq!(entity.common, source.common);
+        // Interactive input reports a refusal in the command log and keeps the selection prompt.
+        assert!(s.log.iter().any(|line| line.contains("canonical")), "{:?}", s.log);
+        assert!(s.log.iter().any(|line| line.contains("Nothing was changed")), "{:?}", s.log);
+        assert!(s.prompt_text().contains("Select dimension"), "{}", s.prompt_text());
+        assert!(s.preview(Vec2::new(7.0, 6.0)).is_empty());
+        assert!(s.doc().unwrap().model.same_as(&before));
+        let entity = s.doc().unwrap().entity(source.handle).unwrap();
+        let EntityKind::Dimension(dimension) = &entity.kind else { panic!("dimension") };
+        // OCS (1,2,5) in normal (0,3,4) is WCS (-1,1.4,5.2), not the cursor or its OCS reinterpretation.
+        assert!((dimension.world_text_mid(entity.common.extrusion).unwrap() - Vec3::new(-1.0, 1.4, 5.2)).len() < 1e-9);
     }
 }
+#[test]
+fn a_dimension_activated_mid_prompt_never_produces_a_projected_preview() {
+    let (mut s, legacy) = dimension_fixture(false);
+    s.set_selection(vec![legacy.handle]);
+    s.start("dimtedit").unwrap();
+    let (_, mut canonical) = dimension_fixture(true);
+    canonical.handle = legacy.handle;
+    assert!(s.doc_mut().unwrap().model.replace(canonical));
+    let before = s.doc().unwrap().model.clone();
+    assert!(s.preview(Vec2::new(7.0, 6.0)).is_empty());
+    assert!(s.doc().unwrap().model.same_as(&before));
+    let entity = s.doc().unwrap().entity(legacy.handle).unwrap();
+    let EntityKind::Dimension(dimension) = &entity.kind else { panic!("dimension") };
+    assert!((dimension.world_text_mid(entity.common.extrusion).unwrap() - Vec3::new(-1.0, 1.4, 5.2)).len() < 1e-9);
+}
+
 #[test]
 fn hot_grip_preview_keeps_canonical_plane_and_world_center() {
     let (mut s, h) = fixture(true);

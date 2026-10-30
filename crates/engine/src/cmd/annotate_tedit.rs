@@ -6,7 +6,15 @@ use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
 use super::{dims_of, run_dimtedit, v3};
-use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
+
+fn legacy_dimension(s: &Session, h: Handle) -> Result<&Entity> {
+    let entity = s.doc()?.entity(h).ok_or_else(|| EngineError::Other(format!("no such object {}", h.hex())))?;
+    entity
+        .require_legacy_geometry()
+        .map_err(|error| EngineError::Disabled("dimtedit".into(), format!("dimension {}: {error} Nothing was changed", h.hex())))?;
+    Ok(entity)
+}
 
 #[derive(Default)]
 pub(super) struct TEditM {
@@ -39,6 +47,7 @@ impl Interactive for TEditM {
         if s.settings.pickfirst
             && let [h] = dims_of(s, &s.selection())[..]
         {
+            legacy_dimension(s, h)?;
             self.dim = Some(h);
         }
         Ok(Step::Continue)
@@ -57,7 +66,10 @@ impl Interactive for TEditM {
             return Ok(match i {
                 Input::Pick(hs) => {
                     match dims_of(s, &hs).first() {
-                        Some(h) => self.dim = Some(*h),
+                        Some(h) => {
+                            legacy_dimension(s, *h)?;
+                            self.dim = Some(*h);
+                        }
                         None if hs.is_empty() => {}
                         None => s.echo("Object selected is not a dimension."),
                     }
@@ -96,7 +108,7 @@ impl Interactive for TEditM {
         if self.asking_angle {
             return Vec::new();
         }
-        let Some(mut entity) = self.dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| (**e).clone())) else { return Vec::new() };
+        let Some(mut entity) = self.dim.and_then(|h| legacy_dimension(s, h).ok().cloned()) else { return Vec::new() };
         let EntityKind::Dimension(d) = &mut entity.kind else { return Vec::new() };
         d.text_mid = v3(c);
         d.user_text_pos = true;
@@ -106,5 +118,23 @@ impl Interactive for TEditM {
         }
         d.block = None;
         vec![entity]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::GeometryRevision;
+
+    #[test]
+    fn canonical_dimension_admission_returns_a_typed_command_refusal() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut session = Session::new();
+        session.script("dimlinear 0,0 10,0 5,3\n")?;
+        let handle = session.doc()?.model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).ok_or("dimension")?.handle;
+        let mut entity = (**session.doc()?.entity(handle).ok_or("dimension")?).clone();
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        assert!(session.doc_mut()?.model.replace(entity));
+        assert!(matches!(legacy_dimension(&session,handle),Err(EngineError::Disabled(command,_)) if command=="dimtedit"));
+        Ok(())
     }
 }
