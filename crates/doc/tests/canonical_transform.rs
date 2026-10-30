@@ -589,22 +589,49 @@ fn a_mirror_refuses_with_the_entity_unchanged_where_the_family_is_a_similarity()
 
 #[test]
 fn families_with_no_canonical_hook_keep_refusing() {
-    let cases = vec![EntityKind::Insert(cadcraft_doc::Insert {
-        block: "B".into(),
-        insert: Vec3::ZERO,
-        scale: Vec3::new(1.0, 1.0, 1.0),
-        rotation: 0.0,
-        attribs: Vec::new(),
-        cols: 1,
-        rows: 1,
-        col_spacing: 0.0,
-        row_spacing: 0.0,
-    })];
+    let cases = vec![EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "X".into(), tags: Vec::new() })];
     for kind in cases {
         let e = entity(kind, NORMAL);
         let mut candidate = e.clone();
         assert!(candidate.try_transform(&rotation(0.6, Vec3::ZERO)).is_err(), "{}", e.kind.type_name());
         assert_eq!(candidate, e);
+    }
+}
+
+/// A canonical block reference in the tilted plane of NORMAL, with a signed scale and a rotation.
+fn block_reference() -> Insert {
+    Insert {
+        block: "B".into(),
+        insert: Vec3::new(7.0, -3.0, 2.0),
+        scale: Vec3::new(1.5, -2.0, 0.5),
+        rotation: 0.4,
+        attribs: Vec::new(),
+        cols: 1,
+        rows: 1,
+        col_spacing: 0.0,
+        row_spacing: 0.0,
+    }
+}
+
+#[test]
+fn a_canonical_block_reference_follows_the_edit_through_its_block_matrix() {
+    let e = entity(EntityKind::Insert(block_reference()), NORMAL);
+    let base = Vec3::new(1.0, 2.0, 3.0);
+    let matrix = |e: &Entity| {
+        let EntityKind::Insert(i) = &e.kind else { panic!("insert") };
+        i.world_transform(e.common.extrusion, base, 0, 0).unwrap()
+    };
+    let before = matrix(&e);
+    let mut cases = moves();
+    cases.push(("scale", uniform(2.0)));
+    for (what, m) in cases {
+        let moved = e.transformed(&m).unwrap_or_else(|err| panic!("{what}: {err}"));
+        let want = m.mul(&before);
+        for (row_a, row_b) in matrix(&moved).m.iter().zip(&want.m) {
+            assert!(row_a.iter().zip(row_b).all(|(a, b)| (a - b).abs() < 1e-8), "{what}: {:?} vs {:?}", matrix(&moved), want);
+        }
+        assert_eq!(moved.common.thickness, 0.5, "{what}: the thickness stays");
+        assert_eq!(moved.geometry_revision, GeometryRevision::CanonicalV2);
     }
 }
 
