@@ -533,7 +533,9 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         if dm.text_rotation != 0.0 {
             w.f(53, dm.text_rotation.to_degrees());
         }
-        canonical_normal(w, e);
+        if plane.is_some() || e.common.extrusion != Vec3::Z {
+            w.p(210, e.common.extrusion);
+        }
         match dm.kind {
             DimKind::Linear { rotation } => {
                 w.s(100, "AcDbAlignedDimension");

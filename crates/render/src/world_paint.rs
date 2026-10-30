@@ -48,6 +48,11 @@ fn draw_flat(
     {
         return super::blocks::canonical_mleader_block(builder, context, entity, leader, content, color, lineweight);
     }
+    if let EntityKind::Dimension(dimension) = &entity.kind
+        && dimension.block.as_ref().is_some_and(|name| context.d.block(name).is_some())
+    {
+        return super::draw::draw_dimension(builder, context, entity, dimension, lineweight, linetype, linetype_scale);
+    }
     if matches!(entity.kind, EntityKind::Table(_) | EntityKind::Tolerance(_) | EntityKind::Dimension(_)) {
         let geometry = super::entity_world_geometry(context.d, entity, &context.world)?;
         let matrix = geometry.layout_to_world().ok_or_else(|| DocError::Invalid("The annotation has no shared local-layout placement.".into()))?;

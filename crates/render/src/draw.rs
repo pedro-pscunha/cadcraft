@@ -152,7 +152,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<
             mtext(b, ctx, t, rgb, lw);
         }
         EntityKind::Insert(ins) => insert(b, ctx, e, ins, rgb),
-        EntityKind::Dimension(dm) => draw_dimension(b, ctx, e, dm, lw, lt.as_ref(), ltscale),
+        EntityKind::Dimension(dm) => draw_dimension(b, ctx, e, dm, lw, lt.as_ref(), ltscale)?,
         EntityKind::Hatch(h) => hatch::draw(b, ctx, e, h, rgb, lw, tol),
         EntityKind::MLine(m) => mline::draw(b, ctx, e, m, rgb, lw, tol),
         EntityKind::LwPolyline(p) if p.const_width > 0.0 || p.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0) => {
@@ -313,18 +313,56 @@ fn draw_wipeout(b: &mut Builder, ctx: &Ctx, w: &cadcraft_doc::Wipeout, rgb: Ink,
     }
 }
 
-fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dimension, lw: f32, lt: Option<&cadcraft_doc::Linetype>, ltscale: f64) {
+/// Native dimension pictures are planar in block coordinates; their definition POINTs can use another Z.
+fn dimension_block_elevation(entity: &Entity) -> cadcraft_doc::Result<f64> {
+    if !cadcraft_doc::has_finite_numbers(entity) {
+        return Err(cadcraft_doc::DocError::NonFinite(entity.handle));
+    }
+    let z = match &entity.kind {
+        EntityKind::Point(point) => point.p.z,
+        EntityKind::Line(line) if line.a.z == line.b.z => line.a.z,
+        EntityKind::Circle(circle) => circle.center.z,
+        EntityKind::Arc(arc) => arc.center.z,
+        EntityKind::Solid(solid) if solid.corners.iter().all(|p| p.z == solid.corners[0].z) => solid.corners[0].z,
+        EntityKind::Text(text) => text.insert.z,
+        EntityKind::MText(text) => text.insert.z,
+        EntityKind::Insert(insert) => insert.insert.z,
+        EntityKind::LwPolyline(polyline) => polyline.elevation,
+        EntityKind::Hatch(hatch) => hatch.elevation,
+        EntityKind::Unknown(_) => 0.0,
+        _ => {
+            return Err(cadcraft_doc::DocError::Invalid(format!(
+                "Dimension block child {} needs a supported planar local payload.",
+                entity.handle.hex()
+            )));
+        }
+    };
+    Ok(z)
+}
+
+pub(crate) fn draw_dimension(
+    b: &mut Builder,
+    ctx: &Ctx,
+    e: &Entity,
+    dm: &cadcraft_doc::Dimension,
+    lw: f32,
+    lt: Option<&cadcraft_doc::Linetype>,
+    ltscale: f64,
+) -> cadcraft_doc::Result<()> {
+    let local = dm.localized(e.common.extrusion)?;
+    let plane = ctx.world.mul(&cadcraft_geom::Mat4::ocs(e.common.extrusion));
+    let picture = plane.mul(&super::world_roles::translation(cadcraft_geom::Vec3::new(0.0, 0.0, local.local_picture_elevation())));
     if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))
         && ctx.depth < cadcraft_doc::MAX_BLOCK_DEPTH
     {
-        let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::IDENTITY) };
+        let inherited = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::IDENTITY) };
         // DIMTFILL: the block's MTEXT carries no background mask here, so a background
         // around each of the block's texts is drawn before the block's first text or first
         // line of the text's marks, except for a text that a SOLID of the block covers.
         let style = ctx.d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
-        let g = if style.text_fill != 0 { dimension_in(ctx.d, dm) } else { DimGeometry::default() };
+        let g = if style.text_fill != 0 { dimension_in(ctx.d, &local) } else { DimGeometry::default() };
         let gap = style.text_gap.abs() * style.effective_scale(ctx.d.header.f64("DIMSCALE", 1.0));
-        let boxes: Vec<Vec<Vec2>> = if g.text_fill.is_empty() {
+        let boxes: Vec<(Vec<Vec2>, f64)> = if g.text_fill.is_empty() {
             Vec::new()
         } else {
             let solids: Vec<&Entity> =
@@ -336,7 +374,14 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
                 .filter(|be| matches!(be.kind, EntityKind::MText(_) | EntityKind::Text(_)))
                 .take(MAX_FILL_TEXTS)
                 .filter(|be| !covered(be))
-                .filter_map(|be| block_text_box(ctx.d, be, gap))
+                .filter_map(|be| {
+                    let z = match &be.kind {
+                        EntityKind::Text(text) => text.insert.z,
+                        EntityKind::MText(text) => text.insert.z,
+                        _ => return None,
+                    };
+                    block_text_box(ctx.d, be, gap).map(|corners| (corners, z))
+                })
                 .collect()
         };
         let mut fill_pending = !boxes.is_empty();
@@ -345,16 +390,28 @@ fn draw_dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dim
                 break;
             }
             if fill_pending && starts_text_marks(be, &g) {
-                for corners in &boxes {
-                    dim_text_fill(b, ctx, e, &style, corners);
+                for (corners, z) in &boxes {
+                    let placed = plane.mul(&super::world_roles::translation(cadcraft_geom::Vec3::new(0.0, 0.0, *z)));
+                    let sub = super::world_roles::placed_context(&inherited, placed);
+                    dim_text_fill(b, &sub, e, &style, corners);
                 }
                 fill_pending = false;
             }
-            entity(b, &sub, be);
+            // Legacy painters consume XY. Lift each planar child by its own Z before that projection.
+            let placed = if be.geometry_revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1 {
+                let z = dimension_block_elevation(be)?;
+                plane.mul(&super::world_roles::translation(cadcraft_geom::Vec3::new(0.0, 0.0, z)))
+            } else {
+                plane
+            };
+            let child = super::world_roles::placed_context(&inherited, placed);
+            try_entity(b, &child, be)?;
         }
     } else {
-        dimension(b, ctx, e, dm, lw, lt, ltscale);
+        let sub = super::world_roles::placed_context(ctx, picture);
+        dimension(b, &sub, e, &local, lw, lt, ltscale);
     }
+    Ok(())
 }
 
 /// A wide polyline's band (and its hairline centre line on screen), whole or dashed: the fill branch of the legacy painter, in
