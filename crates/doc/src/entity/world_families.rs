@@ -216,6 +216,7 @@ pub fn dimension_primitives(dimension: &Dimension, normal: Vec3, layout: &Dimens
             line_spacing_exact: false,
             columns: None,
             direction: Some(x_axis),
+            drawing_direction: None,
         };
         out.push(WorldPrimitive::Text(WorldText {
             frame: TextFrame { origin, x_axis, y_axis: unit_normal.cross(x_axis), normal: unit_normal },
@@ -394,6 +395,7 @@ fn local_text(frame: &TextFrame, at: Vec2, attach: u8, height: f64, style: &str,
         line_spacing_exact: false,
         columns: None,
         direction: Some(frame.x_axis),
+        drawing_direction: None,
     };
     WorldPrimitive::Text(WorldText { frame: TextFrame { origin, ..*frame }, align: None, content: WorldTextContent::MText(content) })
 }
@@ -926,8 +928,16 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: Some(Vec3::new(0.0, 0.0, 1.0)),
+            drawing_direction: None,
         };
-        a.multiline = Some(MultilineAttrib { geometry_revision: Default::default(), normal: Vec3::new(0.0, 1.0, 0.0), mtext, read_as: "x".into() });
+        a.multiline = Some(MultilineAttrib {
+            geometry_revision: Default::default(),
+            normal: Vec3::new(0.0, 1.0, 0.0),
+            mtext,
+            read_as: "x".into(),
+            embedded_46: None,
+            type_72: None,
+        });
         let got = attrib_primitives(&a, &Mat4::IDENTITY).unwrap();
         let [WorldPrimitive::Text(m)] = got.as_slice() else { panic!("multiline text") };
         // The embedded text: WCS insertion and direction as held, and its own normal.

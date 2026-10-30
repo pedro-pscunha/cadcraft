@@ -438,6 +438,7 @@ fn read_as(tags: &[Tag], canonical: bool) -> (MLeader, bool) {
             line_spacing_exact: p.line_spacing_style == Some(2),
             columns: None,
             direction: if canonical { text_dir } else { None },
+            drawing_direction: None,
         }
     });
     let block = has_block.then(|| {

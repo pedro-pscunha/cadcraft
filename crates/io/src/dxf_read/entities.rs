@@ -502,6 +502,7 @@ pub(super) fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
 /// needs the file's handle maps.
 pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx) {
     match (kind, k) {
+        ("ATTDEF", EntityKind::AttDef(a)) if rx.from_dwg => forget_dwg_type_72(a),
         ("DIMENSION", EntityKind::Dimension(dm)) => {
             dm.overrides = crate::dxf_ext::read_dstyle(tags, &rx.styles, &rx.brs, &rx.ltypes);
             dm.assoc = crate::dxf_ext::read_assoc(tags);
@@ -683,6 +684,13 @@ pub(super) fn polyline_entity_in(
     (c, k)
 }
 
+/// A multiline attribute's group 72 after its type is not in a DWG: the DWG reader writes a fixed value there.
+fn forget_dwg_type_72(a: &mut Attrib) {
+    if let Some(m) = &mut a.multiline {
+        m.type_72 = None;
+    }
+}
+
 /// The ATTRIB records after an INSERT, advancing `i` past them and their SEQEND.
 pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_layer: &str, rx: &Rx) -> Vec<Attrib> {
     let mut attribs = Vec::new();
@@ -691,7 +699,10 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, ins_lay
             let tt = T(t2);
             // A multiline attribute has its text as embedded MTEXT after its own groups.
             let (own, embedded) = split_embedded(t2);
-            let multiline = multiline_attrib(embedded, &common(&tt));
+            let mut multiline = multiline_attrib(own, embedded, &common(&tt));
+            if rx.from_dwg {
+                multiline.iter_mut().for_each(|m| m.type_72 = None);
+            }
             let own = T(own);
             let mut text = text_from(&own);
             if let Some(m) = &multiline {

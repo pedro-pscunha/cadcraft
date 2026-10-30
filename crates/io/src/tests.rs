@@ -63,6 +63,7 @@ fn sample() -> Drawing {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
     )
     .unwrap();
@@ -1505,6 +1506,7 @@ fn intl_sample() -> Drawing {
             line_spacing_exact: false,
             columns: None,
             direction: None,
+            drawing_direction: None,
         }),
     )
     .unwrap();
@@ -1727,6 +1729,7 @@ fn mleader_is_written_as_multileader() {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let m = cadcraft_doc::MLeader {
         roots: vec![cadcraft_doc::MLeaderRoot::new(Vec3::new(10.0, 5.0, 0.0), 2.0, false, vec![vec![Vec3::new(0.0, 0.0, 0.0)]])],

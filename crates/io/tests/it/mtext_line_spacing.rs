@@ -19,6 +19,7 @@ fn line_spacing_style_roundtrips() {
             line_spacing_exact: exact,
             columns: None,
             direction: None,
+            drawing_direction: None,
         };
         d.add(&Space::Model, Common::default(), EntityKind::MText(t.clone())).unwrap();
         let bytes = cadcraft_io::write(&d, "a.dxf").unwrap();

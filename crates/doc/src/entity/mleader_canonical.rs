@@ -167,6 +167,7 @@ mod tests {
             line_spacing_exact: false,
             columns: None,
             direction: Some(Vec3::new(1.0, 0.0, 0.0)),
+            drawing_direction: None,
         }
     }
 
@@ -323,6 +324,8 @@ mod tests {
             normal: Vec3::Z,
             mtext: text(),
             read_as: String::new(),
+            embedded_46: None,
+            type_72: None,
         });
         m.block = Some(Insert {
             block: "B".into(),

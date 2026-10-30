@@ -29,6 +29,7 @@ fn text_mleader() -> MLeader {
         line_spacing_exact: true,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let lines = vec![vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 0.0)], vec![Vec3::new(1.0, -2.0, 0.0)]];
     let mut m = MLeader::single(Vec3::new(5.0, 4.0, 0.0), 0.75, false, lines, Some(text));

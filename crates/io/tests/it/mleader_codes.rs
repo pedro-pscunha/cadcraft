@@ -21,6 +21,7 @@ fn drawing(block: bool) -> Drawing {
         line_spacing_exact: false,
         columns: None,
         direction: None,
+        drawing_direction: None,
     };
     let mut m = MLeader::single(
         Vec3::new(10.0, 20.0, 0.0),

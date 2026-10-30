@@ -94,6 +94,10 @@ pub struct MText {
     /// then only its angle in the plane. `None` for legacy text, whose direction is `rotation` alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Vec3>,
+    /// The drawing direction of the text (DXF 72) as a file gave it: 1 left to right, 3 top to bottom, 5 by style. `None` for
+    /// text made here, which is written left to right (an attribute's embedded text: by style).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_direction: Option<u8>,
 }
 
 impl MText {

@@ -199,15 +199,15 @@ pub(super) fn attrib_common(d: &Drawing, e: &Entity, ins: &Insert, a: &Attrib) -
 pub(super) fn multiline_tags(w: &mut W, a: &Attrib, attdef: bool) {
     let Some(m) = a.multiline_text() else { return };
     w.i(71, if attdef { 4 } else { 2 });
-    w.i(72, if attdef { 0 } else { 1 });
+    w.i(72, a.multiline.as_ref().and_then(|ml| ml.type_72).unwrap_or(if attdef { 0 } else { 1 }));
     w.p(11, a.text.align_pt.unwrap_or(a.text.insert));
     w.s(101, "Embedded Object");
     w.p(10, m.insert);
     w.f(40, m.height);
     w.f(41, m.width);
-    w.f(46, 0.0);
+    w.f(46, a.multiline.as_ref().and_then(|ml| ml.embedded_46).unwrap_or(0.0));
     w.i(71, i64::from(m.attach));
-    w.i(72, 5);
+    w.i(72, m.drawing_direction.map_or(5, i64::from));
     let chars: Vec<char> = crate::dxf_read::mtext_dxf::encode_contents(&m.contents).chars().collect();
     let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();
     let n = chunks.len();

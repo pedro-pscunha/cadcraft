@@ -50,12 +50,13 @@ fn canonical_mtext(tags: &[Tag], c: &Common, normal: Vec3) -> Option<MText> {
     Some(mtext)
 }
 
-fn canonical_multiline(embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
+fn canonical_multiline(own: &[Tag], embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
     let embedded = embedded.filter(|e| !e.is_empty())?;
     let normal = normal_of(&T(embedded))?;
     let mtext = canonical_mtext(embedded, c, normal)?;
     let read_as = cadcraft_fonts::plain_mtext(&mtext.contents);
-    Some(MultilineAttrib { geometry_revision: GeometryRevision::CanonicalV2, normal, mtext, read_as })
+    let (embedded_46, type_72) = super::text::embedded_groups(own, embedded);
+    Some(MultilineAttrib { geometry_revision: GeometryRevision::CanonicalV2, normal, mtext, read_as, embedded_46, type_72 })
 }
 
 /// A TEXT, MTEXT or ATTDEF from the groups of a DXF record (without its `0` group), read canonically. `None` for another
@@ -78,7 +79,7 @@ pub fn canonical_text_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, E
             let (own, embedded) = split_embedded(tags);
             let mut a = attdef(tags, &c);
             a.text = canonical_text(own);
-            a.multiline = canonical_multiline(embedded, &c);
+            a.multiline = canonical_multiline(own, embedded, &c);
             if let Some(m) = &a.multiline {
                 a.text.value.clone_from(&m.read_as);
             }
@@ -94,7 +95,7 @@ pub fn canonical_attrib_from_groups(tags: &[Tag], insert_layer: &str, plot_style
     let tt = T(tags);
     let c = common(&tt);
     let (own, embedded) = split_embedded(tags);
-    let multiline = canonical_multiline(embedded, &c);
+    let multiline = canonical_multiline(own, embedded, &c);
     if embedded.is_some_and(|e| !e.is_empty()) && multiline.is_none() {
         return None;
     }
