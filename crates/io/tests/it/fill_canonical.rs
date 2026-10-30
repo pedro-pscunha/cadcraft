@@ -494,14 +494,17 @@ fn each_hatch_edge_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader(
 }
 
 #[test]
-fn the_canonical_hatch_reader_keeps_what_the_legacy_one_flattens() {
+fn the_canonical_hatch_reader_drops_the_vertices_the_legacy_one_keeps_beside_the_edges() {
     let out = dxf_in(EntityKind::Hatch(hatch()), Vec3::new(0.0, 0.0, 2.0));
     let back = cadcraft_io::read(out.as_bytes(), "x.dxf").unwrap();
     let EntityKind::Hatch(legacy) = &back.model.iter().find(|e| matches!(e.kind, EntityKind::Hatch(_))).unwrap().kind else { panic!("hatch") };
-    assert!(legacy.loops[0].edges.is_empty() && !legacy.loops[0].vertices.is_empty(), "no canonical import is active");
+    // The legacy reader keeps the exact edges beside the vertices that approximate them (the canonical reader drops the vertices).
+    assert!(legacy.loops[0].exact_edges().is_some() && !legacy.loops[0].vertices.is_empty(), "the legacy loop keeps its edges");
     let (_, kind) = cadcraft_io::canonical_fill_from_groups("HATCH", &record(&out, "HATCH")).unwrap();
     let EntityKind::Hatch(exact) = kind else { panic!("hatch") };
     assert!(matches!(exact.loops[0].edges[3], HatchEdge::Spline(_)) && matches!(exact.loops[0].edges[2], HatchEdge::Ellipse { .. }));
+    assert_eq!(legacy.loops[0].edges, exact.loops[0].edges, "the same edges");
+    assert!(exact.loops[0].vertices.is_empty());
 }
 
 #[test]

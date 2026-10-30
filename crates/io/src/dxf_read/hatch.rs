@@ -20,12 +20,19 @@ pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
         let flags = get(i)?.i64();
         i += 1;
         let outer = flags & 1 != 0;
+        let loop_start = i;
         let mut verts = if flags & 2 != 0 { polyline_boundary(tags, &mut i)? } else { edge_boundary(tags, &mut i)? };
         if verts.len() > 1 && verts.first().map(|f| f.p).zip(verts.last().map(|l| l.p)).is_some_and(|(a, b)| a.near(b, 1e-9)) {
             verts.pop();
         }
         let sources = boundary_sources(tags, &mut i);
-        loops.push(HatchLoop { vertices: verts, outer, sources, ..Default::default() });
+        // A loop of edges keeps them exactly (line, arc, ellipse, spline) beside the vertices that approximate them, with its
+        // flags as read; a polyline loop is exact in its vertices and keeps only the flags beyond external and polyline.
+        let mut edge_end = loop_start;
+        let edges = if flags & 2 == 0 { exact_edges(tags, &mut edge_end).unwrap_or_default() } else { Vec::new() };
+        let kept_flags = if edges.is_empty() { flags & !3 } else { flags };
+        let edge_vertices = if edges.is_empty() { Vec::new() } else { verts.clone() };
+        loops.push(HatchLoop { vertices: verts, outer, sources, flags: u32::try_from(kept_flags).unwrap_or(0), edges, edge_vertices });
     }
     let solid = solid || pattern.eq_ignore_ascii_case("SOLID");
     let (scale, angle) = (t.fd(41, 1.0), t.fd(52, 0.0).to_radians());
@@ -81,6 +88,7 @@ pub(super) fn exact_hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
         l.edges = if flags & 2 != 0 { vec![exact_polyline(tags, &mut i)?] } else { exact_edges(tags, &mut i)? };
         l.flags = u32::try_from(flags).ok()?;
         l.vertices.clear();
+        l.edge_vertices.clear();
         boundary_sources(tags, &mut i);
     }
     Some(EntityKind::Hatch(h))
