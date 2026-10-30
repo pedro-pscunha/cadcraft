@@ -110,14 +110,16 @@ fn helix() -> Helix {
 }
 
 fn mline() -> MLine {
+    // OCS axes for NORMAL: -X, (0, -0.8, 0.6), (0, 0.6, 0.8).
+    let to_world = |p: Vec3| Vec3::new(-p.x, -0.8 * p.y + 0.6 * p.z, 0.6 * p.y + 0.8 * p.z);
     let mut m = MLine::new(&MLineStyle::default(), &[], false, MLineJust::Zero, 1.0);
     m.def.elements =
         vec![cadcraft_doc::MLineElement { offset: 1.0, ..Default::default() }, cadcraft_doc::MLineElement { offset: -1.0, ..Default::default() }];
     for x in [0.0, 10.0] {
-        let mut v = MLineVertex::new(Vec3::new(x, 0.0, 1.0));
+        let mut v = MLineVertex::new(to_world(Vec3::new(x, 0.0, 1.0)));
         v.frame = Some(MLineVertexFrame {
-            dir: Vec3::new(1.0, 0.0, 0.0),
-            miter: Vec3::new(0.0, 1.0, 0.0),
+            dir: to_world(Vec3::new(1.0, 0.0, 0.0)),
+            miter: to_world(Vec3::new(0.0, 1.0, 0.0)),
             params: vec![vec![1.0, 0.0, 3.0, 5.0], vec![-1.0, 0.0]],
         });
         m.vertices.push(v);

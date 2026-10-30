@@ -79,8 +79,13 @@ fn draw_flat(
         super::hatch::draw(builder, &local, entity, &layout, color, lineweight, tolerance);
         return Ok(());
     }
-    if matches!(entity.kind, EntityKind::MLine(_)) {
-        return Err(unsupported("multiline element paint roles"));
+    if let EntityKind::MLine(mline) = &entity.kind {
+        super::entity_world_geometry(context.d, entity, &context.world)?;
+        let layout = mline.layout_canonical(entity.common.extrusion, &context.world)?;
+        let local = super::world_roles::placed_context(context, *layout.local_to_world());
+        let tolerance = builder.opts.tolerance / super::max_scale(&local.xf).max(1e-12);
+        super::mline::draw_geometry(builder, &local, entity, mline, layout.geometry(), color, lineweight, tolerance);
+        return Ok(());
     }
     if let EntityKind::LwPolyline(polyline) = &entity.kind
         && (polyline.const_width > 0.0 || polyline.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0))

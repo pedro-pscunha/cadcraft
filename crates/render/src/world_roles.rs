@@ -149,8 +149,12 @@ pub(crate) fn local_context<'a>(context: &Ctx<'a>, entity: &Entity, z: f64) -> c
     if !cadcraft_doc::has_finite_numbers(&matrix) {
         return Err(DocError::NonFinite(entity.handle));
     }
+    Ok(placed_context(context, matrix))
+}
+
+pub(crate) fn placed_context<'a>(context: &Ctx<'a>, matrix: Mat4) -> Ctx<'a> {
     let xy = Mat3 { a: matrix.m[0][0], b: matrix.m[1][0], c: matrix.m[0][1], d: matrix.m[1][1], e: matrix.m[0][3], f: matrix.m[1][3] };
-    Ok(Ctx { world: matrix, xf: xy, ..context.clone() })
+    Ctx { world: matrix, xf: xy, ..context.clone() }
 }
 
 /// A wide polyline: its band in the plane of the entity, drawn by the legacy painter in the polyline's own 2D coordinates and

@@ -3,11 +3,17 @@
 
 use super::{Builder, Ctx, Ink, fill, ink, linetype, resolve_common};
 use cadcraft_color::Color;
-use cadcraft_doc::{Entity, MLine};
+use cadcraft_doc::{Entity, GeometryRevision, MLine, MLineGeometry};
 use cadcraft_geom::Vec2;
 
 pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &MLine, rgb: Ink, lw: f32, tol: f64) {
     let g = m.geometry();
+    draw_geometry(b, ctx, e, m, &g, rgb, lw, tol);
+}
+
+/// Geometry is supplied separately so canonical records keep their own miters and breaks under the same style painter.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_geometry(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &MLine, g: &MLineGeometry, rgb: Ink, lw: f32, tol: f64) {
     if let Some(fc) = m.def.fill
         && b.opts.fill
         && !g.fill.is_empty()
@@ -18,7 +24,8 @@ pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, m: &MLine, rgb: Ink, 
         };
         b.tris(ctx, c, &fill::triangulate_evenodd(&g.fill));
     }
-    let min = b.opts.min_dash / ctx.xf.scale_factor().max(1e-12);
+    let stretch = if e.geometry_revision == GeometryRevision::CanonicalV2 { super::max_scale(&ctx.xf) } else { ctx.xf.scale_factor() };
+    let min = b.opts.min_dash / stretch.max(1e-12);
     // One look per element: colour, lineweight, linetype and its scale.
     let looks: Vec<_> = m
         .def
