@@ -15,7 +15,7 @@ fn object(text: &str, kind: &str, code: i32, value: &str) -> (String, String, Ve
         .into_iter()
         .find(|(k, t)| k == kind && val(t, code) == value)
         .unwrap_or_else(|| panic!("no {kind} with group {code} {value}: {text}"));
-    let owner = tags.iter().filter(|t| t.code == 330).last().map(|t| t.str()).unwrap_or_default();
+    let owner = tags.iter().rfind(|t| t.code == 330).map(|t| t.str()).unwrap_or_default();
     (val(&tags, 5), owner, tags.iter().filter(|t| t.code == 350).map(|t| t.str()).collect())
 }
 
