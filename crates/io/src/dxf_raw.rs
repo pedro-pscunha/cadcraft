@@ -467,7 +467,7 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     }
     // An unknown entity's own groups are written as they are; of table records, layers have a
     // colour book colour and a material.
-    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT" | "VIEW" | "UCS")) {
+    if !unknown && (entity || matches!(kind, "LAYER" | "VPORT" | "VIEW" | "UCS" | "STYLE")) {
         let props =
             if entity { entity_groups(tags) } else { tags.get(..tags.iter().position(|t| t.code >= 1000).unwrap_or(tags.len())).unwrap_or(&[]) };
         let book = props.iter().find(|t| t.code == 430).map(Tag::str);
@@ -502,6 +502,7 @@ fn nonconstant_attributes(block: &cadcraft_doc::Block) -> bool {
 fn symbol_flag_mask(kind: &str) -> i64 {
     match kind {
         "LAYER" | "LTYPE" | "VIEW" | "UCS" | "VPORT" | "APPID" => 16 | 32,
+        "STYLE" => 1,
         "BLOCK" => 2,
         _ => 0,
     }
@@ -541,6 +542,7 @@ fn subclass_groups(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         // The view the writer fixes in plan (16, 17, 42) is kept too: `record` drops the written ones.
         "VPORT" => ("AcDbViewportTableRecord", &[2, 70, 10, 20, 11, 21, 12, 22, 40, 41, 361]),
         "VIEW" => ("AcDbViewTableRecord", &[2, 70, 10, 20, 40, 41, 50]),
+        "STYLE" => ("AcDbTextStyleTableRecord", &[2, 70, 40, 41, 50, 71, 3, 4]),
         "UCS" => ("AcDbUCSTableRecord", &[2, 70, 10, 20, 30, 11, 21, 31, 12, 22, 32, 79]),
         _ => return Vec::new(),
     };
@@ -596,8 +598,7 @@ fn unnamed_styles(tables: &Recs<'_>) -> Vec<ForeignObject> {
         .iter()
         .filter_map(|(kind, _, tags)| {
             let unnamed = val(tags, 2).is_none_or(|name| name.trim().is_empty());
-            let shape = kind == "STYLE" && tags.iter().any(|t| t.code == 70 && t.i64() & 1 != 0);
-            if !matches!(kind.as_str(), "STYLE" | "DIMSTYLE") || !unnamed || shape {
+            if !matches!(kind.as_str(), "STYLE" | "DIMSTYLE") || !unnamed {
                 return None;
             }
             let h = head(tags).handle.and_then(|h| handle(&h))?;
@@ -1084,9 +1085,24 @@ struct Map<'a> {
     version: u32,
     pages: HashMap<String, &'a cadcraft_doc::PageSetup>,
     block_attributes: HashMap<String, bool>,
+    table_aliases: HashMap<String, &'a ForeignObject>,
 }
 
 impl Map<'_> {
+    fn replayed_record(&self, rec: &Rec, body: &[Tag], dictionaries: &HashMap<String, &ForeignObject>) -> Option<Vec<Tag>> {
+        match (rec.sec.as_str(), rec.kind.as_str()) {
+            ("TABLES", "STYLE") => head(body).handle.and_then(|handle| self.table_aliases.get(&handle)).map(|source| {
+                let mut tags = Vec::new();
+                self.object(source, &mut tags);
+                tags
+            }),
+            ("OBJECTS", kind) if is_dictionary(kind) => {
+                head(body).handle.and_then(|handle| dictionaries.get(&handle)).map(|source| merge_xdict(self, source, body))
+            }
+            _ => None,
+        }
+    }
+
     /// The written handle for a kept reference, `Some("0")` for the null handle, `None` when what
     /// it named is gone.
     fn get(&self, old: &str) -> Option<String> {
@@ -1320,22 +1336,51 @@ fn unknown_handles(d: &Drawing) -> HashSet<String> {
     all_entities(d).filter(|e| matches!(e.kind, EntityKind::Unknown(_))).map(|e| e.handle.hex()).collect()
 }
 
-fn allocate_table_records(f: &Foreign, roles: &HashMap<ForeignKey, String>, alive: &mut HashMap<String, String>, next: &mut u64) {
-    for o in &f.table_records {
-        if roles.contains_key(&("TABLE".into(), o.kind.clone())) {
-            alive.insert(o.handle.hex(), format!("{next:X}"));
+fn shape_style(object: &ForeignObject) -> bool {
+    object.kind == "STYLE" && first_group(&object.tags, 70).is_some_and(|t| t.value.parse::<i64>().is_ok_and(|flags| flags & 1 != 0))
+}
+
+fn allocate_table_records<'a>(
+    f: &'a Foreign,
+    roles: &HashMap<ForeignKey, String>,
+    tables: &Recs<'_>,
+    alive: &mut HashMap<String, String>,
+    next: &mut u64,
+) -> HashMap<String, &'a ForeignObject> {
+    let mut generated: HashMap<_, _> = tables
+        .iter()
+        .filter(|(kind, _, tags)| {
+            kind == "STYLE" && val(tags, 2).is_none_or(|name| name.is_empty()) && tags.iter().any(|t| t.code == 70 && t.i64() & 1 != 0)
+        })
+        .filter_map(|(_, _, tags)| Some((up(&val(tags, 3)?), head(tags).handle?)))
+        .collect();
+    let mut aliases = HashMap::new();
+    for object in &f.table_records {
+        if !roles.contains_key(&("TABLE".into(), object.kind.clone())) {
+            continue;
+        }
+        // A linetype shape file already has a generated slot. Reuse it, including its
+        // source fields, rather than adding another copy on every save.
+        let slot = shape_style(object).then(|| first_group(&object.tags, 3)).flatten().and_then(|font| generated.remove(&up(&font.value)));
+        if let Some(handle) = slot {
+            alive.insert(object.handle.hex(), handle.clone());
+            aliases.insert(handle, object);
+        } else {
+            alive.insert(object.handle.hex(), format!("{next:X}"));
             *next = next.saturating_add(1);
         }
     }
+    aliases
 }
 
 /// The names a user DXF gives the nameless STYLE and DIMSTYLE records kept from a DWG: AutoCAD
 /// refuses a table record with an empty name (it renames them itself, to AUDIT_I_...). Each name is
 /// unique among the written records of its table. A DWG bridge (`dwg_bridge`) keeps the records nameless.
+/// Shape-file entries legitimately remain nameless in both formats.
 fn names_for_unnamed(f: &Foreign, tables: &Recs<'_>, dwg_bridge: bool) -> HashMap<Handle, String> {
     let mut used: HashSet<(String, String)> = tables.iter().map(|(kind, _, t)| (kind.clone(), up(&val(t, 2).unwrap_or_default()))).collect();
     let mut out = HashMap::new();
-    for o in f.table_records.iter().filter(|o| !dwg_bridge && matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE")) {
+    for o in f.table_records.iter().filter(|o| !dwg_bridge && matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE") && !shape_style(o)) {
         let n = (1..).map(|n| format!("UNNAMED_{}_{n}", o.kind)).find(|n| used.insert((o.kind.clone(), up(n)))).unwrap_or_default();
         out.insert(o.handle, n);
     }
@@ -1348,12 +1393,13 @@ fn write_table_records(map: &Map<'_>, r: &Rec, body: &[Tag], table: &mut String,
     if r.sec != "TABLES" {
         return 0;
     }
+    let standalone = |object: &ForeignObject| map.alive.get(&object.handle.hex()).is_some_and(|handle| !map.table_aliases.contains_key(handle));
     if r.kind == "TABLE" {
         *table = val(body, 2).unwrap_or_default();
-        return map.f.table_records.iter().filter(|o| o.kind == *table && map.alive.contains_key(&o.handle.hex())).count();
+        return map.f.table_records.iter().filter(|o| o.kind == *table && standalone(o)).count();
     }
     if r.kind == "ENDTAB" {
-        for o in map.f.table_records.iter().filter(|o| o.kind == *table && map.alive.contains_key(&o.handle.hex())) {
+        for o in map.f.table_records.iter().filter(|o| o.kind == *table && standalone(o)) {
             let start = out.len();
             map.object(o, out);
             if let Some(name) = names.get(&o.handle)
@@ -1602,7 +1648,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
             next = next.saturating_add(1);
         }
     }
-    allocate_table_records(f, &roles, &mut alive, &mut next);
+    let table_aliases = allocate_table_records(f, &roles, &tables, &mut alive, &mut next);
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
     let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
@@ -1613,7 +1659,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
         .unwrap_or(0);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
-    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages, block_attributes };
+    let map = Map { f, alive, objects: objs, owners, roles, entities, geometry, version, pages, block_attributes, table_aliases };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -1648,11 +1694,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool) {
             out.push(zero.clone());
             record(&map, &ur, ub, x.as_deref(), None, true, false, &mut out);
         }
-        if r.sec == "OBJECTS"
-            && is_dictionary(&r.kind)
-            && let Some(old) = head(b).handle.and_then(|h| merged_into.get(&h))
-        {
-            out.extend(merge_xdict(&map, old, b));
+        if let Some(tags) = map.replayed_record(r, b, &merged_into) {
+            out.extend(tags);
             continue;
         }
         let start = out.len();
@@ -1877,7 +1920,7 @@ fn record(
         }
         // Kept table fields replace the defaults the writer wrote.
         if !entity
-            && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS")
+            && matches!(r.kind.as_str(), "VPORT" | "VIEW" | "UCS" | "STYLE")
             && i < xdata_at
             && x.is_some_and(|x| x.props.iter().chain(&x.subclass).any(|p| p.code == t.code && replay(p)))
             && !matches!(t.code, 0 | 5 | 100 | 330)
