@@ -8,11 +8,28 @@ use cadcraft_geom::Mat4;
 
 /// Canonical WCS geometry with the same local layouts that the drawing displays.
 pub fn entity_world_geometry(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<WorldGeometry> {
-    let mut remaining = crate::MAX_BLOCK_EXPANSION;
-    geometry_in(drawing, entity, parent, 0, &mut remaining)
+    entity_world_geometry_visiting(drawing, entity, parent, &mut |_, _| Ok(()))
 }
 
-fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, remaining: &mut usize) -> cadcraft_doc::Result<WorldGeometry> {
+/// Visit source entities with their complete parents during the same bounded geometry expansion.
+pub(crate) fn entity_world_geometry_visiting(
+    drawing: &Drawing,
+    entity: &Entity,
+    parent: &Mat4,
+    visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
+) -> cadcraft_doc::Result<WorldGeometry> {
+    let mut remaining = crate::MAX_BLOCK_EXPANSION;
+    geometry_in(drawing, entity, parent, 0, &mut remaining, visitor)
+}
+
+fn geometry_in(
+    drawing: &Drawing,
+    entity: &Entity,
+    parent: &Mat4,
+    depth: usize,
+    remaining: &mut usize,
+    visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
+) -> cadcraft_doc::Result<WorldGeometry> {
     if entity.geometry_revision == GeometryRevision::LegacyProjectedV1 {
         return entity.world_geometry(parent);
     }
@@ -26,8 +43,9 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
         return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
     }
     spend(remaining, 1, entity.handle)?;
+    visitor(entity, parent)?;
     match &entity.kind {
-        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining),
+        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining, visitor),
         EntityKind::MLeader(leader) => {
             let block = leader.block.as_ref().and_then(|insert| drawing.block(&insert.block));
             let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
@@ -44,7 +62,7 @@ fn geometry_in(drawing: &Drawing, entity: &Entity, parent: &Mat4, depth: usize, 
             let mut primitives = world.primitives;
             if let (Some(block), Some(matrix)) = (block, world.block) {
                 spend(remaining, 1, entity.handle)?;
-                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives)?;
+                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives, visitor)?;
             }
             WorldGeometry::from_primitives(entity.handle, primitives)
         }
@@ -76,6 +94,7 @@ fn append_block_geometry(
     depth: usize,
     remaining: &mut usize,
     primitives: &mut Vec<WorldPrimitive>,
+    visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<()> {
     for child in block.entities.iter() {
         // Definitions are replaced by instances; unknown records have no modeled display geometry.
@@ -85,7 +104,7 @@ fn append_block_geometry(
         {
             continue;
         }
-        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining)?;
+        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining, visitor)?;
         primitives.extend_from_slice(geometry.primitives());
     }
     Ok(())
@@ -105,6 +124,7 @@ fn insert_geometry(
     parent: &Mat4,
     depth: usize,
     remaining: &mut usize,
+    visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     let mut primitives: Vec<WorldPrimitive> = Vec::new();
     if let Some(block) = drawing.block(&insert.block) {
@@ -122,7 +142,7 @@ fn insert_geometry(
                     .world_transform(entity.common.extrusion, block.base, column, row)
                     .map_err(|error| if matches!(error, DocError::NonFinite(_)) { DocError::NonFinite(entity.handle) } else { error })?;
                 let complete = parent.mul(&local);
-                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives)?;
+                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives, visitor)?;
             }
         }
     }

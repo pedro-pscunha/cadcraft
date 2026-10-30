@@ -28,6 +28,57 @@ fn a_wide_bulge_bounds_its_between_sample_extremum_after_an_affine_parent() {
 }
 
 #[test]
+fn nested_insert_bounds_include_a_wide_bulge_child_under_an_affine_parent() {
+    let mut drawing = Drawing::new_metric();
+    let mut curve = Entity::new(
+        Handle(0x200),
+        EntityKind::LwPolyline(LwPolyline {
+            records: Default::default(),
+            vertices: vec![PolyVertex { bulge: 1.0, ..PolyVertex::new(Vec2::ZERO) }, PolyVertex::new(Vec2::new(20.0, 0.0))],
+            closed: false,
+            const_width: 2.0,
+            elevation: 0.0,
+            plinegen: true,
+            heavy: false,
+            fit: None,
+        }),
+    );
+    curve.geometry_revision = GeometryRevision::CanonicalV2;
+    curve.common.extrusion = Vec3::new(0.0, 0.6, 0.8);
+    let mut block = Block::new("Curve");
+    block.base = Vec3::new(1.0, 2.0, 3.0);
+    block.entities.push(curve);
+    drawing.blocks.insert("Curve".into(), std::sync::Arc::new(block));
+    let insert = |handle, block: &str, at, scale| {
+        let mut entity = Entity::new(
+            Handle(handle),
+            EntityKind::Insert(Insert {
+                block: block.into(),
+                insert: at,
+                scale,
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 1,
+                rows: 1,
+                col_spacing: 0.0,
+                row_spacing: 0.0,
+            }),
+        );
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        entity
+    };
+    let mut outer = Block::new("Outer");
+    outer.entities.push(insert(0x201, "Curve", Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)));
+    drawing.blocks.insert("Outer".into(), std::sync::Arc::new(outer));
+    let root = insert(0x202, "Outer", Vec3::new(5.0, 7.0, 11.0), Vec3::new(2.0, 3.0, 4.0));
+    drawing.model.push(root.clone());
+    let parent = Mat4 { m: [[1.0, 0.123, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+    let bounds = entity_world_bounds(&drawing, &root, &parent).unwrap();
+    let expected = -17.0 + 0.123 + 11.0 * (4.0_f64 + (0.123_f64 * 0.8 * 3.0).powi(2)).sqrt();
+    assert!(bounds.max.x >= expected - 1e-9, "{} excludes the nested outer edge at {expected}", bounds.max.x);
+}
+
+#[test]
 fn an_edge_on_parent_keeps_a_point_markers_relative_size() {
     let mut drawing = Drawing::new_metric();
     drawing.header.set_i64("PDMODE", 2);
