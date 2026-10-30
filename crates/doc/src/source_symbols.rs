@@ -19,6 +19,9 @@ pub struct SourceSymbols {
     /// CADCraft writes itself, by role (see [`ForeignKey`]). A role that is not here (a record made
     /// since) gets a new handle.
     pub handles: BTreeMap<ForeignKey, Handle>,
+    /// The references to each block (the `{BLKREFS` list of its record) in the order the file listed them, by upper-case block
+    /// name. AutoCAD lists them in the order they were made, which a handle does not say.
+    pub block_refs: BTreeMap<String, Vec<Handle>>,
 }
 
 impl SourceSymbols {

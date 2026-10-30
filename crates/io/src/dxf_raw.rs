@@ -406,6 +406,18 @@ fn keep_source_handles(d: &mut Drawing, ids: &HashMap<String, ForeignKey>) {
     }
 }
 
+/// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
+fn keep_block_references(d: &mut Drawing, tables: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    for (_, _, t) in tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD") {
+        let (Some(name), Some(open)) = (val(t, 2), t.iter().position(|g| g.code == 102 && g.str().trim() == "{BLKREFS")) else { continue };
+        let refs: Vec<Handle> = t[open + 1..].iter().take_while(|g| g.code == 331).filter_map(|g| handle(&g.str())).collect();
+        if !refs.is_empty() {
+            source.block_refs.entry(up(&name)).or_insert(refs);
+        }
+    }
+}
+
 /// Give the written tables, symbol records, blocks and dictionary entries the handles the file
 /// the drawing came from gave them, wherever a group names one: the written handle of a role the
 /// file had becomes the file's, unless another record of the written file already has it. A role
@@ -710,6 +722,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ents = entity_types(d);
     let ids = identities(&tables, &blocks, &objects);
     keep_source_handles(d, &ids);
+    keep_block_references(d, &tables);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")

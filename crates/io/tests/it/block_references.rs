@@ -58,3 +58,20 @@ fn a_block_record_lists_its_inserts_in_dxf_and_dwg() {
         assert!(refs(&text, "UNUSED").is_empty(), "{what}: an unused block has no list");
     }
 }
+
+#[test]
+fn the_order_the_file_listed_is_kept_and_new_inserts_follow() {
+    let (d, h) = drawing();
+    // The file listed the inserts of BOLT in an order that is not the handle order.
+    let listed = vec![h[3], h[1], h[0]];
+    let mut source = (*d.source_symbols).clone();
+    source.block_refs.insert("BOLT".into(), listed.clone());
+    let mut d = d;
+    d.source_symbols = std::sync::Arc::new(source);
+    let text = cadcraft_io::write_dxf(&d);
+    let want: Vec<String> = listed.iter().chain([&h[2]]).map(|x| x.hex()).collect();
+    assert_eq!(refs(&text, "BOLT"), want, "the listed ones first, then the new one");
+    // Read back, the order is the file's again.
+    let again = cadcraft_io::write_dxf(&cadcraft_io::read_dxf(text.as_bytes()).unwrap());
+    assert_eq!(refs(&again, "BOLT"), want);
+}
