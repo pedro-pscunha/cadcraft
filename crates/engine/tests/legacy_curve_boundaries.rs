@@ -37,6 +37,15 @@ fn check_refusals(drawing: &Drawing, command: &str, params: Value, inputs: &[Han
 }
 
 #[test]
+fn overkill_checks_every_candidate_before_comparison_or_duplicate_removal() {
+    let mut session = Session::new();
+    let a = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    let b = create(&mut session, "line", json!({"points": [[0, 0], [10, 0]]}));
+    check_refusals(session.doc().unwrap(), "overkill", json!({"handles": [a.hex(), b.hex()]}), &[a, b]);
+    check_refusals(session.doc().unwrap(), "overkill", json!({}), &[a, b]);
+}
+
+#[test]
 fn fillet_and_chamfer_check_each_input_and_the_polyline_option() {
     for command in ["fillet", "chamfer"] {
         let mut session = Session::new();
