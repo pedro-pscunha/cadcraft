@@ -539,7 +539,7 @@ fn write_layout_objects(w: &mut W, plan: &ObjectWritePlan<'_>) {
     let layout_handles = plan.layout_handles;
     w.s(0, "DICTIONARY");
     w.s(5, layout_dict.clone());
-    w.group("ACAD_REACTORS", 330, &[&root_dict]);
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -628,7 +628,7 @@ fn write_root_group_objects(
     w.s(350, scale_dict.clone());
     w.s(0, "DICTIONARY");
     w.s(5, group_dict);
-    w.group("ACAD_REACTORS", 330, &[&root_dict]);
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -652,7 +652,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
     // Multileader styles.
     w.s(0, "DICTIONARY");
     w.s(5, mleader_dict.to_string());
-    w.group("ACAD_REACTORS", 330, &[&root_dict]);
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -676,7 +676,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
     // Table styles.
     w.s(0, "DICTIONARY");
     w.s(5, table_style_dict.clone());
-    w.group("ACAD_REACTORS", 330, &[&root_dict]);
+    w.group("ACAD_REACTORS", 330, &[root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);

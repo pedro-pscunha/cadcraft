@@ -37,7 +37,7 @@ fn every_dictionary_of_the_named_object_dictionary_reacts_to_it() {
     let children: Vec<_> = records.iter().filter(|(k, b)| k == "DICTIONARY" && owner(b).as_deref() == Some(root_handle.as_str())).collect();
     assert!(children.len() >= 4, "the groups, layouts and styles dictionaries");
     for (_, body) in children {
-        assert_eq!(reactors(body), [root_handle.clone()], "{:?}", body.iter().find(|t| t.code == 5).map(Tag::str));
+        assert_eq!(reactors(body), std::slice::from_ref(&root_handle), "{:?}", body.iter().find(|t| t.code == 5).map(Tag::str));
     }
 }
 

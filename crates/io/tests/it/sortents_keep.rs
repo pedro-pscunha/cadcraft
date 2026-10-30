@@ -20,14 +20,9 @@ fn source(pairs: Option<&str>) -> String {
     }
     s.push_str("0\nENDSEC\n0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n");
     s.push_str("0\nDICTIONARY\n5\nB1\n102\n{ACAD_REACTORS\n330\n1F\n102\n}\n330\n1F\n100\nAcDbDictionary\n280\n1\n281\n1\n");
-    match pairs {
-        Some(pairs) => {
-            s.push_str("3\nACAD_SORTENTS\n360\nB0\n");
-            s.push_str(&format!(
-                "0\nSORTENTSTABLE\n5\nB0\n102\n{{ACAD_REACTORS\n330\nB1\n102\n}}\n330\nB1\n100\nAcDbSortentsTable\n330\n1F\n{pairs}"
-            ));
-        }
-        None => {}
+    if let Some(pairs) = pairs {
+        s.push_str("3\nACAD_SORTENTS\n360\nB0\n");
+        s.push_str(&format!("0\nSORTENTSTABLE\n5\nB0\n102\n{{ACAD_REACTORS\n330\nB1\n102\n}}\n330\nB1\n100\nAcDbSortentsTable\n330\n1F\n{pairs}"));
     }
     s.push_str("0\nENDSEC\n0\nEOF\n");
     s
