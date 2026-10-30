@@ -1,14 +1,46 @@
 //! Bounds from the same spatial geometry and font layouts that display consumes.
 
-use cadcraft_doc::{DocError, Drawing, Entity, Handle, Prim, WorldGeometry, WorldPrimitive, WorldTextContent};
-use cadcraft_geom::{Bounds2, Mat4};
+use cadcraft_doc::{
+    Arc, DocError, Drawing, Entity, EntityKind, GeometryRevision, Handle, LwPolyline, Prim, WorldGeometry, WorldPrimitive, WorldTextContent,
+};
+use cadcraft_geom::{Bounds2, Mat4, bulge_to_arc};
 
 use crate::{WorldShaped, WorldTextLayout, entity_world_geometry, layout_world_text};
 
 /// Bounds in the XY view after the complete spatial parent, or an explicit geometry refusal.
 pub fn entity_world_bounds(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<Bounds2> {
     let geometry = entity_world_geometry(drawing, entity, parent)?;
-    geometry.primitives().iter().try_fold(Bounds2::EMPTY, |bounds, primitive| Ok(bounds.union(&primitive_bounds(drawing, primitive, entity.handle)?)))
+    let bounds = geometry
+        .primitives()
+        .iter()
+        .try_fold(Bounds2::EMPTY, |bounds, primitive| Ok::<_, DocError>(bounds.union(&primitive_bounds(drawing, primitive, entity.handle)?)))?;
+    if entity.geometry_revision == GeometryRevision::CanonicalV2
+        && let EntityKind::LwPolyline(polyline) = &entity.kind
+    {
+        return Ok(bounds.union(&wide_bulge_bounds(drawing, entity, polyline, parent)?));
+    }
+    Ok(bounds)
+}
+
+fn wide_bulge_bounds(drawing: &Drawing, entity: &Entity, polyline: &LwPolyline, parent: &Mat4) -> cadcraft_doc::Result<Bounds2> {
+    let count = if polyline.closed { polyline.vertices.len() } else { polyline.vertices.len().saturating_sub(1) };
+    let mut bounds = Bounds2::EMPTY;
+    for (a, b) in polyline.vertices.iter().zip(polyline.vertices.iter().cycle().skip(1)).take(count) {
+        let half = if polyline.const_width > 0.0 { polyline.const_width / 2.0 } else { a.start_width.max(a.end_width).max(0.0) / 2.0 };
+        if half <= 0.0 {
+            continue;
+        }
+        let Some((local, _)) = bulge_to_arc(a.p, b.p, a.bulge) else { continue };
+        // The sampled strip can miss an extremum after an affine parent. These two conics enclose every tapered radial edge.
+        for radius in [local.radius - half, local.radius + half] {
+            let turn = if radius < 0.0 { std::f64::consts::PI } else { 0.0 };
+            let edge = Arc { center: local.center.to3(polyline.elevation), radius: radius.abs(), start: local.start + turn, end: local.end + turn };
+            for primitive in cadcraft_doc::arc_primitives(&edge, entity.common.extrusion, parent)? {
+                bounds = bounds.union(&primitive_bounds(drawing, &primitive, entity.handle)?);
+            }
+        }
+    }
+    Ok(bounds)
 }
 
 fn primitive_bounds(drawing: &Drawing, primitive: &WorldPrimitive, owner: Handle) -> cadcraft_doc::Result<Bounds2> {
