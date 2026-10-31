@@ -292,3 +292,26 @@ The external paths below have the prefix `/tmp/cad/`. Each count names changed r
 | dim1/dim1-vp68-2018.dxf | dxf | 28 members: 1 |
 
 Strict G1 passes with `-- --ignored match`: 63 drawings and four repository drawings checked, no missing inputs, and both tests pass.
+
+# Golden refresh for the private copies of native values (b1fec9b3)
+
+A save writes CADCraft's private copy of a value only where the target release has no native home for it (commit "a save writes the CADCRAFT
+private copy of a value only where the release cannot store it"). Every output of the corpus (63 drawings, DXF and DWG) differs from the
+baseline of the previous refresh, because the table records and objects are numbered above the entities' handles instead of above the
+drawing's next handle (`$HANDSEED`, which the reader no longer follows): G1 keys a record by its handle, so every record numbered by the
+writer drifts in the check. Compared with the handles set aside (every handle-valued group replaced by a mark, the DXF baseline of
+`/tmp/cad/activation/golden` against the new one), the records that differ are only these:
+
+| record | cause | drawings | records |
+|---|---|---|---|
+| OBJECTS/XRECORD | the CADCRAFT_HANDSEED XRECORD is gone (the numbers above the entities need no seed); the DXF baseline is R2000, so CADCRAFT_MLEADERSTYLE stays | 63 | 63 |
+| OBJECTS/DICTIONARY | the named object dictionary lost its CADCRAFT_HANDSEED entry | 63 | 63 |
+| TABLES/APPID | the CADCRAFT APPID is registered only when some xdata names it (the 23 drawings without a table style) | 23 | 23 |
+| TABLES/TABLE | the APPID table's count of those 23 | 23 | 23 |
+| TABLES/STYLE | the built-in font is the file `txt`, with no `CADCRAFT` FONT xdata | 38 | 38 |
+| ENTITIES/VIEWPORT, BLOCKS/VIEWPORT | no `VPFROZEN` xdata: the native group 331 is the whole list | 13 | 101 |
+| BLOCKS/HATCH | no `HATCH` origin xdata: the origin is in the pattern lines' base points (43/44), as AutoCAD keeps it (the R2000 baseline keeps the gradient as xdata, before R2004) | 1 | 1220 |
+
+The DWG baselines differ for the same causes (read as DXF) and the handles; the CADCRAFT_MLEADERSTYLE XRECORD stays in a DWG. The r5 and r6 raw
+fixtures move for the same causes (their handles and the missing records). The legacy-writer fingerprints (`growing_extents`,
+`displacement_tests`) are recaptured: 431 bytes fewer (the two XRECORDs' handle and dictionary entry, the APPID, and the seed).
