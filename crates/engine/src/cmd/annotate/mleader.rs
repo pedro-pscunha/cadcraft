@@ -55,7 +55,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("leader", "need 2+ points"));
     }
     let st = style(s);
-    let h = s.add_entity(EntityKind::Leader(cadcraft_doc::Leader {
+    let h = s.draw(EntityKind::Leader(cadcraft_doc::Leader {
         vertices: pts.iter().map(|q| v3(*q)).collect(),
         arrow: true,
         spline: false,
@@ -67,7 +67,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
     if let (Some(t), Some(last)) = (str_param(p, "text"), pts.last()) {
         let th = s.doc()?.dim_style(&style(s)).map(|d| d.text_height).unwrap_or(0.18);
         out.push(
-            s.add_entity(EntityKind::MText(MText {
+            s.draw(EntityKind::MText(MText {
                 insert: v3(*last + Vec2::new(th * 0.5, th * 0.5)),
                 height: th,
                 width: 0.0,

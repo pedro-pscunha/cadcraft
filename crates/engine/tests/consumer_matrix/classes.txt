@@ -65,9 +65,6 @@ burst operand
 cal n/a
 chamfer operand
 chspace operand
-circle n/a
-circle.2p n/a
-circle.3p n/a
 circle.cd n/a
 circle.ttr operand
 circle.ttt operand
@@ -144,7 +141,6 @@ dimtedit.right operand
 divide operand
 document.bytes n/a
 document.switch n/a
-donut n/a
 drawing.inspect n/a
 drawingrecovery n/a
 draworder operand
@@ -155,9 +151,7 @@ draworder.under operand
 dsettings n/a
 dynmode n/a
 eattext operand
-ellipse n/a
 ellipse.arc n/a
-ellipse.axis n/a
 entities operand
 erase.selection operand
 explode operand
@@ -198,10 +192,8 @@ hatch.patterns n/a
 hatchedit operand
 hatchpick operand
 hatchtoback operand
-helix n/a
 hideobjects operand
 import n/a
-insert n/a
 intersect operand
 isodraft n/a
 isolateobjects operand
@@ -239,7 +231,6 @@ layout.set n/a
 laythw n/a
 layulk operand
 layuniso n/a
-leader n/a
 lengthen operand
 limits n/a
 line n/a
@@ -265,7 +256,6 @@ mlstyle n/a
 mocoro operand
 mredo n/a
 mspace operand
-mtext n/a
 mview operand
 mview.polygonal n/a
 ncopy operand
@@ -298,7 +288,6 @@ plottermanager n/a
 plotwindow operand
 point.multiple n/a
 polar n/a
-polygon n/a
 preview n/a
 properties.set operand
 pspace n/a
@@ -312,7 +301,6 @@ qselect.info operand
 quickcalc.pick n/a
 radius.measure operand
 recover n/a
-rectang n/a
 redo n/a
 redraw n/a
 refclose n/a
@@ -350,7 +338,6 @@ style.rename n/a
 stylesmanager n/a
 subtract operand
 sysvars n/a
-table n/a
 table.break operand
 table.cellstyle operand
 table.deletecol operand
@@ -366,7 +353,6 @@ tabledit operand
 tableexport operand
 tablestyle n/a
 tablestyle.cellstyle n/a
-text n/a
 textedit operand
 texts operand
 texttofront operand

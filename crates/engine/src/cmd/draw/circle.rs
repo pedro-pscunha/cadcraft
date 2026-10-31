@@ -22,7 +22,7 @@ pub(super) fn run_circle(s: &mut Session, p: &Value) -> Result<Value> {
     if !(c.radius > 1e-12 && c.radius.is_finite()) {
         return Err(bad("circle", "radius must be positive"));
     }
-    added(s.add_entity(circle(c.center, c.radius))?)
+    added(s.draw(circle(c.center, c.radius))?)
 }
 
 pub(super) fn run_arc(s: &mut Session, p: &Value) -> Result<Value> {
@@ -44,7 +44,7 @@ pub(super) fn run_arc(s: &mut Session, p: &Value) -> Result<Value> {
     // Zero or non-finite radius (e.g. start == center): refuse, like the interactive ARC and the
     // arc.* variants, before anything is added (#85).
     let a = crate::cmd::curves::finite_arc(a).ok_or_else(|| bad("arc", "these values do not define an arc"))?;
-    added(s.add_entity(arc(&a))?)
+    added(s.draw(arc(&a))?)
 }
 
 #[derive(Default)]
@@ -175,7 +175,7 @@ impl Interactive for CircleM {
 }
 
 fn finish_circle(s: &mut Session, c: Circle) -> Result<()> {
-    s.add_entity(circle(c.center, c.radius))?;
+    s.draw(circle(c.center, c.radius))?;
     s.doc_mut()?.header.set_f64("CIRCLERAD", c.radius);
     Ok(())
 }

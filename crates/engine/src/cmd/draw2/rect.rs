@@ -72,7 +72,7 @@ pub(crate) fn run_rectang2(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("rectang", "rectangle has no area"));
     }
     let first = if centered { a - Vec2::new(w / 2.0, h / 2.0).rotate(rot) } else { a };
-    let k = rect_kind(first, (w, h), rot, fillet, ch, width, f64_or(p, "elevation", 0.0));
+    let k = rect_kind(first, (w, h), rot, fillet, ch, width, f64_or(p, "elevation", s.elevation()));
     let hd = s.add_entity(k)?;
     // A rectangle has its own thickness option and does not take THICKNESS.
     let th = f64_or(p, "thickness", 0.0);
@@ -107,7 +107,8 @@ pub(crate) struct RectM2 {
     fillet: f64,
     chamfer: (f64, f64),
     width: f64,
-    elevation: f64,
+    /// The elevation asked for; without one, the current elevation (ELEVATION).
+    elevation: Option<f64>,
     thickness: f64,
     rotation: f64,
     dims: Option<(f64, f64)>,
@@ -124,7 +125,15 @@ impl RectM2 {
             return Err(other("The rectangle has no area."));
         }
         let first = self.origin(w, h).unwrap_or(a);
-        let hd = s.add_entity(rect_kind(first, (w, h), self.rotation, self.fillet, self.chamfer, self.width, self.elevation))?;
+        let hd = s.add_entity(rect_kind(
+            first,
+            (w, h),
+            self.rotation,
+            self.fillet,
+            self.chamfer,
+            self.width,
+            self.elevation.unwrap_or_else(|| s.elevation()),
+        ))?;
         // A rectangle has its own thickness option and does not take THICKNESS.
         let t = self.thickness;
         s.doc_mut()?.modify_entity(hd, |e| e.common.thickness = t)?;
@@ -157,7 +166,7 @@ impl Interactive for RectM2 {
     }
     /// Asks for the pending option's value, or for the first and second points; in centre mode
     /// the first prompt asks for the centre instead of a corner.
-    fn prompt(&self, _s: &Session) -> Prompt {
+    fn prompt(&self, s: &Session) -> Prompt {
         let num = |m: &str, d: f64| Prompt::new(m, Accept::NUMBER).default(format!("{d:.4}"));
         if let Some(a) = self.asking {
             return match a {
@@ -165,7 +174,7 @@ impl Interactive for RectM2 {
                 RAsk::Chamfer2 => num("Specify second chamfer distance for rectangles", self.chamfer.1),
                 RAsk::Fillet => num("Specify fillet radius for rectangles", self.fillet),
                 RAsk::Width => num("Specify line width for rectangles", self.width),
-                RAsk::Elevation => num("Specify the elevation for rectangles", self.elevation),
+                RAsk::Elevation => num("Specify the elevation for rectangles", self.elevation.unwrap_or_else(|| s.elevation())),
                 RAsk::Thickness => num("Specify thickness for rectangles", self.thickness),
                 RAsk::Area => num("Enter area of rectangle in current units", if self.area > 0.0 { self.area } else { 100.0 }),
                 RAsk::AreaBasis => Prompt::new("Calculate rectangle dimensions based on", curves::KW).kw(&["Length", "Width"]).default("Length"),
@@ -210,7 +219,7 @@ impl Interactive for RectM2 {
                 RAsk::Chamfer2 => self.chamfer.1 = val(&i, self.chamfer.1)?.max(0.0),
                 RAsk::Fillet => self.fillet = val(&i, self.fillet)?.max(0.0),
                 RAsk::Width => self.width = val(&i, self.width)?.max(0.0),
-                RAsk::Elevation => self.elevation = val(&i, self.elevation)?,
+                RAsk::Elevation => self.elevation = Some(val(&i, self.elevation.unwrap_or_else(|| s.elevation()))?),
                 RAsk::Thickness => self.thickness = val(&i, self.thickness)?,
                 RAsk::Area => {
                     let v = val(&i, if self.area > 0.0 { self.area } else { 100.0 })?;
@@ -297,13 +306,13 @@ impl Interactive for RectM2 {
     }
     /// The rubber-band rectangle for the cursor at `c`, mapped through the same size-and-origin
     /// rules as the committed entity so centre mode previews where it will land.
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.asking.is_some() {
             return Vec::new();
         }
         match self.other_corner(c).and_then(|(w, h)| self.origin(w, h).map(|a| (a, w, h))) {
             Some((a, w, h)) if w.abs() > 1e-12 && h.abs() > 1e-12 => {
-                vec![rect_kind(a, (w, h), self.rotation, self.fillet, self.chamfer, self.width, self.elevation)]
+                vec![rect_kind(a, (w, h), self.rotation, self.fillet, self.chamfer, self.width, self.elevation.unwrap_or_else(|| s.elevation()))]
             }
             _ => Vec::new(),
         }

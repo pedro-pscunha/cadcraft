@@ -134,7 +134,7 @@ pub(super) fn run_helix(s: &mut Session, p: &Value) -> Result<Value> {
     if height.abs() > 1e12 || rb > 1e12 || rt > 1e12 {
         return Err(bad("helix", "sizes are out of range"));
     }
-    added(s.add_entity(helix_kind(c, rb, rt, height, turns, bool_or(p, "ccw", true), f64_or(p, "startAngle", 0.0).to_radians()))?)
+    added(s.draw(helix_kind(c, rb, rt, height, turns, bool_or(p, "ccw", true), f64_or(p, "startAngle", 0.0).to_radians()))?)
 }
 
 #[derive(Default)]
@@ -159,7 +159,7 @@ impl HelixM {
         if !height.is_finite() || height.abs() > 1e12 {
             return Err(other("Requires a distance."));
         }
-        s.add_entity(helix_kind(c, rb, rt, height, self.turns(), !self.cw, self.start.unwrap_or(0.0)))?;
+        s.draw(helix_kind(c, rb, rt, height, self.turns(), !self.cw, self.start.unwrap_or(0.0)))?;
         Ok(Step::Done)
     }
 }

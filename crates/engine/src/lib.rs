@@ -155,6 +155,46 @@ impl Default for Session {
     }
 }
 
+/// Move a flat object drawn at Z 0 to Z `z`. An object of a kind that has no Z of its own to move is left as it is.
+fn raise_to(kind: &mut EntityKind, z: f64) {
+    if z == 0.0 {
+        return;
+    }
+    match kind {
+        EntityKind::Circle(c) => c.center.z += z,
+        EntityKind::Arc(a) => a.center.z += z,
+        EntityKind::Ellipse(e) => e.center.z += z,
+        EntityKind::Ray(r) | EntityKind::XLine(r) => r.base.z += z,
+        EntityKind::Text(t) => {
+            t.insert.z += z;
+            if let Some(align) = &mut t.align_pt {
+                align.z += z;
+            }
+        }
+        EntityKind::AttDef(a) => {
+            a.text.insert.z += z;
+            if let Some(align) = &mut a.text.align_pt {
+                align.z += z;
+            }
+        }
+        EntityKind::MText(t) => t.insert.z += z,
+        EntityKind::Insert(i) => {
+            i.insert.z += z;
+            for attrib in &mut i.attribs {
+                attrib.text.insert.z += z;
+                if let Some(align) = &mut attrib.text.align_pt {
+                    align.z += z;
+                }
+            }
+        }
+        EntityKind::Helix(h) => h.center.z += z,
+        EntityKind::Table(t) => t.insert.z += z,
+        EntityKind::LwPolyline(p) => p.elevation += z,
+        EntityKind::Leader(l) => l.vertices.iter_mut().for_each(|v| v.z += z),
+        _ => {}
+    }
+}
+
 impl Session {
     pub fn new() -> Self {
         let mut s = Session::empty();
@@ -279,6 +319,13 @@ impl Session {
             plot_style: h.str("CPLOTSTYLE", "ByLayer"),
             ..Common::default()
         }
+    }
+
+    /// Add an object that a draw command made on the plan view: it sits at the current elevation (ELEVATION), as AutoCAD draws it.
+    /// A command with a Z of its own (POINT, LINE, PLINE, an object it derives from another) uses `add_entity`.
+    pub fn draw(&mut self, mut kind: EntityKind) -> Result<Handle> {
+        raise_to(&mut kind, self.elevation());
+        self.add_entity(kind)
     }
 
     /// Add an entity to the current space with current properties.

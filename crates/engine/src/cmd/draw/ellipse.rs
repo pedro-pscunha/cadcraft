@@ -15,14 +15,7 @@ pub(super) fn run_ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let start = f64_or(p, "start", 0.0).to_radians();
     let end = f64_or(p, "end", 360.0).to_radians();
-    added(s.add_entity(EntityKind::Ellipse(cadcraft_doc::Ellipse {
-        normal: cadcraft_geom::Vec3::Z,
-        center: v3(c),
-        major: v3(m),
-        ratio,
-        start,
-        end,
-    }))?)
+    added(s.draw(EntityKind::Ellipse(cadcraft_doc::Ellipse { normal: cadcraft_geom::Vec3::Z, center: v3(c), major: v3(m), ratio, start, end }))?)
 }
 
 /// ELLIPSE prompt machine starting in axis-end or center mode, optionally for an elliptical arc.
@@ -78,7 +71,7 @@ impl EllipseM {
             self.ellipse = Some(e);
             return Ok(Step::Continue);
         }
-        s.add_entity(EntityKind::Ellipse(cadcraft_doc::Ellipse {
+        s.draw(EntityKind::Ellipse(cadcraft_doc::Ellipse {
             normal: cadcraft_geom::Vec3::Z,
             center: v3(e.center),
             major: v3(e.major),
@@ -149,7 +142,7 @@ impl Interactive for EllipseM {
                     return Ok(Step::Continue);
                 }
                 Some(st) => {
-                    s.add_entity(EntityKind::Ellipse(cadcraft_doc::Ellipse {
+                    s.draw(EntityKind::Ellipse(cadcraft_doc::Ellipse {
                         normal: cadcraft_geom::Vec3::Z,
                         center: v3(e.center),
                         major: v3(e.major),

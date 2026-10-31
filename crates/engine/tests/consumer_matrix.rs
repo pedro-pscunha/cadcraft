@@ -629,11 +629,88 @@ fn arc_three_points_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), St
     arc_made(d, ops, [3.0, 1.125, 0.0], 1.875, last, first)
 }
 
+/// An empty drawing at ELEVATION 3 with the block B1 and a circle far from the picks. The creation command of the row draws in it.
+fn at_elevation(params: Value) -> Fixture {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 3})).unwrap();
+    let source = create(&mut s, "line", json!({"points": [[60, 0], [61, 1]]}));
+    s.execute("block", &json!({"name": "B1", "base": [60, 0], "handles": [source.hex()], "keep": "delete"})).unwrap();
+    let circle = create(&mut s, "circle", json!({"center": [100, 100], "radius": 2}));
+    Fixture { drawing: model_of(&s), params, operands: vec![circle], view: None }
+}
+
+macro_rules! elevated_fixture {
+    ($name:ident, $params:expr) => {
+        fn $name() -> Fixture {
+            at_elevation($params)
+        }
+    };
+}
+
+elevated_fixture!(circle_at_3, json!({"center": [1, 2], "radius": 1}));
+elevated_fixture!(circle_2p_at_3, json!({"p1": [0, 0], "p2": [2, 0]}));
+elevated_fixture!(circle_3p_at_3, json!({"p1": [0, 0], "p2": [2, 0], "p3": [1, 1]}));
+elevated_fixture!(arc_at_3, json!({"p1": [1.5, 0.0], "p2": [3.0, 3.0], "p3": [4.5, 0.0]}));
+elevated_fixture!(arc_sce_at_3, json!({"start": [1.5, 0.0], "center": [1.5, 3.0], "end": [4.5, 3.0]}));
+elevated_fixture!(arc_csa_at_3, json!({"center": [1.5, 0.0], "start": [1.5, 3.0], "angle": 90}));
+elevated_fixture!(ellipse_at_3, json!({"center": [0, 0], "major": [3, 0], "ratio": 0.5}));
+elevated_fixture!(ellipse_axis_at_3, json!({"p1": [0, 0], "p2": [4, 0], "distance": 1}));
+elevated_fixture!(ray_at_3, json!({"base": [0, 0], "through": [1, 1]}));
+elevated_fixture!(xline_at_3, json!({"base": [0, 0], "through": [1, 1]}));
+elevated_fixture!(donut_at_3, json!({"center": [0, 0], "inside": 1, "outside": 2}));
+elevated_fixture!(polygon_at_3, json!({"sides": 5, "center": [0, 0], "radius": 2}));
+elevated_fixture!(rectang_at_3, json!({"p1": [0, 0], "p2": [3, 2]}));
+elevated_fixture!(text_at_3, json!({"at": [1, 1], "text": "a", "height": 1}));
+elevated_fixture!(mtext_at_3, json!({"at": [1, 1], "text": "a", "height": 1}));
+elevated_fixture!(insert_at_3, json!({"name": "B1", "at": [1, 1]}));
+elevated_fixture!(helix_at_3, json!({"center": [0, 0], "baseRadius": 1}));
+elevated_fixture!(table_at_3, json!({"at": [0, 0], "rows": 1, "cols": 1}));
+elevated_fixture!(leader_at_3, json!({"points": [[0, 0], [3, 3]], "text": "a"}));
+elevated_fixture!(revcloud_at_3, json!({"p1": [0, 0], "p2": [4, 4], "arcLength": 1}));
+
+/// The Z that a drawn object sits at: the elevation of a polyline, the Z of the center, base or insertion point of the others.
+fn elevation_of(kind: &EntityKind) -> Option<f64> {
+    Some(match kind {
+        EntityKind::Circle(c) => c.center.z,
+        EntityKind::Arc(a) => a.center.z,
+        EntityKind::Ellipse(e) => e.center.z,
+        EntityKind::Ray(r) | EntityKind::XLine(r) => r.base.z,
+        EntityKind::Text(t) => t.insert.z,
+        EntityKind::MText(t) => t.insert.z,
+        EntityKind::Insert(i) => i.insert.z,
+        EntityKind::Helix(h) => h.center.z,
+        EntityKind::Table(t) => t.insert.z,
+        EntityKind::LwPolyline(p) => p.elevation,
+        EntityKind::Leader(l) => l.vertices.first()?.z,
+        _ => return None,
+    })
+}
+
+fn made_at_elevation_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    let entity = made(d, ops)?;
+    let z = elevation_of(&entity.kind).ok_or_else(|| format!("no elevation known for {:?}", entity.kind))?;
+    near(z, 3.0)
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Rows
 
 /// The commands the rows cover, with the roles each one's rows cover. The registry lint compares both with the rows and the registry.
 const DECLARED: &[(&str, &[Role])] = &[
+    ("circle", &[Role::PickedPoint]),
+    ("circle.2p", &[Role::PickedPoint]),
+    ("circle.3p", &[Role::PickedPoint]),
+    ("donut", &[Role::PickedPoint]),
+    ("ellipse", &[Role::PickedPoint]),
+    ("ellipse.axis", &[Role::PickedPoint]),
+    ("helix", &[Role::PickedPoint]),
+    ("insert", &[Role::PickedPoint]),
+    ("leader", &[Role::PickedPoint]),
+    ("mtext", &[Role::PickedPoint]),
+    ("polygon", &[Role::PickedPoint]),
+    ("rectang", &[Role::PickedPoint]),
+    ("table", &[Role::PickedPoint]),
+    ("text", &[Role::PickedPoint]),
     ("angle.measure", &[Role::Primary, Role::Secondary]),
     ("arc", &[Role::PickedPoint]),
     ("area", &[Role::Primary]),
@@ -655,7 +732,7 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("point", &[Role::PickedPoint]),
     ("properties", &[Role::Primary]),
     ("ray", &[Role::PickedPoint]),
-    ("revcloud", &[Role::Primary]),
+    ("revcloud", &[Role::Primary, Role::PickedPoint]),
     ("rotate", &[Role::SelectionMember]),
     ("scale", &[Role::SelectionMember]),
     ("wipeout", &[Role::Primary]),
@@ -1131,6 +1208,34 @@ fn live_rows() -> Vec<Row> {
         let Expect::Edits(check) = expect else { unreachable!() };
         for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
             out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
+        }
+    }
+    // Drawing takes the current elevation (ELEVATION 3), as POINT, LINE and PLINE do, whatever the revision of the other objects.
+    let drawn: [(&str, &str, fn() -> Fixture); 20] = [
+        ("circle", "center and radius", circle_at_3),
+        ("circle.2p", "two points", circle_2p_at_3),
+        ("circle.3p", "three points", circle_3p_at_3),
+        ("arc", "three points", arc_at_3),
+        ("arc.sce", "start, center, end", arc_sce_at_3),
+        ("arc.csa", "center, start, angle", arc_csa_at_3),
+        ("ellipse", "center, major, ratio", ellipse_at_3),
+        ("ellipse.axis", "axis and distance", ellipse_axis_at_3),
+        ("ray", "base and through", ray_at_3),
+        ("xline", "base and through", xline_at_3),
+        ("donut", "center", donut_at_3),
+        ("polygon", "center and radius", polygon_at_3),
+        ("rectang", "two corners", rectang_at_3),
+        ("text", "insertion point", text_at_3),
+        ("mtext", "insertion point", mtext_at_3),
+        ("insert", "block reference", insert_at_3),
+        ("helix", "center and base radius", helix_at_3),
+        ("table", "insertion point", table_at_3),
+        ("revcloud", "two corners", revcloud_at_3),
+        ("leader", "two points", leader_at_3),
+    ];
+    for (command, branch, fixture) in drawn {
+        for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
+            out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(made_at_elevation_3) });
         }
     }
     rows

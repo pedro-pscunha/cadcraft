@@ -29,7 +29,7 @@ pub(super) fn run_polygon(s: &mut Session, p: &Value) -> Result<Value> {
         };
         polygon_vertices(c, n, rp, inscribed)
     };
-    added(s.add_entity(lwpoly(vs, true))?)
+    added(s.draw(lwpoly(vs, true))?)
 }
 
 #[derive(Default)]
@@ -85,7 +85,7 @@ impl Interactive for PolygonM {
                 }
                 self.edge_pts.push(p);
                 if self.edge_pts.len() == 2 {
-                    s.add_entity(lwpoly(polygon_from_edge(self.edge_pts[0], self.edge_pts[1], n), true))?;
+                    s.draw(lwpoly(polygon_from_edge(self.edge_pts[0], self.edge_pts[1], n), true))?;
                     return Ok(Step::Done);
                 }
             }
@@ -108,7 +108,7 @@ impl Interactive for PolygonM {
                 if c.near(p, 1e-12) {
                     return Err(crate::EngineError::Other("Value must be positive and nonzero.".into()));
                 }
-                s.add_entity(lwpoly(polygon_vertices(c, n, p, ins), true))?;
+                s.draw(lwpoly(polygon_vertices(c, n, p, ins), true))?;
                 return Ok(Step::Done);
             }
             (Some(c), Some(ins), Input::Text(t)) => {
@@ -117,7 +117,7 @@ impl Interactive for PolygonM {
                     return Err(crate::EngineError::Other("Value must be positive and nonzero.".into()));
                 }
                 let rp = polygon_typed_radius_point(c, n, r, ins);
-                s.add_entity(lwpoly(polygon_vertices(c, n, rp, ins), true))?;
+                s.draw(lwpoly(polygon_vertices(c, n, rp, ins), true))?;
                 return Ok(Step::Done);
             }
             _ => {}

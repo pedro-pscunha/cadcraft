@@ -17,7 +17,7 @@ pub(super) fn run_circle_variant(s: &mut Session, p: &Value) -> Result<Value> {
     if !(c.radius > 1e-12 && c.radius.is_finite()) {
         return Err(bad("circle", "radius must be positive"));
     }
-    let h = s.add_entity(circle(c.center, c.radius))?;
+    let h = s.draw(circle(c.center, c.radius))?;
     s.doc_mut()?.header.set_f64("CIRCLERAD", c.radius);
     added(h)
 }
@@ -41,7 +41,7 @@ pub(super) fn run_circle_ttr(s: &mut Session, p: &Value) -> Result<Value> {
     let (h2, p2) = pick_pair("circle.ttr", p, "h2", "p2")?;
     let r = f64_req("circle.ttr", p, "radius")?;
     let c = curves::ttr(tan_obj(s, h1, p1)?, p1, tan_obj(s, h2, p2)?, p2, r).ok_or_else(|| other("Circle does not exist."))?;
-    let h = s.add_entity(circle(c.center, c.radius))?;
+    let h = s.draw(circle(c.center, c.radius))?;
     s.doc_mut()?.header.set_f64("CIRCLERAD", c.radius);
     added(h)
 }
@@ -52,7 +52,7 @@ pub(super) fn run_circle_ttt(s: &mut Session, p: &Value) -> Result<Value> {
     let (h3, p3) = pick_pair("circle.ttt", p, "h3", "p3")?;
     let objs = [(tan_obj(s, h1, p1)?, p1), (tan_obj(s, h2, p2)?, p2), (tan_obj(s, h3, p3)?, p3)];
     let c = curves::ttt(objs).ok_or_else(|| other("Circle does not exist."))?;
-    added(s.add_entity(circle(c.center, c.radius))?)
+    added(s.draw(circle(c.center, c.radius))?)
 }
 
 /// TTR (two picks + radius) or TTT (three picks). Also used by CIRCLE's `Ttr` option.
@@ -104,7 +104,7 @@ impl Interactive for TanCircleM {
                             self.picks.clear();
                             other("Circle does not exist.")
                         })?;
-                        s.add_entity(circle(c.center, c.radius))?;
+                        s.draw(circle(c.center, c.radius))?;
                         return Ok(Step::Done);
                     }
                     Ok(Step::Continue)
@@ -128,7 +128,7 @@ impl Interactive for TanCircleM {
         };
         match curves::ttr(o1, p1, o2, p2, r) {
             Some(c) => {
-                s.add_entity(circle(c.center, c.radius))?;
+                s.draw(circle(c.center, c.radius))?;
                 s.doc_mut()?.header.set_f64("CIRCLERAD", r);
                 Ok(Step::Done)
             }

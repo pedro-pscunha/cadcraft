@@ -12,7 +12,7 @@ fn add_xline(s: &mut Session, base: Vec2, dir: Vec2) -> Result<Handle> {
     if d == Vec2::ZERO || !base.is_finite() {
         return Err(other("Invalid direction."));
     }
-    s.add_entity(EntityKind::XLine(RayLine { base: v3(base), dir: v3(d) }))
+    s.draw(EntityKind::XLine(RayLine { base: v3(base), dir: v3(d) }))
 }
 
 /// A line-like object for XLINE Offset/Reference: (base, direction). For a polyline, the
