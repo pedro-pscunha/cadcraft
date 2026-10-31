@@ -1,5 +1,5 @@
 # G1 frozen baseline: sha256 of the DXF and the DWG that a read and a save makes of each drawing of corpus.toml.
-# Made at be79e74b, refreshed at 5f4eeb51 and later, for the causes listed in golden-changes.md. Columns: sha256, format, bytes, path.
+# Made at 8730f4b18662c5d3ef2e30fe87193f8ba9a0a9f8. Columns: sha256, format, bytes, path.
 7573a1bcdb85c8bd83eb4ea43744bb2ecf3bc938bcd1c9f41d70f0cb11a6d95d dwg 2693585 /tmp/cad/acad2/Planeta-Toulouse-acad.dxf
 331d48a9c842bb2844849a6eaf8c914131bb0b03dd8e39172f52003cc63609db dxf 23641499 /tmp/cad/acad2/Planeta-Toulouse-acad.dxf
 1cf6631e75476c872284f472ffbe46563655c127b0d9f81bbfd6f563ff93991f dwg 22070 /tmp/cad/dim1/dim1-blank.dwg

@@ -296,8 +296,61 @@ Strict G1 passes with `-- --ignored match`: 63 drawings and four repository draw
 # Golden refresh for the private cell styles of an unedited table style
 
 A table style whose cell styles the native groups store (height, alignment, colours, fill, border lineweight, visibility and colour, value format) wrote CADCRAFT `CELLSTYLES` xdata on save, because 0a686b6c compared each cell style to the implied style of its name and AutoCAD's own Standard style (Data 4.5 aligned 2, Title 6.0, Header 4.5, margins 1.5) differs from it in fields the groups hold. Only a cell style that a read of its native groups would not give back (a margin of its own, precision, merge, a format other than General, a border linetype, a text style other than Standard, a name with no implied style) is private now, and a read keeps the native styles the private ones do not name.
-48 of 126 outputs changed (the DXF and the DWG of 24 drawings: every file whose Standard table style carries AutoCAD's cell styles). Compared record by record (DPInc, Plaenge-Altier, `clockwise_arc_edge`, DXF), the only record that differs is the TABLESTYLE, by the xdata:
+48 of 126 outputs changed (the DXF and the DWG of 24 drawings: every file whose Standard table style carries AutoCAD's cell styles). Compared record by record (all outputs, see the proof below), the only record that differs is the TABLESTYLE, by the xdata:
 
 | record | cause | format | drawings | records |
 |---|---|---|---|---|
 | OBJECTS/TABLESTYLE | the CADCRAFT `CELLSTYLES` xdata of an unedited native style is not written | dxf, dwg | 24 | 1 each (2 where a file has two styles) |
+
+Proof: the outputs of fc6836ca and of the fix were written again from two source copies and compared record by record for all 126 outputs (the DWG as the DXF rendition of `cadcraft_dwg`). In 78 outputs every record is equal. In the 48 below the only differing records are the TABLESTYLE ones, and each new record equals the old one without its `CADCRAFT` xdata block (1001 `CADCRAFT` to the next 1001); no record is lost or added, and the CADCRAFT application record stays (other CADCRAFT xdata remain).
+
+| output | TABLESTYLE records that lose the CELLSTYLES xdata |
+|---|---|
+| crates_io_tests_data_clockwise_arc_edge.dwg.dwg | 7F |
+| crates_io_tests_data_clockwise_arc_edge.dwg.dxf | 7F |
+| acad2_Planeta-Toulouse-acad.dxf.dwg | 5FABA |
+| acad2_Planeta-Toulouse-acad.dxf.dxf | 5FABA |
+| mc_Citycon-Augusto_Miele-2010.dxf.dwg | 1488 |
+| mc_Citycon-Augusto_Miele-2010.dxf.dxf | 1488 |
+| mc_Citycon-Augusto_Miele-2018.dxf.dwg | 1488 |
+| mc_Citycon-Augusto_Miele-2018.dxf.dxf | 1488 |
+| mc_DPInc-2018.dxf.dwg | 93 |
+| mc_DPInc-2018.dxf.dxf | 93 |
+| rc2_cyrela-field-group.dwg.dwg | 21258062 |
+| rc2_cyrela-field-group.dwg.dxf | 21258062 |
+| rc2_cyrela-field.dwg.dwg | 21258062 |
+| rc2_cyrela-field.dwg.dxf | 21258062 |
+| rc2_group-bridge.dxf.dwg | 2D |
+| rc2_group-bridge.dxf.dxf | 2D |
+| rc2_plaenge-anon.dwg.dwg | 6D664 |
+| rc2_plaenge-anon.dwg.dxf | 6D664 |
+| rc2_skr-property.dwg.dwg | 9482B |
+| rc2_skr-property.dwg.dxf | 9482B |
+| rc2_tear-autocad-saved.dwg.dwg | 18AE |
+| rc2_tear-autocad-saved.dwg.dxf | 18AE |
+| rc2_tear-native.dwg.dwg | 18AE |
+| rc2_tear-native.dwg.dxf | 18AE |
+| rc2_tear-raw.dwg.dwg | 18AE |
+| rc2_tear-raw.dwg.dxf | 18AE |
+| rt7_Citycon-Augusto_Miele.dwg.dwg | 1488 |
+| rt7_Citycon-Augusto_Miele.dwg.dxf | 1488 |
+| rt7_Cyrela-Aura_Moema.dwg.dwg | 7F |
+| rt7_Cyrela-Aura_Moema.dwg.dxf | 7F |
+| rt7_DPInc.dwg.dwg | 93 |
+| rt7_DPInc.dwg.dxf | 93 |
+| rt7_Even-Manuel_de_Nobrega.dwg.dwg | 2B0D, C0B50 |
+| rt7_Even-Manuel_de_Nobrega.dwg.dxf | 2B0D, C0B50 |
+| rt7_Firenze.dwg.dwg | 7F |
+| rt7_Firenze.dwg.dxf | 7F |
+| rt7_Plaenge-Altier.dwg.dwg | 65 |
+| rt7_Plaenge-Altier.dwg.dxf | 65 |
+| rt7_Planeta-Toulouse.dwg.dwg | 5FABA |
+| rt7_Planeta-Toulouse.dwg.dxf | 5FABA |
+| rt7_Rocontec-Vila_Einstein.dwg.dwg | 7F |
+| rt7_Rocontec-Vila_Einstein.dwg.dxf | 7F |
+| rt7_Skr-Ayya.dwg.dwg | 6A |
+| rt7_Skr-Ayya.dwg.dxf | 6A |
+| rt7_Tear_Incorporadora-Alvorada.dwg.dwg | 18AE |
+| rt7_Tear_Incorporadora-Alvorada.dwg.dxf | 18AE |
+| rt7_Toledo_Ferrari-HBR51.dwg.dwg | 65 |
+| rt7_Toledo_Ferrari-HBR51.dwg.dxf | 65 |
