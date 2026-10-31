@@ -4,12 +4,12 @@
 
 use std::path::PathBuf;
 
-use cadcraft_doc::{Drawing, EntityKind, GeometryRevision, Handle};
+use cadcraft_doc::{DocError, Drawing, EntityKind, GeometryRevision, Handle, Space};
 use cadcraft_dxf::{Tag, parse, records, sections};
-use cadcraft_geom::{Mat3, Mat4, Vec2};
-use cadcraft_io::activation::{FamilySet, ReaderMode, ReaderPolicy};
+use cadcraft_geom::{Bounds2, Mat3, Mat4, Vec2};
 
-use crate::activation_fixtures::{attrib, block, file, insert, line, seqend, source_predicate};
+use crate::activation_fixtures::read_fixtures::read_fixture as read;
+use crate::activation_fixtures::{attrib, block, file, insert, line, seqend};
 
 #[path = "../support/raw_compounds.rs"]
 mod support;
@@ -18,10 +18,11 @@ fn dir() -> PathBuf {
     crate::activation_fixtures::dir()
 }
 
-/// The file of a built drawing that holds a raw INSERT unit (tilted, two ATTRIBs, SEQEND) beside a LINE: CADCraft's own full DXF, with the
+/// The file of a built drawing that holds a raw INSERT unit (tilted, two ATTRIBs, SEQEND) or a raw heavy POLYLINE unit (tilted, two
+/// VERTEXes, SEQEND) beside a LINE: CADCraft's own full DXF, with the
 /// tables, the block record and the registered application its groups name.
-fn full_tables_text() -> String {
-    cadcraft_io::write_dxf(&support::drawing("INSERT"))
+fn full_tables_text(kind: &str) -> String {
+    cadcraft_io::write_dxf(&support::drawing(kind))
 }
 
 /// (name, text) of the end-to-end fixtures.
@@ -38,17 +39,9 @@ fn raw_cases() -> Vec<(&'static str, String)> {
             "r4_raw_insert_edit_refusal_and_save",
             file("", &[block("DEF", 0, &[line("B1")])], &[insert("E1", "DEF", true), attrib("E2", false), seqend("E3"), line("E4")]),
         ),
-        ("r5_raw_insert_with_full_tables", full_tables_text()),
+        ("r5_raw_insert_with_full_tables", full_tables_text("INSERT")),
+        ("r6_raw_polyline_with_full_tables", full_tables_text("POLYLINE")),
     ]
-}
-
-fn policy() -> ReaderPolicy {
-    ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path()
-}
-
-fn read(name: &str) -> (Drawing, String) {
-    let text = std::fs::read_to_string(dir().join(format!("{name}.dxf"))).unwrap_or_else(|e| panic!("{name}: {e}"));
-    (cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", policy(), &source_predicate(text.as_bytes())).unwrap(), text)
 }
 
 fn raw_parents(d: &Drawing) -> Vec<(String, Handle)> {
@@ -149,8 +142,8 @@ fn a_dwg_save_that_cannot_check_a_raw_unit_refuses_and_names_it_while_the_dxf_sa
     // 4.3: the DWG route may write a raw unit only if an independent read of the DWG finds every value of its records. These
     // hand-made files carry no tables for the layers, styles and blocks their groups name, so the check cannot find them: the DWG
     // save refuses, with the unit and the reason, and produces nothing. The DXF save keeps the unit.
-    // (r5 has full tables and is the positive case below.)
-    for (name, _) in raw_cases().into_iter().filter(|(name, _)| !name.starts_with("r5")) {
+    for chain in CHAINS.iter().filter(|chain| !chain.tables) {
+        let name = chain.name;
         let (mut d, _) = read(name);
         let spare = d.model.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).map(|e| e.handle).expect("a line to edit");
         d.transform_entity(spare, &Mat4::from_mat3(&Mat3::translate(Vec2::new(4.0, 5.0)))).unwrap();
@@ -180,18 +173,23 @@ fn normal((code, value): &(i32, String)) -> (i32, String) {
     };
     (*code, text)
 }
-
 #[test]
 fn a_raw_unit_of_a_file_with_full_tables_is_saved_to_dwg_and_reads_back_with_its_source_groups() {
     // The file is CADCraft's own save of a drawing with the unit, so the layers, styles, the block record SYMBOL and the application
-    // RAW_APP its groups name are all there. The need of the INSERT is the stand-in's (its plane is tilted).
-    let (d, source) = read("r5_raw_insert_with_full_tables");
-    assert_eq!(raw_parents(&d), [("INSERT".to_string(), Handle(0x200))]);
+    // RAW_APP its groups name are all there. The need of the INSERT or POLYLINE is the stand-in's (its plane is tilted).
+    for chain in CHAINS.iter().filter(|chain| chain.tables) {
+        dwg_reads_back_the_unit(chain);
+    }
+}
+
+fn dwg_reads_back_the_unit(chain: &Chain) {
+    let (d, source) = read(chain.name);
+    assert_eq!(raw_parents(&d), [(chain.kind.to_string(), Handle(chain.unit[0]))]);
     let bytes = cadcraft_io::write(&d, "x.dwg").expect("a unit whose values the independent DWG read finds is written");
     let dxf = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
     // The DXF save is the reference: it keeps every source group but the owner.
     let dxf_save = cadcraft_io::write_dxf(&d);
-    for handle in [0x200, 0x201, 0x202, 0x203] {
+    for &handle in chain.unit {
         let (kind, from) = groups_of(&source, handle);
         assert_eq!(
             groups_of(&dxf_save, handle).1.iter().filter(|g| g.0 != 330).collect::<Vec<_>>(),
@@ -209,5 +207,91 @@ fn a_raw_unit_of_a_file_with_full_tables_is_saved_to_dwg_and_reads_back_with_its
         };
         let missing: Vec<_> = from.iter().filter(|g| ![330, 360, 102].contains(&g.0) && !default(g) && !back.contains(&normal(g))).collect();
         assert!(missing.is_empty(), "{kind} {handle:X}: groups lost in the DWG: {missing:?}");
+    }
+}
+
+/// One read fixture and the records of its raw unit (parent first), the LINE beside it, and whether the file has the tables the DWG check needs.
+struct Chain {
+    name: &'static str,
+    kind: &'static str,
+    unit: &'static [u64],
+    line: u64,
+    tables: bool,
+}
+
+const CHAINS: [Chain; 6] = [
+    Chain { name: "r1_malformed_spatial_spline", kind: "SPLINE", unit: &[0xA1], line: 0xA2, tables: false },
+    Chain { name: "r2_spatial_leader", kind: "LEADER", unit: &[0xA1], line: 0xA2, tables: false },
+    Chain { name: "r3_forced_canonical_read_failure", kind: "CIRCLE", unit: &[0xA1], line: 0xA2, tables: false },
+    Chain { name: "r4_raw_insert_edit_refusal_and_save", kind: "INSERT", unit: &[0xE1, 0xE2, 0xE3], line: 0xE4, tables: false },
+    Chain { name: "r5_raw_insert_with_full_tables", kind: "INSERT", unit: &[0x200, 0x201, 0x202, 0x203], line: 0x90, tables: true },
+    Chain { name: "r6_raw_polyline_with_full_tables", kind: "POLYLINE", unit: &[0x200, 0x201, 0x202, 0x203], line: 0x90, tables: true },
+];
+
+fn model_extents(d: &Drawing) -> Bounds2 {
+    cadcraft_render::space_extents(d, &Space::Model).unwrap_or_else(|e| panic!("the model has extents: {e}"))
+}
+
+#[test]
+fn every_read_fixture_runs_the_whole_chain() {
+    let shift = Mat4::from_mat3(&Mat3::translate(Vec2::new(4.0, 5.0)));
+    for chain in &CHAINS {
+        let name = chain.name;
+        let (mut d, source) = read(name);
+        let unit = Handle(chain.unit[0]);
+        // Read: one Raw unit of the right family, and its LINE read Legacy.
+        assert_eq!(raw_parents(&d), [(chain.kind.to_string(), unit)], "{name}");
+        let spare = d.entity(Handle(chain.line)).unwrap_or_else(|| panic!("{name}: the LINE"));
+        assert!(matches!(spare.kind, EntityKind::Line(_)) && spare.geometry_revision == GeometryRevision::LegacyProjectedV1, "{name}");
+        // Edit refusal: typed, with the unit's handle and family, and the drawing stays as it was.
+        let before = d.clone();
+        let refused = d.transform_entity(unit, &shift).expect_err(name);
+        assert!(matches!(&refused, DocError::RawReadOnly { handle, family, .. } if *handle == unit && family == chain.kind), "{name}: {refused:?}");
+        assert_eq!(d, before, "{name}");
+        // Edit of another entity: the LINE moves, the unit does not.
+        d.transform_entity(Handle(chain.line), &shift).unwrap();
+        let before_unit = before.entity(unit).unwrap();
+        assert_eq!(d.entity(unit).unwrap(), before_unit, "{name}");
+        // Exact DXF save: every record of the unit keeps its source groups, and the saved file reads back with the same unit and the moved LINE.
+        let saved = cadcraft_io::write_dxf(&d);
+        let (from, to) = (unit_records(&source, chain.unit), unit_records(&saved, chain.unit));
+        for ((kind_from, body_from), (kind_to, body_to)) in from.iter().zip(&to) {
+            assert_eq!(kind_from, kind_to, "{name}");
+            assert_eq!(without_owner(body_from), without_owner(body_to), "{name}: {kind_from} keeps its source groups");
+        }
+        let again = cadcraft_io::read_with_need(
+            saved.as_bytes(),
+            "x.dxf",
+            crate::activation_fixtures::read_fixtures::raw_policy(),
+            &crate::activation_fixtures::source_predicate(saved.as_bytes()),
+        )
+        .unwrap_or_else(|e| panic!("{name}: the saved file reads: {e}"));
+        assert_eq!(raw_parents(&again), raw_parents(&d), "{name}");
+        assert_eq!(again.entity(Handle(chain.line)).map(|e| &e.kind), d.entity(Handle(chain.line)).map(|e| &e.kind), "{name}: the moved LINE");
+        // Display and bounds: the unit is an unresolved record with its reason, and it adds nothing to the extents.
+        let list = cadcraft_render::build(&d, &Space::Model, &Default::default());
+        let [shown] = list.unresolved.as_slice() else { panic!("{name}: {:?}", list.unresolved) };
+        assert_eq!(shown.handle, unit, "{name}");
+        let EntityKind::Raw(raw) = &before_unit.kind else { panic!("{name}") };
+        assert_eq!(shown.reason, raw.reason(), "{name}");
+        let moved_line = [d.entity(Handle(chain.line)).unwrap().as_ref()];
+        assert_eq!(model_extents(&d), cadcraft_render::entities_extents(&d, moved_line, 0).unwrap(), "{name}: the extents are the LINE's");
+        assert_eq!(list.bounds, model_extents(&d), "{name}: the display bounds are the extents");
+        // Export refusal: PNG, SVG and PDF refuse and name the unit, with the extents or with a window that hides it.
+        let window = Bounds2::new(Vec2::new(-1.0, -1.0), Vec2::new(1.0, 1.0));
+        for out in ["x.png", "x.svg", "x.pdf"] {
+            for window in [None, Some(window)] {
+                let error = cadcraft_io::write_framed(&d, out, window).expect_err(name).to_string();
+                assert!(error.contains(&format!("{:X}", unit.0)) && error.contains("unresolved"), "{name} {out}: {error}");
+            }
+        }
+        // DWG: a file with the tables its groups name is written and an independent read finds the unit's values (the test below), any other refuses.
+        let dwg = cadcraft_io::write(&d, "x.dwg");
+        if chain.tables {
+            assert!(dwg.is_ok(), "{name}: {:?}", dwg.err());
+        } else {
+            let error = dwg.expect_err(name).to_string();
+            assert!(error.contains("Save refused for raw unit") && error.contains(&format!("{:X}", unit.0)), "{name}: {error}");
+        }
     }
 }
