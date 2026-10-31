@@ -1896,7 +1896,7 @@ fn check_mirror_oracle(row: &MirrorOracleRow, entity: &cadcraft_doc::Entity) -> 
 }
 
 #[test]
-fn the_eight_readable_text_angle_rows_match_the_measured_a_control() {
+fn entity_mirrored_has_eight_readable_text_angle_rows_with_the_native_a_width() {
     let angles = [30.0_f64, 120.0, 210.0, 300.0];
     let xy_points = [
         Vec3::new(-4.923760430703401, 5.533333333333334, 6.0),
@@ -1918,11 +1918,18 @@ fn the_eight_readable_text_angle_rows_match_the_measured_a_control() {
             text.rotation = angle.to_radians();
             let mirrored = match plane {
                 MirrorPlane::WorldXY => {
-                    let mut drawing = Drawing::new_metric();
-                    drawing.model.push(entity);
-                    let mut session = session_of(&drawing);
-                    session.execute("mirror", &json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true})).unwrap();
-                    session.doc().unwrap().entity(Handle(1)).unwrap().as_ref().clone()
+                    let matrix = cadcraft_geom::Mat4 { m: [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+                    entity
+                        .mirrored(
+                            &matrix,
+                            cadcraft_doc::TextMirror::Readable {
+                                bounds: cadcraft_geom::Bounds2 {
+                                    min: cadcraft_geom::Vec2::ZERO,
+                                    max: cadcraft_geom::Vec2::new(1.066666666666666, 2.0),
+                                },
+                            },
+                        )
+                        .unwrap()
                 }
                 MirrorPlane::VerticalXZ => {
                     let matrix = cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
@@ -1944,6 +1951,56 @@ fn the_eight_readable_text_angle_rows_match_the_measured_a_control() {
             assert!((text.insert - expected).len() < 1e-10, "{plane:?}, {angle}: {:?}", text.insert);
             assert!((text.rotation - cadcraft_geom::norm_angle(-angle.to_radians())).abs() < 1e-10, "{plane:?}, {angle}");
             assert!(!text.backward && !text.upside_down);
+        }
+    }
+}
+
+#[test]
+fn entity_mirrored_readable_anchor_uses_the_supplied_native_width_without_font_lookup() {
+    for (value, width, expected) in [
+        ("A", 1.066666666666666, Vec3::new(-4.923760430703401, 5.533333333333334, 6.0)),
+        ("Mirror control", 20.0, Vec3::new(-21.32050807568878, 15.0, 6.0)),
+    ] {
+        let mut entity = mirror_oracle_entity(MirrorFamily::Text);
+        let EntityKind::Text(text) = &mut entity.kind else { panic!("text") };
+        text.value = value.into();
+        let matrix = cadcraft_geom::Mat4 { m: [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+        let mirrored = entity
+            .mirrored(
+                &matrix,
+                cadcraft_doc::TextMirror::Readable {
+                    bounds: cadcraft_geom::Bounds2 { min: cadcraft_geom::Vec2::ZERO, max: cadcraft_geom::Vec2::new(width, 2.0) },
+                },
+            )
+            .unwrap();
+        let EntityKind::Text(text) = mirrored.kind else { panic!("text") };
+        assert!((text.insert - expected).len() < 1e-10);
+        assert!((text.rotation - 330_f64.to_radians()).abs() < 1e-10);
+        assert!(!text.backward && !text.upside_down);
+    }
+}
+
+#[test]
+fn session_mirror_refuses_unavailable_native_metrics_for_a_and_mirror_control() {
+    for value in ["A", "Mirror control"] {
+        for erase in [false, true] {
+            let mut drawing = Drawing::new_metric();
+            drawing.model.push(mirror_oracle_entity(MirrorFamily::Circle));
+            let mut entity = mirror_oracle_entity(MirrorFamily::Text);
+            entity.handle = Handle(2);
+            let EntityKind::Text(text) = &mut entity.kind else { panic!("text") };
+            text.value = value.into();
+            drawing.model.push(entity);
+            drawing.handseed = 3;
+            let mut session = session_of(&drawing);
+            let error = session.execute("mirror", &json!({"handles": ["1", "2"], "p1": [0, 0], "p2": [0, 10], "erase": erase})).unwrap_err();
+            assert!(
+                matches!(&error, cadcraft_engine::EngineError::TextMirrorMetricsUnavailable { font, renderer_font } if font == "txt" && renderer_font == "CADCraft Stroke")
+            );
+            let message = error.to_string();
+            assert!(message.contains("AutoCAD metrics") && message.contains("txt") && message.contains("CADCraft Stroke"), "{message}");
+            assert_eq!(session.doc().unwrap().model, drawing.model);
+            assert_eq!(session.doc().unwrap().handseed, 3);
         }
     }
 }
@@ -1979,49 +2036,67 @@ fn unmeasured_text_mirror_cases_refuse_before_any_selection_member_changes() {
     }
 }
 
-#[test]
-fn the_sixteen_measured_mirror_rows_match_autocad() {
+fn check_eight_measured_mirror_rows(plane: MirrorPlane) {
     let mut failures = Vec::new();
     let mut count = 0;
-    for plane in [MirrorPlane::WorldXY, MirrorPlane::VerticalXZ] {
-        for mirror_text in [false, true] {
-            for family in [MirrorFamily::Circle, MirrorFamily::Arc, MirrorFamily::Ellipse, MirrorFamily::Text] {
-                let row = MirrorOracleRow { family, plane, mirror_text };
-                let entity = mirror_oracle_entity(family);
-                let result = match plane {
-                    MirrorPlane::WorldXY => {
-                        let mut drawing = Drawing::new_metric();
-                        drawing.header.set_i64("MIRRTEXT", i64::from(mirror_text));
-                        drawing.model.push(entity);
-                        let mut session = session_of(&drawing);
-                        session
-                            .execute("mirror", &json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true}))
+    for mirror_text in [false, true] {
+        for family in [MirrorFamily::Circle, MirrorFamily::Arc, MirrorFamily::Ellipse, MirrorFamily::Text] {
+            let row = MirrorOracleRow { family, plane, mirror_text };
+            let entity = mirror_oracle_entity(family);
+            let result = match plane {
+                MirrorPlane::WorldXY => {
+                    let mut drawing = Drawing::new_metric();
+                    drawing.header.set_i64("MIRRTEXT", i64::from(mirror_text));
+                    drawing.model.push(entity);
+                    let mut session = session_of(&drawing);
+                    let result = session.execute("mirror", &json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true}));
+                    if matches!(family, MirrorFamily::Text) && !mirror_text {
+                        match result {
+                            Err(cadcraft_engine::EngineError::TextMirrorMetricsUnavailable { font, renderer_font })
+                                if font == "txt" && renderer_font == "CADCraft Stroke" && session.doc().unwrap().model == drawing.model =>
+                            {
+                                Ok(())
+                            }
+                            Err(error) => Err(format!("wrong metric refusal: {error}")),
+                            Ok(_) => Err("accepted unavailable native font metrics".into()),
+                        }
+                    } else {
+                        result
                             .map_err(|error| error.to_string())
                             .and_then(|_| check_mirror_oracle(&row, session.doc().unwrap().entity(Handle(1)).unwrap()))
                     }
-                    MirrorPlane::VerticalXZ => {
-                        let matrix =
-                            cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
-                        let policy = if mirror_text {
-                            cadcraft_doc::TextMirror::Reflected
-                        } else {
-                            // AutoCAD's independently measured zero-oblique textbox is an input to this spatial boundary.
-                            cadcraft_doc::TextMirror::Readable {
-                                bounds: cadcraft_geom::Bounds2 { min: cadcraft_geom::Vec2::ZERO, max: cadcraft_geom::Vec2::new(20.0, 2.0) },
-                            }
-                        };
-                        entity.mirrored(&matrix, policy).map_err(|error| error.to_string()).and_then(|entity| check_mirror_oracle(&row, &entity))
-                    }
-                };
-                count += 1;
-                if let Err(error) = result {
-                    failures.push(format!("{family:?} {plane:?} MIRRTEXT={mirror_text}: {error}"));
                 }
+                MirrorPlane::VerticalXZ => {
+                    let matrix = cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+                    let policy = if mirror_text {
+                        cadcraft_doc::TextMirror::Reflected
+                    } else {
+                        // AutoCAD's independently measured zero-oblique textbox is an input to this spatial boundary.
+                        cadcraft_doc::TextMirror::Readable {
+                            bounds: cadcraft_geom::Bounds2 { min: cadcraft_geom::Vec2::ZERO, max: cadcraft_geom::Vec2::new(20.0, 2.0) },
+                        }
+                    };
+                    entity.mirrored(&matrix, policy).map_err(|error| error.to_string()).and_then(|entity| check_mirror_oracle(&row, &entity))
+                }
+            };
+            count += 1;
+            if let Err(error) = result {
+                failures.push(format!("{family:?} {plane:?} MIRRTEXT={mirror_text}: {error}"));
             }
         }
     }
-    assert_eq!(count, 16);
+    assert_eq!(count, 8);
     assert!(failures.is_empty(), "{} of {count} mirror rows fail:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn session_execute_mirror_world_xy_has_eight_measured_outcome_rows() {
+    check_eight_measured_mirror_rows(MirrorPlane::WorldXY);
+}
+
+#[test]
+fn entity_mirrored_vertical_xz_matches_eight_measured_rows_without_a_ucs_command() {
+    check_eight_measured_mirror_rows(MirrorPlane::VerticalXZ);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------

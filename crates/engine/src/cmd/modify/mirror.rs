@@ -1,37 +1,28 @@
 //! MIRROR's measured text policy and atomic candidate preparation.
 
 use cadcraft_doc::{DocError, Drawing, Entity, EntityKind, GeometryRevision, Handle, TextMirror};
-use cadcraft_geom::{Mat3, Mat4, Vec3};
+use cadcraft_geom::{Mat3, Mat4};
 
-use crate::{Result, Session};
+use crate::{EngineError, Result, Session};
 
-pub(super) fn candidate(drawing: &Drawing, entity: &Entity, transform: &Mat4) -> cadcraft_doc::Result<Entity> {
-    let policy = if entity.geometry_revision == GeometryRevision::CanonicalV2
+pub(super) fn candidate(drawing: &Drawing, entity: &Entity, transform: &Mat4) -> Result<Entity> {
+    if entity.geometry_revision == GeometryRevision::CanonicalV2
         && let EntityKind::Text(text) = &entity.kind
     {
         let style = drawing
             .text_style(&text.style)
             .ok_or_else(|| DocError::Invalid(format!("Canonical TEXT MIRROR cannot resolve style {}.", text.style)))?;
         if style.backwards || style.upside_down {
-            return Err(DocError::Invalid("Canonical TEXT MIRROR lacks a measurement for pre-mirrored style flags.".into()));
+            return Err(DocError::Invalid("Canonical TEXT MIRROR lacks a measurement for pre-mirrored style flags.".into()).into());
         }
-        match drawing.header.i64("MIRRTEXT", 0) {
-            0 => {
-                let mut local = text.clone();
-                local.insert = Vec3::ZERO;
-                local.align_pt = None;
-                local.rotation = 0.0;
-                local.oblique = 0.0;
-                let (_, bounds) = cadcraft_render::place_text_entity(drawing, &local, &local.value);
-                TextMirror::Readable { bounds }
-            }
-            1 => TextMirror::Reflected,
-            _ => return Err(DocError::Invalid("MIRRTEXT must be 0 or 1.".into())),
-        }
-    } else {
-        TextMirror::Reflected
-    };
-    entity.mirrored(transform, policy)
+        let candidate = entity.mirrored(transform, TextMirror::Reflected)?;
+        return match drawing.header.i64("MIRRTEXT", 0) {
+            0 => Err(EngineError::TextMirrorMetricsUnavailable { font: style.dxf_font_name().into(), renderer_font: style.font.clone() }),
+            1 => Ok(candidate),
+            _ => Err(DocError::Invalid("MIRRTEXT must be 0 or 1.".into()).into()),
+        };
+    }
+    Ok(entity.mirrored(transform, TextMirror::Reflected)?)
 }
 
 pub(super) fn apply(session: &mut Session, handles: &[Handle], matrix: &Mat3, copy: bool) -> Result<Vec<Handle>> {

@@ -87,7 +87,7 @@ fn mirror_drag_keeps_the_text_entity_properties() {
     assert_eq!(text.common, common);
 }
 #[test]
-fn canonical_mirror_text_preview_and_drag_equal_the_committed_candidate() {
+fn canonical_mirror_text_preview_and_drag_follow_the_committed_metric_policy() {
     for mode in [0, 1] {
         let mut session = Session::new();
         let handle = session.doc_mut().unwrap().new_handle();
@@ -114,13 +114,21 @@ fn canonical_mirror_text_preview_and_drag_equal_the_committed_candidate() {
         session.doc_mut().unwrap().model.push(entity);
         let mut committed = Session::new();
         committed.open_drawing(session.doc().unwrap().clone(), "mirror control", None);
-        committed.execute("mirror", &serde_json::json!({"handles": [handle.hex()], "p1": [0, 0], "p2": [0, 10], "erase": true})).unwrap();
-        let expected = committed.doc().unwrap().entity(handle).unwrap();
+        let result = committed.execute("mirror", &serde_json::json!({"handles": [handle.hex()], "p1": [0, 0], "p2": [0, 10], "erase": true}));
         session.cmdline("MIRROR ALL  0,0").unwrap();
         let preview = session.preview(Vec2::new(0.0, 10.0));
-        assert_eq!(preview.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
         let (_, extra) = session.drag(Vec2::new(0.0, 10.0)).unwrap();
-        assert_eq!(extra.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
+        if mode == 0 {
+            assert!(matches!(result, Err(cadcraft_engine::EngineError::TextMirrorMetricsUnavailable { .. })));
+            assert!(!preview.iter().any(|entity| entity.handle == handle));
+            assert!(!extra.iter().any(|entity| entity.handle == handle));
+            assert_eq!(committed.doc().unwrap().model, session.doc().unwrap().model);
+        } else {
+            result.unwrap();
+            let expected = committed.doc().unwrap().entity(handle).unwrap();
+            assert_eq!(preview.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
+            assert_eq!(extra.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
+        }
     }
 }
 

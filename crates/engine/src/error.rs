@@ -8,6 +8,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("no active document")]
     NoDocument,
+    #[error(
+        "Canonical TEXT MIRROR with MIRRTEXT=0 requires AutoCAD metrics for font {font}; CADCraft uses {renderer_font}, whose metrics are not proven equivalent."
+    )]
+    TextMirrorMetricsUnavailable { font: String, renderer_font: String },
     #[error("{0}")]
     Other(String),
     #[error(transparent)]
