@@ -80,6 +80,7 @@ mod helix_roundtrip;
 mod insert_seqend_props;
 mod layer_transparency_alpha;
 mod layout_canonical;
+mod layout_paper_name;
 mod layout_paper_units;
 mod layout_plot_pointers;
 mod layout_plot_window;
