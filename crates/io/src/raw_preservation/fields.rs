@@ -98,6 +98,35 @@ fn scalar(code: i32, text: &str, source_text: bool) -> Result<Value, String> {
     }
 }
 
+/// The plain fields of an ATTRIB's own `AcDbAttribute` subclass.
+fn attribute_scope(field: &Field) -> bool {
+    field.class == "AcDbAttribute" && field.groups.is_empty() && field.application.is_none() && field.embedded == 0
+}
+
+/// AcDbAttribute's 280s by role (DXF Reference, ATTRIB): the version comes before the tag (group 2) and the lock-position flag
+/// after it, so a record that holds only one of them is read right. The role is the field's index: 0 version, 1 lock; any other
+/// 280 follows from 2 in file order.
+#[derive(Default)]
+struct AttributeRoles {
+    tag_seen: bool,
+    version: bool,
+    lock: bool,
+    extra: usize,
+}
+
+impl AttributeRoles {
+    fn take(&mut self, fields: &mut Fields, mut field: Field, value: Value) {
+        let (taken, role) = if self.tag_seen { (&mut self.lock, 1) } else { (&mut self.version, 0) };
+        field.index = if std::mem::replace(taken, true) {
+            self.extra += 1;
+            1 + self.extra
+        } else {
+            role
+        };
+        fields.insert(field, value);
+    }
+}
+
 fn insert(fields: &mut Fields, counts: &mut BTreeMap<Field, usize>, mut field: Field, value: Value) {
     let mut key = field.clone();
     // Foreign payloads are ordered typed sequences, not independent fields with per-code indices.
@@ -120,6 +149,7 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
     let mut embedded = 0usize;
     let mut owner_seen = false;
     let mut semantic_bytes = 0usize;
+    let mut attribute = AttributeRoles::default();
     for tag in tags {
         let path_bytes = groups
             .iter()
@@ -157,7 +187,12 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
         };
         let text = if tag.code == 102 { tag.value.trim() } else { &tag.value };
         let value = scalar(tag.code, text, source_text).map_err(|reason| FieldError { field: field.label(), reason })?;
-        insert(&mut fields, &mut counts, field, value);
+        if attribute_scope(&field) && tag.code == 280 {
+            attribute.take(&mut fields, field, value);
+        } else {
+            attribute.tag_seen |= tag.code == 2 && attribute_scope(&field);
+            insert(&mut fields, &mut counts, field, value);
+        }
         if tag.code == 100 && groups.is_empty() && application.is_none() {
             class = tag.value.clone();
         }
@@ -174,31 +209,26 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
     Ok(fields)
 }
 
-/// The expected ATTRIB fields as the target release holds them. DXF Reference, ATTRIB / ODA 20.4.4: AcDbAttribute's first 280 is
-/// the version, stored from R2010, and its second is the lock-position flag, stored from R2007. What the source holds depends on
-/// the release it was read from: none before R2007, only the lock (one 280) at R2007 to R2009, both from R2010. A decode of the
-/// target holds what the target stores, so the source is brought to that form: a field the target stores and the source lacks is
-/// the default 0 (also when the decode shows it), and a version of 0 the target cannot store is set aside, leaving the lock as the
-/// first 280. A nonzero version is never set aside or invented, and a third 280 stays; both refuse.
+/// An ATTRIB's two AcDbAttribute 280 roles as the target release holds them (DXF Reference, ATTRIB / ODA 20.4.4): the version
+/// is stored from R2010 and the lock-position flag from R2007. Applied to the source and to the decode alike. A role the target
+/// stores is always present, an absent one being the default 0, so a source read from an older release matches a decode that
+/// shows the zero. A role the target cannot store is equivalent only when 0. A nonzero value is never set aside or invented, and
+/// a 280 beyond the two roles stays; both refuse.
 /// https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-7DD8B495-C3F8-48CD-A766-14F9D7D0DD9B.htm
-pub(crate) fn for_release(expected: Fields, kind: &str, target: Version) -> Fields {
-    let own = |field: &Field| field.class == "AcDbAttribute" && field.groups.is_empty() && field.application.is_none() && field.embedded == 0;
-    if kind != "ATTRIB" || !expected.keys().any(own) {
-        return expected;
+pub(crate) fn for_release(fields: Fields, kind: &str, target: Version) -> Fields {
+    if kind != "ATTRIB" || !fields.keys().any(attribute_scope) {
+        return fields;
     }
-    let (held, mut rest): (Fields, Fields) = expected.into_iter().partition(|(field, _)| own(field) && field.code == 280);
-    let zero = Value::Integer(0);
-    let mut values: Vec<Value> = held.into_values().collect();
-    match (values.len(), target) {
-        (0, t) if t >= Version::R2010 => values = vec![zero.clone(), zero],
-        (0, t) if t >= Version::R2007 => values = vec![zero],
-        (1, t) if t >= Version::R2010 => values.insert(0, zero),
-        (n, t) if n >= 2 && t < Version::R2010 && values.first() == Some(&zero) => {
-            values.remove(0);
+    let (held, mut rest): (Fields, Fields) = fields.into_iter().partition(|(field, _)| attribute_scope(field) && field.code == 280);
+    let mut held: BTreeMap<usize, Value> = held.into_iter().map(|(field, value)| (field.index, value)).collect();
+    for (role, stored_from) in [(0, Version::R2010), (1, Version::R2007)] {
+        if target >= stored_from {
+            held.entry(role).or_insert(Value::Integer(0));
+        } else if held.get(&role) == Some(&Value::Integer(0)) {
+            held.remove(&role);
         }
-        _ => {}
     }
-    rest.extend(values.into_iter().enumerate().map(|(index, value)| {
+    rest.extend(held.into_iter().map(|(index, value)| {
         (Field { class: "AcDbAttribute".into(), groups: Vec::new(), application: None, embedded: 0, code: 280, index }, value)
     }));
     rest
@@ -212,14 +242,9 @@ pub(crate) fn for_release(expected: Fields, kind: &str, target: Version) -> Fiel
 /// - Common-property overrides and reference remapping are checked separately against the model.
 ///
 /// Optional-field defaults are listed here only after a documented format rule justifies them.
-pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields, target: Version) -> Option<Value> {
+pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Option<Value> {
     if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 {
         return None;
-    }
-    // ATTRIB's lock-position flag, the first 280 once [`for_release`] has set the version aside: a release before R2007 stores
-    // none, so a 0, the documented default, loses nothing there. Everything else stays strict.
-    if kind == "ATTRIB" && field.class == "AcDbAttribute" && field.code == 280 {
-        return (field.index == 0 && target < Version::R2007).then_some(Value::Integer(0));
     }
     if field.index != 0 {
         return None;

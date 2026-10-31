@@ -62,6 +62,8 @@ pub enum IoError {
     Unsupported(String),
     #[error("Read refused: {record} ({}) needs a canonical reading and cannot be kept raw: {reason}. Open the file with the raw path off to read it as before.", handle.map_or_else(|| "no handle".to_string(), |h| h.hex()))]
     NotKeptRaw { record: String, handle: Option<cadcraft_doc::Handle>, reason: String },
+    #[error("Read refused: the block definition {block} appears more than once and a copy holds {record} ({}) that cannot be read Legacy: the second copy would replace the first. Open the file with the raw path off to read it as before.", handle.map_or_else(|| "no handle".to_string(), |h| h.hex()))]
+    RepeatedBlock { block: String, record: String, handle: Option<cadcraft_doc::Handle> },
     #[error("Save refused for raw unit {unit}: {record} ({handle}), field {field}: {reason}")]
     RawPreservation { unit: cadcraft_doc::Handle, record: String, handle: cadcraft_doc::Handle, field: String, reason: String },
 }

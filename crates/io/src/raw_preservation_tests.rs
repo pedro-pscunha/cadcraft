@@ -208,8 +208,7 @@ fn old_targets_save_the_zero_attribute_fields_they_cannot_store() {
 
 #[test]
 fn a_nonzero_attribute_field_still_refuses_at_a_release_that_cannot_store_it() {
-    // Below R2010 a zero version is set aside, so the lock is the first 280 there.
-    for (version, lock, group) in [(Some("1"), None, "group 280[0]"), (None, Some("1"), "group 280[0]")] {
+    for (version, lock, group) in [(Some("1"), None, "group 280[0]"), (None, Some("1"), "group 280[1]")] {
         let drawing = drawing_with_attribute_280(version, lock);
         for target in [crate::Version::R2000, crate::Version::R2004] {
             match save_at(&drawing, target) {
@@ -221,50 +220,6 @@ fn a_nonzero_attribute_field_still_refuses_at_a_release_that_cannot_store_it() {
             }
         }
     }
-}
-
-#[test]
-fn the_default_rule_follows_the_target_release() {
-    let source = super::fields::parse(
-        &[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "0".into() }, RawTag { code: 280, value: "0".into() }],
-        true,
-    )
-    .unwrap();
-    let zero = Some(super::fields::Value::Integer(0));
-    // The version is set aside below R2010; the lock is then the first 280, and a default only before R2007.
-    for (target, lock_default) in [
-        (crate::Version::R2000, true),
-        (crate::Version::R2004, true),
-        (crate::Version::R2007, false),
-        (crate::Version::R2010, false),
-        (crate::Version::R2018, false),
-    ] {
-        let kept = super::fields::for_release(source.clone(), "ATTRIB", target);
-        let indices: Vec<usize> = kept.keys().filter(|field| field.code == 280).map(|field| field.index).collect();
-        assert_eq!(indices, if target < crate::Version::R2010 { vec![0] } else { vec![0, 1] }, "{target:?}");
-        for field in kept.keys().filter(|field| field.code == 280) {
-            let expected = lock_default && field.index == 0;
-            assert_eq!(
-                super::fields::default_value("ATTRIB", field, &kept, target),
-                expected.then(|| zero.clone()).flatten(),
-                "{target:?} {field:?}"
-            );
-        }
-    }
-    // A source with one 280 was read from a release without a version: that 280 is the lock, and stays.
-    let lock_only =
-        super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "0".into() }], true).unwrap();
-    assert_eq!(super::fields::for_release(lock_only.clone(), "ATTRIB", crate::Version::R2007), lock_only);
-    // A target that stores more than the source holds gets the default 0 for what the source lacks, the lock staying the last.
-    let held =
-        |fields: &super::fields::Fields| fields.iter().filter(|(field, _)| field.code == 280).map(|(_, value)| value.clone()).collect::<Vec<_>>();
-    let one = super::fields::Value::Integer;
-    let locked = super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "1".into() }], true).unwrap();
-    assert_eq!(held(&super::fields::for_release(locked, "ATTRIB", crate::Version::R2018)), [one(0), one(1)]);
-    let none = super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 2, value: "TAG".into() }], true).unwrap();
-    assert_eq!(held(&super::fields::for_release(none.clone(), "ATTRIB", crate::Version::R2018)), [one(0), one(0)]);
-    assert_eq!(held(&super::fields::for_release(none.clone(), "ATTRIB", crate::Version::R2007)), [one(0)]);
-    assert!(held(&super::fields::for_release(none, "ATTRIB", crate::Version::R2004)).is_empty());
 }
 
 #[test]
@@ -290,12 +245,11 @@ fn nonzero_attribute_version_and_a_third_zero_occurrence_still_refuse() {
             .collect();
         let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
         drawing.model.replace(Entity::from_raw(unit));
-        for (target, third) in [(crate::Version::R2018, "group 280[2]"), (crate::Version::R2004, "group 280[1]")] {
+        for (target, third) in [(crate::Version::R2018, "group 280[2]"), (crate::Version::R2004, "group 280[2]")] {
             let error = save_at(&drawing, target).expect_err("every explicit attribute version field must survive");
             match error {
                 crate::IoError::RawPreservation { record, handle, field, .. } => {
                     assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
-                    // Below R2010 the zero version is set aside, so the third 280 is the second.
                     assert!(field.contains(if extra { third } else { "group 280[0]" }), "{target:?}: {field}");
                 }
                 error => panic!("unexpected error: {error}"),
@@ -334,42 +288,60 @@ fn inspection_cannot_hide_a_changed_attribute_lock_bit() {
     }
 }
 
+/// The 280 roles an AcDbAttribute record holds for a target: (version, lock, others) as indexed by `parse`.
+fn roles(tags: &[(i32, &str)], kind: &str, target: crate::Version) -> Vec<(usize, i64)> {
+    let tags: Vec<_> = tags.iter().map(|(code, value)| RawTag { code: *code, value: (*value).into() }).collect();
+    let fields = super::fields::for_release(super::fields::parse(&tags, true).unwrap(), kind, target);
+    fields
+        .iter()
+        .filter(|(field, _)| field.code == 280)
+        .map(|(field, value)| match value {
+            super::fields::Value::Integer(value) => (field.index, *value),
+            value => panic!("{value:?}"),
+        })
+        .collect()
+}
+
 #[test]
-fn attribute_zero_defaults_are_limited_to_two_fields_in_the_own_subclass() {
-    let source = super::fields::parse(
-        &[
-            RawTag { code: 100, value: "AcDbAttribute".into() },
-            RawTag { code: 280, value: "0".into() },
-            RawTag { code: 280, value: "0".into() },
-            RawTag { code: 280, value: "0".into() },
-        ],
-        true,
-    )
-    .unwrap();
-    let target = crate::Version::R2000;
-    for (field, value) in source.iter().filter(|(field, _)| field.code == 280) {
-        let default = super::fields::default_value("ATTRIB", field, &source, target);
-        assert_eq!(default, (field.index == 0).then_some(super::fields::Value::Integer(0)));
-        if field.index == 0 {
-            assert_eq!(default.as_ref(), Some(value));
-        }
-        assert!(super::fields::default_value("ATTDEF", field, &source, target).is_none());
+fn the_280_roles_are_read_from_their_place_around_the_tag_and_follow_the_target_release() {
+    use crate::Version::{R2000, R2004, R2007, R2010, R2018};
+    let both = [(100, "AcDbAttribute"), (280, "0"), (2, "TAG"), (280, "0")];
+    let lock_only = [(100, "AcDbAttribute"), (2, "TAG"), (280, "1")];
+    let none = [(100, "AcDbAttribute"), (2, "TAG")];
+    // Role 0 is the version (stored from R2010), role 1 the lock (from R2007). A role the target stores is present, 0 when
+    // the source lacks it; one it cannot store is equivalent only when 0.
+    for (tags, target, want) in [
+        (&both[..], R2000, vec![]),
+        (&both[..], R2004, vec![]),
+        (&both[..], R2007, vec![(1, 0)]),
+        (&both[..], R2010, vec![(0, 0), (1, 0)]),
+        (&lock_only[..], R2004, vec![(1, 1)]),
+        (&lock_only[..], R2007, vec![(1, 1)]),
+        (&lock_only[..], R2010, vec![(0, 0), (1, 1)]),
+        (&lock_only[..], R2018, vec![(0, 0), (1, 1)]),
+        (&none[..], R2004, vec![]),
+        (&none[..], R2007, vec![(1, 0)]),
+        (&none[..], R2018, vec![(0, 0), (1, 0)]),
+    ] {
+        assert_eq!(roles(tags, "ATTRIB", target), want, "{tags:?} at {target:?}");
     }
-    for tags in [
+    // A nonzero version stays below R2010, where the target cannot hold it, and a 280 beyond the two roles always stays.
+    let version_one = [(100, "AcDbAttribute"), (280, "1"), (2, "TAG")];
+    assert_eq!(roles(&version_one, "ATTRIB", R2004), vec![(0, 1)]);
+    assert_eq!(roles(&version_one, "ATTRIB", R2018), vec![(0, 1), (1, 0)]);
+    let third = [(100, "AcDbAttribute"), (280, "0"), (2, "TAG"), (280, "0"), (280, "0")];
+    assert_eq!(roles(&third, "ATTRIB", R2004), vec![(2, 0)]);
+    assert_eq!(roles(&third, "ATTRIB", R2018), vec![(0, 0), (1, 0), (2, 0)]);
+    // Only an ATTRIB's own subclass has these roles.
+    assert_eq!(roles(&both, "ATTDEF", R2004), vec![(0, 0), (1, 0)]);
+    for scoped in [
         vec![(100, "AcDbText"), (280, "0")],
         vec![(100, "AcDbAttribute"), (102, "{PRIVATE"), (280, "0"), (102, "}")],
         vec![(100, "AcDbAttribute"), (1001, "RAW_APP"), (280, "0")],
         vec![(100, "AcDbAttribute"), (101, "Embedded Object"), (280, "0")],
     ] {
-        let tags: Vec<_> = tags.into_iter().map(|(code, value)| RawTag { code, value: value.into() }).collect();
-        let fields = super::fields::parse(&tags, true).unwrap();
-        let field = fields.keys().find(|field| field.code == 280).unwrap();
-        assert!(super::fields::default_value("ATTRIB", field, &fields, target).is_none());
+        assert_eq!(roles(&scoped, "ATTRIB", R2004), roles(&scoped, "ATTDEF", R2004), "{scoped:?}");
     }
-    let nonzero =
-        super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "1".into() }], true).unwrap();
-    let (field, value) = nonzero.iter().find(|(field, _)| field.code == 280).unwrap();
-    assert_ne!(super::fields::default_value("ATTRIB", field, &nonzero, target).as_ref(), Some(value));
 }
 
 #[test]
@@ -526,7 +498,7 @@ fn numeric_wire_equivalence_does_not_hide_changed_bits_or_repeated_defaults() {
     )
     .unwrap();
     let repeated = source.keys().find(|field| field.code == 41 && field.index == 1).unwrap();
-    assert!(super::fields::default_value("INSERT", repeated, &source, crate::Version::R2018).is_none());
+    assert!(super::fields::default_value("INSERT", repeated, &source).is_none());
 }
 
 #[test]
@@ -717,6 +689,8 @@ fn a_locked_attribute_read_from_r2007_keeps_its_lock_in_an_up_save() {
         drawing
     };
     for to in [crate::Version::R2007, crate::Version::R2010, crate::Version::R2018] {
-        save_at(&locked, to).unwrap_or_else(|error| panic!("{to:?}: a stored lock of 1 must survive: {error}"));
+        let first = save_at(&locked, to).unwrap_or_else(|error| panic!("{to:?}: a stored lock of 1 must survive: {error}"));
+        let reopened = crate::read_with_need(&first, "first.dwg", raw_policy(), &raw_need).unwrap();
+        save_at(&reopened, to).unwrap_or_else(|error| panic!("{to:?}: second save of a locked attribute: {error}"));
     }
 }
