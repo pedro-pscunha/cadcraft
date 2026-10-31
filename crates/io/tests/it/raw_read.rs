@@ -99,35 +99,39 @@ fn a_file_with_no_needing_record_reads_the_same_with_the_raw_path() {
     assert_eq!(read(&text, raw_path()), read(&text, ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE)));
 }
 
-#[test]
-fn a_unit_that_cannot_be_kept_raw_is_read_legacy_with_a_note() {
-    // A needing INSERT with an ATTRIB and no closing SEQEND: a raw compound needs the SEQEND.
-    let text = "0\nSECTION\n2\nENTITIES\n0\nINSERT\n5\nA1\n8\n0\n66\n1\n2\nNOPE\n10\n0\n20\n0\n30\n0\n210\n0\n220\n1\n230\n1\n\
+/// A needing INSERT with an ATTRIB and no closing SEQEND: a raw compound needs the SEQEND, so the unit cannot be kept raw.
+const NEEDING_INSERT_WITHOUT_SEQEND: &str = "0\nSECTION\n2\nENTITIES\n0\nINSERT\n5\nA1\n8\n0\n66\n1\n2\nNOPE\n10\n0\n20\n0\n30\n0\n210\n0\n220\n1\n230\n1\n\
 0\nATTRIB\n5\nA2\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n2\nT\n0\nENDSEC\n0\nEOF\n";
-    let d = read(text, raw_path());
-    assert!(raw_kinds(&d).is_empty());
-    assert_eq!(legacy_count(&d), 1);
-    assert!(d.read_notes.iter().any(|n| n.contains("cannot be kept raw")), "{:?}", d.read_notes);
+
+#[test]
+fn a_unit_that_cannot_be_kept_raw_is_refused_with_the_record_named_and_no_drawing_is_built() {
+    // Plan v3, 4.1: no Legacy entity is built for a needs node. With the raw path on, the read fails closed and says which record.
+    let text = NEEDING_INSERT_WITHOUT_SEQEND;
+    let error = cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", raw_path(), &source_predicate(text.as_bytes())).unwrap_err();
+    match &error {
+        cadcraft_io::IoError::NotKeptRaw { record, handle, reason } => {
+            assert_eq!((record.as_str(), *handle), ("INSERT", Some(Handle(0xA1))));
+            assert!(!reason.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+    let message = error.to_string();
+    assert!(message.contains("INSERT") && message.contains("A1") && message.contains("raw"), "{message}");
 }
 
 #[test]
-fn a_needing_unit_read_legacy_because_it_cannot_be_raw_is_named_in_every_save() {
-    // The same unit as above: a needing INSERT with an ATTRIB and no closing SEQEND. It is read Legacy with a read note, and every
-    // later save says again that it needed a canonical reading, so no save goes out silent about it.
-    let text = "0\nSECTION\n2\nENTITIES\n0\nINSERT\n5\nA1\n8\n0\n66\n1\n2\nNOPE\n10\n0\n20\n0\n30\n0\n210\n0\n220\n1\n230\n1\n\
-0\nATTRIB\n5\nA2\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n2\nT\n0\nENDSEC\n0\nEOF\n";
-    let mut d = read(text, raw_path());
-    for name in ["x.dxf", "x.dwg"] {
-        let (_, notes) = cadcraft_io::write_with_noted(&d, name, &cadcraft_io::SaveOptions::default()).unwrap();
-        assert!(notes.iter().any(|n| n.contains("INSERT A1") && n.contains("read Legacy")), "{name}: {notes:?}");
-    }
-    // Once the record is gone from the drawing, the save has nothing to say about it.
-    d.remove_entity(Handle(0xA1));
-    let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
-    assert!(!notes.iter().any(|n| n.contains("INSERT A1")), "{notes:?}");
-    // A record that is Legacy because nothing needs more says nothing.
-    let text = crate::activation_fixtures::file("", &[], &[crate::activation_fixtures::line("E1")]);
-    let plain = read(&text, raw_path());
-    let (_, notes) = cadcraft_io::write_with_noted(&plain, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
-    assert!(!notes.iter().any(|n| n.contains("read Legacy")), "{notes:?}");
+fn the_file_that_cannot_be_kept_raw_still_opens_with_the_raw_path_off() {
+    let text = NEEDING_INSERT_WITHOUT_SEQEND;
+    let d = read(text, ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE));
+    assert!(raw_kinds(&d).is_empty());
+    assert_eq!(legacy_count(&d), 1);
+    assert!(!d.read_notes.iter().any(|n| n.contains("cannot be kept raw")), "{:?}", d.read_notes);
+}
+
+#[test]
+fn a_unit_in_a_block_that_cannot_be_kept_raw_is_refused_too() {
+    let text = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\nB0\n2\nB\n70\n0\n10\n0\n20\n0\n30\n0\n0\nINSERT\n5\nA1\n8\n0\n66\n1\n2\nNOPE\n10\n0\n20\n0\n30\n0\n210\n0\n220\n1\n230\n1\n\
+0\nATTRIB\n5\nA2\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n2\nT\n0\nENDBLK\n5\nB1\n0\nENDSEC\n0\nEOF\n";
+    let error = cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", raw_path(), &source_predicate(text.as_bytes())).unwrap_err();
+    assert!(matches!(error, cadcraft_io::IoError::NotKeptRaw { .. }), "{error:?}");
 }
