@@ -976,7 +976,7 @@ fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
 /// Keep live source-listed members in their order, then append current INSERTs that the list did not contain.
 fn block_references(d: &Drawing, every: &[&Entity]) -> HashMap<String, Vec<Handle>> {
     let mut refs: HashMap<String, Vec<Handle>> = HashMap::new();
-    let mut live = std::collections::HashSet::new();
+    let live: std::collections::HashSet<_> = every.iter().map(|entity| entity.handle).collect();
     for e in every {
         let name = match &e.kind {
             EntityKind::Insert(insert) => Some(insert.block.as_str()),
@@ -986,7 +986,6 @@ fn block_references(d: &Drawing, every: &[&Entity]) -> HashMap<String, Vec<Handl
             _ => None,
         };
         if let Some(name) = name {
-            live.insert(e.handle);
             refs.entry(name.to_ascii_uppercase()).or_default().push(e.handle);
         }
     }
@@ -997,9 +996,7 @@ fn block_references(d: &Drawing, every: &[&Entity]) -> HashMap<String, Vec<Handl
         let current = refs.remove(name).unwrap_or_default();
         let mut kept: Vec<_> = listed.iter().filter(|handle| live.contains(handle)).copied().collect();
         kept.extend(current.into_iter().filter(|handle| !listed.contains(handle)));
-        if !kept.is_empty() {
-            refs.insert(name.clone(), kept);
-        }
+        refs.insert(name.clone(), kept);
     }
     refs
 }

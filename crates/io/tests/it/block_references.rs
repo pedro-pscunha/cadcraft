@@ -124,13 +124,60 @@ fn raw_insert_parents_remain_in_reverse_lists_in_dxf_and_dwg() {
 }
 
 #[test]
-fn stale_source_references_do_not_create_an_empty_blkrefs_group() {
+fn a_source_blkrefs_wrapper_remains_after_stale_targets_are_pruned() {
     let (mut drawing, _) = drawing();
     std::sync::Arc::make_mut(&mut drawing.source_symbols).block_refs.insert("UNUSED".into(), vec![cadcraft_doc::Handle(0xDEADBEEF)]);
     let saved = cadcraft_io::write_dxf(&drawing);
     let tables = section(&saved, "TABLES");
     let (_, record) = tables.iter().find(|(kind, tags)| kind == "BLOCK_RECORD" && val(tags, 2) == "UNUSED").unwrap();
-    assert!(!record.iter().any(|tag| tag.code == 102 && tag.str() == "{BLKREFS"), "no live INSERT means no BLKREFS wrapper");
+    assert!(record.iter().any(|tag| tag.code == 102 && tag.str() == "{BLKREFS"), "AutoCAD keeps the source wrapper after it removes stale members");
+    assert!(refs(&saved, "UNUSED").is_empty());
+}
+
+#[test]
+fn an_explicit_empty_source_blkrefs_wrapper_survives_a_dxf_save() {
+    let (drawing, _) = drawing();
+    let source = cadcraft_io::write_dxf(&drawing);
+    let mut tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+    let at = tags.iter().position(|tag| tag.code == 2 && tag.str() == "UNUSED").unwrap() + 1;
+    tags.splice(at..at, [cadcraft_dxf::Tag::s(102, "{BLKREFS"), cadcraft_dxf::Tag::s(102, "}")]);
+    let drawing = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    let saved = cadcraft_io::write_dxf(&drawing);
+    let tables = section(&saved, "TABLES");
+    let (_, record) = tables.iter().find(|(kind, tags)| kind == "BLOCK_RECORD" && val(tags, 2) == "UNUSED").unwrap();
+    assert!(record.iter().any(|tag| tag.code == 102 && tag.str() == "{BLKREFS"));
+    assert!(refs(&saved, "UNUSED").is_empty());
+}
+
+#[test]
+fn a_source_blkrefs_list_keeps_its_live_table_entity() {
+    let mut drawing = cadcraft_doc::Drawing::new_metric();
+    let table = cadcraft_doc::Table {
+        col_widths: vec![1.0],
+        row_heights: vec![1.0],
+        cells: vec![vec![cadcraft_doc::TableCell::default()]],
+        ..cadcraft_doc::Table::default()
+    };
+    let handle = drawing.add(&Space::Model, Common::default(), EntityKind::Table(table)).unwrap();
+    let source = cadcraft_io::write_dxf(&drawing);
+    let name = section(&source, "TABLES")
+        .iter()
+        .find(|(kind, tags)| kind == "BLOCK_RECORD" && val(tags, 2).starts_with("*T"))
+        .map(|(_, tags)| val(tags, 2))
+        .unwrap();
+    let mut tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+    let start = tags
+        .iter()
+        .enumerate()
+        .filter(|(_, tag)| tag.code == 0 && tag.str() == "BLOCK_RECORD")
+        .find_map(|(at, _)| tags[at + 1..].iter().take_while(|tag| tag.code != 0).any(|tag| tag.code == 2 && tag.str() == name).then_some(at))
+        .unwrap();
+    let end = start + 1 + tags[start + 1..].iter().position(|tag| tag.code == 0).unwrap();
+    tags.splice(end..end, [cadcraft_dxf::Tag::s(102, "{BLKREFS"), cadcraft_dxf::Tag::s(331, handle.hex()), cadcraft_dxf::Tag::s(102, "}")]);
+    let drawing = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    for (what, saved) in ["DXF", "DWG"].into_iter().zip(saved_twice(&drawing)) {
+        assert_eq!(refs(&saved, &name), [handle.hex()], "{what}: ACAD_TABLE is a live source-listed block reference");
+    }
 }
 
 #[test]

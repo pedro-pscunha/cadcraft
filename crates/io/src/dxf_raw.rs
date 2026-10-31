@@ -601,9 +601,7 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
         }
         let (Some(name), Some(open)) = (val(t, 2), t.iter().position(|g| g.code == 102 && g.str().trim() == "{BLKREFS")) else { continue };
         let refs: Vec<Handle> = t[open + 1..].iter().take_while(|g| g.code == 331).filter_map(|g| handle(&g.str())).collect();
-        if !refs.is_empty() {
-            source.block_refs.entry(up(&name)).or_insert(refs);
-        }
+        source.block_refs.entry(up(&name)).or_insert(refs);
     }
 }
 
