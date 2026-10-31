@@ -355,6 +355,7 @@ selection_fixture!(erase_fixture, json!({}));
 selection_fixture!(move_fixture, json!({"delta": [3, 1]}));
 selection_fixture!(copy_fixture, json!({"delta": [3, 1]}));
 selection_fixture!(rotate_fixture, json!({"base": [0, 0], "angle": 90}));
+selection_fixture!(scale_fixture, json!({"base": [0, 0], "factor": 2}));
 selection_fixture!(mirror_fixture, json!({"p1": [0, 0], "p2": [1, 0]}));
 
 type V3 = [f64; 3];
@@ -426,6 +427,12 @@ fn after_rotate(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String>
     circle_is(d, ops[0], turned(start(plane)), 2.0, turned(arr(plane.normal())))
 }
 
+fn after_scale(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
+    // SCALE scales all three axes: the world center, Z included, is twice the start.
+    let w = start(plane);
+    circle_is(d, ops[0], [2.0 * w[0], 2.0 * w[1], 2.0 * w[2]], 4.0, arr(plane.normal()))
+}
+
 fn after_mirror(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
     circle_is(d, ops[0], start(plane), 2.0, arr(plane.normal()))?;
     let w = start(plane);
@@ -460,6 +467,7 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("properties", &[Role::Primary]),
     ("revcloud", &[Role::Primary]),
     ("rotate", &[Role::SelectionMember]),
+    ("scale", &[Role::SelectionMember]),
     ("wipeout", &[Role::Primary]),
     ("xline", &[Role::Primary]),
 ];
@@ -759,11 +767,12 @@ fn live_rows() -> Vec<Row> {
     });
     // Editing the selection: the independent numbers come from the world transform of each plane (`start`, `turned`, `after_*`).
     let planes = [PlusZ, PlusZElevated, Tilted, NegativeZ];
-    let edits: [(&str, fn() -> Fixture, Expect); 4] = [
+    let edits: [(&str, fn() -> Fixture, Expect); 5] = [
         ("move", move_fixture, Expect::Edits(after_move)),
         ("copy", copy_fixture, Expect::Edits(after_copy)),
         ("rotate", rotate_fixture, Expect::Edits(after_rotate)),
         ("erase", erase_fixture, Expect::Edits(erased)),
+        ("scale", scale_fixture, Expect::Edits(after_scale)),
     ];
     for (command, fixture, expect) in edits {
         let Expect::Edits(check) = expect else { unreachable!() };

@@ -333,7 +333,6 @@ revcloud.freehand
 revcloud.polygonal
 reverse
 saveas
-scale
 scalelistedit
 script
 select

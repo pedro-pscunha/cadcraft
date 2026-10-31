@@ -2,6 +2,21 @@ use super::{Handle, Mat3, Result, Session, Value, Vec2, bad, bool_or, f64_req, j
 
 // ---------------- core operations ----------------
 
+/// The world map of a 2D command for one entity. A uniform positive scale scales Z as well, as SCALE does in AutoCAD, so a canonical
+/// object, which lives in 3D, keeps its shape. Every other map, and every legacy entity, leaves Z as it is.
+pub(crate) fn world_map(entity: &cadcraft_doc::Entity, m: &Mat3) -> cadcraft_geom::Mat4 {
+    let mut map = cadcraft_geom::Mat4::from_mat3(m);
+    if entity.geometry_revision != cadcraft_doc::GeometryRevision::CanonicalV2 {
+        return map;
+    }
+    let (sx, sy) = (m.a.hypot(m.b), m.c.hypot(m.d));
+    let tolerance = 1e-9 * sx;
+    if sx.is_finite() && (sx - sy).abs() <= tolerance && (m.a * m.c + m.b * m.d).abs() <= tolerance * sx && m.a * m.d - m.b * m.c > 0.0 {
+        map.m[2][2] = sx;
+    }
+    map
+}
+
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     if copy {
         return copy_transformed(s, hs, std::iter::once(*m));
@@ -21,7 +36,8 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             continue;
         }
         if d.space_of(*h).is_some() {
-            d.transform_entity(*h, &cadcraft_geom::Mat4::from_mat3(m))?;
+            let map = world_map(d.entity(*h).ok_or_else(|| bad("transform", "no such object"))?, m);
+            d.transform_entity(*h, &map)?;
             out.push(*h);
         }
     }
@@ -40,7 +56,7 @@ fn copy_transformed(s: &mut Session, hs: &[Handle], transforms: impl IntoIterato
     }
     let sets = transforms
         .into_iter()
-        .map(|m| originals.iter().map(|(_, e)| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m))).collect::<cadcraft_doc::Result<Vec<_>>>())
+        .map(|m| originals.iter().map(|(_, e)| e.transformed(&world_map(e, &m))).collect::<cadcraft_doc::Result<Vec<_>>>())
         .collect::<cadcraft_doc::Result<Vec<_>>>()?;
     let copies = d.duplicate_entities(sets, cadcraft_doc::DuplicationSource::SameDrawing)?;
     let mut out = Vec::new();
