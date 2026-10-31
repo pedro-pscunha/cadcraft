@@ -28,7 +28,9 @@ impl Similarity {
     pub fn from_mat4(transform: &Mat4) -> Result<Self> {
         let similarity = Self::including_reflection(transform)?;
         if similarity.reflected() {
-            return Err(DocError::Invalid("Canonical geometry has no measured convention for a reflection; it can be moved, rotated and scaled uniformly.".into()));
+            return Err(DocError::Invalid(
+                "Canonical geometry has no measured convention for a reflection; it can be moved, rotated and scaled uniformly.".into(),
+            ));
         }
         Ok(similarity)
     }

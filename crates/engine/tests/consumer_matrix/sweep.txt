@@ -84,7 +84,7 @@ gctangent	template=91	legacy=works	canonical=refused: object 100 has canonical g
 gcvertical	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
 geomconstraint	template=101	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
 gradient	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
-grip.mirror	template=41	legacy=works	canonical=refused: Canonical geometry has no measured convention for a reflection; it can be moved, rotated and sca...	raw=refused: invalid parameters for `grip.mirror`: no such grip
+grip.mirror	template=41	legacy=works	canonical=works	raw=refused: invalid parameters for `grip.mirror`: no such grip
 grip.move	template=41	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 grip.rotate	template=27	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 grip.scale	template=41	legacy=works	canonical=works	raw=refused: invalid parameters for `grip.scale`: no such grip
