@@ -1,13 +1,13 @@
 # G1 frozen baseline: sha256 of the DXF and the DWG that a read and a save makes of each drawing of corpus.toml.
-# Made at be79e74b, refreshed at 5f4eeb51 for the causes listed in golden-changes.md. Columns: sha256, format, bytes, path.
+# Made at be79e74b, refreshed at 5f4eeb51 and for the table graphics block, for the causes listed in golden-changes.md. Columns: sha256, format, bytes, path.
 9a6015d717bb6410172fc328caab06bada74293ba4a963ecf50046013ecbcfe0 dwg 2694319 /tmp/cad/acad2/Planeta-Toulouse-acad.dxf
 e58ae96ac906e7427ed96043f4ae5fea5857d8c49fc4fdaf4dd5330ded1303e3 dxf 23642892 /tmp/cad/acad2/Planeta-Toulouse-acad.dxf
 1cf6631e75476c872284f472ffbe46563655c127b0d9f81bbfd6f563ff93991f dwg 22070 /tmp/cad/dim1/dim1-blank.dwg
 83ac9c341e7a4b53bf95cb34c165f96cb4be1eb88e6b63fed7cf7f4bd9f2a904 dxf 47009 /tmp/cad/dim1/dim1-blank.dwg
-6cdac289a6fa458a59b1b44ec970dc4886ba16ad7b219065bda2d6f821890b2e dwg 36766 /tmp/cad/dim1/dim1-mattrib-2018.dwg
-73ca1dc4261d27a3808fa2728991ef3b91cbc68716034bff823ebf9a7faac4d0 dxf 111822 /tmp/cad/dim1/dim1-mattrib-2018.dwg
-ad17729008b992e9652fc8042c01c3fdbfd8a01e2cb66ddd871751f988b7bd66 dwg 36957 /tmp/cad/dim1/dim1-mattrib-2018.dxf
-61896f508ee4b38a1b0b27f75285fccb68b510b508e9dd528133d2f694230b2c dxf 117743 /tmp/cad/dim1/dim1-mattrib-2018.dxf
+6ac068909fc27c50079e8c46c4dde201ef25c2a7ee5ddc245a3501491f3c3996 dwg 36798 /tmp/cad/dim1/dim1-mattrib-2018.dwg
+432c95080c11fbb1d1cf80ab0613cb5f4e8770a0696f8ccbb232e1197345339d dxf 112289 /tmp/cad/dim1/dim1-mattrib-2018.dwg
+e0080f4c2817427559d597b97e910090390d38370ac87e0b43a20d0ee163d502 dwg 36989 /tmp/cad/dim1/dim1-mattrib-2018.dxf
+10962d1e582feb286da6375f00b639a745d4b77aa3b4878ff9eb94d0cd1cb372 dxf 118200 /tmp/cad/dim1/dim1-mattrib-2018.dxf
 00d6f5a768d88ff4a13cca068354ceb01965835f0af5b13b1866552ec355b76e dwg 31383 /tmp/cad/dim1/dim1-minsert-acad.dxf
 eeca43803e61f5c9bb7c9b54189216008570de518170fb992a0122fecdaa33f4 dxf 97750 /tmp/cad/dim1/dim1-minsert-acad.dxf
 f99b8bee7bc10116e8e2851c517b87edd684cf4303e1241700bdf0d440c51898 dwg 26860 /tmp/cad/dim1/dim1-mleader-2004.dwg
@@ -16,12 +16,12 @@ ae8b3194dbfcce16ebb7c2e704094bd0c6cd23cac67a3e1c17153e267d304bba dxf 296892 /tmp
 402fd60f94a41a72eed05adde8b48bd1851df86c5a2cf82bf26e12174d0c23f9 dxf 105584 /tmp/cad/dim1/dim1-mleader-acad.dxf
 c24542f0fa4e83287c56ff89642c6154f4f2d67b41aa04bc6d9462e618da739c dwg 29397 /tmp/cad/dim1/dim1-native-acad.dxf
 0bc1f2aeee7d2faaad3732ea155fca62bf4f41625ba7f92c953486f365e0f1d8 dxf 85265 /tmp/cad/dim1/dim1-native-acad.dxf
-efdd715d1932bb42437d7656effe34c065abb0ccd20e8591b5d5bf06759f35e4 dwg 37088 /tmp/cad/dim1/dim1-table90-2007.dxf
-98b67e3f3d1d35ae6eb35154d58183ba179d2f5fe25e29279627a04af602cfb5 dxf 231053 /tmp/cad/dim1/dim1-table90-2007.dxf
-db375028d19057db41c288ebb3cc903fda46d578937450d3b57903425ce9f844 dwg 36032 /tmp/cad/dim1/dim1-table90-2018.dwg
-a72394efa0f854fcf0c75b4f5e647daa3cd6bd31ec0aa45763ab458716344d46 dxf 114563 /tmp/cad/dim1/dim1-table90-2018.dwg
-680d448c94cdd5c846d7ae32805a7829bda778eaccdea47b9a0675471ce366f8 dwg 36255 /tmp/cad/dim1/dim1-table90-2018.dxf
-1e0eba5582e2a0b7bcf21b8a86653e4a4a0e46bd27c59a32a193be16248707c8 dxf 120055 /tmp/cad/dim1/dim1-table90-2018.dxf
+f8f30b6e7cc7138742a8125f2112630203040333f98f1e65fb7dc549b5ccfd32 dwg 37088 /tmp/cad/dim1/dim1-table90-2007.dxf
+be3473a7e890144d774c9b690328f421f3574113db52d6fb975839f129ed81a0 dxf 231510 /tmp/cad/dim1/dim1-table90-2007.dxf
+f39dc641b7faa688623bd771509354db7778f6fec979ead661ea5ee4753b400f dwg 36032 /tmp/cad/dim1/dim1-table90-2018.dwg
+b454a29bfbdb068b8bbe72beefa2f8664e6584f7b2b150fff505c5f8acfa3284 dxf 115034 /tmp/cad/dim1/dim1-table90-2018.dwg
+fa7f66b1bfe590ec7791a2ae2bb6016b5149686b1aa31af1c971fe5eb8bf9317 dwg 36287 /tmp/cad/dim1/dim1-table90-2018.dxf
+dea336bb2c675f2f43b1c329b2fe8aab721b24c8ea4845b3ed34a6f3ee2fdde2 dxf 120512 /tmp/cad/dim1/dim1-table90-2018.dxf
 c18a2634dcfc09adcedcb7854fcac6b69e7082443b8e5a62742039e93f638d37 dwg 39904 /tmp/cad/dim1/dim1-tablefix-2007.dwg
 cb7887b6cbaaaecee67984acd5a93adf56b22a680b9d5fe88d537d282190fa4c dxf 294456 /tmp/cad/dim1/dim1-tablefix-2007.dwg
 2617a3d1bcb1fdbf1c075bcf623a21ef7f1b3125def831764db0ce54f6aeea5f dwg 36320 /tmp/cad/dim1/dim1-tablefix-2007.dxf
@@ -30,8 +30,8 @@ cb7887b6cbaaaecee67984acd5a93adf56b22a680b9d5fe88d537d282190fa4c dxf 294456 /tmp
 31a874ab1c38b0487840fb4ed6edca4170a7ddd3a74d38dd1629d8edb0d8f2da dxf 100944 /tmp/cad/dim1/dim1-tablefix-2018.dwg
 188d5c0e524fd60af265b1cb588c95504a1409eb6ad3ed90e22b4544b9cedb2f dwg 35326 /tmp/cad/dim1/dim1-tablefix-2018.dxf
 7c99c3df7cdb13f5bb1949936bd40db2615102e1e35990f4a3c97ee97070476f dxf 106618 /tmp/cad/dim1/dim1-tablefix-2018.dxf
-b933d13863c6e8feb5e5d7113cba7d356305fd62ee2deeed874f7725eeb0ab1d dwg 37570 /tmp/cad/dim1/dim1-vp68-2018.dxf
-d0ddffa29bc9c3eaeb52b1387559b2247f7d8952ca68c0c0c7f61bbd5a1716ca dxf 124477 /tmp/cad/dim1/dim1-vp68-2018.dxf
+248dae82b9be50464f13e1d5344256e7ad83c660db2b4cd6ed5fce405d2c937a dwg 37605 /tmp/cad/dim1/dim1-vp68-2018.dxf
+efeba739d31bd364ca6d4c01477db77b1a0dda7b70ac73b8a4ea1fea509ffb56 dxf 124934 /tmp/cad/dim1/dim1-vp68-2018.dxf
 371ec0988229a7ca17102e9854b96adcffa6de9338194cee6fa2f4ed71713dba dwg 11239143 /tmp/cad/mc/Citycon-Augusto_Miele-2010.dxf
 7bebeaeaea668e4bbb389fb17a32a00828d45d1eeb36e6b30daa520760a3d641 dxf 50602670 /tmp/cad/mc/Citycon-Augusto_Miele-2010.dxf
 3d48f2388c1d7c03fd39c580c3a8c2dd6dccbcdf36463388c80113d7104176bf dwg 11246843 /tmp/cad/mc/Citycon-Augusto_Miele-2018.dxf
@@ -124,5 +124,5 @@ b3a414a0d9227bcf60c5d0bc080150bee5e6b0aa9edfc64cbbf5b00470221a96 dxf 19438 crate
 d4acda0a27a633befd66efcee5a912a799c9ce3abaf126c8fa098f014333d21b dxf 77745 crates/io/tests/data/clockwise_arc_edge.dwg
 39b8722b1c72e6ad5ec3debd2a48c4b22ddeb742b15113cd3d8ad47ee48fef91 dwg 22194 crates/io/tests/data/named_shape_style.dxf
 8199f57201ce318f2a4c20eb7b043720fba899859ca3601c04b61995973d98c6 dxf 17612 crates/io/tests/data/named_shape_style.dxf
-0647afaa8e18cdd62c5f5b7a3bf0282db300ff1a05a6212104bf0e2e2d3a5603 dwg 14830 examples/apartment.dxf
-b711fa3d06b74c1a57f04dc2cea88ffd42e43342ded9654635ede7a37e2bebb8 dxf 53484 examples/apartment.dxf
+68ba8e487366912799b676f3f132497dfac5ef360f384a0cd876049d011e788f dwg 15184 examples/apartment.dxf
+7a739d308182b19463b68a41cc1edf91cfe822be8b60f80109b027e598b24d54 dxf 56842 examples/apartment.dxf
