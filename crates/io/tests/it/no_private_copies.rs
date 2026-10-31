@@ -363,7 +363,8 @@ fn a_layout_read_from_a_file_gets_no_paper_marker_on_save() {
         let once = cadcraft_io::write_with(&fixture(), name, &options).unwrap();
         let twice = cadcraft_io::write_with(&cadcraft_io::read(&once, name).unwrap(), name, &options).unwrap();
         let tags = parse(&if name.ends_with(".dwg") { cadcraft_dwg::dwg_to_dxf(&twice).unwrap() } else { twice }).unwrap();
-        let markers: Vec<String> = tags.iter().filter(|t| t.code == 1000 && matches!(t.str().as_str(), "PAPERVIEW" | "PSVIEW")).map(Tag::str).collect();
+        let markers: Vec<String> =
+            tags.iter().filter(|t| t.code == 1000 && matches!(t.str().as_str(), "PAPERVIEW" | "PSVIEW")).map(Tag::str).collect();
         assert!(markers.is_empty(), "{name}: {markers:?}");
     }
 }

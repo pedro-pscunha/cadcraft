@@ -315,3 +315,22 @@ writer drifts in the check. Compared with the handles set aside (every handle-va
 The DWG baselines differ for the same causes (read as DXF) and the handles; the CADCRAFT_MLEADERSTYLE XRECORD stays in a DWG. The r5 and r6 raw
 fixtures move for the same causes (their handles and the missing records). The legacy-writer fingerprints (`growing_extents`,
 `displacement_tests`) are recaptured: 431 bytes fewer (the two XRECORDs' handle and dictionary entry, the APPID, and the seed).
+
+# Golden refresh for the handle seed, the hatch background and the current multileader style (cf0c6635, 29b31a67)
+
+The previous refresh (b1fec9b3, above) is the reference. Every output of the corpus (63 drawings, DXF and DWG) differs from it again, and the cause is
+numbering only: `$HANDSEED` is the next handle above the handles written (a file's records keep the handles it gave them, and a new one is above the
+file's own `$HANDSEED`), and the writer takes two more handles for the variable dictionary of the current multileader style, in every release. G1 keys
+a record by its handle, so every record numbered by the writer drifts in the check. Compared with the handles set aside (the DXF baseline of the
+previous refresh against the new one), the records that differ are only these:
+
+| record | cause | drawings | records |
+|---|---|---|---|
+| OBJECTS/XRECORD | `CADCRAFT_MLEADERSTYLE` (the DXF baseline is R2000, so the XRECORD stays) holds `Linha_MEDIO`, not `Standard`: the AutoCAD file keeps the current multileader style in the variable CMLEADERSTYLE of its variable dictionary, which the reader takes now (and acadrust 6735e35 for a DWG) | 4 | 4 |
+
+The R2000 DXF baseline holds no variable (a release before R2004 keeps the style in the XRECORD) and no `$CMLEADERSTYLE` (AutoCAD's DXF has none; the
+header variable is not written at any release now, the reader still reads it). The records of a hatch with a background colour change in no drawing of the corpus
+(none has one; a background is AutoCAD's `HATCHBACKGROUNDCOLOR` xdata now, kept as read when a file has it). The DWG baselines differ for the same causes
+(read as DXF) and the handles. From R2004 a DXF and a DWG hold the current style in the variable CMLEADERSTYLE only; the corpus baselines are R2000 for the
+DXF, and the DWG's variable dictionary is the one the file had. The r5 and r6 raw fixtures move for the numbering (two more handles). The legacy-writer
+fingerprints (`growing_extents`, `displacement_tests`) are recaptured: the seed value, and 36 bytes fewer (no `$CMLEADERSTYLE` in the header).

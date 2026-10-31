@@ -1118,6 +1118,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             f.entities.entry(hh).or_insert(x);
         }
     }
+    // The header is part of the display key of a multileader's graphics (see `dxf_mleader_proxy`), so it is complete before them.
+    // AutoCAD keeps the current multileader style in the variable dictionary, not in its header.
+    take_current_mleader_style(d, &f);
     put_xdata(d, xdata_of);
     // After the extras of the INSERT itself, which they join.
     keep_insert_seqends(&mut f, &blocks, &entities);
@@ -1175,12 +1178,6 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     if let Some(ds) = secs.iter().find(|s| s.name.eq_ignore_ascii_case("ACDSDATA")) {
         f.data_store = ds.tags.iter().take(MAX_DATA_STORE_GROUPS).map(raw).collect();
     }
-    // AutoCAD keeps the current multileader style in the variable dictionary, not in its header.
-    if d.header.str("CMLEADERSTYLE", "Standard").trim().eq_ignore_ascii_case("Standard")
-        && let Some(style) = kept_mleader_style(&f).filter(|s| !s.trim().is_empty())
-    {
-        d.header.set_str("CMLEADERSTYLE", style.trim());
-    }
     if !f.is_empty() {
         d.foreign = Arc::new(f);
     }
@@ -1207,6 +1204,15 @@ fn variable_dictionary(f: &Foreign) -> Option<(usize, Option<usize>)> {
 /// Whether the file's named object dictionary kept a variable dictionary (the writer makes none then).
 pub(crate) fn has_variable_dictionary(f: &Foreign) -> bool {
     variable_dictionary(f).is_some()
+}
+
+/// The current multileader style the kept variable dictionary names becomes the drawing's, unless the header already names one.
+fn take_current_mleader_style(d: &mut Drawing, f: &Foreign) {
+    if d.header.str("CMLEADERSTYLE", "Standard").trim().eq_ignore_ascii_case("Standard")
+        && let Some(style) = kept_mleader_style(f).filter(|s| !s.trim().eq_ignore_ascii_case("Standard"))
+    {
+        d.header.set_str("CMLEADERSTYLE", style.trim());
+    }
 }
 
 /// The current multileader style the kept variable dictionary names.
@@ -1244,10 +1250,27 @@ fn with_current_mleader_style(d: &Drawing, f: &Foreign, target: cadcraft_dxf::Ve
             let dictionary_handle = patched.objects.get(dictionary)?.handle;
             let top = all_entities(d).map(|e| e.handle.0).chain(f.objects.iter().chain(&f.table_records).map(|o| o.handle.0)).max().unwrap_or(0);
             let new = Handle(top.max(d.handseed).saturating_add(1));
-            patched.objects.get_mut(dictionary)?.tags.extend([RawTag { code: 3, value: CURRENT_MLEADER_STYLE.into() }, RawTag { code: 350, value: new.hex() }]);
+            patched
+                .objects
+                .get_mut(dictionary)?
+                .tags
+                .extend([RawTag { code: 3, value: CURRENT_MLEADER_STYLE.into() }, RawTag { code: 350, value: new.hex() }]);
             let owner = dictionary_handle.hex();
-            let tags = [(5, new.hex()), (102, "{ACAD_REACTORS".into()), (330, owner.clone()), (102, "}".into()), (330, owner), (100, "DictionaryVariables".into()), (280, "0".into()), (1, style.into())];
-            patched.objects.push(ForeignObject { handle: new, kind: "DICTIONARYVAR".into(), tags: tags.into_iter().map(|(code, value)| RawTag { code, value }).collect() });
+            let tags = [
+                (5, new.hex()),
+                (102, "{ACAD_REACTORS".into()),
+                (330, owner.clone()),
+                (102, "}".into()),
+                (330, owner),
+                (100, "DictionaryVariables".into()),
+                (280, "0".into()),
+                (1, style.into()),
+            ];
+            patched.objects.push(ForeignObject {
+                handle: new,
+                kind: "DICTIONARYVAR".into(),
+                tags: tags.into_iter().map(|(code, value)| RawTag { code, value }).collect(),
+            });
         }
     }
     Some(patched)
