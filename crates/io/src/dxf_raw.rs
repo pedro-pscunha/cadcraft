@@ -1091,8 +1091,10 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| matches!(k.as_str(), "BLOCK" | "ENDBLK"))).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
-        // A DIMSTYLE lists the dimensions that use it among its persistent reactors, so a record's reactors may name entities too.
-        let mut x = extra(kind, t, kind == "BLOCK", false, if kind == "DIMSTYLE" { &reactor_targets } else { &kept });
+        // A DIMSTYLE lists the dimensions that use it, and an MLEADERSTYLE the multileaders, among its persistent reactors, so a record's
+        // reactors may name entities too.
+        let mut x =
+            extra(kind, t, kind == "BLOCK", false, if matches!(kind.as_str(), "DIMSTYLE" | "MLEADERSTYLE") { &reactor_targets } else { &kept });
         x.block_attributes = (kind == "BLOCK").then(|| block_attributes.get(&key.1).copied()).flatten();
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
