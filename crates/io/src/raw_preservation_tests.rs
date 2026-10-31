@@ -255,6 +255,16 @@ fn the_default_rule_follows_the_target_release() {
     let lock_only =
         super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "0".into() }], true).unwrap();
     assert_eq!(super::fields::for_release(lock_only.clone(), "ATTRIB", crate::Version::R2007), lock_only);
+    // A target that stores more than the source holds gets the default 0 for what the source lacks, the lock staying the last.
+    let held =
+        |fields: &super::fields::Fields| fields.iter().filter(|(field, _)| field.code == 280).map(|(_, value)| value.clone()).collect::<Vec<_>>();
+    let one = super::fields::Value::Integer;
+    let locked = super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "1".into() }], true).unwrap();
+    assert_eq!(held(&super::fields::for_release(locked, "ATTRIB", crate::Version::R2018)), [one(0), one(1)]);
+    let none = super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 2, value: "TAG".into() }], true).unwrap();
+    assert_eq!(held(&super::fields::for_release(none.clone(), "ATTRIB", crate::Version::R2018)), [one(0), one(0)]);
+    assert_eq!(held(&super::fields::for_release(none.clone(), "ATTRIB", crate::Version::R2007)), [one(0)]);
+    assert!(held(&super::fields::for_release(none, "ATTRIB", crate::Version::R2004)).is_empty());
 }
 
 #[test]
@@ -643,5 +653,70 @@ fn an_ascii_dxf_keeps_the_zero_attribute_fields_at_every_release() {
         let options = crate::SaveOptions { version: Some(version), binary: false };
         let bytes = crate::write_with(&drawing, "target.dxf", &options).unwrap_or_else(|error| panic!("{version:?}: {error}"));
         assert_eq!(attribute_version_groups(&bytes).1, vec![0, 0], "{version:?}: both zeros are written once");
+    }
+}
+
+fn raw_policy() -> crate::activation::ReaderPolicy {
+    crate::activation::ReaderPolicy::new(crate::activation::ReaderMode::Off, crate::activation::FamilySet::NONE).with_raw_path()
+}
+
+fn raw_need(view: &crate::activation::records::RecordView<'_>) -> crate::activation::Need {
+    if matches!(view.kind, "INSERT" | "ATTRIB") { crate::activation::Need::Needs { readable: true } } else { crate::activation::Need::Plain }
+}
+
+/// The fixture saved at `from` and read back as a Raw unit: its ATTRIB holds what that release stores.
+fn raw_read_back_from(from: crate::Version) -> (Drawing, Vec<i64>) {
+    let first = save_at(&fixtures::drawing("INSERT"), from).unwrap_or_else(|error| panic!("{from:?} first save: {error}"));
+    let reopened = crate::read_with_need(&first, "first.dwg", raw_policy(), &raw_need).unwrap();
+    let EntityKind::Raw(raw) = &reopened.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
+    let attribute = raw.records().find(|record| record.handle() == Handle(0x201)).unwrap();
+    let held = attribute.tags().iter().filter(|tag| tag.code == 280).map(|tag| tag.value.trim().parse().unwrap()).collect();
+    (reopened, held)
+}
+
+#[test]
+fn a_raw_attribute_read_from_an_older_release_saves_up_to_one_that_stores_more() {
+    // R2000/R2004 hold neither 280; R2007 holds only the lock. A newer release stores the version and the lock, both 0 here.
+    for (from, held) in [(crate::Version::R2004, vec![]), (crate::Version::R2007, vec![0])] {
+        let (drawing, found) = raw_read_back_from(from);
+        assert_eq!(found, held, "{from:?}: what the older release left in the source");
+        for to in [crate::Version::R2010, crate::Version::R2018] {
+            let first = save_at(&drawing, to).unwrap_or_else(|error| panic!("{from:?} to {to:?}: {error}"));
+            let reopened = crate::read_with_need(&first, "first.dwg", raw_policy(), &raw_need).unwrap();
+            save_at(&reopened, to).unwrap_or_else(|error| panic!("{from:?} to {to:?}, second save: {error}"));
+        }
+    }
+}
+
+#[test]
+fn an_r2000_source_saves_to_r2007_with_the_lock_added() {
+    let (drawing, _) = raw_read_back_from(crate::Version::R2000);
+    save_at(&drawing, crate::Version::R2007).expect("R2007 stores the lock the source lacks");
+}
+
+#[test]
+fn a_locked_attribute_read_from_r2007_keeps_its_lock_in_an_up_save() {
+    // A locked ATTRIB read from R2007 keeps its lock; the up-save writes it after the implicit zero version.
+    let (drawing, _) = raw_read_back_from(crate::Version::R2007);
+    let locked = {
+        let EntityKind::Raw(raw) = &drawing.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
+        let followers = raw
+            .followers()
+            .iter()
+            .map(|record| {
+                let mut tags = record.tags().to_vec();
+                if record.handle() == Handle(0x201) {
+                    tags.iter_mut().find(|tag| tag.code == 280).unwrap().value = "1".into();
+                }
+                RawRecord::new(record.kind().into(), tags).unwrap()
+            })
+            .collect();
+        let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
+        let mut drawing = drawing.clone();
+        drawing.model.replace(Entity::from_raw(unit));
+        drawing
+    };
+    for to in [crate::Version::R2007, crate::Version::R2010, crate::Version::R2018] {
+        save_at(&locked, to).unwrap_or_else(|error| panic!("{to:?}: a stored lock of 1 must survive: {error}"));
     }
 }
