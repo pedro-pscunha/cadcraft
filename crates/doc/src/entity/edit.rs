@@ -149,6 +149,25 @@ impl Entity {
         Ok(())
     }
 
+    /// A MIRROR candidate with an explicit text policy. Unmeasured text cases refuse before mutation.
+    pub fn mirrored(&self, transform: &Mat4, policy: super::TextMirror) -> Result<Self> {
+        if self.geometry_revision == GeometryRevision::CanonicalV2
+            && let EntityKind::Text(text) = &self.kind
+        {
+            self.require_canonical_geometry()?;
+            let (text, normal) = text.mirrored_canonical(self.common.extrusion, transform, policy)?;
+            let mut candidate = self.clone();
+            candidate.kind = EntityKind::Text(text);
+            candidate.common.extrusion = normal;
+            candidate.common.thickness *= Similarity::including_reflection(transform)?.scale;
+            if !has_finite_numbers(&candidate) {
+                return Err(DocError::NonFinite(self.handle));
+            }
+            return Ok(candidate);
+        }
+        self.transformed(transform)
+    }
+
     /// The transformed candidate, with source identity and properties, or an explicit refusal.
     pub fn transformed(&self, transform: &Mat4) -> Result<Self> {
         if let EntityKind::Raw(raw) = &self.kind {
@@ -258,12 +277,12 @@ impl Entity {
             EntityKind::Circle(c) => {
                 let (moved, n) = c.transformed_canonical(normal, transform)?;
                 *c = moved;
-                Some((n, scale()?))
+                Some((n, Similarity::including_reflection(transform)?.scale))
             }
             EntityKind::Arc(a) => {
                 let (moved, n) = a.transformed_canonical(normal, transform)?;
                 *a = moved;
-                Some((n, scale()?))
+                Some((n, Similarity::including_reflection(transform)?.scale))
             }
             EntityKind::LwPolyline(p) => {
                 let (moved, n) = p.transformed_canonical(normal, transform)?;

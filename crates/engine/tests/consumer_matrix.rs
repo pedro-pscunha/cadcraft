@@ -451,8 +451,14 @@ fn after_mirror(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String>
     circle_is(d, ops[0], start(plane), 2.0, arr(plane.normal()))?;
     let w = start(plane);
     let copy = d.model.iter().last().ok_or("empty model")?;
-    // The mirror line is the world X axis: y changes sign.
-    circle_is(d, copy.handle, [w[0], -w[1], w[2]], 2.0, [0.0, 0.0, 1.0])
+    // The mirror line is the world X axis: y and the normal's y component change sign.
+    let normal = if d.entity(ops[0]).is_some_and(|entity| entity.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2) {
+        let normal = plane.normal();
+        [normal.x, -normal.y, normal.z]
+    } else {
+        [0.0, 0.0, 1.0]
+    };
+    circle_is(d, copy.handle, [w[0], -w[1], w[2]], 2.0, normal)
 }
 
 fn erased(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
@@ -1130,7 +1136,7 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("erase", &[Role::SelectionMember]),
     ("id", &[Role::PickedPoint]),
     ("list", &[Role::Primary]),
-    ("mirror", &[Role::SelectionMember]),
+    ("mirror", &[Role::Primary, Role::SelectionMember]),
     ("mleadercollect", &[Role::SelectionMember]),
     ("move", &[Role::SelectionMember]),
     ("point", &[Role::PickedPoint]),
@@ -1161,6 +1167,15 @@ fn refusal_rows(out: &mut Vec<Row>, case: Case, revisions: &[Revision], planes: 
         }
     }
     out.push(Row { command, role, branch, revision: Revision::Legacy, plane: Plane::PlusZ, fixture, expect: Expect::Ok(|_| Ok(())) });
+}
+
+fn mirror_circle_primary() -> Fixture {
+    let mut drawing = Drawing::new_metric();
+    let mut entity = mirror_oracle_entity(MirrorFamily::Circle);
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::LegacyProjectedV1;
+    drawing.model.push(entity);
+    drawing.handseed = 2;
+    Fixture { drawing, params: json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true}), operands: vec![Handle(1)], view: None }
 }
 
 fn live_rows() -> Vec<Row> {
@@ -1466,10 +1481,9 @@ fn live_rows() -> Vec<Row> {
         expect,
     };
     out.push(mirror(Revision::Legacy, Expect::Edits(after_mirror)));
-    // A reflection of canonical geometry has no measured convention (the normal of a mirrored circle, the sweep of a mirrored arc):
-    // it is refused in every plane, and the reason names the reflection.
+    // The measured circle convention reflects its center and normal without a projected fallback.
     for plane in planes {
-        out.push(Row { plane, ..mirror(Canonical, Expect::Refuses("reflection")) });
+        out.push(Row { plane, ..mirror(Canonical, Expect::Edits(after_mirror)) });
     }
     out.push(mirror(Revision::Raw, Expect::Refuses("read-only")));
     // The object under a picked point gives its Z back; the interior of a fill and empty space give the current elevation.
@@ -1695,6 +1709,15 @@ fn live_rows() -> Vec<Row> {
             out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
         }
     }
+    out.push(Row {
+        command: "mirror",
+        role: Role::Primary,
+        branch: "tilted circle, erase source, World-Y mirror line",
+        revision: Canonical,
+        plane: Tilted,
+        fixture: mirror_circle_primary,
+        expect: Expect::Ok(|value| if value["handles"] == json!(["1"]) { Ok(()) } else { Err(format!("unexpected handles: {value}")) }),
+    });
     rows
 }
 
@@ -1766,6 +1789,239 @@ fn pending() -> Vec<Pending> {
             }),
         },
     ]
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// AutoCAD MIRROR controls. The vertical controls exercise the public spatial entity boundary:
+// the command accepts only a World-XY line, not a vertical UCS.
+
+#[derive(Clone, Copy, Debug)]
+enum MirrorFamily {
+    Circle,
+    Arc,
+    Ellipse,
+    Text,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MirrorPlane {
+    WorldXY,
+    VerticalXZ,
+}
+
+struct MirrorOracleRow {
+    family: MirrorFamily,
+    plane: MirrorPlane,
+    mirror_text: bool,
+}
+
+fn mirror_oracle_entity(family: MirrorFamily) -> cadcraft_doc::Entity {
+    let normal = Vec3::new(0.0, 0.6, 0.8);
+    let center = Vec3::new(4.0, 5.0, 6.0);
+    let kind = match family {
+        MirrorFamily::Circle => EntityKind::Circle(cadcraft_doc::Circle { center, radius: 2.0 }),
+        MirrorFamily::Arc => EntityKind::Arc(cadcraft_doc::Arc { center, radius: 2.0, start: 30_f64.to_radians(), end: 140_f64.to_radians() }),
+        MirrorFamily::Ellipse => {
+            EntityKind::Ellipse(cadcraft_doc::Ellipse { center, major: Vec3::new(3.0, 0.0, 0.0), normal, ratio: 0.5, start: 0.3, end: 4.2 })
+        }
+        MirrorFamily::Text => EntityKind::Text(cadcraft_doc::Text {
+            insert: center,
+            align_pt: None,
+            height: 2.0,
+            value: "Mirror control".into(),
+            rotation: 30_f64.to_radians(),
+            width_factor: 0.8,
+            oblique: 15_f64.to_radians(),
+            style: "Standard".into(),
+            halign: cadcraft_doc::HAlign::Left,
+            valign: cadcraft_doc::VAlign::Baseline,
+            backward: false,
+            upside_down: false,
+        }),
+    };
+    let mut entity = cadcraft_doc::Entity::new(Handle(1), kind);
+    entity.common.extrusion = normal;
+    entity.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+    entity
+}
+
+fn check_mirror_oracle(row: &MirrorOracleRow, entity: &cadcraft_doc::Entity) -> Result<(), String> {
+    let xy = matches!(row.plane, MirrorPlane::WorldXY);
+    let reflected_normal = if xy { Vec3::new(0.0, 0.6, 0.8) } else { Vec3::new(0.0, 0.6, -0.8) };
+    let normal = if matches!(row.family, MirrorFamily::Ellipse) { -reflected_normal } else { reflected_normal };
+    let near = |actual: Vec3, expected: Vec3| (actual - expected).len() < 1e-10;
+    let angle = |actual: f64, expected: f64| {
+        (actual - expected.to_radians()).rem_euclid(std::f64::consts::TAU).min((expected.to_radians() - actual).rem_euclid(std::f64::consts::TAU))
+            < 1e-10
+    };
+    if !near(entity.common.extrusion, normal) {
+        return Err(format!("normal {:?}, expected {normal:?}", entity.common.extrusion));
+    }
+    let center = if xy { Vec3::new(-4.0, 5.0, 6.0) } else { Vec3::new(4.0, -5.0, 6.0) };
+    let valid = match &entity.kind {
+        EntityKind::Circle(circle) => near(circle.center, center) && circle.radius == 2.0,
+        EntityKind::Arc(arc) => {
+            near(arc.center, center)
+                && arc.radius == 2.0
+                && angle(arc.start, if xy { 40.0 } else { 220.0 })
+                && angle(arc.end, if xy { 150.0 } else { 330.0 })
+        }
+        EntityKind::Ellipse(ellipse) => {
+            near(ellipse.center, if xy { Vec3::new(-4.0, 5.0, 6.0) } else { Vec3::new(4.0, 5.0, -6.0) })
+                && near(ellipse.major, Vec3::new(if xy { -3.0 } else { 3.0 }, 0.0, 0.0))
+                && near(ellipse.normal, normal)
+                && ellipse.ratio == 0.5
+                && (ellipse.start - 0.3).abs() < 1e-10
+                && (ellipse.end - 4.2).abs() < 1e-10
+        }
+        EntityKind::Text(text) => {
+            let expected = if row.mirror_text {
+                center
+            } else if xy {
+                Vec3::new(-21.32050807568878, 15.0, 6.0)
+            } else {
+                Vec3::new(3.0, -6.732050807568877, 6.0)
+            };
+            near(text.insert, expected)
+                && angle(text.rotation, if row.mirror_text && !xy { 150.0 } else { 330.0 })
+                && text.backward == row.mirror_text
+                && !text.upside_down
+                && text.height == 2.0
+                && text.width_factor == 0.8
+                && angle(text.oblique, 15.0)
+        }
+        _ => false,
+    };
+    if valid { Ok(()) } else { Err(format!("geometry {:?}", entity.kind)) }
+}
+
+#[test]
+fn the_eight_readable_text_angle_rows_match_the_measured_a_control() {
+    let angles = [30.0_f64, 120.0, 210.0, 300.0];
+    let xy_points = [
+        Vec3::new(-4.923760430703401, 5.533333333333334, 6.0),
+        Vec3::new(-3.466666666666666, 5.923760430703402, 6.0),
+        Vec3::new(-3.076239569296598, 4.466666666666666, 6.0),
+        Vec3::new(-4.533333333333334, 4.0762395692966, 6.0),
+    ];
+    let xz_points = [
+        Vec3::new(2.999999999999999, -6.732050807568877, 6.0),
+        Vec3::new(2.267949192431122, -4.000000000000001, 6.0),
+        Vec3::new(5.0, -3.267949192431123, 6.0),
+        Vec3::new(5.732050807568876, -6.000000000000001, 6.0),
+    ];
+    for plane in [MirrorPlane::WorldXY, MirrorPlane::VerticalXZ] {
+        for (index, angle) in angles.into_iter().enumerate() {
+            let mut entity = mirror_oracle_entity(MirrorFamily::Text);
+            let EntityKind::Text(text) = &mut entity.kind else { panic!("text") };
+            text.value = "A".into();
+            text.rotation = angle.to_radians();
+            let mirrored = match plane {
+                MirrorPlane::WorldXY => {
+                    let mut drawing = Drawing::new_metric();
+                    drawing.model.push(entity);
+                    let mut session = session_of(&drawing);
+                    session.execute("mirror", &json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true})).unwrap();
+                    session.doc().unwrap().entity(Handle(1)).unwrap().as_ref().clone()
+                }
+                MirrorPlane::VerticalXZ => {
+                    let matrix = cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+                    entity
+                        .mirrored(
+                            &matrix,
+                            cadcraft_doc::TextMirror::Readable {
+                                bounds: cadcraft_geom::Bounds2 {
+                                    min: cadcraft_geom::Vec2::ZERO,
+                                    max: cadcraft_geom::Vec2::new(1.066666666666666, 2.0),
+                                },
+                            },
+                        )
+                        .unwrap()
+                }
+            };
+            let EntityKind::Text(text) = mirrored.kind else { panic!("text") };
+            let expected = if matches!(plane, MirrorPlane::WorldXY) { xy_points[index] } else { xz_points[index] };
+            assert!((text.insert - expected).len() < 1e-10, "{plane:?}, {angle}: {:?}", text.insert);
+            assert!((text.rotation - cadcraft_geom::norm_angle(-angle.to_radians())).abs() < 1e-10, "{plane:?}, {angle}");
+            assert!(!text.backward && !text.upside_down);
+        }
+    }
+}
+
+#[test]
+fn unmeasured_text_mirror_cases_refuse_before_any_selection_member_changes() {
+    for case in ["justification", "backward", "upside_down", "style_flags"] {
+        for erase in [false, true] {
+            for mode in [0, 1] {
+                let mut drawing = Drawing::new_metric();
+                drawing.header.set_i64("MIRRTEXT", mode);
+                drawing.model.push(mirror_oracle_entity(MirrorFamily::Circle));
+                let mut text = mirror_oracle_entity(MirrorFamily::Text);
+                text.handle = Handle(2);
+                let EntityKind::Text(payload) = &mut text.kind else { panic!("text") };
+                match case {
+                    "justification" => payload.halign = cadcraft_doc::HAlign::Center,
+                    "backward" => payload.backward = true,
+                    "upside_down" => payload.upside_down = true,
+                    "style_flags" => drawing.text_styles[0].backwards = true,
+                    _ => unreachable!(),
+                }
+                drawing.model.push(text);
+                drawing.handseed = 3;
+                let mut session = session_of(&drawing);
+                let error = session.execute("mirror", &json!({"handles": ["1", "2"], "p1": [0, 0], "p2": [0, 10], "erase": erase})).unwrap_err();
+                assert!(error.to_string().contains("measurement"), "{case}: {error}");
+                assert!(error.to_string().contains(if case == "justification" { "justification" } else { "flags" }), "{case}: {error}");
+                assert_eq!(session.doc().unwrap().model, drawing.model, "{case}, erase={erase}, MIRRTEXT={mode}");
+                assert_eq!(session.doc().unwrap().handseed, 3, "{case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_sixteen_measured_mirror_rows_match_autocad() {
+    let mut failures = Vec::new();
+    let mut count = 0;
+    for plane in [MirrorPlane::WorldXY, MirrorPlane::VerticalXZ] {
+        for mirror_text in [false, true] {
+            for family in [MirrorFamily::Circle, MirrorFamily::Arc, MirrorFamily::Ellipse, MirrorFamily::Text] {
+                let row = MirrorOracleRow { family, plane, mirror_text };
+                let entity = mirror_oracle_entity(family);
+                let result = match plane {
+                    MirrorPlane::WorldXY => {
+                        let mut drawing = Drawing::new_metric();
+                        drawing.header.set_i64("MIRRTEXT", i64::from(mirror_text));
+                        drawing.model.push(entity);
+                        let mut session = session_of(&drawing);
+                        session
+                            .execute("mirror", &json!({"handles": ["1"], "p1": [0, 0], "p2": [0, 10], "erase": true}))
+                            .map_err(|error| error.to_string())
+                            .and_then(|_| check_mirror_oracle(&row, session.doc().unwrap().entity(Handle(1)).unwrap()))
+                    }
+                    MirrorPlane::VerticalXZ => {
+                        let matrix =
+                            cadcraft_geom::Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
+                        let policy = if mirror_text {
+                            cadcraft_doc::TextMirror::Reflected
+                        } else {
+                            // AutoCAD's independently measured zero-oblique textbox is an input to this spatial boundary.
+                            cadcraft_doc::TextMirror::Readable {
+                                bounds: cadcraft_geom::Bounds2 { min: cadcraft_geom::Vec2::ZERO, max: cadcraft_geom::Vec2::new(20.0, 2.0) },
+                            }
+                        };
+                        entity.mirrored(&matrix, policy).map_err(|error| error.to_string()).and_then(|entity| check_mirror_oracle(&row, &entity))
+                    }
+                };
+                count += 1;
+                if let Err(error) = result {
+                    failures.push(format!("{family:?} {plane:?} MIRRTEXT={mirror_text}: {error}"));
+                }
+            }
+        }
+    }
+    assert_eq!(count, 16);
+    assert!(failures.is_empty(), "{} of {count} mirror rows fail:\n{}", failures.len(), failures.join("\n"));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------

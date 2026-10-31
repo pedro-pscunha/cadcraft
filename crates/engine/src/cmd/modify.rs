@@ -20,6 +20,7 @@ mod break_join;
 mod explode;
 pub(crate) use explode::explode_dimension;
 mod fillet;
+mod mirror;
 mod offset;
 mod select_then;
 mod stretch;
