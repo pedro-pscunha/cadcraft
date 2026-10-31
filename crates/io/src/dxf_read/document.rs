@@ -3,9 +3,11 @@ use super::entities::{entity_plot_style, entity_with_table_budget, insert_attrib
 use super::extras::entity_extras;
 use super::objects::{MAX_OBJECTS, Objects, SortentsTable, page_setup};
 use super::{BTreeMap, Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
+use crate::activation::records::Container;
 
 pub(super) fn parse_entities(
     recs: &[(String, Vec<Tag>)],
+    container: &Container,
     d: &mut Drawing,
     rx: &mut Rx,
     skipped: &mut usize,
@@ -17,6 +19,17 @@ pub(super) fn parse_entities(
         let t = T(tags);
         let owner = crate::dxf_ext::owner(tags);
         let paper = t.i(67) == Some(1);
+        // The place of a top-level record, counted as the activation adapter counts it (followers are not records of their own).
+        let place = (!matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND")).then(|| rx.ordinals.next(container));
+        if let Some(reason) = place.and_then(|place| rx.raw_reason(container, place)) {
+            let end = unit_end(recs, i);
+            if let Some(unit) = raw_unit(&recs[i..end], &reason, d, rx) {
+                d.bump_handseed(unit.handle);
+                out.push((owner, paper, unit));
+                i = end;
+                continue;
+            }
+        }
         if kind == "VIEWPORT"
             && crate::dxf_ext::is_paper_view(tags)
             && let Some(block) = owner.as_ref().and_then(|o| rx.brs.get(&o.trim().to_ascii_uppercase()))
@@ -67,7 +80,8 @@ pub(super) fn parse_entities(
     // Assign fresh handles to duplicates (hostile files).
     let mut seen = std::collections::HashSet::new();
     for (_, _, e) in &mut out {
-        if !seen.insert(e.handle) {
+        // A raw unit keeps the identity of its source records.
+        if !seen.insert(e.handle) && !matches!(e.kind, EntityKind::Raw(_)) {
             e.handle = d.new_handle();
             seen.insert(e.handle);
         }
@@ -106,7 +120,7 @@ pub(super) fn read_blocks(
                 j += 1;
             }
             let body = recs.get(i + 1..j).unwrap_or(&[]);
-            let ents = parse_entities(body, d, rx, &mut n, table_cells_left);
+            let ents = parse_entities(body, &Container::block(&name), d, rx, &mut n, table_cells_left);
             blocks.push((name, base, description, ents, xref));
             i = j + 1;
         } else {
@@ -386,4 +400,56 @@ pub(super) fn apply_sortents(
     }
     d.read_notes.extend(notes);
     tables
+}
+
+/// The end of the unit that starts at `recs[start]`: the record and the followers the activation adapter gives it (the ATTRIBs of an
+/// INSERT, the VERTEX records of a POLYLINE, and their closing SEQEND).
+fn unit_end(recs: &[(String, Vec<Tag>)], start: usize) -> usize {
+    let follower = match recs[start].0.as_str() {
+        "INSERT" => "ATTRIB",
+        "POLYLINE" => "VERTEX",
+        _ => return start + 1,
+    };
+    let mut end = start + 1;
+    while recs.get(end).is_some_and(|(kind, _)| kind == follower) {
+        end += 1;
+    }
+    if recs.get(end).is_some_and(|(kind, _)| kind == "SEQEND") {
+        end += 1;
+    }
+    end
+}
+
+/// The record as raw tags, with an identity if the file gave it none (an old DXF has no handles).
+fn raw_record(kind: &str, tags: &[Tag], d: &mut Drawing) -> Option<cadcraft_doc::RawRecord> {
+    let mut raw: Vec<cadcraft_doc::RawTag> = tags.iter().map(|t| cadcraft_doc::RawTag { code: t.code, value: t.str() }).collect();
+    if !raw.iter().any(|t| t.code == 5) {
+        raw.insert(0, cadcraft_doc::RawTag { code: 5, value: d.new_handle().hex() });
+    }
+    cadcraft_doc::RawRecord::new(kind.to_string(), raw).ok()
+}
+
+/// The records of one unit as the raw entity that keeps them verbatim and read-only; `None`, with a read note, when the records
+/// cannot be kept raw (no closing SEQEND, a repeated identity): the unit is then read Legacy.
+fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx) -> Option<Entity> {
+    let (kind, tags) = unit.first()?;
+    let parent = raw_record(kind, tags, d);
+    let followers: Option<Vec<_>> = unit[1..].iter().map(|(kind, tags)| raw_record(kind, tags, d)).collect();
+    let mut source = super::common::common(&T(tags));
+    if let Some(style) = entity_plot_style(tags, rx) {
+        source.plot_style = style;
+    }
+    let compound =
+        parent.zip(followers).and_then(|(parent, followers)| cadcraft_doc::RawCompound::new(parent, followers, source, reason.to_string()).ok());
+    match compound {
+        Some(compound) => {
+            let handle = compound.parent().handle();
+            d.read_notes.push(format!("{kind} {} is kept as read and cannot be edited: {reason}", handle.hex()));
+            Some(Entity::from_raw(compound))
+        }
+        None => {
+            d.read_notes.push(format!("{kind} needs a canonical reading and cannot be kept raw (its records have no usable identity or closing SEQEND): {reason} It is read Legacy."));
+            None
+        }
+    }
 }

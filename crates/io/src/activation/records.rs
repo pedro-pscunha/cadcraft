@@ -52,6 +52,21 @@ impl NodeKey {
     }
 }
 
+/// The place of the next top-level record of each container, shared by the adapter and the reader so that both count alike. A block
+/// repeated by name, and an ENTITIES section repeated in a damaged file, continue the count of their container.
+#[derive(Debug, Default)]
+pub struct Ordinals(HashMap<Container, u32>);
+
+impl Ordinals {
+    /// The place of the next top-level record of `container`.
+    pub fn next(&mut self, container: &Container) -> u32 {
+        let counter = self.0.entry(container.clone()).or_insert(0);
+        let place = *counter;
+        *counter = counter.saturating_add(1);
+        place
+    }
+}
+
 /// A record as the need function sees it.
 pub struct RecordView<'a> {
     pub key: &'a NodeKey,
@@ -163,6 +178,7 @@ struct Builder<'a> {
     /// Upper-case block name → its definition node (the first of a repeated name).
     definitions: HashMap<String, NodeId>,
     references: Vec<(NodeId, Names)>,
+    ordinals: Ordinals,
 }
 
 impl Builder<'_> {
@@ -177,16 +193,15 @@ impl Builder<'_> {
 
     /// The top-level records of one container, in file order.
     fn container(&mut self, container: &Container, definition: Option<NodeId>, recs: &[(String, Vec<Tag>)]) {
-        let mut ordinal = 0u32;
-        // The INSERT whose ATTRIBs follow, with its node and the number of ATTRIBs so far.
-        let mut insert: Option<(NodeId, u32)> = None;
+        // The INSERT whose ATTRIBs follow, with its node, its place and the number of ATTRIBs so far.
+        let mut insert: Option<(NodeId, u32, u32)> = None;
         for (kind, groups) in recs {
             if kind == "ATTRIB" {
                 // An ATTRIB follows its INSERT; one with no INSERT before it is no record.
-                if let Some((parent, count)) = insert.as_mut() {
-                    let (parent, place) = (*parent, *count);
+                if let Some((parent, parent_place, count)) = insert.as_mut() {
+                    let (parent, parent_place, place) = (*parent, *parent_place, *count);
                     *count += 1;
-                    let key = NodeKey::record(container.clone(), ordinal.saturating_sub(1), Some(place));
+                    let key = NodeKey::record(container.clone(), parent_place, Some(place));
                     let need = (self.need)(&RecordView { key: &key, kind, family: Family::Attrib, groups });
                     let attrib = self.add(key, Node::record(Family::Attrib, need), first(groups, 5));
                     self.edges.push(Edge::Owns { insert: parent, attrib });
@@ -201,8 +216,7 @@ impl Builder<'_> {
                 continue;
             }
             insert = None;
-            let place = ordinal;
-            ordinal = ordinal.saturating_add(1);
+            let place = self.ordinals.next(container);
             let Some(family) = family_of_kind(kind) else { continue };
             let key = NodeKey::record(container.clone(), place, None);
             let need = (self.need)(&RecordView { key: &key, kind, family, groups });
@@ -212,7 +226,7 @@ impl Builder<'_> {
             }
             match kind.as_str() {
                 "INSERT" => {
-                    insert = Some((id, 0));
+                    insert = Some((id, place, 0));
                     if let Some(name) = first(groups, 2) {
                         self.references.push((id, Names::Block(name.to_ascii_uppercase())));
                     }
@@ -299,6 +313,7 @@ impl RecordGraph {
             edges: Vec::new(),
             definitions: HashMap::new(),
             references: Vec::new(),
+            ordinals: Ordinals::default(),
         };
         let section = |name: &str| sections.iter().find(|s| s.name.eq_ignore_ascii_case(name));
         // Block record handle (upper case) → block name (upper case).
@@ -332,7 +347,8 @@ impl RecordGraph {
                 at = end;
             }
         }
-        if let Some(entities) = section("ENTITIES") {
+        // A damaged file can split its entities over several ENTITIES sections: one container.
+        for entities in sections.iter().filter(|s| s.name.eq_ignore_ascii_case("ENTITIES")) {
             b.container(&Container::Entities, None, &records(&entities.tags));
         }
         for (user, names) in std::mem::take(&mut b.references) {

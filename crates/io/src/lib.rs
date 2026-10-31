@@ -77,17 +77,27 @@ pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
 
 /// [`read`] with the activation policy of the caller.
 pub fn read_with_policy(bytes: &[u8], name: impl AsRef<Path>, policy: activation::ReaderPolicy) -> Result<Drawing> {
+    read_with_need(bytes, name, policy, &dxf_read::no_need)
+}
+
+/// [`read_with_policy`] with the function that says which records need Canonical (the stand-in for the section 3 predicate).
+pub fn read_with_need(
+    bytes: &[u8],
+    name: impl AsRef<Path>,
+    policy: activation::ReaderPolicy,
+    need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
+) -> Result<Drawing> {
     let name = name.as_ref();
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read_from_dwg(&dxf, policy).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        let mut d = dxf_read::read_from_dwg(&dxf, policy, need).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
         d.read_notes.extend(notes);
         return Ok(d);
     }
     match (Format::from_path(name), ext(name).as_str()) {
         (Some(Format::Svg | Format::Svgz), _) => svg_read::read(bytes),
-        (Some(Format::Dxf), _) => dxf_read::read_with_policy(bytes, policy),
-        (_, e) if bytes.len() > 4 => dxf_read::read_with_policy(bytes, policy).map_err(|_| IoError::Unsupported(e.to_string())),
+        (Some(Format::Dxf), _) => dxf_read::read_with_need(bytes, policy, need),
+        (_, e) if bytes.len() > 4 => dxf_read::read_with_need(bytes, policy, need).map_err(|_| IoError::Unsupported(e.to_string())),
         (_, e) => Err(IoError::Unsupported(e.to_string())),
     }
 }
@@ -105,7 +115,7 @@ pub fn read_report_with(
     policy: activation::ReaderPolicy,
     need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
 ) -> Result<(Drawing, activation::records::ReadReport)> {
-    let drawing = read_with_policy(bytes, name, policy)?;
+    let drawing = read_with_need(bytes, name, policy, need)?;
     let dxf = if cadcraft_dwg::is_dwg(bytes) {
         std::borrow::Cow::Owned(cadcraft_dwg::dwg_to_dxf(bytes).map_err(IoError::Format)?)
     } else {

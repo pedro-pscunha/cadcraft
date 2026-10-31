@@ -198,3 +198,19 @@ fn the_family_of_every_entity_type_with_a_reader_is_named() {
     assert_eq!(family_of_kind("MULTILEADER"), Some(Family::MLeader));
     assert_eq!(family_of_kind("3DSOLID"), None);
 }
+
+#[test]
+fn a_repeated_container_continues_its_count_so_that_two_records_never_share_a_key() {
+    // A damaged file with two ENTITIES sections, and two blocks of one name: the second continues the first.
+    let secs = {
+        let one = dxf("", &[block("Door", &[line("B1")]), block("DOOR", &[line("B2")])], &[line("A1")]);
+        let two = dxf("", &[], &[line("A2")]);
+        one.into_iter().chain(two.into_iter().filter(|s| s.name == "ENTITIES")).collect::<Vec<_>>()
+    };
+    let g = RecordGraph::build(&secs, &plain).unwrap();
+    assert_eq!(g.graph().nodes().len(), 5);
+    for ordinal in 0..2 {
+        assert!(g.node(&key(Container::Entities, ordinal)).is_some(), "entities {ordinal}");
+        assert!(g.node(&key(Container::block("door"), ordinal)).is_some(), "door {ordinal}");
+    }
+}

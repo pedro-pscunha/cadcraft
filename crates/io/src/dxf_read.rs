@@ -13,7 +13,8 @@ use cadcraft_doc::{
 use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
-use crate::activation::{Activation, NodeId, Outcome, ReaderPolicy, WIRED_FAMILIES};
+use crate::activation::records::{Container, NodeKey, Ordinals, RecordGraph, RecordView};
+use crate::activation::{Activation, Need, NodeId, Outcome, ReaderPolicy, WIRED_FAMILIES, activate};
 use crate::{IoError, Result};
 
 #[cfg(test)]
@@ -71,6 +72,10 @@ pub struct Rx {
     reader_policy: ReaderPolicy,
     /// Prepared component outcomes, indexed by the record adapter's graph NodeId.
     activation: Option<Activation>,
+    /// The graph the outcomes belong to: the one answer to "which node is this record", built only when the policy needs it.
+    records: Option<RecordGraph>,
+    /// The place of the next top-level record of each container, counted as the adapter counted it.
+    ordinals: Ordinals,
     /// The DXF was made from a DWG file by the DWG reader.
     from_dwg: bool,
     /// STYLE record handle (upper case) → text style name.
@@ -113,6 +118,17 @@ pub struct Rx {
 impl Rx {
     pub fn reader_policy(&self) -> ReaderPolicy {
         self.reader_policy
+    }
+
+    /// The reason a record has to be kept Raw, `None` when the read keeps it Legacy: the record of `container` at `place` is a
+    /// node of a component that needs Canonical and cannot get it.
+    pub(crate) fn raw_reason(&self, container: &Container, place: u32) -> Option<String> {
+        let node = self.records.as_ref()?.node(&NodeKey::record(container.clone(), place, None))?;
+        if self.revision_for(node) != Some(cadcraft_doc::GeometryRevision::RawSource) {
+            return None;
+        }
+        let why = self.activation.as_ref()?.reason_for(node).unwrap_or_else(|| "it needs a canonical reading".into());
+        Some(format!("The record needs a canonical reading that this reader cannot give it: {why}."))
     }
 
     /// The prepared revision of a graph node. An unprepared context or an unknown node has no decision.
@@ -168,7 +184,17 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
 
 /// Read a DXF file into a drawing with the activation policy of the caller.
 pub fn read_with_policy(bytes: &[u8], policy: ReaderPolicy) -> Result<Drawing> {
-    read_budgeted(bytes, 4_000_000, false, policy)
+    read_with_need(bytes, policy, &no_need)
+}
+
+/// [`read_with_policy`] with the function that says which records need Canonical (the stand-in for the section 3 predicate).
+pub fn read_with_need(bytes: &[u8], policy: ReaderPolicy, need: &dyn Fn(&RecordView) -> Need) -> Result<Drawing> {
+    read_budgeted(bytes, 4_000_000, false, policy, need)
+}
+
+/// No record needs Canonical until the section 3 predicate exists.
+pub(crate) fn no_need(_: &RecordView) -> Need {
+    Need::Plain
 }
 
 pub(crate) fn current_policy() -> Result<ReaderPolicy> {
@@ -177,8 +203,8 @@ pub(crate) fn current_policy() -> Result<ReaderPolicy> {
 
 /// Read the DXF that the DWG reader made from a DWG file. Groups that the DWG reader writes as fixed values, and a DWG does not
 /// hold, are not the file's data and are left unread.
-pub fn read_from_dwg(bytes: &[u8], policy: ReaderPolicy) -> Result<Drawing> {
-    read_budgeted(bytes, 4_000_000, true, policy)
+pub fn read_from_dwg(bytes: &[u8], policy: ReaderPolicy, need: &dyn Fn(&RecordView) -> Need) -> Result<Drawing> {
+    read_budgeted(bytes, 4_000_000, true, policy, need)
 }
 
 /// A block definition read from BLOCKS: name, base point, description, entities (owner, paper
@@ -189,7 +215,13 @@ type BlockDef = (String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)
 type LayoutDef = (String, u32, String, PageSetup);
 
 /// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
-fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool, policy: ReaderPolicy) -> Result<Drawing> {
+fn read_budgeted(
+    bytes: &[u8],
+    mut table_cells_left: usize,
+    from_dwg: bool,
+    policy: ReaderPolicy,
+    need: &dyn Fn(&RecordView) -> Need,
+) -> Result<Drawing> {
     // No canonical reader is called yet: a mask that asks for one cannot be honored, and the read says so.
     if let Some(family) = policy.mask().families().find(|f| !WIRED_FAMILIES.contains(*f)) {
         return Err(IoError::Format(format!("the reader policy turns on {family:?}, which has no canonical reader")));
@@ -204,6 +236,12 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool, poli
     // A file without $INSUNITS declares no units (#1209); only new drawings take the template's.
     d.header.set_i64("INSUNITS", 0);
     let mut rx = Rx { reader_policy: policy, pstyles: plot_style_names(&secs), from_dwg, ..Rx::default() };
+    // The activation of the file, before any entity is built; a plain read at stage 0 skips it.
+    if policy.needs_graph() {
+        let graph = RecordGraph::build(&secs, need).map_err(|e| IoError::Format(format!("the activation graph is invalid: {e:?}")))?;
+        rx.activation = Some(activate(graph.graph(), &policy.graph_policy()));
+        rx.records = Some(graph);
+    }
     d.plot_style_names = rx.pstyles.values().cloned().collect();
     d.plot_style_names.sort();
     let mut blocks: Vec<BlockDef> = Vec::new();
@@ -227,7 +265,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool, poli
             // A damaged file may split its entities over several ENTITIES sections (#865).
             "ENTITIES" => {
                 let mut n = 0;
-                entities.extend(parse_entities(&records(&s.tags), &mut d, &mut rx, &mut n, &mut table_cells_left));
+                entities.extend(parse_entities(&records(&s.tags), &Container::Entities, &mut d, &mut rx, &mut n, &mut table_cells_left));
                 count_skipped(&mut skipped, "ENTITIES", n);
             }
             "OBJECTS" => read_objects(&s.tags, &mut objs, &mut layout_objs),
@@ -357,7 +395,7 @@ mod table_budget_tests {
         let dxf = format!(
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nTEST\n10\n0\n20\n0\n{table}0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{table}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{table}0\nENDSEC\n0\nEOF\n"
         );
-        let d = read_budgeted(dxf.as_bytes(), 2, false, ReaderPolicy::resolve(None).unwrap()).unwrap();
+        let d = read_budgeted(dxf.as_bytes(), 2, false, ReaderPolicy::resolve(None).unwrap(), &no_need).unwrap();
         let block = d.block("TEST").unwrap();
         let count = |e: &Entity| match &e.kind {
             EntityKind::Table(t) => t.cells.iter().map(Vec::len).sum::<usize>(),

@@ -82,6 +82,8 @@ impl ReaderMode {
 pub struct ReaderPolicy {
     mode: ReaderMode,
     active: FamilySet,
+    /// Plan v3, section 9, Q1: the records that need Canonical are kept Raw, with an empty mask too.
+    raw_path: bool,
 }
 
 impl Default for ReaderPolicy {
@@ -92,7 +94,12 @@ impl Default for ReaderPolicy {
 
 impl ReaderPolicy {
     pub fn new(mode: ReaderMode, active: FamilySet) -> ReaderPolicy {
-        ReaderPolicy { mode, active }
+        ReaderPolicy { mode, active, raw_path: false }
+    }
+
+    /// This policy with the Raw path: a record that needs Canonical and cannot get it is kept Raw and read-only (plan v3, section 4.1).
+    pub fn with_raw_path(self) -> ReaderPolicy {
+        ReaderPolicy { raw_path: true, ..self }
     }
 
     /// The policy of a setting (the value of [`READER_ENV`]) over this build: [`ACTIVATION_DEFAULT`] when there is none.
@@ -115,10 +122,10 @@ impl ReaderPolicy {
         if self.mode == ReaderMode::Off { FamilySet::NONE } else { self.active }
     }
 
-    /// Whether a plain read must build the activation graph. One condition decides it: today only a mask that turns a family on does.
-    /// The Raw path for the records that need Canonical (plan v3, section 9, Q1) will add its own case here, with an empty mask.
+    /// Whether a plain read must build the activation graph. One condition decides it: a mask that turns a family on, or the Raw path
+    /// for the records that need Canonical (plan v3, section 9, Q1), which needs the graph with an empty mask too.
     pub fn needs_graph(&self) -> bool {
-        self.mask() != FamilySet::NONE
+        self.mask() != FamilySet::NONE || self.raw_path
     }
 
     /// The policy of the graph engine for this reader policy: the mask, the families with a canonical reader, and no definition
@@ -283,6 +290,19 @@ pub enum Failure {
     TooDeep(NodeId),
 }
 
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failure::DefinitionBeforeStage6(_) => write!(f, "it belongs to a block definition, which cannot be read Canonical before stage 6"),
+            Failure::FamilyOutsideMask(family) => write!(f, "{family:?} records are outside the reader mask"),
+            Failure::NoReader(family) => write!(f, "{family:?} has no canonical reader"),
+            Failure::UnreadableNeed(_) => write!(f, "its canonical reading fails"),
+            Failure::Cycle(_) => write!(f, "its blocks refer to each other in a cycle"),
+            Failure::TooDeep(_) => write!(f, "its blocks nest too deeply"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComponentOutcome {
     /// No `needs` node.
@@ -311,6 +331,15 @@ pub struct Activation {
 }
 
 impl Activation {
+    /// Why the component of `node` could not activate, as one sentence; `None` when it did not need to.
+    pub fn reason_for(&self, node: NodeId) -> Option<String> {
+        let component = self.components.iter().find(|c| c.nodes.contains(&node))?;
+        if component.failures.is_empty() {
+            return None;
+        }
+        Some(component.failures.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+    }
+
     pub fn outcome(&self, id: NodeId) -> Option<Outcome> {
         self.outcomes.get(id.index()).copied()
     }
