@@ -10,10 +10,26 @@
 //! Canonical when it can activate ([`Failure`] lists why it cannot), else each `needs` unit is Raw and everything else stays
 //! Legacy. A Raw unit is an exception to revision agreement: it is neither Legacy nor Canonical.
 
+#[cfg(test)]
+#[path = "activation_inspections.rs"]
+mod inspections;
 pub mod records;
 #[cfg(test)]
 #[path = "activation_work_tests.rs"]
 mod work_tests;
+
+#[cfg(not(test))]
+type ComponentList = Vec<Component>;
+#[cfg(test)]
+type ComponentList = inspections::InspectedVec<Component, 0>;
+#[cfg(not(test))]
+type ComponentMembers = Vec<NodeId>;
+#[cfg(test)]
+type ComponentMembers = inspections::InspectedVec<NodeId, 1>;
+#[cfg(not(test))]
+type EdgeList = Vec<Edge>;
+#[cfg(test)]
+type EdgeList = inspections::InspectedVec<Edge, 2>;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -205,7 +221,7 @@ pub enum GraphError {
 #[derive(Clone, Debug)]
 pub struct Graph {
     nodes: Vec<Node>,
-    edges: Vec<Edge>,
+    edges: EdgeList,
 }
 
 impl Graph {
@@ -244,6 +260,8 @@ impl Graph {
                 }
             }
         }
+        #[cfg(test)]
+        let edges = EdgeList::new(edges);
         Ok(Graph { nodes, edges })
     }
 
@@ -321,7 +339,7 @@ pub enum ComponentOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Component {
     /// The nodes of the component, ascending.
-    pub nodes: Vec<NodeId>,
+    pub nodes: ComponentMembers,
     pub outcome: ComponentOutcome,
     /// Why it cannot activate (empty unless `outcome` is [`ComponentOutcome::Raw`]), ascending and without repeats.
     pub failures: Vec<Failure>,
@@ -347,15 +365,13 @@ pub struct Activation {
     /// The outcome of every node, by node index.
     outcomes: Vec<Outcome>,
     /// The components, by their lowest node.
-    components: Vec<Component>,
+    components: ComponentList,
     component_by_node: Vec<usize>,
 }
 
 impl Activation {
     /// The component's cached, deduplicated display summary; `None` when it did not need to activate.
     pub fn reason_for(&self, node: NodeId) -> Option<&str> {
-        #[cfg(test)]
-        work_tests::REASON_PROBES.with(|count| count.set(count.get() + 1));
         let component = self.components.get(*self.component_by_node.get(node.index())?)?;
         component.reason.as_deref()
     }
@@ -387,8 +403,6 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     let mut sets = Sets::new(n);
     let mut owned: BTreeMap<NodeId, Vec<NodeId>> = BTreeMap::new();
     for edge in &graph.edges {
-        #[cfg(test)]
-        work_tests::OWNERSHIP_PROBES.with(|count| count.set(count.get() + 1));
         let (a, b) = match *edge {
             Edge::Contains { definition, member } => (definition, member),
             Edge::Refers { user, definition } => (user, definition),
@@ -408,6 +422,8 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     let mut outcomes = vec![Outcome::Legacy; n];
     let mut components: Vec<Component> = Vec::with_capacity(members.len());
     for nodes in members.into_values() {
+        #[cfg(test)]
+        let nodes = ComponentMembers::new(nodes);
         let needs = nodes.iter().any(|id| matches!(graph.nodes[id.index()].need, Need::Needs { .. }) && is_record(graph, *id));
         if !needs {
             components.push(Component { nodes, outcome: ComponentOutcome::Legacy, failures: Vec::new(), reason: None });
@@ -434,6 +450,8 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
             component_by_node[node.index()] = index;
         }
     }
+    #[cfg(test)]
+    let components = ComponentList::new(components);
     Activation { outcomes, components, component_by_node }
 }
 
