@@ -301,10 +301,20 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     let txt = format_angle_with_separator(sweep, st.angular_unit, st.angular_decimals, azin, &st.decimal_separator);
     // DIMPOST is a linear-dimension prefix/suffix; angles have their own format only.
     g.mtext = inspected(apply_override(&txt, d), d);
-    // Text above the line, unmoved (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle6`): when the two arrowheads fit on the arc, the arc is drawn
-    // between their bases, and a text that does not fit between them goes outside, past the first extension line (see below).
+    // Text above the line, unmoved (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle6` and `elev-oracle15`). AutoCAD measures the chord of the arc.
+    // The text is between the extension lines when the chord is longer than the text and a gap on each side; then the arrowheads are inside
+    // (the arc drawn between their bases) when the chord also holds the text and two arrowheads, and outside (the arc whole, a stub of an
+    // arrowhead past each end) otherwise. A text that does not fit goes outside, past the first extension line (see below), and the
+    // arrowheads are inside when they fit on the arc.
     let head = 2.0 * (config.arrow_size / (2.0 * r)).clamp(-1.0, 1.0).asin();
-    let beside = st.text_above != 0 && !d.user_text_pos && !config.ticks && head.is_finite() && sweep >= 2.0 * head - 1e-9;
+    let (tw, tht) = measure(&g.mtext);
+    let ink = config.ink_height(&g.mtext);
+    let chord = arc.start_point().dist(arc.end_point());
+    let unmoved = st.text_above != 0 && !d.user_text_pos && !config.ticks && head.is_finite();
+    let text_between = chord > tw + 2.0 * gap + 1e-9;
+    let arrows_between = if text_between { chord >= tw + 2.0 * config.arrow_size - 1e-9 } else { sweep >= 2.0 * head - 1e-9 };
+    let beside = unmoved && arrows_between;
+    let arrows_outside = unmoved && !arrows_between;
     let mut pts = Vec::new();
     if beside {
         if sweep > 2.0 * head + 1e-9 {
@@ -323,20 +333,29 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     let ((p1, dir1), (p2, dir2)) = if cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e) { (start, finish) } else { (finish, start) };
     // From a vertex and two points, the extension lines start at the points even when those are beyond the arc (AutoCAD draws them from
     // the point, a gap off, to a little past the arc); from two lines the lines are the objects and reach no further than the arc.
-    let reach = |a: Vec2| if matches!(d.kind, DimKind::Angular3P) && beside { vertex.dist(a) } else { vertex.dist(a).min(r) };
+    let reach = |a: Vec2| if matches!(d.kind, DimKind::Angular3P) && unmoved { vertex.dist(a) } else { vertex.dist(a).min(r) };
     if !st.suppress_ext1 {
         g.ext_n(ext_line(vertex + (p1 - vertex).normalized() * reach(a1), p1, st, k), false);
     }
     if !st.suppress_ext2 {
         g.ext_n(ext_line(vertex + (p2 - vertex).normalized() * reach(a2), p2, st, k), true);
     }
-    end(g, blk1, p1, dir1);
-    end(g, blk2, p2, dir2);
-    let (tw, tht) = measure(&g.mtext);
-    let ink = config.ink_height(&g.mtext);
+    if arrows_outside {
+        // The arrowheads point in from outside the angle, each with a stub of an arrowhead past its base.
+        end(g, blk1, p1, -dir1);
+        end(g, blk2, p2, -dir2);
+        for p in [p1, p2] {
+            let at_start = (p - arc.start_point()).len() < (p - arc.end_point()).len();
+            let (low, high) = if at_start { (arc.start - 2.0 * head, arc.start - head) } else { (arc.end + head, arc.end + 2.0 * head) };
+            g.dim(arc_points(&Arc::new(vertex, r, low, high)));
+        }
+    } else {
+        end(g, blk1, p1, dir1);
+        end(g, blk2, p2, dir2);
+    }
     let mid = arc.mid_point();
     let radial = (mid - vertex).normalized();
-    if beside && arc.start_point().dist(arc.end_point()) <= tw + 2.0 * gap + 1e-9 {
+    if beside && !text_between {
         // The text does not fit between the extension lines (AutoCAD measures the chord of the arc): the arc goes on for an arrowhead past the first one, and a leader goes on from
         // it along the tangent for a gap, the text and a gap, with the text above the leader (radially out) a gap and half its height.
         let at_start = (p1 - arc.start_point()).len() < (p1 - arc.end_point()).len();
@@ -355,7 +374,8 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     let text_angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
     if !d.user_text_pos {
         let tr = Vec2::from_angle(text_angle);
-        let off = gap + (tw * tr.dot(radial).abs() + tht * tr.perp().dot(radial).abs()) / 2.0;
+        let ink_height = if unmoved { ink } else { tht };
+        let off = gap + (tw * tr.dot(radial).abs() + ink_height * tr.perp().dot(radial).abs()) / 2.0;
         text_mid = mid + radial * off;
     }
     *text_angle_out = text_angle;
@@ -416,16 +436,16 @@ pub(super) fn draw_arc_length(config: &DimConfig<'_>, g: &mut DimGeometry, text_
     let head = 2.0 * (config.arrow_size / (2.0 * arc.radius)).clamp(-1.0, 1.0).asin();
     let plain = linear_text(meas, d, st, "");
     let (tw_plain, _) = measure(&plain);
-    let beside = st.text_above != 0
-        && !d.user_text_pos
-        && !config.ticks
-        && head.is_finite()
-        && arc.sweep() >= 2.0 * head - 1e-9
-        && arc.start_point().dist(arc.end_point()) <= tw_plain + 2.0 * gap + 1e-9;
-    if beside {
-        if st.arc_symbol == 0 {
-            g.mtext = plain.clone();
-        }
+    let chord = arc.start_point().dist(arc.end_point());
+    let unmoved = st.text_above != 0 && !d.user_text_pos && !config.ticks && head.is_finite();
+    let text_between = chord > tw_plain + 2.0 * gap + 1e-9;
+    let arrows_between = if text_between { chord >= tw_plain + 2.0 * config.arrow_size - 1e-9 } else { arc.sweep() >= 2.0 * head - 1e-9 };
+    let beside = unmoved && arrows_between && !text_between;
+    let text_above_arc = unmoved && text_between;
+    if unmoved && st.arc_symbol == 0 && (beside || text_above_arc) {
+        g.mtext = plain.clone();
+    }
+    if unmoved && arrows_between {
         if arc.sweep() > 2.0 * head + 1e-9 {
             g.dim(arc_points(&Arc::new(c, arc.radius, arc.start + head, arc.end - head)));
         }
@@ -437,8 +457,33 @@ pub(super) fn draw_arc_length(config: &DimConfig<'_>, g: &mut DimGeometry, text_
     for (i, (p, q)) in [(d.p13.xy(), arc.start_point()), (d.p14.xy(), arc.end_point())].into_iter().enumerate() {
         g.ext_n(ext_line(p, q, st, k), i == 1);
     }
-    end(g, blk1, arc.start_point(), -(arc.start_point() - c).perp().normalized());
-    end(g, blk2, arc.end_point(), (arc.end_point() - c).perp().normalized());
+    if unmoved && !arrows_between {
+        // The arrowheads point in from outside the arc, each with a stub of an arrowhead past its base.
+        end(g, blk1, arc.start_point(), (arc.start_point() - c).perp().normalized());
+        end(g, blk2, arc.end_point(), -(arc.end_point() - c).perp().normalized());
+        g.dim(arc_points(&Arc::new(c, arc.radius, arc.start - 2.0 * head, arc.start - head)));
+        g.dim(arc_points(&Arc::new(c, arc.radius, arc.end + head, arc.end + 2.0 * head)));
+    } else {
+        end(g, blk1, arc.start_point(), -(arc.start_point() - c).perp().normalized());
+        end(g, blk2, arc.end_point(), (arc.end_point() - c).perp().normalized());
+    }
+    if text_above_arc {
+        // The text fits between the extension lines: above the middle of the arc, a gap and half its height out, with the arc symbol
+        // (DIMARCSYM 0) a semicircle of 0.8 of the text height a text width before the text's centre and 0.4 of the height below it.
+        let m = arc.mid_point();
+        let radial = (m - c).normalized();
+        let angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
+        let axis = Vec2::from_angle(angle);
+        let ink = config.ink_height(&g.mtext);
+        let center = m + radial * (gap + 0.5 * ink);
+        if st.arc_symbol == 0 {
+            let symbol = Arc::new(center - axis * tw_plain - axis.perp() * (0.4 * th), 0.8 * th, angle, angle + std::f64::consts::PI);
+            g.text_mark(arc_points(&symbol));
+        }
+        *text_angle_out = angle;
+        *text_mid_out = center;
+        return;
+    }
     if beside {
         let angle = arc.start - head;
         g.dim(arc_points(&Arc::new(c, arc.radius, angle, arc.start)));
