@@ -17,7 +17,7 @@ Other causes with no record of their own: the DesignCenter xdata of a block reco
 (packed zero in the DWG) changed no record of the corpus beyond the table above (the corpus has no such record, or it was the same in the baseline). The r5 raw fixture's
 two lines move for the table style and the CLASS values only; its input change in 5f4eeb51 adds no other difference.
 
-The DWG of seven drawings is not deterministic in this build (the same drawing saved twice differs in bytes, not in records): see the commit that fixes it.
+The DWG of seven drawings (the `cyrela-field` pair, the three `tear` files, `Cyrela-Aura_Moema`, `Tear_Incorporadora-Alvorada`) was not deterministic (the same drawing saved twice differed in bytes, not in records): acadrust 9ae5de35 fixes it, and their DWG hashes are recaptured at that pin.
 
 ## Per entry
 
