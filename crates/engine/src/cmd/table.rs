@@ -164,6 +164,9 @@ fn table_handle(s: &Session, p: &Value, id: &str) -> Result<Handle> {
 /// Modify the table `handle` with `f`.
 fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std::result::Result<(), String>) -> Result<Value> {
     let h = table_handle(s, p, id)?;
+    if let Some(entity) = s.doc()?.entity(h) {
+        entity.require_legacy_geometry()?;
+    }
     let mut t = match s.doc()?.entity(h).map(|e| &e.kind) {
         Some(EntityKind::Table(t)) => t.clone(),
         _ => return Err(bad(id, "object is not a table")),

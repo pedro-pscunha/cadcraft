@@ -232,12 +232,12 @@ impl Builder<'_> {
                     }
                 }
                 // A dimension draws a `*D` block and a table a `*T` block: group 2.
-                "DIMENSION" | "ACAD_TABLE" => {
+                "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" | "ACAD_TABLE" => {
                     if let Some(name) = first(groups, 2) {
                         self.references.push((id, Names::Block(name.to_ascii_uppercase())));
                     }
                 }
-                "MULTILEADER" => {
+                "MULTILEADER" | "MLEADER" => {
                     if let Some(handle) = mleader_block_handle(groups) {
                         self.references.push((id, Names::Handle(handle)));
                     }
@@ -251,10 +251,12 @@ impl Builder<'_> {
 /// What a read decided for one component of the graph (I5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentReport {
-    /// The nodes of the component: records and definitions.
-    pub nodes: usize,
-    /// The nodes read Canonical: all of them, or none.
-    pub activated: usize,
+    /// Entity records, including owned ATTRIB records, excluding definition nodes.
+    pub records: usize,
+    /// Block-definition nodes, separate from the records they contain.
+    pub definitions: usize,
+    pub activated_records: usize,
+    pub activated_definitions: usize,
     pub outcome: ComponentOutcome,
     /// Why the component could not activate, when it needed to.
     pub failures: Vec<Failure>,
@@ -271,7 +273,7 @@ pub struct ReadReport {
 impl ReadReport {
     /// The records read Canonical, in all.
     pub fn activated(&self) -> usize {
-        self.components.iter().map(|c| c.activated).sum()
+        self.components.iter().map(|component| component.activated_records).sum()
     }
 }
 
@@ -284,9 +286,28 @@ impl RecordGraph {
             .iter()
             .map(|component| {
                 let outcome_of = |n: &NodeId| activation.outcome(*n);
+                let mut records = 0;
+                let mut definitions = 0;
+                let mut activated_records = 0;
+                let mut activated_definitions = 0;
+                for node in &component.nodes {
+                    let canonical = usize::from(outcome_of(node) == Some(Outcome::Canonical));
+                    match self.graph.nodes()[node.0 as usize].kind {
+                        super::NodeKind::Record(_) => {
+                            records += 1;
+                            activated_records += canonical;
+                        }
+                        super::NodeKind::Definition => {
+                            definitions += 1;
+                            activated_definitions += canonical;
+                        }
+                    }
+                }
                 ComponentReport {
-                    nodes: component.nodes.len(),
-                    activated: component.nodes.iter().filter(|n| outcome_of(n) == Some(Outcome::Canonical)).count(),
+                    records,
+                    definitions,
+                    activated_records,
+                    activated_definitions,
                     outcome: component.outcome,
                     failures: component.failures.clone(),
                     raw: component
