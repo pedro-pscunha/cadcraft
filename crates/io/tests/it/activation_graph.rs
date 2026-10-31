@@ -156,7 +156,7 @@ fn run_once(fixture: &Fixture, policy: &Policy, rotate: usize, reverse: bool) ->
     let (graph, names) = fixture.build(rotate, reverse);
     let activation = activate(&graph, policy);
     let outcomes = names.iter().enumerate().map(|(i, name)| (*name, activation.outcome(NodeId(i as u32)).expect("an outcome"))).collect();
-    Result { outcomes, components: activation.components.clone(), graph, names, activated: activation.activated() }
+    Result { outcomes, components: activation.components().to_vec(), graph, names, activated: activation.activated() }
 }
 
 /// I1: no Canonical node shares an agreement edge with a Legacy one. A Raw node is the one allowed exception.
@@ -504,7 +504,7 @@ fn a_chain_of_nested_definitions_is_deep_at_seventeen_and_not_at_sixteen() {
         let (nodes, edges) = chain(depth);
         let seed = NodeId(nodes.len() as u32 - 1);
         let activation = activate(&Graph::new(nodes, edges).expect("a chain"), &open());
-        (activation.outcome(seed).expect("seed"), activation.components.iter().flat_map(|c| c.failures.clone()).collect::<Vec<_>>())
+        (activation.outcome(seed).expect("seed"), activation.components().iter().flat_map(|c| c.failures.clone()).collect::<Vec<_>>())
     };
     assert_eq!(outcome(cadcraft_doc::MAX_BLOCK_DEPTH).0, Outcome::Canonical);
     let (deep, failures) = outcome(cadcraft_doc::MAX_BLOCK_DEPTH + 1);
@@ -529,7 +529,7 @@ fn a_hundred_thousand_nested_definitions_do_not_overflow_the_stack() {
     }
     let activation = activate(&Graph::new(nodes, edges).expect("a long chain"), &open());
     assert_eq!(activation.outcome(NodeId(1)), Some(Outcome::Raw));
-    assert!(activation.components.iter().flat_map(|c| c.failures.iter()).any(|f| matches!(f, Failure::TooDeep(_))));
+    assert!(activation.components().iter().flat_map(|c| c.failures.iter()).any(|f| matches!(f, Failure::TooDeep(_))));
 }
 
 #[test]
