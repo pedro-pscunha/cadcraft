@@ -890,6 +890,32 @@ fn qdim_ordinate_at_3() -> Fixture {
     qdim_mode_at_3("ordinate")
 }
 
+/// QDIM in `mode` over two circles drawn at Z 7 while the elevation is 3.
+fn qdim_radial_at_7(mode: &str) -> Fixture {
+    let mut f = at_elevation(json!({}));
+    let mut s = session_of(&f.drawing);
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 7})).unwrap();
+    let a = create(&mut s, "circle", json!({"center": [10, 0], "radius": 2}));
+    let b = create(&mut s, "circle", json!({"center": [20, 0], "radius": 2}));
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 3})).unwrap();
+    f.drawing = model_of(&s);
+    f.params = json!({"handles": [a.hex(), b.hex()], "at": [15, 6], "mode": mode});
+    f
+}
+
+fn qdim_radius_at_7() -> Fixture {
+    qdim_radial_at_7("radius")
+}
+
+fn qdim_diameter_at_7() -> Fixture {
+    qdim_radial_at_7("diameter")
+}
+
+/// QDIM radius and diameter over circles at Z 7 with ELEVATION 3: the centre and the point on the circle at Z 7, the text at Z 3.
+fn qdim_radial_at_7_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 7.0), ("text_mid", 3.0), ("p15", 7.0)])
+}
+
 fn angular_on_arc_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
     made_dim(d, ops, &[("defpt", 3.0), ("text_mid", 3.0), ("p13", 7.0), ("p14", 7.0), ("p15", 7.0)])
 }
@@ -1551,7 +1577,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 12] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 14] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1564,6 +1590,8 @@ fn live_rows() -> Vec<Row> {
         ("qdim", "radius mode, two circles", qdim_radius_at_3, qdim_radial_made),
         ("qdim", "diameter mode, two circles", qdim_diameter_at_3, qdim_radial_made),
         ("qdim", "ordinate mode, two lines", qdim_ordinate_at_3, qdim_ordinate_made),
+        ("qdim", "radius mode, circles at Z 7", qdim_radius_at_7, qdim_radial_at_7_made),
+        ("qdim", "diameter mode, circles at Z 7", qdim_diameter_at_7, qdim_radial_at_7_made),
     ];
     for (command, branch, fixture, check) in on_objects {
         for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
