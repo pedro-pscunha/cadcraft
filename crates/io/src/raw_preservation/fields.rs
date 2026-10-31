@@ -8,7 +8,7 @@ use cadcraft_dxf::{Kind, kind_of};
 const MAX_SEMANTIC_BYTES: usize = 64 << 20;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct Field {
+pub(crate) struct Field {
     pub class: String,
     pub groups: Vec<String>,
     pub application: Option<String>,
@@ -35,7 +35,7 @@ impl Field {
 }
 
 #[derive(Clone, Debug)]
-pub(super) enum Value {
+pub(crate) enum Value {
     Text(String),
     Real(f64),
     Integer(i64),
@@ -57,14 +57,14 @@ impl PartialEq for Value {
 }
 
 #[derive(Debug)]
-pub(super) struct FieldError {
+pub(crate) struct FieldError {
     pub field: String,
     pub reason: String,
 }
 
-pub(super) type Fields = BTreeMap<Field, Value>;
+pub(crate) type Fields = BTreeMap<Field, Value>;
 
-pub(super) use crate::dxf_write::raw_reference as reference;
+pub(crate) use crate::dxf_write::raw_reference as reference;
 
 fn scalar(code: i32, text: &str, source_text: bool) -> Result<Value, String> {
     if code == 5 || reference(code) || (320..=329).contains(&code) {
@@ -110,7 +110,7 @@ fn insert(fields: &mut Fields, counts: &mut BTreeMap<Field, usize>, mut field: F
     fields.insert(field, value);
 }
 
-pub(super) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldError> {
+pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldError> {
     let mut fields = Fields::new();
     let mut counts = BTreeMap::new();
     let mut groups: Vec<String> = Vec::new();
@@ -182,7 +182,7 @@ pub(super) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
 /// - Common-property overrides and reference remapping are checked separately against the model.
 ///
 /// Optional-field defaults are listed here only after a documented format rule justifies them.
-pub(super) fn default_value(kind: &str, field: &Field, source: &Fields) -> Option<Value> {
+pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Option<Value> {
     if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 || field.index != 0 {
         return None;
     }

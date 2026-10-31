@@ -226,8 +226,12 @@ fn structural_variants_stay_needs_under_the_replay_disabled_edit_oracle() {
         assert_eq!(classify_legacy_unit(&[record], cadcraft_dxf::Version::R2018).unwrap().disposition, LegacyDisposition::Needs, "{}", variant.name);
         for operation in oracle::Operation::ALL {
             let measured = oracle::measure(&variant.source, operation);
-            assert!(measured.contains_key(&variant.handle), "{} {operation:?}", variant.name);
-            eprintln!("LEGACY_VARIANT name={} operation={operation:?} legacy_lossless={}", variant.name, measured[&variant.handle]);
+            assert!(measured.contains_key(&oracle::RecordIdentity::Handle(variant.handle)), "{} {operation:?}", variant.name);
+            eprintln!(
+                "LEGACY_VARIANT name={} operation={operation:?} legacy_lossless={}",
+                variant.name,
+                measured[&oracle::RecordIdentity::Handle(variant.handle)]
+            );
         }
     }
 }
