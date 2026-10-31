@@ -78,9 +78,13 @@ pub(crate) fn require_ascii(drawing: &Drawing) -> Result<()> {
     Ok(())
 }
 
+/// The release whose storage an ASCII DXF has: its text holds every group, whatever the `$ACADVER`, so no field is one the
+/// target "cannot store". The identity and Common preflight compares nothing, and uses it too.
+pub(crate) const DXF_TEXT: Version = Version::R2018;
+
 /// Check the original identities and Common before any writer repairs handles.
 pub(crate) fn preflight(drawing: &Drawing) -> Result<()> {
-    RawSaveCheck::new(drawing, &WrittenReferences::default()).map(|_| ())
+    RawSaveCheck::new(drawing, &WrittenReferences::default(), DXF_TEXT).map(|_| ())
 }
 
 fn descendants(roots: impl Iterator<Item = Handle>, index: &BTreeMap<Handle, Vec<(Handle, usize)>>) -> std::result::Result<Vec<usize>, FieldError> {

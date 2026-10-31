@@ -182,7 +182,7 @@ pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<
     crate::raw_preservation::preflight(d)?;
     let (tags, references) = tags_for(d, version, version, false);
     let bytes = cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes();
-    crate::raw_preservation::RawSaveCheck::new(d, &references)?.verify_dxf(&bytes)?;
+    crate::raw_preservation::RawSaveCheck::new(d, &references, crate::raw_preservation::DXF_TEXT)?.verify_dxf(&bytes)?;
     Ok(bytes)
 }
 

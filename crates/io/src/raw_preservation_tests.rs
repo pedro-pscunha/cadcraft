@@ -634,3 +634,14 @@ fn an_r2007_target_saves_a_raw_attribute_twice_with_zero_version_and_lock() {
     let locked = drawing_with_attribute_280(None, Some("1"));
     save_at(&locked, crate::Version::R2007).expect("R2007 stores the lock bit");
 }
+
+#[test]
+fn an_ascii_dxf_keeps_the_zero_attribute_fields_at_every_release() {
+    // A DXF text holds every group, so its release never makes a field one the target cannot store.
+    let drawing = fixtures::drawing("INSERT");
+    for version in [crate::Version::R2000, crate::Version::R2004, crate::Version::R2007, crate::Version::R2010, crate::Version::R2018] {
+        let options = crate::SaveOptions { version: Some(version), binary: false };
+        let bytes = crate::write_with(&drawing, "target.dxf", &options).unwrap_or_else(|error| panic!("{version:?}: {error}"));
+        assert_eq!(attribute_version_groups(&bytes).1, vec![0, 0], "{version:?}: both zeros are written once");
+    }
+}
