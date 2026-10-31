@@ -261,7 +261,7 @@ fn legacy_clone_normalization_keeps_the_frozen_output() {
     let drawing = drawing(GeometryRevision::LegacyProjectedV1);
     let bytes = crate::write(&drawing, "legacy-clone.dxf").unwrap();
     let hash = format!("{:x}", Sha256::digest(&bytes));
-    // Measured independently on the clean accepted 75c982ad base; re-measured when an MLEADERSTYLE began to keep its group 298.
-    assert_eq!(hash, "39668011269ab574ae2261abf81ee88e8785254e47dac07b53c002c5f14da3ae");
+    // Measured independently on the clean accepted 75c982ad base; re-measured when an MLEADERSTYLE began to keep its group 298, and when it moved last.
+    assert_eq!(hash, "64ed84595be6f71d691d532ee63a6c6005a2be39dfb90573ba8a015070ddd9fd");
     assert_eq!(bytes.len(), 17767);
 }

@@ -115,9 +115,6 @@ pub(super) fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str
     w.f(45, s.text_height);
     w.i(292, i64::from(s.text_frame));
     w.i(297, i64::from(s.text_always_left));
-    if refs.flag_298 {
-        w.i(298, i64::from(s.unknown_298));
-    }
     w.f(46, s.align_space);
     if let Some(b) = &refs.block {
         w.s(343, b);
@@ -137,6 +134,10 @@ pub(super) fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str
     w.i(271, s.attach_direction);
     w.i(272, s.attach_top);
     w.i(273, s.attach_bottom);
+    // AutoCAD writes group 298 last.
+    if refs.flag_298 {
+        w.i(298, i64::from(s.unknown_298));
+    }
 }
 
 /// The key of each scale in the scale list: the one it had in its file, else the next free key of
