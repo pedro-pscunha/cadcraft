@@ -89,7 +89,6 @@ constraintinfer
 constraints.dof
 constraints.inspect
 constraintsettings
-copy
 copybase
 copyclip
 count
@@ -164,7 +163,6 @@ ellipse
 ellipse.arc
 ellipse.axis
 entities
-erase
 erase.selection
 explode
 export
@@ -259,7 +257,6 @@ massprop
 matchprop
 measure
 measuregeom
-mirror
 mleader
 mleaderalign
 mleaderedit
@@ -270,7 +267,6 @@ mledit
 mline
 mlstyle
 mocoro
-move
 mredo
 mspace
 mtext
@@ -336,7 +332,6 @@ rename
 revcloud.freehand
 revcloud.polygonal
 reverse
-rotate
 saveas
 scale
 scalelistedit

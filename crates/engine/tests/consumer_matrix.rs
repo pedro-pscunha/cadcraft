@@ -44,6 +44,8 @@ enum Revision {
     LegacyFirst,
     /// The first operand canonical, the others legacy.
     CanonicalFirst,
+    /// Every operand is a raw unit: kept as read, read-only.
+    Raw,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +56,8 @@ enum Plane {
     NegativeZ,
     /// The normal (0, 1, 0): the plane of the major axis (3, 0, 4).
     NormalY,
+    /// The normal (0, 0, 1), with the operand lifted to Z 5: the elevation is real, not a zero.
+    PlusZElevated,
 }
 
 impl Plane {
@@ -63,15 +67,24 @@ impl Plane {
             Plane::Tilted => Vec3::new(0.0, 0.6, 0.8),
             Plane::NegativeZ => Vec3::new(0.0, 0.0, -1.0),
             Plane::NormalY => Vec3::new(0.0, 1.0, 0.0),
+            Plane::PlusZElevated => Vec3::Z,
         }
     }
+
+    fn elevation(self) -> f64 {
+        if self == Plane::PlusZElevated { ELEVATION } else { 0.0 }
+    }
 }
+
+const ELEVATION: f64 = 5.0;
 
 type Check = fn(&Value) -> Result<(), String>;
 
 enum Expect {
     /// The command succeeds and the check on its result holds.
     Ok(Check),
+    /// The command succeeds and the drawing, read through the operand handles, holds the independent numbers.
+    Edits(fn(&Drawing, &[Handle], Plane) -> Result<(), String>),
     /// The command is refused with an error that contains this text, and writes nothing.
     Refuses(&'static str),
 }
@@ -101,36 +114,44 @@ impl Row {
     }
 }
 
-/// Run a row. `Err` names the way it failed.
-fn run_row(row: &Row) -> Result<(), String> {
-    let fixture = (row.fixture)();
-    // The control: the same command and parameters on the legacy drawing must succeed, so a row never passes on a malformed call.
-    let mut control = session_of(&fixture.drawing);
-    if let Some(view) = &fixture.view {
-        control.execute("zoom", view).map_err(|error| format!("the view fails: {error}"))?;
-    }
-    control.execute(row.command, &fixture.params).map_err(|error| format!("the legacy control fails: {error}"))?;
+/// The fixture's drawing opened in a session, with its operands in the row's revision and plane. `Err` names a malformed fixture.
+fn prepare(fixture: &Fixture, revision: Revision, plane: Plane) -> Result<Session, String> {
     let mut session = session_of(&fixture.drawing);
     if let Some(view) = &fixture.view {
         session.execute("zoom", view).map_err(|error| format!("the view fails: {error}"))?;
     }
     for (index, handle) in fixture.operands.iter().enumerate() {
-        let canonical = match row.revision {
-            Revision::Legacy => false,
+        let canonical = match revision {
+            Revision::Legacy | Revision::Raw => false,
             Revision::Canonical => true,
             Revision::LegacyFirst => index > 0,
             Revision::CanonicalFirst => index == 0,
         };
         if canonical {
-            make_canonical_in(&mut session, *handle, row.plane.normal());
+            make_canonical_in(&mut session, *handle, plane.normal());
+            lift(&mut session, *handle, plane.elevation());
+        }
+        if revision == Revision::Raw {
+            make_raw(&mut session, *handle);
         }
     }
+    Ok(session)
+}
+
+/// Run a row. `Err` names the way it failed.
+fn run_row(row: &Row) -> Result<(), String> {
+    let fixture = (row.fixture)();
+    // The control: the same command and parameters on the legacy drawing must succeed, so a row never passes on a malformed call.
+    let mut control = prepare(&fixture, Revision::Legacy, Plane::PlusZ)?;
+    control.execute(row.command, &fixture.params).map_err(|error| format!("the legacy control fails: {error}"))?;
+    let mut session = prepare(&fixture, row.revision, row.plane)?;
     let before = session.doc().map_err(|e| e.to_string())?.model.clone();
     let seed = session.doc().map_err(|e| e.to_string())?.handseed;
     let result = session.execute(row.command, &fixture.params);
     match (&row.expect, result) {
         (Expect::Ok(check), Ok(value)) => check(&value),
-        (Expect::Ok(_), Err(error)) => Err(format!("refused: {error}")),
+        (Expect::Edits(check), Ok(_)) => check(session.doc().map_err(|e| e.to_string())?, &fixture.operands, row.plane),
+        (Expect::Ok(_) | Expect::Edits(_), Err(error)) => Err(format!("refused: {error}")),
         (Expect::Refuses(_), Ok(value)) => Err(format!("accepted: {value}")),
         (Expect::Refuses(reason), Err(error)) => {
             if !error.to_string().contains(reason) {
@@ -316,6 +337,107 @@ fn properties_of_circle() -> Fixture {
     Fixture { drawing: model_of(&s), params: json!({"handles": [circle.hex()]}), operands: vec![circle], view: None }
 }
 
+/// The edit commands over a selection of one circle, (10,5) and radius 2 in the plane of the row.
+macro_rules! selection_fixture {
+    ($name:ident, $params:expr) => {
+        fn $name() -> Fixture {
+            let mut f = list_circle();
+            let extra: Value = $params;
+            for (key, value) in extra.as_object().unwrap() {
+                f.params[key] = value.clone();
+            }
+            f
+        }
+    };
+}
+
+selection_fixture!(erase_fixture, json!({}));
+selection_fixture!(move_fixture, json!({"delta": [3, 1]}));
+selection_fixture!(copy_fixture, json!({"delta": [3, 1]}));
+selection_fixture!(rotate_fixture, json!({"base": [0, 0], "angle": 90}));
+selection_fixture!(mirror_fixture, json!({"p1": [0, 0], "p2": [1, 0]}));
+
+type V3 = [f64; 3];
+
+fn arr(v: Vec3) -> V3 {
+    [v.x, v.y, v.z]
+}
+
+fn unit(a: V3) -> V3 {
+    let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    [a[0] / l, a[1] / l, a[2] / l]
+}
+
+fn cross(a: V3, b: V3) -> V3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// A point of the OCS of `normal` in the world: the arbitrary-axis rule, written out here and not taken from the code under test.
+fn world(normal: V3, p: V3) -> V3 {
+    let n = unit(normal);
+    let x = if n[0].abs() < 1.0 / 64.0 && n[1].abs() < 1.0 / 64.0 { cross([0.0, 1.0, 0.0], n) } else { cross([0.0, 0.0, 1.0], n) };
+    let x = unit(x);
+    let y = cross(n, x);
+    [0, 1, 2].map(|i| x[i] * p[0] + y[i] * p[1] + n[i] * p[2])
+}
+
+fn close3(got: V3, want: V3, what: &str) -> Result<(), String> {
+    if (0..3).all(|i| (got[i] - want[i]).abs() < 1e-9) { Ok(()) } else { Err(format!("{what} {got:?} instead of {want:?}")) }
+}
+
+/// The fixture circle before the command: the center (10,5) in the OCS of the plane, lifted by the elevation of the plane.
+fn start(plane: Plane) -> V3 {
+    world(arr(plane.normal()), [10.0, 5.0, plane.elevation()])
+}
+
+/// The circle `handle` holds the world center, the radius and the plane normal given.
+fn circle_is(d: &Drawing, handle: Handle, center: V3, radius: f64, normal: V3) -> Result<(), String> {
+    let entity = d.entity(handle).ok_or("the circle is gone")?;
+    let EntityKind::Circle(c) = &entity.kind else { return Err(format!("not a circle: {:?}", entity.kind)) };
+    let stored = arr(entity.common.extrusion);
+    close3(world(stored, arr(c.center)), center, "center")?;
+    close3(unit(stored), unit(normal), "normal")?;
+    near(c.radius, radius)
+}
+
+fn after_move(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
+    let w = start(plane);
+    circle_is(d, ops[0], [w[0] + 3.0, w[1] + 1.0, w[2]], 2.0, arr(plane.normal()))
+}
+
+fn after_copy(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
+    circle_is(d, ops[0], start(plane), 2.0, arr(plane.normal()))?;
+    let copy = d.model.iter().last().ok_or("empty model")?;
+    if copy.handle == ops[0] {
+        return Err("no copy was made".into());
+    }
+    let w = start(plane);
+    circle_is(d, copy.handle, [w[0] + 3.0, w[1] + 1.0, w[2]], 2.0, arr(plane.normal()))?;
+    let original = d.entity(ops[0]).ok_or("the original is gone")?;
+    if copy.geometry_revision == original.geometry_revision { Ok(()) } else { Err("the copy has another revision than its source".into()) }
+}
+
+/// The quarter turn about the world Z axis through (0,0): (x,y,z) goes to (-y,x,z), the normal with it.
+fn turned(v: V3) -> V3 {
+    [-v[1], v[0], v[2]]
+}
+
+fn after_rotate(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
+    circle_is(d, ops[0], turned(start(plane)), 2.0, turned(arr(plane.normal())))
+}
+
+fn after_mirror(d: &Drawing, ops: &[Handle], plane: Plane) -> Result<(), String> {
+    circle_is(d, ops[0], start(plane), 2.0, arr(plane.normal()))?;
+    let w = start(plane);
+    let copy = d.model.iter().last().ok_or("empty model")?;
+    // The mirror line is the world X axis: y changes sign.
+    circle_is(d, copy.handle, [w[0], -w[1], w[2]], 2.0, [0.0, 0.0, 1.0])
+}
+
+fn erased(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    if d.entity(ops[0]).is_none() { Ok(()) } else { Err("the circle is still there".into()) }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Rows
 
@@ -326,13 +448,18 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("arc.continue", &[Role::Boundary]),
     ("centerline", &[Role::Primary, Role::Secondary]),
     ("centermark", &[Role::Primary]),
+    ("copy", &[Role::SelectionMember]),
     ("dimbreak", &[Role::Boundary]),
     ("dimjogged", &[Role::Primary]),
+    ("erase", &[Role::SelectionMember]),
     ("id", &[Role::PickedPoint]),
     ("list", &[Role::Primary]),
+    ("mirror", &[Role::SelectionMember]),
     ("mleadercollect", &[Role::SelectionMember]),
+    ("move", &[Role::SelectionMember]),
     ("properties", &[Role::Primary]),
     ("revcloud", &[Role::Primary]),
+    ("rotate", &[Role::SelectionMember]),
     ("wipeout", &[Role::Primary]),
     ("xline", &[Role::Primary]),
 ];
@@ -358,7 +485,7 @@ fn refusal_rows(out: &mut Vec<Row>, case: Case, revisions: &[Revision], planes: 
 }
 
 fn live_rows() -> Vec<Row> {
-    use Plane::{NegativeZ, PlusZ, Tilted};
+    use Plane::{NegativeZ, PlusZ, PlusZElevated, Tilted};
     use Revision::{Canonical, CanonicalFirst, LegacyFirst};
     let mut rows = Vec::new();
     let out = &mut rows;
@@ -568,6 +695,98 @@ fn live_rows() -> Vec<Row> {
             if frame == "ocs" { Ok(()) } else { Err(format!("frame {frame}")) }
         }),
     });
+    // Raw operands (plan 4.2): a geometry edit is refused with the typed read-only reason and writes nothing.
+    for (case, reason) in [
+        (Case { command: "centermark", role: Role::Primary, branch: "circle", fixture: circle, reason: "" }, "read-only"),
+        (Case { command: "centerline", role: Role::Primary, branch: "spatial line first", fixture: two_lines, reason: "" }, "read-only"),
+        (Case { command: "centerline", role: Role::Secondary, branch: "plain line second", fixture: two_lines, reason: "" }, "read-only"),
+        (Case { command: "wipeout", role: Role::Primary, branch: "polyline", fixture: closed_polyline, reason: "" }, "read-only"),
+        (Case { command: "wipeout", role: Role::Primary, branch: "polyline erase", fixture: wipeout_erasing, reason: "" }, "read-only"),
+        (Case { command: "revcloud", role: Role::Primary, branch: "circle", fixture: revcloud, reason: "" }, "read-only"),
+        (Case { command: "xline", role: Role::Primary, branch: "offset", fixture: xline_offset, reason: "" }, "read-only"),
+        (Case { command: "xline", role: Role::Primary, branch: "through", fixture: xline_through, reason: "" }, "read-only"),
+        (Case { command: "dimjogged", role: Role::Primary, branch: "circle", fixture: dimjogged, reason: "" }, "read-only"),
+        (Case { command: "dimbreak", role: Role::Boundary, branch: "automatic", fixture: dimbreak_automatic, reason: "" }, "read-only"),
+        (Case { command: "dimbreak", role: Role::Boundary, branch: "chosen objects", fixture: dimbreak_chosen, reason: "" }, "read-only"),
+        // A raw line is not a line to continue from, and a raw leader is not a multileader with block content.
+        (
+            Case { command: "arc.continue", role: Role::Boundary, branch: "last line", fixture: arc_continue, reason: "" },
+            "no line or arc to continue from",
+        ),
+        (
+            Case { command: "mleadercollect", role: Role::SelectionMember, branch: "pair, canonical first", fixture: mleader_pair, reason: "" },
+            "need two or more multileaders with block content",
+        ),
+        (
+            Case { command: "mleadercollect", role: Role::SelectionMember, branch: "pair, canonical second", fixture: mleader_pair, reason: "" },
+            "need two or more multileaders with block content",
+        ),
+    ] {
+        out.push(Row {
+            command: case.command,
+            role: case.role,
+            branch: case.branch,
+            revision: Revision::Raw,
+            plane: PlusZ,
+            fixture: case.fixture,
+            expect: Expect::Refuses(reason),
+        });
+    }
+    // The inquiries read a raw unit as it is kept: LIST names its kind, PROPERTIES gives the record's groups.
+    out.push(Row {
+        command: "list",
+        role: Role::Primary,
+        branch: "circle at (10,5), kept as read",
+        revision: Revision::Raw,
+        plane: PlusZ,
+        fixture: list_circle,
+        expect: Expect::Ok(|v| {
+            let text = v["message"].as_str().ok_or("no message")?;
+            if text.contains("CIRCLE") { Ok(()) } else { Err(text.to_string()) }
+        }),
+    });
+    out.push(Row {
+        command: "properties",
+        role: Role::Primary,
+        branch: "circle: the kept record",
+        revision: Revision::Raw,
+        plane: PlusZ,
+        fixture: properties_of_circle,
+        expect: Expect::Ok(|v| {
+            let kind = &v["objects"][0]["geometry"]["parent"]["kind"];
+            if kind == "CIRCLE" { Ok(()) } else { Err(format!("kind {kind}")) }
+        }),
+    });
+    // Editing the selection: the independent numbers come from the world transform of each plane (`start`, `turned`, `after_*`).
+    let planes = [PlusZ, PlusZElevated, Tilted, NegativeZ];
+    let edits: [(&str, fn() -> Fixture, Expect); 4] = [
+        ("move", move_fixture, Expect::Edits(after_move)),
+        ("copy", copy_fixture, Expect::Edits(after_copy)),
+        ("rotate", rotate_fixture, Expect::Edits(after_rotate)),
+        ("erase", erase_fixture, Expect::Edits(erased)),
+    ];
+    for (command, fixture, expect) in edits {
+        let Expect::Edits(check) = expect else { unreachable!() };
+        let row = |revision, plane, expect| Row { command, role: Role::SelectionMember, branch: "circle (10,5)", revision, plane, fixture, expect };
+        out.push(row(Revision::Legacy, PlusZ, Expect::Edits(check)));
+        for plane in planes {
+            out.push(row(Canonical, plane, Expect::Edits(check)));
+        }
+        // ERASE removes any unit; the others edit its geometry, which a raw unit refuses.
+        out.push(row(Revision::Raw, PlusZ, if command == "erase" { Expect::Edits(check) } else { Expect::Refuses("read-only") }));
+    }
+    // MIRROR keeps the source and adds the mirrored circle.
+    let mirror = |revision, expect| Row {
+        command: "mirror",
+        role: Role::SelectionMember,
+        branch: "circle (10,5)",
+        revision,
+        plane: PlusZ,
+        fixture: mirror_fixture,
+        expect,
+    };
+    out.push(mirror(Revision::Legacy, Expect::Edits(after_mirror)));
+    out.push(mirror(Revision::Raw, Expect::Refuses("read-only")));
     rows
 }
 
