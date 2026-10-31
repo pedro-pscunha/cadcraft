@@ -82,6 +82,12 @@ pub struct ReaderPolicy {
     active: FamilySet,
 }
 
+impl Default for ReaderPolicy {
+    fn default() -> Self {
+        Self::new(ACTIVATION_DEFAULT, ACTIVE_FAMILIES)
+    }
+}
+
 impl ReaderPolicy {
     pub fn new(mode: ReaderMode, active: FamilySet) -> ReaderPolicy {
         ReaderPolicy { mode, active }
