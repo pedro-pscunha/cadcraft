@@ -514,6 +514,24 @@ fn ellipse_hatch_is_plain_only_when_its_actual_edits_are_lossless() {
 }
 
 #[test]
+fn polyline_hatch_closed_flag_is_not_a_false_plain_after_actual_edits() {
+    for version in Version::ALL {
+        for closed in [0, 1] {
+            let record = super::tests::polyline_hatch(closed);
+            let source =
+                format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\n{}\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{record}0\nENDSEC\n0\nEOF\n", version.code());
+            for operation in Operation::ALL {
+                let lossless = measure(source.as_bytes(), operation);
+                assert_eq!(lossless.get(&RecordIdentity::Handle(Handle(0x100))), Some(&(closed == 1)), "{version:?} closed={closed} {operation:?}");
+            }
+            let unit = cadcraft_dxf::records(&cadcraft_dxf::parse(record.as_bytes()).unwrap());
+            let expected = if closed == 1 { LegacyDisposition::Plain } else { LegacyDisposition::Needs };
+            assert_eq!(classify_legacy_unit(&unit, version).unwrap().disposition, expected);
+        }
+    }
+}
+
+#[test]
 fn point_display_angle_fix_matches_the_independent_rotation_reference() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nPOINT\n5\n100\n10\n1\n20\n2\n30\n0\n50\n15\n0\nENDSEC\n0\nEOF\n";
     let index = RecordIndex::new(source);
