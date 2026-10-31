@@ -12,8 +12,17 @@ use cadcraft_io::activation::{FamilySet, ReaderMode, ReaderPolicy};
 
 use crate::activation_fixtures::{attrib, block, file, insert, line, seqend, stand_in};
 
+#[path = "../support/raw_compounds.rs"]
+mod support;
+
 fn dir() -> PathBuf {
     crate::activation_fixtures::dir()
+}
+
+/// The file of a built drawing that holds a raw INSERT unit (tilted, two ATTRIBs, SEQEND) beside a LINE: CADCraft's own full DXF, with the
+/// tables, the block record and the registered application its groups name.
+fn full_tables_text() -> String {
+    cadcraft_io::write_dxf(&support::drawing("INSERT"))
 }
 
 /// (name, text) of the end-to-end fixtures.
@@ -30,6 +39,7 @@ fn raw_cases() -> Vec<(&'static str, String)> {
             "r4_raw_insert_edit_refusal_and_save",
             file("", &[block("DEF", 0, &[line("B1")])], &[insert("E1", "DEF", true), attrib("E2", false), seqend("E3"), line("E4")]),
         ),
+        ("r5_raw_insert_with_full_tables", full_tables_text()),
     ]
 }
 
@@ -140,7 +150,8 @@ fn a_dwg_save_that_cannot_check_a_raw_unit_refuses_and_names_it_while_the_dxf_sa
     // 4.3: the DWG route may write a raw unit only if an independent read of the DWG finds every value of its records. These
     // hand-made files carry no tables for the layers, styles and blocks their groups name, so the check cannot find them: the DWG
     // save refuses, with the unit and the reason, and produces nothing. The DXF save keeps the unit.
-    for (name, _) in raw_cases() {
+    // (r5 has full tables and is the positive case below.)
+    for (name, _) in raw_cases().into_iter().filter(|(name, _)| !name.starts_with("r5")) {
         let (mut d, _) = read(name);
         let spare = d.model.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).map(|e| e.handle).expect("a line to edit");
         d.transform_entity(spare, &Mat4::from_mat3(&Mat3::translate(Vec2::new(4.0, 5.0)))).unwrap();
@@ -148,5 +159,56 @@ fn a_dwg_save_that_cannot_check_a_raw_unit_refuses_and_names_it_while_the_dxf_sa
         let error = cadcraft_io::write(&d, "x.dwg").expect_err(name).to_string();
         assert!(error.contains("Save refused for raw unit") && error.contains(&format!("{:X}", unit.0)), "{name}: {error}");
         assert_eq!(unit_records(&cadcraft_io::write_dxf(&d), &[unit.0]).len(), 1, "{name}: the DXF save keeps the unit");
+    }
+}
+
+/// Source groups of the records of one handle, in order.
+fn groups_of(text: &str, handle: u64) -> (String, Vec<(i32, String)>) {
+    let (kind, body) = unit_records(text, &[handle]).remove(0);
+    (kind, body.iter().map(|t| (t.code, t.str())).collect())
+}
+
+/// A group in a form that does not depend on how a writer spells it: handles as numbers, reals to nine places, integers as integers.
+fn normal((code, value): &(i32, String)) -> (i32, String) {
+    let value = value.trim();
+    let text = match *code {
+        5 | 105 | 330..=369 | 390..=399 | 1005 => u64::from_str_radix(value, 16).map_or_else(|_| value.to_string(), |h| format!("#{h:X}")),
+        10..=59 | 110..=149 | 210..=239 | 1010..=1059 => value.parse::<f64>().map_or_else(|_| value.to_string(), |v| format!("{v:.9}")),
+        60..=99 | 160..=179 | 270..=289 | 370..=389 | 400..=409 | 1060..=1071 => {
+            value.parse::<i64>().map_or_else(|_| value.to_string(), |v| v.to_string())
+        }
+        _ => value.to_string(),
+    };
+    (*code, text)
+}
+
+#[test]
+fn a_raw_unit_of_a_file_with_full_tables_is_saved_to_dwg_and_reads_back_with_its_source_groups() {
+    // The file is CADCraft's own save of a drawing with the unit, so the layers, styles, the block record SYMBOL and the application
+    // RAW_APP its groups name are all there. The need of the INSERT is the stand-in's (its plane is tilted).
+    let (d, source) = read("r5_raw_insert_with_full_tables");
+    assert_eq!(raw_parents(&d), [("INSERT".to_string(), Handle(0x200))]);
+    let bytes = cadcraft_io::write(&d, "x.dwg").expect("a unit whose values the independent DWG read finds is written");
+    let dxf = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
+    // The DXF save is the reference: it keeps every source group but the owner.
+    let dxf_save = cadcraft_io::write_dxf(&d);
+    for handle in [0x200, 0x201, 0x202, 0x203] {
+        let (kind, from) = groups_of(&source, handle);
+        assert_eq!(
+            groups_of(&dxf_save, handle).1.iter().filter(|g| g.0 != 330).collect::<Vec<_>>(),
+            from.iter().filter(|g| g.0 != 330).collect::<Vec<_>>(),
+            "DXF {kind} {handle:X}"
+        );
+        let back: Vec<_> = groups_of(&dxf, handle).1.iter().map(normal).collect();
+        // Every source group is in the DWG's record, once its spelling is normalised, except: the owner (330 outside a 102 group) and the
+        // reactor, extension dictionary and 102 markers, which the DWG sets to its own block record and renumbers with the metadata
+        // objects; and the defaults the DWG does not repeat (the INSERT's scale 1 and rotation 0, the ATTRIB's version and lock-position flags 280 = 0).
+        let default = |g: &(i32, String)| {
+            matches!(g, (41..=43, v) if v.trim().parse::<f64>() == Ok(1.0))
+                || matches!(g, (50, v) if v.trim().parse::<f64>() == Ok(0.0))
+                || matches!(g, (280, v) if v.trim() == "0")
+        };
+        let missing: Vec<_> = from.iter().filter(|g| ![330, 360, 102].contains(&g.0) && !default(g) && !back.contains(&normal(g))).collect();
+        assert!(missing.is_empty(), "{kind} {handle:X}: groups lost in the DWG: {missing:?}");
     }
 }
