@@ -108,8 +108,8 @@ debug = 0
 # reference gives it, entity ENC true-color fallback indices, duplicate-handle remapping, shape STYLE names kept as read;
 # versioned DIMENSION presentation fields, ENDBLK color and linetype scale, inactive solid-HATCH gradient data, the angular DIMENSION arc point at the entity elevation, bit 4 of a fit-point spline's DWG flags as Periodic, the viewport on bit kept when group 68 is 0, no attribute flag on the model and paper space block records, ByLayer ambient colour of a new viewport, the rotate action's class named AcDbBlockRotateAction; upstream main 2c436ae merged),
 # until upstream.
-# Block-owned SURFACE SAB and native modeler cache survive the DWG bridge; the rotate action's class is named AcDbBlockRotateAction, a CLASS record read from a DXF replaces the default class of its name.
-acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "ecdd07b801af10583a9e9eeeb61c421d33547d10" }
+# Block-owned SURFACE SAB and native modeler cache survive the DWG bridge; the rotate action's class is named AcDbBlockRotateAction, a CLASS record read from a DXF replaces the default class of its name, an opaque layer's transparency is packed zero in a DWG.
+acadrust = { git = "https://github.com/pedro-pscunha/acadrust", rev = "68f9208e88282c04a5732e4cc14b28642593fd58" }
 krilla = { version = "=0.8.2", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
