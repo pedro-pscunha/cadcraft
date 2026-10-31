@@ -156,7 +156,11 @@ fn reopened_dimension_reuses_its_block_name_and_handles() {
     assert_eq!(dm2.block.as_deref(), Some(name.as_str()));
     let after: Vec<Handle> = again.block(&name).unwrap().entities.iter().map(|e| e.handle).collect();
     assert_eq!(after, before);
-    assert_eq!(again.handseed, back.handseed);
+    // The table records and objects are numbered above the entities' handles, not above the drawing's next handle: a third save is
+    // the second (the first is from a drawing whose dimension block was made while saving), and no handle drifts.
+    let third = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&again).as_bytes()).unwrap();
+    assert_eq!(third.handseed, again.handseed);
+    assert_eq!(cadcraft_io::write_dxf(&third), cadcraft_io::write_dxf(&again));
 }
 
 #[test]
@@ -164,12 +168,9 @@ fn hostile_handle_seed_does_not_panic() {
     let mut d = Drawing::new_metric();
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(linear([0.0, 0.0], [10.0, 0.0], [5.0, 3.0]))).unwrap();
     let p = pairs(&cadcraft_io::write_dxf(&d));
-    // The dictionary entry names the XRECORD; its group 1 holds the seed.
-    let key = p.iter().position(|(c, v)| *c == 3 && v == "CADCRAFT_HANDSEED").unwrap();
-    let h = p[key + 1].1.clone();
-    let rec = p.iter().position(|(c, v)| *c == 5 && *v == h).unwrap();
-    let at = rec + p[rec..].iter().position(|(c, _)| *c == 1).unwrap();
-    assert_eq!(p[at].1, format!("{:X}", d.handseed));
+    // The header's $HANDSEED is the only seed a file holds.
+    let key = p.iter().position(|(c, v)| *c == 9 && v == "$HANDSEED").unwrap();
+    let at = key + 1;
     for bad in ["FFFFFFFFFFFFFFFF", "not-hex", "", "-1"] {
         let mut q = p.clone();
         q[at].1 = bad.to_string();

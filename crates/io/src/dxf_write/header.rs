@@ -18,6 +18,8 @@ const HEADER_VARS: &[(&str, i32)] = &[
     ("CMLSTYLE", 2),
     ("CMLJUST", 70),
     ("CMLSCALE", 40),
+    // The current multileader style (AutoCAD 2007 and later), by name.
+    ("CMLEADERSTYLE", 2),
     ("TEXTSTYLE", 7),
     ("CLAYER", 8),
     ("CELTYPE", 6),
@@ -96,6 +98,9 @@ fn dim_header_vars(w: &mut W, d: &Drawing, target: Version) {
 pub(super) fn header_vars(w: &mut W, d: &Drawing, target: Version) {
     for (name, code) in HEADER_VARS {
         let Some(v) = d.header.get(name) else { continue };
+        if *name == "CMLEADERSTYLE" && target < Version::R2007 {
+            continue;
+        }
         match (*code, v) {
             (-2 | -3, HVal::Point(p)) => {
                 let p = match *name {

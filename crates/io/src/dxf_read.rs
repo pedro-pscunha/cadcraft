@@ -290,13 +290,12 @@ fn read_core(
     let mut layout_objs: Vec<LayoutDef> = Vec::new();
     let mut entities = Vec::new();
     let mut objs = Objects::default();
-    // Every handle another program's file already uses is taken before anything gets a new one:
-    // its $HANDSEED can be lower than its handles, and entities made while reading (the faces of
-    // a polyface mesh) would otherwise get handles that records further on still have. A file
-    // CADCraft wrote names its own next handle, above which its rebuilt records are numbered
-    // (#495), so it is left to that.
-    let ours = secs.iter().any(|s| s.name == "OBJECTS" && s.tags.iter().any(|t| t.code == 3 && t.str() == crate::dxf_ext::HANDSEED_KEY));
-    reserve_instance_handles(&mut secs, &mut d, ours);
+    // Every handle the file's entities use is taken before anything gets a new one: its $HANDSEED can be
+    // lower than its handles, and entities made while reading (the faces of a polyface mesh) would
+    // otherwise get handles that records further on still have. The drawing's next handle follows its
+    // entities only: its table records and objects are rebuilt and numbered again on save, so
+    // following $HANDSEED, which is above them, would move every save's numbers.
+    reserve_instance_handles(&mut secs, &mut d);
     let mut skipped = BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
@@ -314,9 +313,6 @@ fn read_core(
             _ => {}
         }
     }
-    // A file CADCraft wrote names its own next handle (#495): its table records and objects
-    // are numbered above it and rebuilt on save, so following $HANDSEED would drift every save.
-    let own_seed = objs.xrecord_text(crate::dxf_ext::HANDSEED_KEY).and_then(|t| Handle::parse_hex(t.trim()));
     let raw_blocks: Vec<_> =
         rx.raw_block_handles.iter().filter_map(|handle| rx.brs.get(&handle.hex()).map(|name| name.to_ascii_uppercase())).collect();
     rx.inserted.extend(raw_blocks);
@@ -330,11 +326,6 @@ fn read_core(
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
-    // Keep handles unique against the header's seed.
-    let seed = d.header.str("HANDSEED", "");
-    if let Some(h) = own_seed.or_else(|| Handle::parse_hex(&seed)) {
-        d.bump_handseed(Handle(h.0.saturating_sub(1)));
-    }
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
@@ -375,10 +366,10 @@ fn keep_table_graphics(d: &mut Drawing, names: &HashMap<String, Handle>, mut gra
     }
 }
 
-/// Reserve persistent child identities even in CADCraft files with a private handseed. A
-/// colliding input identity is omitted before raw-data reading, so its dictionary cannot be
-/// attached to whichever different record already owns the handle.
-fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
+/// Take every handle the file uses, and reserve its persistent child identities. A colliding input
+/// identity is omitted before raw-data reading, so its dictionary cannot be attached to whichever
+/// different record already owns the handle.
+fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing) {
     let mut used = HashSet::new();
     for section in secs.iter().filter(|s| s.name != "HEADER") {
         let mut kind = String::new();
@@ -390,7 +381,8 @@ fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
             } else if !kind.is_empty() && !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") && matches!(t.code, 5 | 105) && !seen {
                 if let Some(h) = Handle::parse_hex(&t.str()) {
                     used.insert(h);
-                    if !ours {
+                    // The entities' handles only (not the table records, objects or block records the save numbers again).
+                    if matches!(section.name.as_str(), "ENTITIES" | "BLOCKS") && !matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
                         d.bump_handseed(h);
                     }
                 }

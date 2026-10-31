@@ -6,8 +6,8 @@
 //!
 //! CADCraft's own data lives under the registered application `CADCRAFT` (xdata) and the
 //! named-object-dictionary entries `CADCRAFT_CONSTRAINTS`, `CADCRAFT_LAYERSTATES`,
-//! `CADCRAFT_PLOTSTYLES`, `CADCRAFT_HANDSEED` and `CADCRAFT_MLEADERSTYLE` (XRECORDs). Other
-//! readers keep or ignore them.
+//! `CADCRAFT_PLOTSTYLES`, `CADCRAFT_ANNOTATION` and, in a DXF before R2007 and in a DWG, `CADCRAFT_MLEADERSTYLE` (XRECORDs),
+//! each written only when the drawing has that data. Other readers keep or ignore them.
 
 use std::collections::HashMap;
 
@@ -31,9 +31,8 @@ pub(crate) const ANNOTATION_KEY: &str = "CADCRAFT_ANNOTATION";
 /// Named-object-dictionary key of the plot style names dictionary (DXF Reference): its entries
 /// name `ACDBPLACEHOLDER` objects, and layers and objects point at them with group 390.
 pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
-/// Named-object-dictionary key of the XRECORD holding the drawing's next entity handle (hex).
-pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
-/// Named-object-dictionary key of the XRECORD holding the current multileader style.
+/// Named-object-dictionary key of the XRECORD that holds the current multileader style in a DXF before R2007, which has
+/// no `$CMLEADERSTYLE`, and in a DWG, whose header handle for it the DWG writer neither writes nor reads: read from any file.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
@@ -614,7 +613,9 @@ pub(crate) fn read_arclen(tags: &[Tag]) -> Option<cadcraft_geom::Vec3> {
     Some(cadcraft_geom::Vec3::new(g(1010)?, g(1020)?, g(1030).unwrap_or(0.0)))
 }
 
-/// A viewport's frozen layer names as CADCraft xdata: `1000 VPFROZEN`, `1002 {`, one `1000` per layer, `1002 }`.
+/// A viewport's frozen layer names as CADCraft xdata: `1000 VPFROZEN`, `1002 {`, one `1000` per layer, `1002 }`: what
+/// files saved before the native group 331 held, for the tests of the reader.
+#[cfg(test)]
 pub(crate) fn frozen_xdata(layers: &[String]) -> Vec<Tag> {
     let mut v = vec![Tag::s(1000, "VPFROZEN"), Tag::s(1002, "{")];
     v.extend(layers.iter().map(|l| Tag::s(1000, l.clone())));

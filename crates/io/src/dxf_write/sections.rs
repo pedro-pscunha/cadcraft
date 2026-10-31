@@ -89,18 +89,12 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(50, s.oblique.to_degrees());
         w.i(71, if s.backwards { 2 } else { 0 } | if s.upside_down { 4 } else { 0 });
         w.f(42, 0.2);
-        // The built-in font goes out as `txt`, which every reader has; CADCraft's own name
-        // travels in `CADCRAFT` xdata (`1000 FONT`, name) so the style reopens with it.
-        let file = s.dxf_font_name();
-        w.s(3, file);
+        // The built-in font goes out as `txt`, which every reader has, and AutoCAD's own default style
+        // holds: the reader takes `txt` for the built-in font again.
+        w.s(3, s.dxf_font_name());
         w.s(4, &s.big_font);
         if s.annotative {
             annotative_xdata(w);
-        }
-        if file != s.font {
-            w.s(1001, dxf_ext::APP);
-            w.s(1000, "FONT");
-            w.s(1000, dxf_ext::xdata_str(&s.font));
         }
     }
     let mut shape_handles: HashMap<String, String> = HashMap::new();
@@ -170,7 +164,7 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let mut apps = vec!["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    let mut apps = vec!["ACAD", "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
     if cx.target < Version::R2007
         && std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
@@ -1090,11 +1084,14 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     let table_style_dict = w.h();
     // CADCraft data in XRECORDs of the named object dictionary: (key, handle, text chunks).
     let mut xrecords: Vec<(&str, String, Vec<String>)> = Vec::new();
-    // The drawing's own next handle: table records and objects are numbered above it, so
-    // reading it back (instead of $HANDSEED) keeps their handles across saves (#495).
-    xrecords.push((dxf_ext::HANDSEED_KEY, w.h(), vec![format!("{:X}", d.handseed)]));
+    // The current multileader style is the header variable $CMLEADERSTYLE of a DXF from R2007. Before that release it has no home in
+    // the file, and the DWG writer neither writes nor reads the style's header handle: both stay an XRECORD. The handle is taken
+    // in every file, so that the numbers of the records after it do not depend on the release.
     if let Some(name) = d.header.get("CMLEADERSTYLE").and_then(HVal::as_str) {
-        xrecords.push((dxf_ext::MLEADER_STYLE_KEY, w.h(), vec![name.to_string()]));
+        let handle = w.h();
+        if target < Version::R2007 || dwg_bridge {
+            xrecords.push((dxf_ext::MLEADER_STYLE_KEY, handle, vec![name.to_string()]));
+        }
     }
     if let Some(chunks) = dxf_ext::constraint_chunks(&d.constraints, &d.parametric) {
         xrecords.push((dxf_ext::CONSTRAINTS_KEY, w.h(), chunks));

@@ -2058,6 +2058,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let geometry = crate::dxf_geometry::eligible(d);
     let xd: XdataOf = all_entities(d).filter(|e| !e.common.xdata.is_empty()).map(|e| (e.handle, e.common.xdata.as_slice())).collect();
     if f.is_empty() && unknown.is_empty() && xd.is_empty() && d.registered_apps.is_empty() && geometry.is_empty() {
+        // The applications the written xdata uses (CADCRAFT is registered only when some xdata names it).
+        add_appids(tags, std::iter::empty());
+        raise_seed(tags);
         // No kept object a header pointer could name.
         remap_header_pointers(tags, |_| "0".into());
         remap_table_fields(tags, |_| None);
@@ -2278,16 +2281,21 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         }
     }
     add_appids(&mut out, std::iter::empty());
-    let top = max_handle(&out).saturating_add(1);
-    if let Some(t) = seed_index(&out).and_then(|i| out.get_mut(i))
-        && Handle::parse_hex(&t.str()).is_none_or(|h| h.0 < top)
-    {
-        *t = Tag::s(5, format!("{top:X}"));
-    }
+    raise_seed(&mut out);
     remap_header_pointers(&mut out, |h| map.get(h).unwrap_or_else(|| "0".into()));
     remap_table_fields(&mut out, |h| map.get(h).filter(|n| n != "0"));
     *tags = out;
     map.written_references()
+}
+
+/// Move the header's next handle past every handle written.
+fn raise_seed(out: &mut [Tag]) {
+    let top = max_handle(out).saturating_add(1);
+    if let Some(t) = seed_index(out).and_then(|i| out.get_mut(i))
+        && Handle::parse_hex(&t.str()).is_none_or(|h| h.0 < top)
+    {
+        *t = Tag::s(5, format!("{top:X}"));
+    }
 }
 
 /// Where the entities of types CADCraft doesn't model go: each before the next written entity of

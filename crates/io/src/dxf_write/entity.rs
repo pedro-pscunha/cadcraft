@@ -978,11 +978,18 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
             w.p2(10, p);
         }
         // Gradient fills (450 to 470) exist from AutoCAD 2004; AutoCAD 2000 ends the hatch at the seed points
-        // and the fill stays in CADCraft's xdata below.
+        // and the fill stays in CADCraft's xdata below. The DWG bridge carries the groups to the DWG writer
+        // at any release (it stores them from R2004).
+        let native = cx.target >= Version::R2004;
+        let mut app_open = false;
         if let Some(g) = &h.gradient {
-            gradient(w, g, cx.dwg_bridge || cx.target >= Version::R2004, cx.dwg_bridge && cx.target >= Version::R2004);
+            gradient(w, g, cx.dwg_bridge || native);
+            if !native {
+                gradient_xdata(w, g);
+                app_open = true;
+            }
         }
-        hatch_xdata(w, h);
+        hatch_xdata(w, h, app_open);
     }
 }
 
@@ -1011,22 +1018,17 @@ fn write_viewport_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper:
         if let Some(h) = clip {
             w.s(340, h.hex());
         }
-        // AutoCAD's frozen-layer list: one soft pointer per layer, to its LAYER record. Other
-        // programs read only this; CADCraft prefers its own xdata below when present.
+        // AutoCAD's frozen-layer list: one soft pointer per layer, to its LAYER record. It is the
+        // whole list: the reader still takes the `VPFROZEN` xdata of files CADCraft saved before.
         for name in &v.frozen_layers {
             if let Some(h) = w.layers.get(&name.to_ascii_uppercase()).cloned() {
                 w.s(331, h);
             }
         }
-        // One CADCraft xdata group holds both lists: readers stop at the first group of an app.
-        if !v.frozen_layers.is_empty() || !v.layer_colors.is_empty() {
+        // The per-viewport layer colours have no group in the DXF Reference: they stay CADCraft xdata.
+        if !v.layer_colors.is_empty() {
             w.s(1001, dxf_ext::APP);
-            if !v.frozen_layers.is_empty() {
-                w.xdata(dxf_ext::frozen_xdata(&v.frozen_layers));
-            }
-            if !v.layer_colors.is_empty() {
-                w.xdata(dxf_ext::layer_colors_xdata(&v.layer_colors));
-            }
+            w.xdata(dxf_ext::layer_colors_xdata(&v.layer_colors));
         }
     }
 }
@@ -1117,15 +1119,10 @@ fn write_other_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
 /// A hatch's gradient fill (DXF Reference, HATCH group codes 450–470): two-colour gradient
 /// with its rotation (radians), shift (0 = centered, 1 = shifted) and per-colour 463 records
 /// carrying ACI (63) and, for true colours, the RGB value (421). Those groups belong to R2004+
-/// files, so the same gradient also travels as `CADCRAFT` xdata, which survives this R2000
-/// file's conversion to DWG (where the native fields don't exist).
-fn gradient(w: &mut W, g: &Gradient, groups: bool, native_in_dwg: bool) {
+/// files; a release before that keeps the gradient only as `CADCRAFT` xdata ([`gradient_xdata`]).
+fn gradient(w: &mut W, g: &Gradient, groups: bool) {
     if groups {
         gradient_groups(w, g);
-    }
-    // The DWG keeps the native fields (acadrust writes them since its HATCH gradient fix): its copy as xdata would only be extra.
-    if !native_in_dwg {
-        gradient_xdata(w, g);
     }
 }
 
@@ -1240,19 +1237,16 @@ fn thickness(w: &mut W, e: &Entity) {
     }
 }
 
-/// Hatch origin and background colour as `CADCRAFT` xdata: `1000 HATCH`, the origin as a
-/// world position (`1011`, moved with the hatch by other programs) and the background colour
-/// name (`1000`, empty for none). The DXF Reference has no HATCH groups for either: other
-/// readers get the origin through the pattern lines' base points (43/44), the background isn't
-/// carried. Appended to the gradient's `CADCRAFT` xdata when there is one.
-fn hatch_xdata(w: &mut W, h: &Hatch) {
-    if h.origin == Vec2::ZERO && h.background.is_none() {
-        return;
-    }
-    if h.gradient.is_none() {
+/// The hatch background colour as `CADCRAFT` xdata: `1000 HATCH`, the origin (`1011`, always zero: the
+/// origin is already in the pattern lines' base points, 43/44, which is where AutoCAD keeps it) and the
+/// background colour name (`1000`). The DXF Reference has no HATCH group for the background colour.
+/// Appended to the gradient's `CADCRAFT` xdata when `app_open`.
+fn hatch_xdata(w: &mut W, h: &Hatch, app_open: bool) {
+    let Some(background) = h.background else { return };
+    if !app_open {
         w.s(1001, dxf_ext::APP);
     }
     w.s(1000, "HATCH");
-    w.p(1011, h.origin.to3(0.0));
-    w.s(1000, h.background.map(Color::name).unwrap_or_default());
+    w.p(1011, Vec3::ZERO);
+    w.s(1000, background.name());
 }
