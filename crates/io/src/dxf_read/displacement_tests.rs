@@ -263,7 +263,7 @@ fn legacy_clone_normalization_keeps_the_frozen_output() {
     let hash = format!("{:x}", Sha256::digest(&bytes));
     // Measured independently on the clean accepted 75c982ad base; re-measured when an MLEADERSTYLE began to keep its group 298, and
     // when a save stopped writing the private copies of what the file holds natively, and when `$HANDSEED` became the next handle above
-    // the handles written (see `growing_extents`).
-    assert_eq!(hash, "9406578cc61d89a6207f2e3c162076a9ee3567a115f48a34e2dd5c0142133820");
-    assert_eq!(bytes.len(), 17336);
+    // the handles written, and when a DXF header stopped writing `$CMLEADERSTYLE` (see `growing_extents`).
+    assert_eq!(hash, "471ff20b3e58c7d1d54006a29dda7b1ce746fa36a00ad278ff2856b10e3dd854");
+    assert_eq!(bytes.len(), 17300);
 }

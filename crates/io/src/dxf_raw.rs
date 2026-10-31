@@ -1175,9 +1175,82 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     if let Some(ds) = secs.iter().find(|s| s.name.eq_ignore_ascii_case("ACDSDATA")) {
         f.data_store = ds.tags.iter().take(MAX_DATA_STORE_GROUPS).map(raw).collect();
     }
+    // AutoCAD keeps the current multileader style in the variable dictionary, not in its header.
+    if d.header.str("CMLEADERSTYLE", "Standard").trim().eq_ignore_ascii_case("Standard")
+        && let Some(style) = kept_mleader_style(&f).filter(|s| !s.trim().is_empty())
+    {
+        d.header.set_str("CMLEADERSTYLE", style.trim());
+    }
     if !f.is_empty() {
         d.foreign = Arc::new(f);
     }
+}
+
+/// AutoCAD's key of the variable dictionary (the drawing variables with no header variable) in the named object dictionary.
+const VARIABLE_DICTIONARY: &str = "AcDbVariableDictionary";
+/// The variable of the current multileader style: a DICTIONARYVAR whose group 1 is the style's name.
+const CURRENT_MLEADER_STYLE: &str = "CMLEADERSTYLE";
+
+/// The variable dictionary among the kept objects, and in it the object of the current multileader style (indexes of `f.objects`).
+fn variable_dictionary(f: &Foreign) -> Option<(usize, Option<usize>)> {
+    let (_, dictionary_handle) = f.dictionary.iter().find(|(k, _)| k.trim().eq_ignore_ascii_case(VARIABLE_DICTIONARY))?;
+    let dictionary = f.objects.iter().position(|o| o.handle == *dictionary_handle && is_dictionary(&o.kind))?;
+    let tags = &f.objects.get(dictionary)?.tags;
+    let variable = tags
+        .windows(2)
+        .find(|w| w[0].code == 3 && w[0].value.trim().eq_ignore_ascii_case(CURRENT_MLEADER_STYLE) && matches!(w[1].code, 350 | 360))
+        .and_then(|w| Handle::parse_hex(w[1].value.trim()))
+        .and_then(|h| f.objects.iter().position(|o| o.handle == h && up(&o.kind) == "DICTIONARYVAR"));
+    Some((dictionary, variable))
+}
+
+/// Whether the file's named object dictionary kept a variable dictionary (the writer makes none then).
+pub(crate) fn has_variable_dictionary(f: &Foreign) -> bool {
+    variable_dictionary(f).is_some()
+}
+
+/// The current multileader style the kept variable dictionary names.
+fn kept_mleader_style(f: &Foreign) -> Option<String> {
+    let (_, variable) = variable_dictionary(f)?;
+    let object = f.objects.get(variable?)?;
+    object.tags.iter().find(|t| t.code == 1).map(|t| t.value.clone())
+}
+
+/// The kept objects with the variable of the current multileader style as the drawing has it, from R2004: the variable that exists
+/// takes the name when it differs (also `Standard`: the header cannot tell it from a name never set), and a variable dictionary
+/// that has none gets one for a name other than `Standard`. `None` when nothing differs or the file kept no variable dictionary
+/// (the writer makes one itself then).
+fn with_current_mleader_style(d: &Drawing, f: &Foreign, target: cadcraft_dxf::Version) -> Option<Foreign> {
+    if target < cadcraft_dxf::Version::R2004 {
+        return None;
+    }
+    let style = d.header.str("CMLEADERSTYLE", "Standard");
+    let style = style.trim();
+    let (dictionary, variable) = variable_dictionary(f)?;
+    let mut patched = f.clone();
+    match variable {
+        Some(at) => {
+            let object = patched.objects.get_mut(at)?;
+            let value = object.tags.iter_mut().find(|t| t.code == 1)?;
+            if value.value.trim().eq_ignore_ascii_case(style) {
+                return None;
+            }
+            value.value = style.to_string();
+        }
+        None => {
+            if style.eq_ignore_ascii_case("Standard") {
+                return None;
+            }
+            let dictionary_handle = patched.objects.get(dictionary)?.handle;
+            let top = all_entities(d).map(|e| e.handle.0).chain(f.objects.iter().chain(&f.table_records).map(|o| o.handle.0)).max().unwrap_or(0);
+            let new = Handle(top.max(d.handseed).saturating_add(1));
+            patched.objects.get_mut(dictionary)?.tags.extend([RawTag { code: 3, value: CURRENT_MLEADER_STYLE.into() }, RawTag { code: 350, value: new.hex() }]);
+            let owner = dictionary_handle.hex();
+            let tags = [(5, new.hex()), (102, "{ACAD_REACTORS".into()), (330, owner.clone()), (102, "}".into()), (330, owner), (100, "DictionaryVariables".into()), (280, "0".into()), (1, style.into())];
+            patched.objects.push(ForeignObject { handle: new, kind: "DICTIONARYVAR".into(), tags: tags.into_iter().map(|(code, value)| RawTag { code, value }).collect() });
+        }
+    }
+    Some(patched)
 }
 
 /// The classes of kept objects and of entities of types CADCraft doesn't model.
@@ -2051,7 +2124,9 @@ fn declared_version(tags: &[Tag], dwg_bridge: bool) -> u32 {
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).
 pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target: cadcraft_dxf::Version) -> WrittenReferences {
     let public = (!dwg_bridge).then(|| public_foreign(&d.foreign));
-    let f = public.as_ref().unwrap_or(&d.foreign);
+    let kept = public.as_ref().unwrap_or(&d.foreign);
+    let patched = with_current_mleader_style(d, kept, target);
+    let f = patched.as_ref().unwrap_or(kept);
     let opaque = raw_handles(d);
     let mut unknown = unknown_handles(d);
     unknown.extend(opaque.iter().cloned());

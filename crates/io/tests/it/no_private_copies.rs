@@ -175,9 +175,6 @@ fn an_unedited_r2018_save_writes_no_private_copy_of_a_native_value() {
     let d = fixture();
     for name in ["x.dxf", "x.dwg"] {
         let (bytes, tags) = saved(&d, name, Version::R2018);
-        // A DWG keeps the current multileader style as an XRECORD (see `exception_dwg_current_multileader_style`).
-        let tags: Vec<Tag> =
-            if name.ends_with(".dwg") { tags.into_iter().filter(|t| !(t.code == 3 && t.str() == "CADCRAFT_MLEADERSTYLE")).collect() } else { tags };
         assert_no_private_copy(&tags, name);
         assert_values(&cadcraft_io::read(&bytes, name).unwrap(), name);
     }
@@ -229,9 +226,8 @@ fn files_saved_with_the_private_copies_still_reopen() {
     let mut record: Vec<Tag> = tags[style..end].iter().map(|t| if t.code == 3 { Tag::s(3, "txt") } else { t.clone() }).collect();
     record.extend([Tag::s(1001, "CADCRAFT"), Tag::s(1000, "FONT"), Tag::s(1000, "Legacy Face")]);
     tags.splice(style..end, record);
-    // The multileader style: no $CMLEADERSTYLE, an XRECORD in the named object dictionary.
-    let at = tags.iter().position(|t| t.code == 9 && t.str() == "$CMLEADERSTYLE").unwrap();
-    tags.drain(at..at + 2);
+    // The multileader style: an XRECORD in the named object dictionary, and no variable dictionary.
+    assert!(tags.iter().all(|t| !(t.code == 9 && t.str() == "$CMLEADERSTYLE")), "a DXF header has no $CMLEADERSTYLE");
     let objects = tags.iter().position(|t| t.code == 2 && t.str() == "OBJECTS").unwrap();
     let root = (objects..tags.len()).find(|&i| tags[i].code == 0 && tags[i].str() == "DICTIONARY").unwrap();
     let root_handle = tags[root..].iter().find(|t| t.code == 5).unwrap().str();
@@ -392,20 +388,107 @@ fn exception_the_implicit_sheet_viewport_stays_marked() {
     }
 }
 
-/// The DWG writer neither writes nor reads the header handle of the current multileader style: a DWG keeps it in an XRECORD,
-/// and so does a DXF before R2007, which has no `$CMLEADERSTYLE`.
+/// A release before R2004 has no variable dictionary for the current multileader style (AutoCAD's DXF has no `$CMLEADERSTYLE`, its
+/// DWG header no field for it), so the style stays an XRECORD there. From R2004 it is the variable (see below).
 #[test]
-fn exception_the_current_multileader_style_in_a_dwg_and_in_an_old_dxf() {
+fn exception_the_current_multileader_style_before_r2004_stays_an_xrecord() {
     let d = fixture();
-    for (name, version) in [("x.dwg", Version::R2018), ("x.dwg", Version::R2004), ("x.dxf", Version::R2004)] {
-        let (bytes, tags) = saved(&d, name, version);
-        assert_eq!(private_xrecords(&tags), ["CADCRAFT_MLEADERSTYLE"], "{name} {version:?}");
-        assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Notes", "{name} {version:?}");
+    for name in ["x.dxf", "x.dwg"] {
+        let (bytes, tags) = saved(&d, name, Version::R2000);
+        assert_eq!(private_xrecords(&tags), ["CADCRAFT_MLEADERSTYLE"], "{name}");
+        assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Notes", "{name}");
     }
-    // A DXF from R2007 holds it in the header.
-    let (_, tags) = saved(&d, "x.dxf", Version::R2007);
-    assert!(private_xrecords(&tags).is_empty());
-    assert!(tags.windows(2).any(|w| w[0].code == 9 && w[0].str() == "$CMLEADERSTYLE" && w[1].str() == "Notes"));
+}
+
+/// A file as AutoCAD writes it, with the variable dictionary: the current multileader style `style` (none: the dictionary has other
+/// variables only).
+fn autocad_variables_file(style: Option<&str>) -> String {
+    let entry = if style.is_some() { "3\nCMLEADERSTYLE\n350\n2F8D\n" } else { "" };
+    let variable = style.map_or(String::new(), |s| {
+        format!("0\nDICTIONARYVAR\n5\n2F8D\n102\n{{ACAD_REACTORS\n330\n322\n102\n}}\n330\n322\n100\nDictionaryVariables\n280\n0\n1\n{s}\n")
+    });
+    format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n50000\n0\nENDSEC\n\
+         0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n100\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n0\nENDSEC\n\
+         0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n281\n1\n3\nAcDbVariableDictionary\n350\n322\n\
+         0\nDICTIONARY\n5\n322\n102\n{{ACAD_REACTORS\n330\nC\n102\n}}\n330\nC\n100\nAcDbDictionary\n281\n1\n3\nCANNOSCALE\n350\n2F8F\n{entry}\
+         0\nDICTIONARYVAR\n5\n2F8F\n102\n{{ACAD_REACTORS\n330\n322\n102\n}}\n330\n322\n100\nDictionaryVariables\n280\n0\n1\n1:1\n{variable}\
+         0\nENDSEC\n0\nEOF\n"
+    )
+}
+
+/// The value of the CMLEADERSTYLE variable and the number of them (and of `$CMLEADERSTYLE` header variables) in a DXF.
+fn mleader_variable(tags: &[Tag]) -> (Vec<String>, usize) {
+    let values = sections(tags)
+        .into_iter()
+        .flat_map(|s| records(&s.tags))
+        .filter(|(kind, body)| kind == "DICTIONARYVAR" && body.iter().any(|t| t.code == 330))
+        .filter_map(|(_, body)| {
+            let handle = body.iter().find(|t| t.code == 5)?.str();
+            let owner_entry = tags.windows(2).any(|w| w[0].code == 3 && w[0].str() == "CMLEADERSTYLE" && w[1].str() == handle);
+            owner_entry.then(|| body.iter().find(|t| t.code == 1).map(|t| t.str()).unwrap_or_default())
+        })
+        .collect();
+    (values, tags.iter().filter(|t| t.code == 9 && t.str() == "$CMLEADERSTYLE").count())
+}
+
+/// From R2004 the current multileader style is the variable CMLEADERSTYLE of the variable dictionary, in the DXF and in the DWG, and
+/// the DXF has no `$CMLEADERSTYLE` and no `CADCRAFT_MLEADERSTYLE` XRECORD: AutoCAD writes neither.
+#[test]
+fn the_current_multileader_style_is_the_variable_from_r2004() {
+    let d = fixture();
+    for name in ["x.dxf", "x.dwg"] {
+        for version in [Version::R2004, Version::R2007, Version::R2018] {
+            let (bytes, tags) = saved(&d, name, version);
+            let (values, header) = mleader_variable(&tags);
+            assert_eq!(values, ["Notes"], "{name} {version:?}: the variable");
+            // The DXF rendition of a DWG is acadrust's, which writes the header variable.
+            assert!(header == 0 || name.ends_with(".dwg"), "{name} {version:?}: $CMLEADERSTYLE");
+            assert!(private_xrecords(&tags).is_empty(), "{name} {version:?}: {:?}", private_xrecords(&tags));
+            assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Notes", "{name} {version:?}");
+        }
+    }
+}
+
+/// A file whose variable dictionary names a style keeps it through a save in the DXF and the DWG, a switch to Standard writes
+/// Standard (the header cannot tell it from a name never set), and a variable dictionary without the variable gets one.
+#[test]
+fn the_current_multileader_style_of_an_autocad_file_follows_the_drawing() {
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    for name in ["x.dxf", "x.dwg"] {
+        let mut d = cadcraft_io::read_dxf(autocad_variables_file(Some("Linha_MEDIO")).as_bytes()).unwrap();
+        assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{name}: read");
+        let kept = cadcraft_io::write_with(&d, name, &options).unwrap();
+        assert_eq!(cadcraft_io::read(&kept, name).unwrap().header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{name}: unedited");
+        d.header.set_str("CMLEADERSTYLE", "Standard");
+        let (bytes, tags) = saved(&d, name, Version::R2018);
+        assert_eq!(mleader_variable(&tags).0, ["Standard"], "{name}: the variable of the switch");
+        assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Standard", "{name}: switched");
+        // A variable dictionary without the variable.
+        let mut d = cadcraft_io::read_dxf(autocad_variables_file(None).as_bytes()).unwrap();
+        assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Standard", "{name}: none");
+        d.header.set_str("CMLEADERSTYLE", "Notes");
+        let (bytes, tags) = saved(&d, name, Version::R2018);
+        assert_eq!(mleader_variable(&tags).0, ["Notes"], "{name}: a variable made");
+        assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Notes", "{name}: made");
+    }
+}
+
+/// Citycon keeps `Linha_MEDIO` as its current multileader style (a DICTIONARYVAR in the AutoCAD DWG and in AutoCAD's own DXF): it stays
+/// through a read and a save as DXF and as DWG.
+#[test]
+#[ignore = "reads the AutoCAD drawings of /tmp/cad (Citycon, a DWG and AutoCAD's own R2018 DXF)"]
+fn citycon_keeps_its_current_multileader_style() {
+    for source in ["/tmp/cad/rt7/Citycon-Augusto_Miele.dwg", "/tmp/cad/save-compare/acad/Citycon-Augusto_Miele-2018.acad-saveas.dxf"] {
+        let d = cadcraft_io::read(&std::fs::read(source).expect("the Citycon drawing"), source).unwrap();
+        assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{source}: read");
+        for name in ["x.dxf", "x.dwg"] {
+            for version in [Version::R2010, Version::R2018] {
+                let (bytes, _) = saved(&d, name, version);
+                assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{source} {name} {version:?}");
+            }
+        }
+    }
 }
 
 /// The other private data stays where the DXF Reference and the DWG have no group for it: a named view's layer state and layout,

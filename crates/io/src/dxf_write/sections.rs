@@ -518,6 +518,8 @@ struct ObjectWritePlan<'a> {
     ps_brs: &'a [(String, String, &'a Layout)],
     layout_handles: &'a [String],
     xrecords: &'a [(&'static str, String, Vec<String>)],
+    /// The variable dictionary of a drawing whose current multileader style is not Standard: (dictionary, variable, style).
+    variables: Option<&'a (String, String, String)>,
     scales: &'a [(&'a cadcraft_doc::AnnoScale, String)],
     pstyles: &'a [(String, String)],
     table_styles: &'a [TableStyle],
@@ -619,6 +621,10 @@ fn write_root_group_objects(
     for (key, h, _) in xrecords {
         w.s(3, *key);
         w.s(350, h);
+    }
+    if let Some((dictionary, _, _)) = plan.variables {
+        w.s(3, "AcDbVariableDictionary");
+        w.s(350, dictionary);
     }
     w.s(3, "ACAD_SCALELIST");
     w.s(350, scale_dict.clone());
@@ -724,6 +730,23 @@ fn write_named_objects(w: &mut W, plan: &ObjectWritePlan<'_>) {
         for c in chunks {
             w.s(1, c.clone());
         }
+    }
+    if let Some((dictionary, variable, style)) = plan.variables {
+        w.s(0, "DICTIONARY");
+        w.s(5, dictionary);
+        w.group("ACAD_REACTORS", 330, &[root_dict]);
+        w.s(330, root_dict.clone());
+        w.s(100, "AcDbDictionary");
+        w.i(281, 1);
+        w.s(3, "CMLEADERSTYLE");
+        w.s(350, variable);
+        w.s(0, "DICTIONARYVAR");
+        w.s(5, variable);
+        w.group("ACAD_REACTORS", 330, &[dictionary]);
+        w.s(330, dictionary.clone());
+        w.s(100, "DictionaryVariables");
+        w.i(280, 0);
+        w.s(1, style);
     }
     scale_list(w, scales, scale_dict, root_dict);
 }
@@ -1084,13 +1107,17 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     let table_style_dict = w.h();
     // CADCraft data in XRECORDs of the named object dictionary: (key, handle, text chunks).
     let mut xrecords: Vec<(&str, String, Vec<String>)> = Vec::new();
-    // The current multileader style is the header variable $CMLEADERSTYLE of a DXF from R2007. Before that release it has no home in
-    // the file, and the DWG writer neither writes nor reads the style's header handle: both stay an XRECORD. The handle is taken
-    // in every file, so that the numbers of the records after it do not depend on the release.
+    // The current multileader style is the variable CMLEADERSTYLE of the variable dictionary (AutoCAD's DXF has no $CMLEADERSTYLE, its
+    // DWG header no field for it) from R2004; `dxf_raw::finish` sets it in a variable dictionary the file kept, and this writes the
+    // dictionary of a drawing without one for a style other than Standard. Before R2004 it is an XRECORD. The handles are taken in
+    // every file, so that the numbers of the records after them do not depend on the release.
+    let mut variables = None;
     if let Some(name) = d.header.get("CMLEADERSTYLE").and_then(HVal::as_str) {
-        let handle = w.h();
-        if target < Version::R2007 || dwg_bridge {
-            xrecords.push((dxf_ext::MLEADER_STYLE_KEY, handle, vec![name.to_string()]));
+        let (xrecord, dictionary, variable) = (w.h(), w.h(), w.h());
+        if target < Version::R2004 {
+            xrecords.push((dxf_ext::MLEADER_STYLE_KEY, xrecord, vec![name.to_string()]));
+        } else if !name.trim().eq_ignore_ascii_case("Standard") && !crate::dxf_raw::has_variable_dictionary(&d.foreign) {
+            variables = Some((dictionary, variable, name.trim().to_string()));
         }
     }
     if let Some(chunks) = dxf_ext::constraint_chunks(&d.constraints, &d.parametric) {
@@ -1309,6 +1336,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             ps_brs: &ps_brs,
             layout_handles: &layout_handles,
             xrecords: &xrecords,
+            variables: variables.as_ref(),
             scales: &scales,
             pstyles: &pstyles,
             table_styles,

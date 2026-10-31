@@ -129,12 +129,13 @@ fn legacy_save_bytes_match_the_frozen_writer() {
     // cell style: 83 bytes), and again when an MLEADERSTYLE began to write its group 298 (8 bytes), and again when a save stopped
     // writing the private copies of what the file holds natively (the CADCRAFT_HANDSEED and CADCRAFT_MLEADERSTYLE XRECORDs and
     // the CADCRAFT APPID, 431 bytes; the table records and objects are numbered above the entities' handles), and again when
-    // `$HANDSEED` became the next handle above the handles written (same length, the seed value).
+    // `$HANDSEED` became the next handle above the handles written (same length, the seed value), and again when a DXF header stopped
+    // writing `$CMLEADERSTYLE` (36 bytes: AutoCAD's DXF has none, the variable dictionary holds the style).
     for (case, expected, length) in [
-        ("unchanged", 0xcdfc_32b8_f660_8789_u64, 17711),
-        ("inward", 0x5884_871c_e642_9f6d, 17711),
-        ("far", 0x9a6a_3e21_beb9_41e6, 17725),
-        ("added", 0x55a7_aef7_6024_6e73, 17858),
+        ("unchanged", 0x0bb1_819d_3eaa_2cc9_u64, 17675),
+        ("inward", 0xce78_d011_87ab_a83d, 17675),
+        ("far", 0xea6a_9f49_6847_106e, 17689),
+        ("added", 0x1bbc_bc4f_5998_5713, 17822),
     ] {
         let mut drawing = source();
         match case {
