@@ -1,7 +1,6 @@
 //! Plan v3, 4.5: the Raw path end to end, on real DXF files in `tests/data/activation/`: a malformed spatial SPLINE, a spatial LEADER, a
 //! forced canonical-read failure, the read note, and read -> Raw -> edit refusal -> save (a DXF keeps the source records, a DWG save
-//! refuses what it cannot check). The need of a record is the stand-in of `activation_fixtures` (a tilted or spatial record needs
-//! Canonical; the xdata string UNREADABLE and a SPLINE with a wrong control count cannot be read) until the section 3 predicate lands.
+//! refuses what it cannot check). The static Legacy classifier decides need. Fixture readability remains separate.
 
 use std::path::PathBuf;
 
@@ -10,7 +9,7 @@ use cadcraft_dxf::{Tag, parse, records, sections};
 use cadcraft_geom::{Mat3, Mat4, Vec2};
 use cadcraft_io::activation::{FamilySet, ReaderMode, ReaderPolicy};
 
-use crate::activation_fixtures::{attrib, block, file, insert, line, seqend, stand_in};
+use crate::activation_fixtures::{attrib, block, file, insert, line, seqend, source_predicate};
 
 #[path = "../support/raw_compounds.rs"]
 mod support;
@@ -49,7 +48,7 @@ fn policy() -> ReaderPolicy {
 
 fn read(name: &str) -> (Drawing, String) {
     let text = std::fs::read_to_string(dir().join(format!("{name}.dxf"))).unwrap_or_else(|e| panic!("{name}: {e}"));
-    (cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", policy(), &stand_in).unwrap(), text)
+    (cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", policy(), &source_predicate(text.as_bytes())).unwrap(), text)
 }
 
 fn raw_parents(d: &Drawing) -> Vec<(String, Handle)> {

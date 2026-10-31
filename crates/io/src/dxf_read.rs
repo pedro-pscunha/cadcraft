@@ -29,6 +29,7 @@ mod extras;
 mod extras_tests;
 mod fill_canonical;
 mod hatch;
+mod legacy_equivalence;
 mod mleader_canonical;
 mod objects;
 #[cfg(test)]
@@ -44,6 +45,9 @@ pub(crate) fn common_from_groups(tags: &[Tag]) -> Common {
 
 pub use curve_canonical::{canonical_curve_from_groups, canonical_polyline_from_groups};
 pub use fill_canonical::canonical_fill_from_groups;
+pub use legacy_equivalence::{
+    DerivedOwner, LegacyClassification, LegacyClassifier, LegacyDisposition, LegacyRecordClassification, classify_legacy_unit,
+};
 pub use mleader_canonical::canonical_mleader_from_groups;
 pub use text_canonical::{canonical_attrib_from_groups, canonical_layout_from_groups, canonical_text_from_groups};
 

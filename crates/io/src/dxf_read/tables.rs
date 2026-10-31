@@ -80,8 +80,8 @@ pub(super) fn header(tags: &[Tag], d: &mut Drawing, rx: &Rx) {
     }
 }
 
-/// True when a style record carries `AcadAnnotative` xdata with the annotative flag set.
-fn annotative(tags: &[Tag]) -> bool {
+/// True when a record carries `AcadAnnotative` xdata with the annotative flag set.
+pub(super) fn annotative(tags: &[Tag]) -> bool {
     let list = crate::dxf_ext::xdata_list(crate::dxf_ext::xdata(tags, "AcadAnnotative"), "AnnotativeData");
     list.iter().filter(|t| t.code == 1070).nth(1).is_some_and(|t| t.i64() != 0)
 }
