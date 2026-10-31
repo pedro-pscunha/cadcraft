@@ -155,12 +155,20 @@ impl Default for Session {
     }
 }
 
+/// The interactive commands whose preview shows the object they will draw with `Session::draw`.
+pub(crate) const DRAWN_AT_ELEVATION: &[&str] =
+    &["ARC", "ATTDEF", "CIRCLE", "DONUT", "ELLIPSE", "HELIX", "INSERT", "MTEXT", "POLYGON", "RAY", "REVCLOUD", "TABLE", "TEXT", "XLINE"];
+
 /// Move a flat object drawn at Z 0 to Z `z`. An object of a kind that has no Z of its own to move is left as it is.
-fn raise_to(kind: &mut EntityKind, z: f64) {
+pub(crate) fn raise_to(kind: &mut EntityKind, z: f64) {
     if z == 0.0 {
         return;
     }
     match kind {
+        EntityKind::Line(l) => {
+            l.a.z += z;
+            l.b.z += z;
+        }
         EntityKind::Circle(c) => c.center.z += z,
         EntityKind::Arc(a) => a.center.z += z,
         EntityKind::Ellipse(e) => e.center.z += z,

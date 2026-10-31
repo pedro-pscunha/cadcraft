@@ -38,6 +38,7 @@ mod dim_radial_outside;
 mod dim_vars;
 mod dimtedit_prompts;
 mod drafting_spacing;
+mod draw_previews_elevation;
 mod draw_prompts;
 mod draworder;
 mod dyn_input;
