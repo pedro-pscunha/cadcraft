@@ -295,6 +295,8 @@ pub enum Failure {
 
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(test)]
+        work_tests::REASON_FORMATS.with(|count| count.set(count.get() + 1));
         match self {
             Failure::DefinitionBeforeStage6(_) => write!(f, "it belongs to a block definition, which cannot be read Canonical before stage 6"),
             Failure::FamilyOutsideMask(family) => write!(f, "{family:?} records are outside the reader mask"),
@@ -323,6 +325,21 @@ pub struct Component {
     pub outcome: ComponentOutcome,
     /// Why it cannot activate (empty unless `outcome` is [`ComponentOutcome::Raw`]), ascending and without repeats.
     pub failures: Vec<Failure>,
+    /// One cached display summary. Node-specific details remain in `failures`.
+    reason: Option<String>,
+}
+
+fn component_reason(failures: &[Failure]) -> Option<String> {
+    let mut seen = BTreeSet::new();
+    let mut reasons = Vec::new();
+    for failure in failures {
+        let reason = failure.to_string();
+        if seen.insert(reason.clone()) {
+            reasons.push(reason);
+        }
+    }
+    // Failure text has a finite vocabulary: node IDs do not make the per-record summary grow.
+    (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -335,15 +352,12 @@ pub struct Activation {
 }
 
 impl Activation {
-    /// Why the component of `node` could not activate, as one sentence; `None` when it did not need to.
-    pub fn reason_for(&self, node: NodeId) -> Option<String> {
+    /// The component's cached, deduplicated display summary; `None` when it did not need to activate.
+    pub fn reason_for(&self, node: NodeId) -> Option<&str> {
         #[cfg(test)]
         work_tests::REASON_PROBES.with(|count| count.set(count.get() + 1));
         let component = self.components.get(*self.component_by_node.get(node.index())?)?;
-        if component.failures.is_empty() {
-            return None;
-        }
-        Some(component.failures.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+        component.reason.as_deref()
     }
 
     /// The outcome of every node, in node order.
@@ -396,7 +410,7 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     for nodes in members.into_values() {
         let needs = nodes.iter().any(|id| matches!(graph.nodes[id.index()].need, Need::Needs { .. }) && is_record(graph, *id));
         if !needs {
-            components.push(Component { nodes, outcome: ComponentOutcome::Legacy, failures: Vec::new() });
+            components.push(Component { nodes, outcome: ComponentOutcome::Legacy, failures: Vec::new(), reason: None });
             continue;
         }
         let failures = failures(graph, policy, &nesting, &nodes);
@@ -404,12 +418,13 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
             for id in &nodes {
                 outcomes[id.index()] = Outcome::Canonical;
             }
-            components.push(Component { nodes, outcome: ComponentOutcome::Canonical, failures });
+            components.push(Component { nodes, outcome: ComponentOutcome::Canonical, failures, reason: None });
         } else {
             for id in raw_units(graph, &nodes, &owned) {
                 outcomes[id.index()] = Outcome::Raw;
             }
-            components.push(Component { nodes, outcome: ComponentOutcome::Raw, failures });
+            let reason = component_reason(&failures);
+            components.push(Component { nodes, outcome: ComponentOutcome::Raw, failures, reason });
         }
     }
     components.sort_by_key(|c| c.nodes.first().copied());

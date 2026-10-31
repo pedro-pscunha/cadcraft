@@ -1,14 +1,45 @@
 use std::cell::Cell;
 
-use super::{Edge, Family, FamilySet, Graph, Need, Node, NodeId, Outcome, Policy, activate};
+use super::{Edge, Failure, Family, FamilySet, Graph, Need, Node, NodeId, Outcome, Policy, activate};
 
 thread_local! {
     pub(super) static REASON_PROBES: Cell<usize> = const { Cell::new(0) };
     pub(super) static OWNERSHIP_PROBES: Cell<usize> = const { Cell::new(0) };
+    pub(super) static REASON_FORMATS: Cell<usize> = const { Cell::new(0) };
 }
 
 fn off() -> Policy {
     Policy { mask: FamilySet::NONE, readers: FamilySet::ALL, definitions: true }
+}
+
+fn unreadable_block(count: u32) -> Graph {
+    let mut nodes = vec![Node::definition()];
+    nodes.extend(std::iter::repeat_n(Node::record(Family::Circle, Need::Needs { readable: false }), count as usize));
+    let edges = (1..=count).map(|index| Edge::Contains { definition: NodeId(0), member: NodeId(index) }).collect();
+    Graph::new(nodes, edges).unwrap()
+}
+
+#[test]
+fn one_component_formats_each_failure_once_for_all_raw_records() {
+    let count = 2_000u32;
+    REASON_FORMATS.with(|formats| formats.set(0));
+    let activation = activate(&unreadable_block(count), &Policy { mask: FamilySet::ALL, ..off() });
+    for index in 1..=count {
+        assert!(activation.reason_for(NodeId(index)).is_some());
+    }
+    assert_eq!(REASON_FORMATS.with(Cell::get), count as usize, "a shared reason must not format every failure for every record");
+}
+
+#[test]
+fn a_shared_reason_is_bounded_but_keeps_the_complete_failure_list() {
+    let count = 2_000u32;
+    let activation = activate(&unreadable_block(count), &Policy { mask: FamilySet::ALL, ..off() });
+    let reason = activation.reason_for(NodeId(1)).unwrap();
+    assert_eq!(reason.len(), "its canonical reading fails".len());
+    assert_eq!(reason, "its canonical reading fails");
+    assert_eq!(activation.components()[0].failures, (1..=count).map(|index| Failure::UnreadableNeed(NodeId(index))).collect::<Vec<_>>());
+    let last = activation.reason_for(NodeId(count)).unwrap();
+    assert!(std::ptr::eq(reason.as_ptr(), last.as_ptr()), "all records must borrow the same cached reason");
 }
 
 #[test]

@@ -138,7 +138,7 @@ impl Rx {
         if self.revision_for(node) != Some(cadcraft_doc::GeometryRevision::RawSource) {
             return None;
         }
-        let why = self.activation.as_ref()?.reason_for(node).unwrap_or_else(|| "it needs a canonical reading".into());
+        let why = self.activation.as_ref()?.reason_for(node).unwrap_or("it needs a canonical reading");
         Some(format!("The record needs a canonical reading that this reader cannot give it: {why}."))
     }
 
