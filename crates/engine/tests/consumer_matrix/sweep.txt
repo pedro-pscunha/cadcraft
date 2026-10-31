@@ -124,7 +124,6 @@ pickstyle	template=0	legacy=works	canonical=works	raw=works
 plotstyle	template=0	legacy=works	canonical=works	raw=works
 plotwindow	template=95	legacy=works	canonical=works	raw=works
 properties.set	template=0	legacy=works	canonical=works	raw=works
-qdim	template=33	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 qselect	template=0	legacy=works	canonical=works	raw=works
 qselect.info	template=0	legacy=works	canonical=works	raw=works
 radius.measure	template=0	legacy=works	canonical=works	raw=refused: invalid parameters for `radius.measure`: select an arc, circle or polyline arc

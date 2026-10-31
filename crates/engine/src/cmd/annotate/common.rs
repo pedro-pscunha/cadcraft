@@ -1,4 +1,4 @@
-use super::{Accept, DimAssoc, DimKind, Dimension, EntityKind, Handle, Input, Prompt, Result, Segment, Session, Value, Vec2, Vec3, v3};
+use super::{Accept, AssocSnap, DimAssoc, DimKind, Dimension, EntityKind, Handle, Input, Prompt, Result, Segment, Session, Value, Vec2, Vec3, v3};
 
 pub(super) fn style(s: &Session) -> String {
     s.doc().map(|d| d.header.str("DIMSTYLE", "Standard")).unwrap_or_else(|_| "Standard".into())
@@ -49,9 +49,53 @@ pub(super) fn add_dim(s: &mut Session, k: EntityKind) -> Result<Handle> {
     {
         dm.assoc = crate::assoc::reassociate(s.doc()?, &s.space(), dm);
     }
+    if let EntityKind::Dimension(dm) = &mut k {
+        take_object_z(s, dm);
+    }
     let h = s.draw(k)?;
     s.last_dim = Some(h);
     Ok(h)
+}
+
+/// The Z of the point of `object` that an associative definition point sits on.
+fn object_z(s: &Session, object: Handle, snap: &AssocSnap) -> f64 {
+    let Some(entity) = s.doc().ok().and_then(|d| d.entity(object)) else { return 0.0 };
+    match &entity.kind {
+        EntityKind::Circle(c) => c.center.z,
+        EntityKind::Arc(a) => a.center.z,
+        EntityKind::Line(l) if *snap == AssocSnap::End => l.b.z,
+        EntityKind::Line(l) => l.a.z,
+        EntityKind::LwPolyline(p) => p.elevation,
+        _ => 0.0,
+    }
+}
+
+/// A dimension attached to an object takes the object's Z for the points that come from it, and the current elevation for the points
+/// that were picked (the location, the text), as AutoCAD does with an object at Z 7 and ELEVATION 3 (measured in LT 2025). `Session::draw`
+/// adds the elevation to every point after this, so the shift here is the difference. An arc length dimension also measures from the
+/// arc's centre and end (15, 16), and a jogged radius dimension puts its override centre and its jog on the circle's plane.
+fn take_object_z(s: &Session, dm: &mut Dimension) {
+    let elevation = s.elevation();
+    let mut z: Vec<(&str, f64)> = dm.assoc.iter().map(|a| (a.point.as_str(), object_z(s, a.handle, &a.snap) - elevation)).collect();
+    let first = z.first().map(|(_, v)| *v);
+    if let (DimKind::ArcLength, Some(v)) = (dm.kind, first) {
+        z.extend([("p15", v), ("p16", v)]);
+    }
+    for (name, shift) in z {
+        match name {
+            "defpt" => dm.defpt.z += shift,
+            "p13" => dm.p13.z += shift,
+            "p14" => dm.p14.z += shift,
+            "p15" => dm.p15.z += shift,
+            "p16" => dm.p16.z += shift,
+            _ => {}
+        }
+    }
+    if let (Some(jogged), Some(attached)) = (&mut dm.marks.jogged, dm.assoc.iter().find(|a| a.point == "defpt")) {
+        let shift = object_z(s, attached.handle, &attached.snap) - elevation;
+        jogged.center.z += shift;
+        jogged.jog.z += shift;
+    }
 }
 
 pub(super) fn assoc_enabled(s: &Session) -> bool {

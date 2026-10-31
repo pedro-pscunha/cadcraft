@@ -105,7 +105,6 @@ dcradius operand
 dcvertical operand
 ddptype n/a
 delconstraint operand
-dim n/a
 dimbaseline n/a
 dimconstraint operand
 dimcontinue n/a
@@ -285,7 +284,6 @@ properties.set operand
 pspace n/a
 publish operand
 purge n/a
-qdim operand
 qpmode n/a
 qsave n/a
 qselect operand

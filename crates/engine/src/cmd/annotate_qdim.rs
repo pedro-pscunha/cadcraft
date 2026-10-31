@@ -218,6 +218,16 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
             };
         }
         let h = s.draw(k)?;
+        // AutoCAD puts the dimension line and the text at the elevation and the two measured points of a linear dimension at Z 0, not at
+        // the Z of the objects (measured in LT 2025).
+        s.doc_mut()?.modify_entity(h, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind
+                && matches!(dm.kind, DimKind::Linear { .. })
+            {
+                dm.p13.z = 0.0;
+                dm.p14.z = 0.0;
+            }
+        })?;
         s.last_dim = Some(h);
         out.push(h.hex());
     }

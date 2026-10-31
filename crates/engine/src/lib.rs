@@ -270,6 +270,7 @@ fn raise_dimension(dm: &mut cadcraft_doc::Dimension, z: f64) {
     }
     if let Some(jogged) = &mut dm.marks.jogged {
         jogged.center.z += z;
+        jogged.jog.z += z;
     }
 }
 

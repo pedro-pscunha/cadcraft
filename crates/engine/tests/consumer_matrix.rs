@@ -4,7 +4,7 @@
 //! - A live row states `Ok(numbers)` or `Refuses(reason)` and is checked: an `Ok` row must reach the operand and give the independent
 //!   number, a refusal must name the reason and leave the model and the handle counter as they were. A missing-argument error
 //!   does not count: every row's control with the same parameters on a legacy drawing must succeed.
-//! - A pending row belongs to an open finding of the plan (none is open: F3 closed with 5774fbf8). Its expectation is what the fix must deliver, it must still
+//! - A pending row belongs to an open finding (F3 of the plan is closed with 5774fbf8; MLINE-ELEVATION is open and has no row yet). Its expectation is what the fix must deliver, it must still
 //!   fail today, and the test that checks it fails the day it passes, so the row cannot outlive its fix silently.
 //! - The registry lint: every registered command is declared here with the roles its rows cover, or has a line in
 //!   `consumer_matrix/classes.txt`: `n/a` for a command that reads no object (checked against its parameters), or `operand` for one that
@@ -722,6 +722,7 @@ fn dimension_points_at_3(dm: &cadcraft_doc::Dimension) -> Result<(), String> {
     }
     if let Some(jogged) = &dm.marks.jogged {
         near(jogged.center.z, 3.0).map_err(|e| format!("jog center: {e}"))?;
+        near(jogged.jog.z, 3.0).map_err(|e| format!("jog: {e}"))?;
     }
     Ok(())
 }
@@ -792,6 +793,125 @@ fn made_wipeout_at_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String
     }
 }
 
+/// Objects drawn at ELEVATION 7, then ELEVATION 3 and a far circle for the neighbour: a dimension made from an object.
+struct Objects {
+    session: Session,
+    circle: Handle,
+    arc: Handle,
+    lines: [Handle; 2],
+    line: Handle,
+}
+
+fn objects_at_7() -> Objects {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 7})).unwrap();
+    let circle = create(&mut s, "circle", json!({"center": [30, 0], "radius": 2}));
+    let arc = create(&mut s, "arc", json!({"p1": [70, 0], "p2": [72, 2], "p3": [74, 0]}));
+    let l1 = create(&mut s, "line", json!({"points": [[50, 0], [60, 0]]}));
+    let l2 = create(&mut s, "line", json!({"points": [[50, 0], [55, 8]]}));
+    let line = create(&mut s, "line", json!({"points": [[0, 10], [10, 10]]}));
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 3})).unwrap();
+    let neighbour = create(&mut s, "circle", json!({"center": [100, 100], "radius": 2}));
+    let _ = neighbour;
+    Objects { session: s, circle, arc, lines: [l1, l2], line }
+}
+
+fn on_objects(params: fn(&Objects) -> Value) -> Fixture {
+    let o = objects_at_7();
+    let params = params(&o);
+    let neighbour = o.session.doc().unwrap().model.iter().last().unwrap().handle;
+    Fixture { drawing: model_of(&o.session), params, operands: vec![neighbour], view: None }
+}
+
+fn dimradius_on_circle() -> Fixture {
+    on_objects(|o| json!({"handle": o.circle.hex(), "at": [33, 3]}))
+}
+
+fn dimdiameter_on_circle() -> Fixture {
+    on_objects(|o| json!({"handle": o.circle.hex(), "at": [27, -3]}))
+}
+
+fn dimjogged_on_circle() -> Fixture {
+    on_objects(|o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]}))
+}
+
+fn dimangular_on_lines() -> Fixture {
+    on_objects(|o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]}))
+}
+
+fn dimarc_on_arc() -> Fixture {
+    on_objects(|o| json!({"handle": o.arc.hex(), "at": [72, 4]}))
+}
+
+fn dimlinear_on_line() -> Fixture {
+    on_objects(|o| json!({"object": o.line.hex(), "at": [5, 13]}))
+}
+
+elevated_fixture!(dim_at_3, json!({"p1": [0, 10], "p2": [10, 10], "at": [5, 13]}));
+
+/// QDIM over two lines drawn at the elevation.
+fn qdim_at_3() -> Fixture {
+    let mut f = at_elevation(json!({}));
+    let mut s = session_of(&f.drawing);
+    let a = create(&mut s, "line", json!({"points": [[100, 0], [100, 5]]}));
+    let b = create(&mut s, "line", json!({"points": [[105, 0], [105, 5]]}));
+    f.drawing = model_of(&s);
+    f.params = json!({"handles": [a.hex(), b.hex()], "at": [102, 8]});
+    f
+}
+
+/// What AutoCAD gives a dimension made from an object at Z 7 with ELEVATION 3: the points that come from the object at Z 7, the points
+/// that were picked at Z 3 (oracle: `/tmp/cad/elev-oracle2`, LT 2025, 31/10/2026).
+fn dimension_points(dm: &cadcraft_doc::Dimension, want: &[(&str, f64)]) -> Result<(), String> {
+    for (name, z) in want {
+        let point = match *name {
+            "defpt" => dm.defpt,
+            "text_mid" => dm.text_mid,
+            "p13" => dm.p13,
+            "p14" => dm.p14,
+            "p15" => dm.p15,
+            "p16" => dm.p16,
+            "jog_center" => dm.marks.jogged.as_ref().ok_or("no jog")?.center,
+            "jog" => dm.marks.jogged.as_ref().ok_or("no jog")?.jog,
+            other => return Err(format!("no point {other}")),
+        };
+        near(point.z, *z).map_err(|e| format!("{name}: {e}"))?;
+    }
+    Ok(())
+}
+
+fn made_dim(d: &Drawing, ops: &[Handle], want: &[(&str, f64)]) -> Result<(), String> {
+    match &made(d, ops)?.kind {
+        EntityKind::Dimension(dm) => dimension_points(dm, want),
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+fn radius_on_circle_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 7.0), ("text_mid", 3.0), ("p15", 7.0)])
+}
+
+fn jogged_on_circle_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 7.0), ("text_mid", 3.0), ("p15", 7.0), ("jog_center", 7.0), ("jog", 7.0)])
+}
+
+fn angular_on_lines_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 7.0), ("text_mid", 3.0), ("p13", 7.0), ("p14", 7.0), ("p15", 7.0), ("p16", 3.0)])
+}
+
+fn arc_on_arc_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 3.0), ("text_mid", 3.0), ("p13", 7.0), ("p14", 7.0), ("p15", 7.0), ("p16", 7.0)])
+}
+
+fn linear_on_line_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 3.0), ("text_mid", 3.0), ("p13", 7.0), ("p14", 7.0)])
+}
+
+/// QDIM: AutoCAD puts the dimension line and the text at the elevation, and the two measured points at Z 0, not at the Z of the lines.
+fn qdim_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    made_dim(d, ops, &[("defpt", 3.0), ("text_mid", 3.0), ("p13", 0.0), ("p14", 0.0)])
+}
+
 /// The Z that a drawn object sits at: the elevation of a polyline, the Z of the center, base or insertion point of the others.
 fn elevation_of(kind: &EntityKind) -> Option<f64> {
     Some(match kind {
@@ -827,7 +947,9 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("dimradius", &[Role::PickedPoint]),
     ("dimdiameter", &[Role::PickedPoint]),
     ("dimordinate", &[Role::PickedPoint]),
+    ("dim", &[Role::PickedPoint]),
     ("dimarc", &[Role::PickedPoint]),
+    ("qdim", &[Role::PickedPoint]),
     ("mleader", &[Role::PickedPoint]),
     ("spline", &[Role::PickedPoint]),
     ("circle", &[Role::PickedPoint]),
@@ -1385,6 +1507,21 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 8] = [
+        ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
+        ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
+        ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
+        ("dimangular", "two lines at Z 7", dimangular_on_lines, angular_on_lines_made),
+        ("dimarc", "by handle, arc at Z 7", dimarc_on_arc, arc_on_arc_made),
+        ("dimlinear", "by object, line at Z 7", dimlinear_on_line, linear_on_line_made),
+        ("dim", "two points and a location", dim_at_3, made_dimension_at_3),
+        ("qdim", "two lines at the elevation", qdim_at_3, qdim_made),
+    ];
+    for (command, branch, fixture, check) in on_objects {
+        for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
+            out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
+        }
+    }
     for (command, branch, fixture, check) in annotated {
         for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
             out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
@@ -1401,7 +1538,12 @@ struct Pending {
 }
 
 fn pending() -> Vec<Pending> {
-    Vec::new()
+    vec![Pending {
+        finding: "MLINE-ELEVATION",
+        what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
+               measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
+        row: None,
+    }]
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -1429,7 +1571,7 @@ fn a_pending_row_still_fails_and_is_removed_when_its_fix_lands() {
 #[test]
 fn the_pending_rows_are_exactly_the_open_findings() {
     let findings: Vec<&str> = pending().iter().map(|p| p.finding).collect();
-    assert_eq!(findings, Vec::<&str>::new(), "F3 is closed (5774fbf8): a new finding gets its entry here");
+    assert_eq!(findings, vec!["MLINE-ELEVATION"], "F3 is closed (5774fbf8): a new finding gets its entry here");
     assert!(pending().iter().all(|p| !p.what.is_empty()));
 }
 
