@@ -11,6 +11,9 @@
 //! cargo test -p cadcraft-io --test corpus_golden -- --ignored match --nocapture
 //! ```
 //!
+//! The check is strict: an output whose sha256 is not the frozen one fails (the records that differ from the golden explain the failure),
+//! and a file that is not on the machine fails unless its `corpus.toml` entry says `optional = true`.
+//!
 //! A save-fidelity change that moves the output on purpose refreshes the baseline with
 //! `write_golden_set` (`CADCRAFT_G1_WRITE=1`, and `-- --ignored write_golden_set`), in the commit that makes it. The filter `match` keeps the check
 //! from running `write_golden_set`, which rewrites the baseline.
@@ -41,6 +44,9 @@ struct Entry {
     owner: String,
     /// The activation families the file holds (the entities of its ENTITIES and BLOCKS sections).
     families: Vec<String>,
+    /// The file may be absent from the machine (an external drawing): a missing file is a failure unless it is marked here.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    optional: bool,
 }
 
 fn root() -> PathBuf {
@@ -128,6 +134,7 @@ fn keyed_records(text: &str) -> BTreeMap<String, Record> {
     let mut out = BTreeMap::new();
     for section in sections(&tags) {
         let mut ordinal: BTreeMap<String, usize> = BTreeMap::new();
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
         for (kind, body) in records(&section.tags) {
             let handle = body.iter().find(|t| matches!(t.code, 5 | 105)).map(Tag::str);
             let key = match handle {
@@ -138,6 +145,10 @@ fn keyed_records(text: &str) -> BTreeMap<String, Record> {
                     format!("{}/{kind}/#{n}", section.name)
                 }
             };
+            // A repeated key keeps every occurrence: the later ones are `key~2`, `key~3`.
+            let n = seen.entry(key.clone()).or_default();
+            *n += 1;
+            let key = if *n == 1 { key } else { format!("{key}~{n}") };
             out.insert(key, (kind, body));
         }
     }
@@ -195,6 +206,29 @@ fn families_of(dxf: &[u8]) -> Vec<String> {
     names
 }
 
+/// Why an output fails its baseline, `None` when it is the frozen one: the output must hash to the frozen sha256, and the records that
+/// differ from the golden (when there is one) explain a mismatch.
+fn output_failure(entry: &Entry, format: Format, bytes: &[u8], frozen: Option<&str>, golden: impl FnOnce() -> Option<Vec<u8>>) -> Option<String> {
+    let name = format!("{} {}", entry.path, format.name());
+    let Some(frozen) = frozen else {
+        return Some(format!("{name}: not in golden.sha256 (refresh with write_golden_set)"));
+    };
+    if sha256(bytes) == frozen {
+        return None;
+    }
+    let drift = golden().map(|golden| forbidden_drift(format, &golden, bytes));
+    Some(match drift {
+        None => format!("{name}: the output changed and there is no golden file to name the records"),
+        Some(drift) if drift.is_empty() => format!("{name}: the output changed (sha256 {}), no record differs from the golden", sha256(bytes)),
+        Some(drift) => format!("{name}: the output changed, {} records drifted, first: {:?}", drift.len(), &drift[..drift.len().min(5)]),
+    })
+}
+
+/// The failure of a file that is not on this machine, `None` when corpus.toml marks it optional.
+fn absent_failure(entry: &Entry) -> Option<String> {
+    (!entry.optional).then(|| format!("{}: not on this machine, and corpus.toml does not mark it optional", entry.path))
+}
+
 /// `CADCRAFT_GOLDEN_OWNER` restricts a run to the files of one owner.
 fn check(owner_is: impl Fn(&str) -> bool) {
     let only = std::env::var("CADCRAFT_GOLDEN_OWNER").ok();
@@ -204,6 +238,7 @@ fn check(owner_is: impl Fn(&str) -> bool) {
     let mut failures = Vec::new();
     for entry in corpus().into_iter().filter(|e| owner_is(&e.owner)) {
         let Some(outputs) = saves(&entry) else {
+            failures.extend(absent_failure(&entry));
             missing.push(entry.path.clone());
             continue;
         };
@@ -216,31 +251,8 @@ fn check(owner_is: impl Fn(&str) -> bool) {
             }
         }
         for format in Format::ALL {
-            let bytes = &outputs[&format];
-            let Some((hash, _)) = hashes.get(&(entry.path.clone(), format.name().to_string())) else {
-                failures.push(format!("{} {}: not in golden.sha256 (refresh with write_golden_set)", entry.path, format.name()));
-                continue;
-            };
-            if &sha256(bytes) == hash {
-                continue;
-            }
-            match read_golden(&entry, format) {
-                None => {
-                    failures.push(format!("{} {}: the output changed and there is no golden file to name the records", entry.path, format.name()))
-                }
-                Some(golden) => {
-                    let drift = forbidden_drift(format, &golden, bytes);
-                    if !drift.is_empty() {
-                        failures.push(format!(
-                            "{} {}: {} records drifted, first: {:?}",
-                            entry.path,
-                            format.name(),
-                            drift.len(),
-                            &drift[..drift.len().min(5)]
-                        ));
-                    }
-                }
-            }
+            let hash = hashes.get(&(entry.path.clone(), format.name().to_string())).map(|(hash, _)| hash.as_str());
+            failures.extend(output_failure(&entry, format, &outputs[&format], hash, || read_golden(&entry, format)));
         }
     }
     eprintln!("G1: {checked} drawings checked, {} not on this machine: {missing:?}", missing.len());
@@ -313,4 +325,42 @@ fn a_changed_record_is_named_and_an_unchanged_save_is_clean() {
     drawing.modify_entity(line, |e| e.common.layer = "G1-DRIFT".into()).unwrap();
     let drift = forbidden_drift(Format::Dxf, golden.as_bytes(), cadcraft_io::write_dxf(&drawing).as_bytes());
     assert!(drift.contains(&format!("ENTITIES/LINE/{}", line.hex())), "{drift:?}");
+}
+
+fn entry(optional: bool) -> Entry {
+    Entry { path: "examples/apartment.dxf".into(), owner: "repo".into(), families: Vec::new(), optional }
+}
+
+#[test]
+fn a_changed_hash_fails_even_when_no_record_differs() {
+    let golden = cadcraft_io::write_dxf(&cadcraft_io::read(&std::fs::read(root().join("examples/apartment.dxf")).unwrap(), "apartment.dxf").unwrap());
+    let crlf = golden.replace('\n', "\r\n");
+    assert_eq!(forbidden_drift(Format::Dxf, golden.as_bytes(), crlf.as_bytes()), Vec::<String>::new(), "the records are the same");
+    let frozen = sha256(golden.as_bytes());
+    let failure = output_failure(&entry(false), Format::Dxf, crlf.as_bytes(), Some(&frozen), || Some(golden.clone().into_bytes()));
+    assert!(failure.is_some_and(|f| f.contains("examples/apartment.dxf dxf") && f.contains("no record differs")), "a hash mismatch is a failure");
+    assert_eq!(output_failure(&entry(false), Format::Dxf, golden.as_bytes(), Some(&frozen), || None), None, "the frozen output passes");
+}
+
+#[test]
+fn a_changed_hash_names_the_records_that_drifted() {
+    let golden = "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  5\nAB\n  8\n0\n  0\nENDSEC\n  0\nEOF\n";
+    let moved = golden.replace("  8\n0\n", "  8\nX\n");
+    let failure = output_failure(&entry(false), Format::Dxf, moved.as_bytes(), Some(&sha256(golden.as_bytes())), || Some(golden.as_bytes().to_vec()));
+    assert!(failure.is_some_and(|f| f.contains("1 records drifted") && f.contains("ENTITIES/LINE/AB")));
+}
+
+#[test]
+fn records_that_share_a_key_all_count() {
+    let text = |second_layer: &str| {
+        format!("  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  5\nAB\n  8\n0\n  0\nLINE\n  5\nAB\n  8\n{second_layer}\n  0\nENDSEC\n  0\nEOF\n")
+    };
+    assert_eq!(keyed_records(&text("0")).len(), 2);
+    assert_eq!(forbidden_drift(Format::Dxf, text("0").as_bytes(), text("X").as_bytes()).len(), 1, "the second record of the key moved");
+}
+
+#[test]
+fn a_missing_file_fails_unless_corpus_toml_marks_it_optional() {
+    assert!(absent_failure(&entry(false)).is_some_and(|f| f.contains("examples/apartment.dxf") && f.contains("optional")));
+    assert_eq!(absent_failure(&entry(true)), None);
 }
