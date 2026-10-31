@@ -48,26 +48,34 @@ impl Mode {
     }
 }
 
+/// A circle or arc of the objects: its centre, its radius and the Z of the circle or arc entity it came from (`None` for the arc of a polyline).
+type Round = (Vec2, f64, Option<f64>);
+
 /// The dimension points (segment ends, circle centres, points) and the circles and arcs of the
 /// objects.
-fn geometry(s: &Session, hs: &[Handle]) -> Result<(Vec<Vec2>, Vec<(Vec2, f64)>)> {
+fn geometry(s: &Session, hs: &[Handle]) -> Result<(Vec<Vec2>, Vec<Round>)> {
     let d = s.doc()?;
     let mut pts = Vec::new();
     let mut circles = Vec::new();
     for h in hs {
         let Some(e) = d.entity(*h) else { continue };
         e.require_legacy_geometry()?;
+        let z = match &e.kind {
+            EntityKind::Circle(c) => Some(c.center.z),
+            EntityKind::Arc(a) => Some(a.center.z),
+            _ => None,
+        };
         for pr in e.kind.prims() {
             match pr {
                 Prim::Seg(seg) => {
                     pts.extend([seg.start(), seg.end()]);
                     if let Segment::Arc { arc, .. } = seg {
-                        circles.push((arc.center, arc.radius));
+                        circles.push((arc.center, arc.radius, z));
                     }
                 }
                 Prim::Circle(c) => {
                     pts.push(c.center);
-                    circles.push((c.center, c.radius));
+                    circles.push((c.center, c.radius, z));
                 }
                 Prim::Point(q) => pts.push(q),
                 _ => {}
@@ -81,18 +89,10 @@ fn geometry(s: &Session, hs: &[Handle]) -> Result<(Vec<Vec2>, Vec<(Vec2, f64)>)>
 }
 
 /// The quick dimensions, without adding them. `pts` are the dimension points (unsorted).
-fn plan(
-    s: &Session,
-    pts: &[Vec2],
-    circles: &[(Vec2, f64)],
-    mode: Mode,
-    at: Vec2,
-    vertical: Option<bool>,
-    datum: Option<Vec2>,
-) -> Result<Vec<EntityKind>> {
+fn plan(s: &Session, pts: &[Vec2], circles: &[Round], mode: Mode, at: Vec2, vertical: Option<bool>, datum: Option<Vec2>) -> Result<Vec<EntityKind>> {
     if matches!(mode, Mode::Radius | Mode::Diameter) {
         let mut out = Vec::new();
-        for (c, r) in circles.iter().take(MAX_CHAIN) {
+        for (c, r, _) in circles.iter().take(MAX_CHAIN) {
             let dir = (at - *c).normalized();
             let dir = if dir == Vec2::ZERO || !dir.is_finite() { Vec2::from_angle(std::f64::consts::FRAC_PI_4) } else { dir };
             let p = *c + dir * *r;
@@ -170,16 +170,6 @@ fn plan(
     })
 }
 
-/// The Z of the circle or arc among `hs` that `p` lies on.
-fn circle_z(s: &Session, hs: &[Handle], p: Vec2) -> Option<f64> {
-    let d = s.doc().ok()?;
-    hs.iter().find_map(|h| match &d.entity(*h)?.kind {
-        EntityKind::Circle(c) if (c.center.xy().dist(p) - c.radius).abs() <= 1e-6 * (1.0 + c.radius) => Some(c.center.z),
-        EntityKind::Arc(a) if (a.center.xy().dist(p) - a.radius).abs() <= 1e-6 * (1.0 + a.radius) => Some(a.center.z),
-        _ => None,
-    })
-}
-
 /// The nearest point of `pts` to `q` within `tol`, by index.
 fn nearest(pts: &[Vec2], q: Vec2, tol: f64) -> Option<usize> {
     pts.iter().enumerate().filter(|(_, p)| p.dist(q) <= tol).min_by(|a, b| a.1.dist(q).total_cmp(&b.1.dist(q))).map(|(i, _)| i)
@@ -219,7 +209,7 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
     // objects by scanning the drawing made QDIM quadratic (the added dimensions are no snap targets).
     let snaps = if assoc_enabled(s) { Some(crate::assoc::SnapIndex::new(s.doc()?, &s.space())) } else { None };
     let mut out = Vec::new();
-    for mut k in kinds {
+    for (index, mut k) in kinds.into_iter().enumerate() {
         if let (Some(ix), EntityKind::Dimension(dm)) = (&snaps, &mut k) {
             dm.assoc = match dm.kind {
                 DimKind::Radius | DimKind::Diameter => ix.auto_assoc(&[("p15", dm.p15.xy())]),
@@ -229,7 +219,7 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let EntityKind::Dimension(dm) = &mut k
             && let DimKind::Radius | DimKind::Diameter = dm.kind
-            && let Some(z) = circle_z(s, &hs, dm.p15.xy())
+            && let Some(z) = circles.get(index).and_then(|round| round.2)
         {
             // The centre and the point on the circle are at the circle's Z; `draw` adds the elevation to them (measured in LT 2025).
             let shift = z - s.elevation();
