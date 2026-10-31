@@ -224,3 +224,15 @@ Five fixes move 64 of the 126 outputs, compared record by record with the output
 | TABLES/LAYER | the xdata applications of a layer keep their order | acadrust b1921b8 | dxf | 12 | 1618 |
 
 The width axis (5f7a992), the 1005 handle (579d393) and the same-release inspection (58fabeb) moved no output of the corpus.
+
+# Golden refresh for the combined acadrust pin (1e5eaa6) and the zero ATTRIB 280 default
+
+Two of the 126 outputs move, compared record by record with the outputs of aede6b44 (whose golden the strict check passed). The pin brings the width axis, the
+Rocontec faults and the VPORT default of the earlier refresh, rootcause-dwg's same-release inspection and bridge-raw's imported HATCH reverse reactors; the merge of
+raw280-zero-default (a659db03) brings the target release to the Raw check. No record is lost or added.
+
+| record | cause | pin or fix | format | drawings | records |
+|---|---|---|---|---|---|
+| ENTITIES/LWPOLYLINE | the persistent reactors of the polyline a hatch is associated with keep the order of the imported link (DPInc 50C0AB: 50C0AC, 50C0AA, where aede6b44 had 50C0AA, 50C0AC) | acadrust da83d2d / 1e5eaa6 (imported hatch reverse reactors) | dxf, dwg | 1 (rt7/DPInc.dwg) | 1 each |
+
+The 280 default, the inspection and every other commit moved no output of the corpus.
