@@ -197,7 +197,34 @@ pub(super) fn setup_layouts(d: &mut Drawing, layout_objs: &mut [LayoutDef], rx: 
 
 /// Place the BLOCKS entities: model and paper space blocks go to their space, the rest become
 /// block definitions.
-pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, paper_block_for: &HashMap<String, String>, first_layout: &str) {
+pub(super) fn place_blocks(
+    d: &mut Drawing,
+    blocks: Vec<BlockDef>,
+    rx: &mut Rx,
+    paper_block_for: &HashMap<String, String>,
+    first_layout: &str,
+) -> crate::Result<()> {
+    // The graph merges the records of a repeated definition, but a definition is placed by name and the later copy replaces the earlier one.
+    // A Raw record in either copy would be lost with it, and the save would have no unit to protect: the read fails closed.
+    let mut first_copy: HashMap<String, usize> = HashMap::new();
+    for (at, (name, ..)) in blocks.iter().enumerate() {
+        let up = name.to_ascii_uppercase();
+        if up == "*MODEL_SPACE" || up.starts_with("*PAPER_SPACE") {
+            continue;
+        }
+        let Some(&earlier) = first_copy.get(&up) else {
+            first_copy.insert(up, at);
+            continue;
+        };
+        let raw = |copy: usize| blocks[copy].3.iter().find_map(|(_, _, e)| if let EntityKind::Raw(raw) = &e.kind { Some(raw) } else { None });
+        if let Some(raw) = raw(earlier).or_else(|| raw(at)) {
+            return Err(crate::IoError::RepeatedBlock {
+                block: name.clone(),
+                record: raw.parent().kind().to_string(),
+                handle: Some(raw.parent().handle()),
+            });
+        }
+    }
     let source = std::sync::Arc::make_mut(&mut d.source_symbols);
     for (place, (name, ..)) in blocks.iter().enumerate() {
         source.block_order.entry(name.to_ascii_uppercase()).or_insert(place);
@@ -269,6 +296,7 @@ pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, 
         }
         d.blocks.insert(name, std::sync::Arc::new(b));
     }
+    Ok(())
 }
 
 /// Place the ENTITIES section: model space, or paper space when flagged (67=1).
