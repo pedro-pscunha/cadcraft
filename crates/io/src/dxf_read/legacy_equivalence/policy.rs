@@ -15,7 +15,6 @@ impl Policy {
         if self.source_version < Version::R2000 {
             return false;
         }
-        let mut subclass = None;
         for tag in tags.iter().take_while(|tag| tag.code < 1000) {
             if tag.code == 100 {
                 let marker = match &tag.value {
@@ -25,9 +24,7 @@ impl Policy {
                 if marker != "AcDbEntity" && !self.subclasses.contains(&marker) {
                     return false;
                 }
-                subclass = Some(marker);
-            } else if subclass.is_none()
-                && !self.headerless_groups.contains(&tag.code)
+            } else if !self.headerless_groups.contains(&tag.code)
                 && !matches!(
                     tag.code,
                     5 | 6 | 8 | 48 | 60 | 62 | 67 | 100 | 102 | 284 | 330 | 347 | 348 | 360 | 370 | 380 | 390 | 410 | 420 | 430 | 440

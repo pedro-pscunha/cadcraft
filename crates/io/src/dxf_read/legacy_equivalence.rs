@@ -1,5 +1,5 @@
 //! Static Legacy suitability, separate from canonical readability and activation policy.
-use crate::activation::Family;
+use crate::activation::{Family, records::family_of_kind};
 use cadcraft_dxf::{Tag, Version};
 
 #[cfg(test)]
@@ -27,50 +27,10 @@ pub struct LegacyClassification {
     pub policy_reason: &'static str,
 }
 
-/// The activation family of an entity kind. An unrecognized kind is not implicitly plain.
-pub fn family_from_dxf(kind: &str) -> Option<Family> {
-    const KINDS: &[(&str, Family)] = &[
-        ("CIRCLE", Family::Circle),
-        ("ARC", Family::Arc),
-        ("ELLIPSE", Family::Ellipse),
-        ("LINE", Family::Line),
-        ("POINT", Family::Point),
-        ("RAY", Family::Ray),
-        ("XLINE", Family::XLine),
-        ("LWPOLYLINE", Family::LwPolyline),
-        ("POLYLINE", Family::Polyline),
-        ("SOLID", Family::Solid),
-        ("TRACE", Family::Trace),
-        ("3DFACE", Family::Face3d),
-        ("SPLINE", Family::Spline),
-        ("LEADER", Family::Leader),
-        ("DIMENSION", Family::Dimension),
-        ("ARC_DIMENSION", Family::Dimension),
-        ("LARGE_RADIAL_DIMENSION", Family::Dimension),
-        ("TEXT", Family::Text),
-        ("MTEXT", Family::MText),
-        ("ATTDEF", Family::AttDef),
-        ("ATTRIB", Family::Attrib),
-        ("TOLERANCE", Family::Tolerance),
-        ("HATCH", Family::Hatch),
-        ("WIPEOUT", Family::Wipeout),
-        ("MLINE", Family::MLine),
-        ("HELIX", Family::Helix),
-        ("IMAGE", Family::Image),
-        ("ACAD_TABLE", Family::Table),
-        ("INSERT", Family::Insert),
-        ("MULTILEADER", Family::MLeader),
-        ("MLEADER", Family::MLeader),
-        ("REGION", Family::Region),
-        ("VIEWPORT", Family::Viewport),
-    ];
-    KINDS.iter().find(|(name, _)| name.eq_ignore_ascii_case(kind)).map(|(_, family)| *family)
-}
-
 /// Classify a parent and its ordered followers without constructing geometry or calling a canonical reader.
 pub fn classify_legacy_unit(unit: &[(String, Vec<Tag>)], version: Version) -> Option<LegacyClassification> {
     let (kind, tags) = unit.first()?;
-    let family = family_from_dxf(kind)?;
+    let family = family_of_kind(kind)?;
     Some(classify_groups(family, tags, unit.len() > 1, version))
 }
 

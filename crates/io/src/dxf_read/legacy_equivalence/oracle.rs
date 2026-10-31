@@ -1,5 +1,5 @@
 //! Test-only differential definition. Neither branch uses the static classification decision.
-use super::{LegacyDisposition, classify_legacy_unit, family_from_dxf, policy};
+use super::{LegacyDisposition, classify_legacy_unit, family_of_kind, policy};
 use cadcraft_doc::{Drawing, EntityStore, Handle};
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_geom::Mat4;
@@ -93,7 +93,7 @@ fn records(bytes: &[u8]) -> BTreeMap<Handle, (String, Vec<Tag>)> {
 }
 
 fn fields(kind: &str, tags: &[Tag], version: Version) -> BTreeMap<(i32, usize), String> {
-    let Some(family) = family_from_dxf(kind) else { return BTreeMap::new() };
+    let Some(family) = family_of_kind(kind) else { return BTreeMap::new() };
     let policy = policy::policy(family, version);
     let mut owned = None;
     let mut ordinal = BTreeMap::new();
@@ -126,7 +126,33 @@ fn fields(kind: &str, tags: &[Tag], version: Version) -> BTreeMap<(i32, usize), 
 }
 
 fn reference_fields(kind: &str, source: &[Tag], expected: &[Tag], version: Version, operation: Operation) -> BTreeMap<(i32, usize), String> {
+    if matches!(operation, Operation::Identity) {
+        return fields(kind, source, version);
+    }
     let mut result = fields(kind, expected, version);
+    if kind == "ARC" {
+        // These source angles use the +Z OCS admitted by the static rule. A native
+        // endpoint reconstruction loses precision for short arcs far from the origin.
+        let angles = fields(kind, source, version);
+        for code in [50, 51] {
+            let source_code = if matches!(operation, Operation::Mirror) { 101 - code } else { code };
+            if let Some(angle) = angles.get(&(source_code, 0)).and_then(|value| value.parse::<f64>().ok()) {
+                let angle = match operation {
+                    Operation::Rotate => angle + 90.0,
+                    Operation::Mirror => 180.0 - angle,
+                    Operation::Identity | Operation::Move | Operation::Scale => angle,
+                };
+                result.insert((code, 0), angle.to_string());
+            }
+        }
+    }
+    if kind == "LWPOLYLINE" && matches!(operation, Operation::Scale) {
+        // Constant width is a drawing length. The independent native transform
+        // scales vertex widths but currently omits group 43.
+        if let Some(width) = source.iter().find(|tag| tag.code == 43) {
+            result.insert((43, 0), (width.f64() * 2.0).to_string());
+        }
+    }
     if kind == "HATCH" && matches!(operation, Operation::Mirror) {
         // Reflection reverses an ellipse's parameter because its minor vector is reconstructed
         // perpendicular to the mirrored major vector. This comes from source groups, not either writer.
@@ -153,7 +179,7 @@ fn reference_fields(kind: &str, source: &[Tag], expected: &[Tag], version: Versi
 
 fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>, input_scale: f64) -> bool {
     expected.iter().all(|(key, expected)| {
-        let default = family_from_dxf(kind).and_then(|family| policy::omitted_default(family, key.0));
+        let default = family_of_kind(kind).and_then(|family| policy::omitted_default(family, key.0));
         actual.get(key).map(String::as_str).or_else(|| default.map(|(value, _)| value)).is_some_and(|actual| {
             if expected == actual {
                 return true;
@@ -163,7 +189,7 @@ fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BT
             }
             match (expected.parse::<f64>(), actual.parse::<f64>()) {
                 (Ok(a), Ok(b)) if a.is_finite() && b.is_finite() => {
-                    let delta = family_from_dxf(kind).and_then(|family| policy::angular_period(family, key.0)).map_or((a - b).abs(), |period| {
+                    let delta = family_of_kind(kind).and_then(|family| policy::angular_period(family, key.0)).map_or((a - b).abs(), |period| {
                         let distance = (a - b).rem_euclid(period);
                         distance.min(period - distance)
                     });
@@ -190,6 +216,7 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
     let version = crate::save_version(&legacy);
     let refused = transform(&mut legacy, operation);
     let actual = records(crate::write_dxf(&legacy).as_bytes());
+    drop(legacy);
     let original = records(source);
     let mut native = acadrust::DxfReader::from_reader(Cursor::new(source.to_vec())).unwrap().read().unwrap();
     for entity in native.entities_mut() {
@@ -197,10 +224,13 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
     }
     let mut bytes = Vec::new();
     acadrust::DxfWriter::new(&native).keep_heavy_polylines().write_to_writer(&mut bytes).unwrap();
+    drop(native);
     let expected = records(&bytes);
+    drop(bytes);
+    let mut reported = BTreeSet::new();
     original
         .into_iter()
-        .filter(|(_, (kind, _))| family_from_dxf(kind).is_some())
+        .filter(|(_, (kind, _))| family_of_kind(kind).is_some())
         .map(|(handle, (kind, source_tags))| {
             let source_fields = fields(&kind, &source_tags, version);
             // Bound roundoff by input magnitude too: rotation can cancel a large coordinate to zero.
@@ -225,6 +255,27 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
                         && (!matches!(operation, Operation::Identity)
                             || equivalent(&kind, &source_fields, &fields(&kind, actual_tags, version), input_scale))
                 });
+            if !good
+                && classify_legacy_unit(&[(kind.clone(), source_tags.clone())], version)
+                    .is_some_and(|classification| classification.disposition == LegacyDisposition::Plain)
+                && reported.insert(kind.clone())
+            {
+                let actual_fields = actual.get(&handle).map(|(_, tags)| fields(&kind, tags, version)).unwrap_or_default();
+                let expected_fields =
+                    expected.get(&handle).map(|(_, tags)| reference_fields(&kind, &source_tags, tags, version, operation)).unwrap_or_default();
+                for (label, target) in [("reference", &expected_fields), ("source", &source_fields)] {
+                    let differences: Vec<_> = target
+                        .iter()
+                        .filter(|(key, value)| !equivalent(&kind, &BTreeMap::from([(**key, (*value).clone())]), &actual_fields, input_scale))
+                        .take(8)
+                        .map(|(key, value)| (key, value, actual_fields.get(key)))
+                        .collect();
+                    eprintln!(
+                        "LEGACY_DIFFERENCE kind={kind} handle={handle:?} operation={operation:?} refused={} branch={label} fields={differences:?}",
+                        refused.contains(&handle)
+                    );
+                }
+            }
             (handle, good)
         })
         .collect()
@@ -292,8 +343,10 @@ fn run_corpus(external: bool) {
         let original = records(&source);
         let drawing = crate::dxf_read::read_with_policy(&source, crate::activation::ReaderPolicy::resolve(Some("off")).unwrap()).unwrap();
         let version = crate::save_version(&drawing);
+        drop(drawing);
         let parsed = cadcraft_dxf::parse(&source).unwrap();
         let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), version);
+        drop(parsed);
         let places = containers(&source);
         for operation in Operation::ALL {
             let measured = measure_with_origin(&source, operation, from_dwg);
@@ -357,6 +410,16 @@ fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
 }
 
 #[test]
+fn reference_uses_source_angles_and_scales_polyline_constant_width() {
+    let arc = cadcraft_dxf::parse(b"50\n90.14528841801683\n51\n115.93705821811227\n").unwrap();
+    let changed = cadcraft_dxf::parse(b"50\n90.14529003267106\n51\n115.93705948035071\n").unwrap();
+    assert_eq!(reference_fields("ARC", &arc, &changed, Version::R2018, Operation::Identity), fields("ARC", &arc, Version::R2018));
+    let polyline = cadcraft_dxf::parse(b"43\n0.25\n").unwrap();
+    let expected = reference_fields("LWPOLYLINE", &polyline, &polyline, Version::R2018, Operation::Scale);
+    assert_eq!(expected.get(&(43, 0)).unwrap().parse::<f64>().unwrap(), 0.5);
+}
+
+#[test]
 fn repository_corpus_has_no_false_plain() {
     run_corpus(false);
 }
@@ -405,11 +468,11 @@ fn ellipse_hatch_is_plain_only_when_its_actual_edits_are_lossless() {
 }
 
 #[test]
-fn point_display_angle_loss_is_classified_as_needs() {
+fn point_display_angle_fix_matches_the_independent_rotation_reference() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nPOINT\n5\n100\n10\n1\n20\n2\n30\n0\n50\n15\n0\nENDSEC\n0\nEOF\n";
     let record = records(source).remove(&Handle(0x100)).unwrap();
     assert_eq!(classify_legacy_unit(&[record], Version::R2018).unwrap().disposition, LegacyDisposition::Needs);
-    assert_eq!(measure(source, Operation::Rotate).get(&Handle(0x100)), Some(&false));
+    assert_eq!(measure(source, Operation::Rotate).get(&Handle(0x100)), Some(&true));
 }
 
 #[test]

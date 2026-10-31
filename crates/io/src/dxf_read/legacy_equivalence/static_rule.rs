@@ -49,7 +49,7 @@ pub(super) fn plain(family: Family, tags: &[Tag], has_followers: bool) -> bool {
     }
     match family {
         Line => required(tags, &[10, 20, 11, 21]),
-        Point => false, // Legacy rotates the position but not POINT's display angle.
+        Point => false, // The angle fix has a witness, but the full field contract remains unproved.
         Circle => required(tags, &[10, 20, 40]) && scalar(tags, 40, 0.0).is_some_and(|value| value > 0.0),
         Arc => {
             required(tags, &[10, 20, 40, 50, 51])
@@ -79,7 +79,7 @@ fn hatch(tags: &[Tag]) -> bool {
     if scalar(tags, 70, 0.0) != Some(1.0)
         || scalar(tags, 71, 0.0) != Some(0.0)
         || scalar(tags, 98, 0.0) != Some(0.0)
-        || scalar(tags, 450, 0.0) != Some(0.0)
+        || tags.iter().any(|tag| (450..=470).contains(&tag.code))
         || !count_matches(tags, 91, 92)
         || count(tags, 92) == 0
         || !all_zero(tags, &[97])
