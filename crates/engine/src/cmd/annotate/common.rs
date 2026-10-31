@@ -185,8 +185,12 @@ pub(super) fn circle_of(s: &Session, h: Handle) -> Option<(Vec2, f64)> {
 /// outside the circle, as a user-positioned text (DXF flag 70 bit 128), like AutoCAD. A location outside the circle only gives the
 /// direction when the style puts the text above the line (DIMTAD 1, 2, 4): AutoCAD lays that text out itself (measured in LT 2025, ISO-25).
 pub(super) fn text_at(s: &Session, mut k: EntityKind, at: Vec2, center: Vec2, radius: f64) -> EntityKind {
-    let beside = s.doc().ok().and_then(|d| d.dim_style(&style(s)).map(|st| st.text_above != 0)).unwrap_or(false);
+    // The style in force is the named style with the dimension's own overrides (SETVAR), as the renderer reads it.
+    let beside = |d: &Dimension| {
+        s.doc().ok().and_then(|doc| doc.dim_style(&style(s)).map(|st| st.with_overrides(&d.overrides).text_above != 0)).unwrap_or(false)
+    };
     if let EntityKind::Dimension(d) = &mut k
+        && let beside = beside(d)
         && !(beside && at.dist(center) > radius)
     {
         d.text_mid = v3(at);
