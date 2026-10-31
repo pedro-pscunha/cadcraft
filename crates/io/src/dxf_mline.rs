@@ -560,6 +560,12 @@ pub(crate) fn plan<'a>(d: &Drawing, every: impl Iterator<Item = &'a Entity>, mut
     Plan { dict, styles: list.into_iter().filter(|s| !s.name.trim().is_empty()).map(|s| (s, new_handle())).collect() }
 }
 
+/// The name in the MLINESTYLE object: AutoCAD writes its built-in style as `STANDARD` there, whatever case the dictionary key has.
+fn object_name(name: &str) -> &str {
+    let name = name.trim();
+    if name.eq_ignore_ascii_case(STANDARD_MLINE_STYLE) { STANDARD_MLINE_STYLE } else { name }
+}
+
 /// The `ACAD_MLINESTYLE` dictionary (owned by the root dictionary `root`) and its styles.
 pub(crate) fn objects(plan: &Plan, root: &str) -> Vec<Tag> {
     let mut t = vec![
@@ -578,7 +584,7 @@ pub(crate) fn objects(plan: &Plan, root: &str) -> Vec<Tag> {
     }
     for (s, h) in &plan.styles {
         t.extend([Tag::s(0, "MLINESTYLE"), Tag::s(5, h.clone()), Tag::s(102, "{ACAD_REACTORS"), Tag::s(330, plan.dict.clone()), Tag::s(102, "}")]);
-        t.extend([Tag::s(330, plan.dict.clone()), Tag::s(100, "AcDbMlineStyle"), Tag::s(2, s.name.trim())]);
+        t.extend([Tag::s(330, plan.dict.clone()), Tag::s(100, "AcDbMlineStyle"), Tag::s(2, object_name(&s.name))]);
         let caps = |c: &MLineCaps, line: i64, inner: i64, outer: i64| {
             (if c.line { line } else { 0 }) | (if c.inner_arcs { inner } else { 0 }) | (if c.outer_arc { outer } else { 0 })
         };
