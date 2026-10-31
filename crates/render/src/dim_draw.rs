@@ -17,6 +17,16 @@ pub fn dimension_in(d: &Drawing, dm: &cadcraft_doc::Dimension) -> DimGeometry {
     dim::dimension_geometry_with(dm, &style, d.header.f64("DIMSCALE", 1.0), &dim_text(d, &st))
 }
 
+/// Where AutoCAD puts the text of a radius or diameter dimension made with its location inside the circle when the text is above the
+/// line: `dm` is laid out with the text to be worked out, and the centre of the text is returned.
+pub fn radial_inside_text(d: &Drawing, dm: &cadcraft_doc::Dimension) -> Option<cadcraft_geom::Vec2> {
+    let mut probe = dm.clone();
+    probe.user_text_pos = true;
+    probe.text_mid = cadcraft_geom::Vec3::new(f64::NAN, f64::NAN, 0.0);
+    let at = dimension_in(d, &probe).text_pos;
+    at.is_finite().then_some(at)
+}
+
 /// The dimension laid out in the OCS of the plane of `normal`, for the world builders: its WCS points are put in the plane
 /// and the renderer's layout draws it there. Every point of the result is a local 2D point.
 pub fn dimension_layout(

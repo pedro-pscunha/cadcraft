@@ -469,3 +469,62 @@ fn text_above_the_line_sits_a_gap_above_its_own_box() {
     }
     assert!(offsets[1] > offsets[0], "a descender raises the text: {offsets:?}");
 }
+
+/// A radius dimension of the circle of radius `r` at the origin, towards 45 degrees, with the text above the line (DIMTAD 1) in ISO-25 sizes.
+fn radial_beside(r: f64, diameter: bool, inside: bool) -> (Dimension, DimStyle) {
+    let u = Vec2::from_angle(std::f64::consts::FRAC_PI_4);
+    let mut d = lin((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0);
+    let tip = u * r;
+    d.kind = if diameter { DimKind::Diameter } else { DimKind::Radius };
+    d.defpt = if diameter { Vec3::new(-tip.x, -tip.y, 0.0) } else { Vec3::ZERO };
+    d.p15 = Vec3::new(tip.x, tip.y, 0.0);
+    d.user_text_pos = inside;
+    d.text_mid = Vec3::new(f64::NAN, f64::NAN, 0.0);
+    let st = st_with(|s| {
+        s.text_above = 1;
+        s.text_height = 2.5;
+        s.arrow_size = 2.5;
+        s.text_gap = 0.625;
+        s.force_line_inside = true;
+        s.text_inside_horizontal = false;
+        s.text_outside_horizontal = false;
+    });
+    (d, st)
+}
+
+#[test]
+fn a_radial_dimension_made_inside_the_circle_puts_the_leader_inward_from_one_arrowhead() {
+    // AutoCAD LT 2025 (/tmp/cad/elev-oracle11, radii 4 to 15 with the location inside): one arrowhead inside pointing out, one line from its
+    // base inward for an arrowhead, a gap, the text and a gap, no line across the circle, the text above that line.
+    for diameter in [false, true] {
+        let (d, st) = radial_beside(30.0, diameter, true);
+        let g = dimension_geometry(&d, &st, 1.0);
+        let u = Vec2::from_angle(std::f64::consts::FRAC_PI_4);
+        let (tw, _) = (DimConfig::new(&d, &st, 1.0, &DimText { width_factor: 1.0, ..Default::default() }).measure(&g.mtext).0, 0.0);
+        assert_eq!(g.lines.len(), 1, "diameter {diameter}: {:?}", g.lines);
+        assert_eq!(g.fills.len(), 1, "one arrowhead");
+        let line = &g.lines[0];
+        let base = u * (30.0 - 2.5);
+        assert!(line[0].dist(base) < 1e-9, "the leader starts at the base of the arrowhead: {line:?}");
+        let length = line[0].dist(line[1]);
+        assert!((length - (2.5 + 2.0 * 0.625 + tw)).abs() < 1e-9, "length {length}, text {tw}");
+        assert!((line[1] - line[0]).normalized().dot(-u) > 1.0 - 1e-9, "inward");
+        let along = (g.text_pos - base).dot(-u);
+        assert!((along - (2.5 + 0.625 + tw / 2.0)).abs() < 1e-9, "the text starts an arrowhead and a gap along: {along}");
+        let above = (g.text_pos - base).dot(u.perp());
+        assert!((above - (0.625 + 1.25)).abs() < 1e-6, "above the leader: {above}");
+    }
+}
+
+#[test]
+fn a_moved_radial_text_inside_the_circle_has_the_leader_under_it() {
+    let (mut d, st) = radial_beside(30.0, false, true);
+    let u = Vec2::from_angle(std::f64::consts::FRAC_PI_4);
+    let default = dimension_geometry(&d, &st, 1.0);
+    let farther = default.text_pos - u * 3.0;
+    d.text_mid = Vec3::new(farther.x, farther.y, 0.0);
+    let moved = dimension_geometry(&d, &st, 1.0);
+    assert!((moved.text_pos - farther).len() < 1e-9);
+    let (before, after) = (default.lines[0][0].dist(default.lines[0][1]), moved.lines[0][0].dist(moved.lines[0][1]));
+    assert!((after - before - 3.0).abs() < 1e-9, "{before} -> {after}: {:?} {:?}", default.lines, moved.lines);
+}

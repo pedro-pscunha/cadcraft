@@ -35,6 +35,18 @@ pub(super) fn draw_jogged_radius(config: &DimConfig<'_>, g: &mut DimGeometry, te
         let ang = if st.jog_angle.is_finite() { st.jog_angle.clamp(5.0, 90.0) } else { 45.0 }.to_radians();
         let run = h.abs() / ang.tan().max(1e-6);
         let tj = (jp - center).dot(u).clamp(0.0, r);
+        if st.text_above != 0 && d.user_text_pos && text_mid.dist(center) > r {
+            // Text above the line, outside the circle (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle13`): the arrowhead is outside pointing in,
+            // and the line runs from its base out along the radius, jogs back at DIMJOGANG to the line through the override centre
+            // and on to it. The jog is centred where the jog location falls along the radius.
+            let along = (jp - center).dot(u);
+            let base = tip + u * asz;
+            let (p2, p1) = (center + u * (along + run / 2.0), center + u * (along - run / 2.0) + n * h);
+            g.dim(vec![base, p2, p1, o]);
+            end(g, blk2, tip, -u);
+            text_angle = if st.text_outside_horizontal { 0.0 } else { readable(u.angle()) };
+            break 'jogged;
+        }
         let (j1, j2) = (center + u * (tj + run / 2.0), center + u * (tj - run / 2.0) + n * h);
         g.dim(vec![tip, j1, j2, o]);
         end(g, blk2, tip, u);
@@ -66,6 +78,39 @@ fn center_mark(g: &mut DimGeometry, st: &super::DimStyle, k: f64, center: Vec2, 
             }
         }
     }
+}
+
+/// A radius or diameter dimension made with its location inside the circle, text above the line (AutoCAD LT 2025, ISO-25, radii 4 to 15,
+/// `/tmp/cad/elev-oracle11`): one arrowhead inside the circle pointing out at the point on the circle, and a leader from its base inward,
+/// through the centre if it is long enough, for an arrowhead, a gap, the text and a gap, with the text above the leader one arrowhead and
+/// one gap from the base. There is no line across the circle and no second arrowhead, also for a diameter. The text is where the centre
+/// of the dimension puts it (`text_mid`, not finite when it is to be worked out); a text that was moved has the leader under it.
+fn draw_radial_inside(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
+    let d = config.dimension;
+    let st = config.style;
+    let (asz, gap) = (config.arrow_size, config.gap);
+    let a = d.defpt.xy();
+    let b = d.p15.xy();
+    let radius = matches!(d.kind, DimKind::Radius);
+    let (center, r) = if radius { (a, a.dist(b)) } else { (a.mid(b), a.dist(b) / 2.0) };
+    let meas = if radius { r } else { 2.0 * r };
+    g.mtext = linear_text(meas, d, st, if radius { "R" } else { "%%c" });
+    g.measurement = meas;
+    let (tw, _) = config.measure(&g.mtext);
+    let ink = config.ink_height(&g.mtext);
+    let u = (b - center).normalized();
+    let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
+    let tip = center + u * r;
+    let base = tip - u * asz;
+    config.end(g, config.second_arrow, tip, u);
+    let angle = readable(u.angle());
+    let above = Vec2::from_angle(angle).perp();
+    let given = d.text_mid.xy();
+    let text = if given.is_finite() { given } else { base - u * (asz + gap + tw / 2.0) + above * (gap + 0.5 * ink) };
+    let reach = ((base - text).dot(u) + tw / 2.0 + gap).max(asz);
+    g.dim(vec![base, base - u * reach]);
+    *text_angle_out = angle;
+    *text_mid_out = text;
 }
 
 /// A radius or diameter dimension whose text is above the line (DIMTAD 1, 2, 4), unmoved, as AutoCAD lays it out (LT 2025, ISO-25, 30
@@ -122,6 +167,13 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
 
     if st.text_above != 0 && !st.text_outside_horizontal && !d.user_text_pos {
         return draw_radial_beside(config, g, text_angle_out, text_mid_out);
+    }
+    if st.text_above != 0 && !st.text_inside_horizontal && d.user_text_pos {
+        let center = if matches!(d.kind, DimKind::Radius) { d.defpt.xy() } else { d.defpt.xy().mid(d.p15.xy()) };
+        let radius = center.dist(d.p15.xy());
+        if !text_mid.is_finite() || text_mid.dist(center) < radius {
+            return draw_radial_inside(config, g, text_angle_out, text_mid_out);
+        }
     }
     let a = d.defpt.xy();
     let b = d.p15.xy();
@@ -198,6 +250,16 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
     *text_mid_out = text_mid;
 }
 
+/// The points of a dimension arc: at least three, so that a short arc is still told from a straight line by the run of points.
+fn arc_points(arc: &Arc) -> Vec<Vec2> {
+    let mut pts = Vec::new();
+    arc.tessellate(arc.radius * 1e-3, &mut pts);
+    if pts.len() < 3 {
+        pts = vec![arc.start_point(), arc.mid_point(), arc.end_point()];
+    }
+    pts
+}
+
 pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
     let d = config.dimension;
     let st = config.style;
@@ -239,9 +301,19 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     let txt = format_angle_with_separator(sweep, st.angular_unit, st.angular_decimals, azin, &st.decimal_separator);
     // DIMPOST is a linear-dimension prefix/suffix; angles have their own format only.
     g.mtext = inspected(apply_override(&txt, d), d);
+    // Text above the line, unmoved (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle6`): when the two arrowheads fit on the arc, the arc is drawn
+    // between their bases, and a text that does not fit between them goes outside, past the first extension line (see below).
+    let head = 2.0 * (config.arrow_size / (2.0 * r)).clamp(-1.0, 1.0).asin();
+    let beside = st.text_above != 0 && !d.user_text_pos && !config.ticks && head.is_finite() && sweep >= 2.0 * head - 1e-9;
     let mut pts = Vec::new();
-    arc.tessellate(r * 1e-3, &mut pts);
-    g.dim(pts);
+    if beside {
+        if sweep > 2.0 * head + 1e-9 {
+            g.dim(arc_points(&Arc::new(vertex, r, arc.start + head, arc.end - head)));
+        }
+    } else {
+        arc.tessellate(r * 1e-3, &mut pts);
+        g.dim(pts);
+    }
     let sp = arc.start_point();
     let ep = arc.end_point();
     // The arc's ends with the outward tangents there, paired with leg 1 and leg 2: when
@@ -249,17 +321,37 @@ pub(super) fn draw_angular(config: &DimConfig<'_>, g: &mut DimGeometry, text_ang
     // leg 1, and each leg keeps its own extension line, DIMSE1/2 and DIMBLK1/2.
     let (start, finish) = ((sp, -(sp - vertex).perp().normalized()), (ep, (ep - vertex).perp().normalized()));
     let ((p1, dir1), (p2, dir2)) = if cadcraft_geom::angle_in_sweep(vertex.angle_to(arc_pt), s, e) { (start, finish) } else { (finish, start) };
+    // From a vertex and two points, the extension lines start at the points even when those are beyond the arc (AutoCAD draws them from
+    // the point, a gap off, to a little past the arc); from two lines the lines are the objects and reach no further than the arc.
+    let reach = |a: Vec2| if matches!(d.kind, DimKind::Angular3P) && beside { vertex.dist(a) } else { vertex.dist(a).min(r) };
     if !st.suppress_ext1 {
-        g.ext_n(ext_line(vertex + (p1 - vertex).normalized() * vertex.dist(a1).min(r), p1, st, k), false);
+        g.ext_n(ext_line(vertex + (p1 - vertex).normalized() * reach(a1), p1, st, k), false);
     }
     if !st.suppress_ext2 {
-        g.ext_n(ext_line(vertex + (p2 - vertex).normalized() * vertex.dist(a2).min(r), p2, st, k), true);
+        g.ext_n(ext_line(vertex + (p2 - vertex).normalized() * reach(a2), p2, st, k), true);
     }
     end(g, blk1, p1, dir1);
     end(g, blk2, p2, dir2);
     let (tw, tht) = measure(&g.mtext);
+    let ink = config.ink_height(&g.mtext);
     let mid = arc.mid_point();
     let radial = (mid - vertex).normalized();
+    if beside && arc.start_point().dist(arc.end_point()) <= tw + 2.0 * gap + 1e-9 {
+        // The text does not fit between the extension lines (AutoCAD measures the chord of the arc): the arc goes on for an arrowhead past the first one, and a leader goes on from
+        // it along the tangent for a gap, the text and a gap, with the text above the leader (radially out) a gap and half its height.
+        let at_start = (p1 - arc.start_point()).len() < (p1 - arc.end_point()).len();
+        let angle = if at_start { arc.start - head } else { arc.end + head };
+        let (low, high) = if at_start { (arc.start - head, arc.start) } else { (arc.end, arc.end + head) };
+        g.dim(arc_points(&Arc::new(vertex, r, low, high)));
+        let from = vertex + Vec2::from_angle(angle) * r;
+        let tangent = Vec2::from_angle(angle).perp();
+        let away = if at_start { -tangent } else { tangent };
+        g.dim(vec![from, from + away * (2.0 * gap + tw)]);
+        let outward = Vec2::from_angle(angle);
+        *text_angle_out = readable(away.angle());
+        *text_mid_out = from + away * (gap + tw / 2.0) + outward * (gap + 0.5 * ink);
+        return;
+    }
     let text_angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
     if !d.user_text_pos {
         let tr = Vec2::from_angle(text_angle);
@@ -317,14 +409,54 @@ pub(super) fn draw_arc_length(config: &DimConfig<'_>, g: &mut DimGeometry, text_
     // DIMARCSYM: the arc symbol before the text (0), over it (1) or none (2).
     g.mtext = linear_text(meas, d, st, if st.arc_symbol == 0 { "⌒" } else { "" });
     g.measurement = meas;
-    let mut pts = Vec::new();
-    arc.tessellate(arc.radius * 1e-3, &mut pts);
-    g.dim(pts);
+    // Text above the line, unmoved, the arrowheads fit on the arc and the text does not fit between them (AutoCAD LT 2025, ISO-25,
+    // `/tmp/cad/elev-oracle6`): as in an angular dimension, the arc stops at the arrowheads, goes on for an arrowhead past the first one, and
+    // a leader runs on from there under the text. The arc symbol (DIMARCSYM 0) is then drawn, a semicircle before the text, and not
+    // written in it.
+    let head = 2.0 * (config.arrow_size / (2.0 * arc.radius)).clamp(-1.0, 1.0).asin();
+    let plain = linear_text(meas, d, st, "");
+    let (tw_plain, _) = measure(&plain);
+    let beside = st.text_above != 0
+        && !d.user_text_pos
+        && !config.ticks
+        && head.is_finite()
+        && arc.sweep() >= 2.0 * head - 1e-9
+        && arc.start_point().dist(arc.end_point()) <= tw_plain + 2.0 * gap + 1e-9;
+    if beside {
+        if st.arc_symbol == 0 {
+            g.mtext = plain.clone();
+        }
+        if arc.sweep() > 2.0 * head + 1e-9 {
+            g.dim(arc_points(&Arc::new(c, arc.radius, arc.start + head, arc.end - head)));
+        }
+    } else {
+        let mut pts = Vec::new();
+        arc.tessellate(arc.radius * 1e-3, &mut pts);
+        g.dim(pts);
+    }
     for (i, (p, q)) in [(d.p13.xy(), arc.start_point()), (d.p14.xy(), arc.end_point())].into_iter().enumerate() {
         g.ext_n(ext_line(p, q, st, k), i == 1);
     }
     end(g, blk1, arc.start_point(), -(arc.start_point() - c).perp().normalized());
     end(g, blk2, arc.end_point(), (arc.end_point() - c).perp().normalized());
+    if beside {
+        let angle = arc.start - head;
+        g.dim(arc_points(&Arc::new(c, arc.radius, angle, arc.start)));
+        let from = c + Vec2::from_angle(angle) * arc.radius;
+        let away = -Vec2::from_angle(angle).perp();
+        let outward = Vec2::from_angle(angle);
+        g.dim(vec![from, from + away * (2.0 * gap + tw_plain)]);
+        let ink = config.ink_height(&g.mtext);
+        if st.arc_symbol == 0 {
+            // A semicircle of 0.8 of the text height, its flat side on a line 0.35 of the height above the leader, its right end a fifth of
+            // the height before the text.
+            let symbol = Arc::new(from + away * (gap - th) + outward * (gap + 0.1 * th), 0.8 * th, away.angle(), away.angle() + std::f64::consts::PI);
+            g.text_mark(arc_points(&symbol));
+        }
+        *text_angle_out = readable(away.angle());
+        *text_mid_out = from + away * (gap + tw_plain / 2.0) + outward * (gap + 0.5 * ink);
+        return;
+    }
     let m = arc.mid_point();
     let radial = (m - c).normalized();
     let text_angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
