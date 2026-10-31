@@ -12,7 +12,7 @@ pub(super) fn parse_entities(
     rx: &mut Rx,
     skipped: &mut usize,
     table_cells_left: &mut usize,
-) -> Vec<(Option<String>, bool, Entity)> {
+) -> crate::Result<Vec<(Option<String>, bool, Entity)>> {
     let mut out = Vec::new();
     let mut i = 0;
     while let Some((kind, tags)) = recs.get(i) {
@@ -21,7 +21,6 @@ pub(super) fn parse_entities(
         let paper = t.i(67) == Some(1);
         // The place of a top-level record, counted as the activation adapter counts it (followers are not records of their own).
         let place = (!matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND")).then(|| rx.ordinals.next(container));
-        let mut unraw_reason: Option<String> = None;
         if let Some(reason) = place.and_then(|place| rx.raw_reason(container, place)) {
             let end = unit_end(recs, i);
             match raw_unit(&recs[i..end], &reason, d, rx) {
@@ -31,8 +30,14 @@ pub(super) fn parse_entities(
                     i = end;
                     continue;
                 }
-                // Read Legacy below; the entity's handle is not known yet.
-                Err(unraw) => unraw_reason = Some(unraw),
+                // Plan v3, 4.1: no Legacy entity is built for a needs node. The read fails closed and names the record.
+                Err(unraw) => {
+                    return Err(crate::IoError::NotKeptRaw {
+                        record: kind.clone(),
+                        handle: t.s(5).and_then(|h| Handle::parse_hex(&h)),
+                        reason: unraw,
+                    });
+                }
             }
         }
         if kind == "VIEWPORT"
@@ -75,9 +80,6 @@ pub(super) fn parse_entities(
             };
             let geometry_revision = cadcraft_doc::GeometryRevision::LegacyProjectedV1;
             entity_extras(kind, tags, h, &mut k, rx, geometry_revision);
-            if let Some(reason) = unraw_reason {
-                std::sync::Arc::make_mut(&mut d.source_symbols).legacy_needs.insert(h, format!("{kind} {}: {reason}", h.hex()));
-            }
             out.push((owner, paper, Entity { geometry_revision, handle: h, common: c, kind: k }));
         } else if kind == "HATCH" {
             // Without boundary data. The other records `entity` returns nothing for are read
@@ -94,7 +96,7 @@ pub(super) fn parse_entities(
             seen.insert(e.handle);
         }
     }
-    out
+    Ok(out)
 }
 
 /// Read the BLOCKS section: the xref paths of external blocks, then each block's entities.
@@ -104,7 +106,7 @@ pub(super) fn read_blocks(
     rx: &mut Rx,
     table_cells_left: &mut usize,
     skipped: &mut std::collections::BTreeMap<String, usize>,
-) -> Vec<BlockDef> {
+) -> crate::Result<Vec<BlockDef>> {
     let recs = records(tags);
     for (k, tg) in &recs {
         let t = T(tg);
@@ -128,7 +130,7 @@ pub(super) fn read_blocks(
                 j += 1;
             }
             let body = recs.get(i + 1..j).unwrap_or(&[]);
-            let ents = parse_entities(body, &Container::block(&name), d, rx, &mut n, table_cells_left);
+            let ents = parse_entities(body, &Container::block(&name), d, rx, &mut n, table_cells_left)?;
             blocks.push((name, base, description, ents, xref));
             i = j + 1;
         } else {
@@ -140,7 +142,7 @@ pub(super) fn read_blocks(
         }
     }
     count_skipped(skipped, "BLOCKS", n);
-    blocks
+    Ok(blocks)
 }
 
 /// Read the OBJECTS section into `objs`, and each LAYOUT into `layout_objs`.
@@ -419,8 +421,8 @@ fn raw_record(kind: &str, tags: &[Tag], d: &mut Drawing) -> Option<cadcraft_doc:
     cadcraft_doc::RawRecord::new(kind.to_string(), raw).ok()
 }
 
-/// The records of one unit as the raw entity that keeps them verbatim and read-only; `None`, with a read note, when the records
-/// cannot be kept raw (no closing SEQEND, a repeated identity): the unit is then read Legacy.
+/// The records of one unit as the raw entity that keeps them verbatim and read-only; the reason as an `Err` when the records
+/// cannot be kept raw (no closing SEQEND, a repeated identity): the caller then refuses the read (plan v3, 4.1: no Legacy entity is built for a needs node).
 fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx) -> Result<Entity, String> {
     let (kind, tags) = unit.first().ok_or_else(|| reason.to_string())?;
     let parent = raw_record(kind, tags, d);
@@ -437,9 +439,6 @@ fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx)
             d.read_notes.push(format!("{kind} {} is kept as read and cannot be edited: {reason}", handle.hex()));
             Ok(Entity::from_raw(compound))
         }
-        None => {
-            d.read_notes.push(format!("{kind} needs a canonical reading and cannot be kept raw (its records have no usable identity or closing SEQEND): {reason} It is read Legacy."));
-            Err(reason.to_string())
-        }
+        None => Err(format!("its records have no usable identity or closing SEQEND: {reason}")),
     }
 }

@@ -270,11 +270,11 @@ fn read_budgeted(
         match s.name.as_str() {
             "HEADER" => header(&s.tags, &mut d, &rx),
             "TABLES" => tables(&s.tags, &mut d, &mut rx),
-            "BLOCKS" => blocks.extend(read_blocks(&s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped)),
+            "BLOCKS" => blocks.extend(read_blocks(&s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped)?),
             // A damaged file may split its entities over several ENTITIES sections (#865).
             "ENTITIES" => {
                 let mut n = 0;
-                entities.extend(parse_entities(&records(&s.tags), &Container::Entities, &mut d, &mut rx, &mut n, &mut table_cells_left));
+                entities.extend(parse_entities(&records(&s.tags), &Container::Entities, &mut d, &mut rx, &mut n, &mut table_cells_left)?);
                 count_skipped(&mut skipped, "ENTITIES", n);
             }
             "OBJECTS" => read_objects(&s.tags, &mut objs, &mut layout_objs),

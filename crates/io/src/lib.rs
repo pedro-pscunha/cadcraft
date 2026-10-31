@@ -60,6 +60,8 @@ pub enum IoError {
     Format(String),
     #[error("unsupported file type `{0}`")]
     Unsupported(String),
+    #[error("Read refused: {record} ({}) needs a canonical reading and cannot be kept raw: {reason}. Open the file with the raw path off to read it as before.", handle.map_or_else(|| "no handle".to_string(), |h| h.hex()))]
+    NotKeptRaw { record: String, handle: Option<cadcraft_doc::Handle>, reason: String },
     #[error("Save refused for raw unit {unit}: {record} ({handle}), field {field}: {reason}")]
     RawPreservation { unit: cadcraft_doc::Handle, record: String, handle: cadcraft_doc::Handle, field: String, reason: String },
 }
