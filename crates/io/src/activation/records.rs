@@ -232,12 +232,12 @@ impl Builder<'_> {
                     }
                 }
                 // A dimension draws a `*D` block and a table a `*T` block: group 2.
-                "DIMENSION" | "ACAD_TABLE" => {
+                "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" | "ACAD_TABLE" => {
                     if let Some(name) = first(groups, 2) {
                         self.references.push((id, Names::Block(name.to_ascii_uppercase())));
                     }
                 }
-                "MULTILEADER" => {
+                "MULTILEADER" | "MLEADER" => {
                     if let Some(handle) = mleader_block_handle(groups) {
                         self.references.push((id, Names::Handle(handle)));
                     }

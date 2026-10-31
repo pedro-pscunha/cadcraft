@@ -120,6 +120,46 @@ fn a_dimension_and_a_table_refer_to_their_graphics_blocks() {
 }
 
 #[test]
+fn dimension_aliases_keep_the_graphics_edge_and_definition_activation_guard() {
+    use cadcraft_io::activation::{FamilySet, Outcome, Policy, activate};
+    for kind in ["DIMENSION", "ARC_DIMENSION", "LARGE_RADIAL_DIMENSION"] {
+        let secs = dxf("", &[block("*D1", &[line("B1")])], &[rec(kind, "5\nA1\n2\n*D1\n70\n0\n")]);
+        let graph =
+            RecordGraph::build(&secs, &|view| if view.family == Family::Dimension { Need::Needs { readable: true } } else { Need::Plain }).unwrap();
+        let user = graph.node(&key(Container::Entities, 0)).unwrap();
+        let definition = graph.node(&NodeKey::definition("*D1")).unwrap();
+        let child = graph.node(&key(Container::block("*D1"), 0)).unwrap();
+        assert!(edges_of(&graph).contains(&Edge::Refers { user, definition }), "{kind}");
+        let policy = Policy { mask: FamilySet::ALL, readers: FamilySet::ALL, definitions: false };
+        let guarded = activate(graph.graph(), &policy);
+        assert_eq!(guarded.outcome(user), Some(Outcome::Raw), "{kind}: definition must block pre-stage6 activation");
+        assert_eq!(guarded.outcome(child), Some(Outcome::Legacy), "{kind}");
+        let activated = activate(graph.graph(), &Policy { definitions: true, ..policy });
+        for node in [user, definition, child] {
+            assert_eq!(activated.outcome(node), Some(Outcome::Canonical), "{kind}: agreement closure");
+        }
+    }
+}
+
+#[test]
+fn mleader_aliases_keep_both_content_reference_forms_and_ignore_the_linetype_handle() {
+    for kind in ["MULTILEADER", "MLEADER"] {
+        let outer = rec(kind, "5\nA1\n344\nAB\n");
+        let inner = rec(kind, "5\nA2\n300\nCONTEXT_DATA{\n296\n1\n341\nAB\n301\n}\n");
+        let text = rec(kind, "5\nA3\n300\nCONTEXT_DATA{\n290\n1\n301\n}\n341\nAB\n");
+        let secs = dxf("0\nBLOCK_RECORD\n5\nAB\n2\nMLB\n", &[block("MLB", &[line("B1")])], &[outer, inner, text]);
+        let graph = RecordGraph::build(&secs, &plain).unwrap();
+        let definition = graph.node(&NodeKey::definition("MLB")).unwrap();
+        for ordinal in [0, 1] {
+            let user = graph.node(&key(Container::Entities, ordinal)).unwrap();
+            assert!(edges_of(&graph).contains(&Edge::Refers { user, definition }), "{kind} reference form {ordinal}");
+        }
+        let user = graph.node(&key(Container::Entities, 2)).unwrap();
+        assert!(!edges_of(&graph).contains(&Edge::Refers { user, definition }), "{kind}: group341 linetype must not link content");
+    }
+}
+
+#[test]
 fn a_multileader_refers_to_its_block_content_by_either_handle_group() {
     // The block record handle of the content: group 344 of the entity, or group 341 of a context that has block contents (296 = 1).
     let outer = rec("MULTILEADER", "5\nA1\n8\n0\n300\nCONTEXT_DATA{\n290\n0\n296\n1\n341\nBR1\n301\n}\n344\nBR1\n");
