@@ -289,3 +289,23 @@ families = ["Circle", "Line"]
 path = "crates/io/tests/data/activation/b5_dimension_with_star_d_block.dxf"
 owner = "activation fixtures"
 families = ["Dimension", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/r1_malformed_spatial_spline.dxf"
+owner = "activation fixtures"
+families = ["Line", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/r2_spatial_leader.dxf"
+owner = "activation fixtures"
+families = ["Leader", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/r3_forced_canonical_read_failure.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/r4_raw_insert_edit_refusal_and_save.dxf"
+owner = "activation fixtures"
+families = ["Attrib", "Insert", "Line"]

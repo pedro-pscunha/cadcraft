@@ -134,6 +134,7 @@ mod polyline_owned_vertices;
 mod polyline_parent_plot_style;
 #[cfg(not(target_arch = "wasm32"))]
 mod raw_dwg_bridge;
+mod raw_end_to_end;
 mod raw_read;
 mod reader_switch;
 mod region_roundtrip;

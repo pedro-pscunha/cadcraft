@@ -20,36 +20,36 @@ fn extrusion(tilted: bool) -> &'static str {
     if tilted { TILT } else { "" }
 }
 
-fn line(handle: &str) -> String {
+pub(crate) fn line(handle: &str) -> String {
     format!("0\nLINE\n5\n{handle}\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n")
 }
 
-fn circle(handle: &str, tilted: bool) -> String {
+pub(crate) fn circle(handle: &str, tilted: bool) -> String {
     format!("0\nCIRCLE\n5\n{handle}\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n{}", extrusion(tilted))
 }
 
 /// A SPLINE; `controls_declared` is the count of group 73, so a count that is not the points that follow makes it unreadable.
-fn spline(handle: &str, tilted: bool, controls_declared: usize) -> String {
+pub(crate) fn spline(handle: &str, tilted: bool, controls_declared: usize) -> String {
     format!("0\nSPLINE\n5\n{handle}\n8\n0\n{}70\n8\n71\n3\n73\n{controls_declared}\n10\n0\n20\n0\n30\n0\n10\n1\n20\n1\n30\n0\n", extrusion(tilted))
 }
 
-fn insert(handle: &str, block: &str, tilted: bool) -> String {
+pub(crate) fn insert(handle: &str, block: &str, tilted: bool) -> String {
     format!("0\nINSERT\n5\n{handle}\n8\n0\n66\n1\n2\n{block}\n10\n0\n20\n0\n30\n0\n{}", extrusion(tilted))
 }
 
-fn attrib(handle: &str, tilted: bool) -> String {
+pub(crate) fn attrib(handle: &str, tilted: bool) -> String {
     format!("0\nATTRIB\n5\n{handle}\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n2\nT\n{}", extrusion(tilted))
 }
 
-fn seqend(handle: &str) -> String {
+pub(crate) fn seqend(handle: &str) -> String {
     format!("0\nSEQEND\n5\n{handle}\n8\n0\n")
 }
 
-fn block(name: &str, flags: i32, members: &[String]) -> String {
+pub(crate) fn block(name: &str, flags: i32, members: &[String]) -> String {
     format!("0\nBLOCK\n5\nB0\n8\n0\n2\n{name}\n70\n{flags}\n10\n0\n20\n0\n30\n0\n3\n{name}\n{}0\nENDBLK\n5\nB1\n8\n0\n", members.concat())
 }
 
-fn file(tables: &str, blocks: &[String], entities: &[String]) -> String {
+pub(crate) fn file(tables: &str, blocks: &[String], entities: &[String]) -> String {
     let tables =
         if tables.is_empty() { String::new() } else { format!("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n{tables}0\nENDTAB\n0\nENDSEC\n") };
     format!(
@@ -328,14 +328,18 @@ fn group(groups: &[Tag], code: i32) -> Option<f64> {
     groups.iter().find(|t| t.code == code).map(Tag::f64)
 }
 
-/// A record needs Canonical when its extrusion is not +Z. A SPLINE whose declared control count is not the number of its points
-/// cannot be read.
+/// A record needs Canonical when its extrusion is not +Z or it holds a Z value. A SPLINE whose declared control count is not the number
+/// of its points cannot be read, and neither can a record that carries the xdata string `UNREADABLE` (a forced canonical-read
+/// failure). This is the stand-in for the section 3 predicate; the tests that use it say so.
 pub(crate) fn stand_in(view: &RecordView) -> Need {
     let tilted = [group(view.groups, 210).unwrap_or(0.0), group(view.groups, 220).unwrap_or(0.0)].iter().any(|v| *v != 0.0);
-    if !tilted {
+    let spatial = (30..=37).any(|code| view.groups.iter().filter(|t| t.code == code).any(|t| t.f64() != 0.0));
+    if !tilted && !spatial {
         return Need::Plain;
     }
-    let readable = view.kind != "SPLINE" || group(view.groups, 73).is_some_and(|n| n as usize == view.groups.iter().filter(|t| t.code == 10).count());
+    let forced = view.groups.iter().any(|t| t.code == 1000 && t.str() == "UNREADABLE");
+    let readable = !forced
+        && (view.kind != "SPLINE" || group(view.groups, 73).is_some_and(|n| n as usize == view.groups.iter().filter(|t| t.code == 10).count()));
     Need::Needs { readable }
 }
 
