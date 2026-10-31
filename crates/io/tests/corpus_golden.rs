@@ -19,6 +19,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use cadcraft_dxf::{Tag, records, sections};
+use cadcraft_io::activation::records::family_of_kind;
 use cadcraft_io::activation::{Family, FamilySet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -116,43 +117,6 @@ fn read_hashes() -> BTreeMap<(String, String), (String, usize)> {
             ((path.to_string(), format.to_string()), (hash.to_string(), bytes.parse().unwrap()))
         })
         .collect()
-}
-
-/// The activation family of a DXF entity type.
-fn family_of_kind(kind: &str) -> Option<Family> {
-    Some(match kind {
-        "CIRCLE" => Family::Circle,
-        "ARC" => Family::Arc,
-        "ELLIPSE" => Family::Ellipse,
-        "LINE" => Family::Line,
-        "POINT" => Family::Point,
-        "RAY" => Family::Ray,
-        "XLINE" => Family::XLine,
-        "LWPOLYLINE" => Family::LwPolyline,
-        "POLYLINE" => Family::Polyline,
-        "SOLID" => Family::Solid,
-        "TRACE" => Family::Trace,
-        "3DFACE" => Family::Face3d,
-        "SPLINE" => Family::Spline,
-        "LEADER" => Family::Leader,
-        "DIMENSION" => Family::Dimension,
-        "TEXT" => Family::Text,
-        "MTEXT" => Family::MText,
-        "ATTDEF" => Family::AttDef,
-        "ATTRIB" => Family::Attrib,
-        "TOLERANCE" => Family::Tolerance,
-        "HATCH" => Family::Hatch,
-        "WIPEOUT" => Family::Wipeout,
-        "MLINE" => Family::MLine,
-        "HELIX" => Family::Helix,
-        "IMAGE" => Family::Image,
-        "ACAD_TABLE" => Family::Table,
-        "INSERT" => Family::Insert,
-        "MULTILEADER" => Family::MLeader,
-        "REGION" => Family::Region,
-        "VIEWPORT" => Family::Viewport,
-        _ => return None,
-    })
 }
 
 type Record = (String, Vec<Tag>);

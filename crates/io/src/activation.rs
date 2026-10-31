@@ -10,6 +10,8 @@
 //! Canonical when it can activate ([`Failure`] lists why it cannot), else each `needs` unit is Raw and everything else stays
 //! Legacy. A Raw unit is an exception to revision agreement: it is neither Legacy nor Canonical.
 
+pub mod records;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use cadcraft_doc::MAX_BLOCK_DEPTH;
