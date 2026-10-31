@@ -1,4 +1,4 @@
-use super::common::{DimText, add_dim, add_dim_from, assoc_enabled, circle_of, dim, linear_kind, pick_at};
+use super::common::{DimText, add_dim, add_dim_from, add_exploded, assoc_enabled, circle_of, dim, linear_kind, pick_at};
 use super::{
     Accept, DimKind, Dimension, EngineError, EntityKind, Handle, Input, Interactive, Prim, Prompt, Result, Segment, Session, Step, Value, Vec2, bad,
     json, point_req, points_param, str_param,
@@ -102,9 +102,20 @@ fn chain_run(s: &mut Session, p: &Value, baseline: bool) -> Result<Value> {
     // drawing made long chains quadratic (the added dimensions are no snap targets).
     let snaps = if assoc_enabled(s) { Some(crate::assoc::SnapIndex::new(s.doc()?, &s.space())) } else { None };
     let mut out = Vec::new();
+    // DIMASSOC 0: every dimension of the chain is made as its pieces, and the chain keeps the dimension it started from: the next point
+    // continues or stacks on it, not on the pieces (AutoCAD LT 2025, `/tmp/cad/elev-oracle17`).
+    let base = s.last_dim;
     for q in pts {
         let prev = last_linear(s).ok_or_else(|| bad(id, "no linear dimension to continue"))?;
         let mut k = chained(s, &prev, q, baseline);
+        if !assoc_enabled(s)
+            && let EntityKind::Dimension(dm) = &k
+        {
+            let first = add_exploded(s, dm)?;
+            s.last_dim = base;
+            out.push(first.hex());
+            continue;
+        }
         if let (Some(ix), EntityKind::Dimension(dm)) = (&snaps, &mut k) {
             dm.assoc = ix.auto_assoc(&[("p13", dm.p13.xy()), ("p14", dm.p14.xy())]);
         }

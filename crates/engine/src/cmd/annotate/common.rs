@@ -69,7 +69,7 @@ pub(super) fn add_dim_from(s: &mut Session, k: EntityKind, source: Option<Handle
 
 /// DIMASSOC 0: AutoCAD makes no DIMENSION but its pieces (LINEs, ARCs, SOLID arrowheads and the MTEXT) on the current layer, all at the
 /// current elevation, whatever Z the objects have (measured in LT 2025). Returns the first piece; no dimension remains to continue.
-fn add_exploded(s: &mut Session, dm: &Dimension) -> Result<Handle> {
+pub(super) fn add_exploded(s: &mut Session, dm: &Dimension) -> Result<Handle> {
     let whole = cadcraft_doc::Entity {
         geometry_revision: Default::default(),
         handle: Handle(0),
