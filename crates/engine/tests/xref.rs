@@ -332,6 +332,7 @@ fn bind_makes_the_xref_part_of_the_drawing() {
     s.execute("qsave", &json!({})).unwrap();
     let saved = cadcraft_io::read(&std::fs::read(&host).unwrap(), "host.dxf").unwrap();
     assert_eq!(saved.block("site").map(|b| b.entities.len()), Some(2));
+    assert_eq!(saved.block("site$0$Tree").map(|b| b.entities.len()), Some(1), "the bound definition is host-owned and survives saving");
     assert!(saved.layer("site$1$Walls").is_some());
 
     // Insert type: the symbols keep their own names (an existing one is used instead).
