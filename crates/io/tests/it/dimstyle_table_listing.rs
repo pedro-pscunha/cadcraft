@@ -1,6 +1,6 @@
 //! The DIMSTYLE table lists some of its styles in the 71 / 340 groups of its header; a save lists the ones the file listed, as long as they exist.
 
-use super::foreign_passthrough::{dxf, section, val};
+use super::foreign_passthrough::{dxf, val};
 
 fn source(listed: &[&str]) -> String {
     let mut tags: Vec<(i32, &str)> =

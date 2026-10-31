@@ -560,6 +560,11 @@ fn keep_classes(d: &mut Drawing, classes: &Recs) {
     }
 }
 
+/// A style record that lists the entities that use it among its persistent reactors.
+fn lists_users(kind: &str) -> bool {
+    matches!(kind, "DIMSTYLE" | "MLEADERSTYLE")
+}
+
 /// Remember the DIMSTYLE records that the header of the DIMSTYLE table listed.
 fn keep_dim_style_listing(d: &mut Drawing, tables: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -588,6 +593,7 @@ pub(crate) fn list_dim_styles(tags: &mut Vec<Tag>, d: &Drawing) {
 
 /// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
+    keep_dim_style_listing(d, tables);
     let source = Arc::make_mut(&mut d.source_symbols);
     for (_, _, t) in tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD") {
         if let Some(name) = val(t, 2).filter(|_| val(t, 70).is_some() && crate::dxf_ext::block_record_units(t).is_some()) {
@@ -1021,7 +1027,6 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ids = identities(&tables, &blocks, &objects);
     keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&tables, &entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
-    keep_dim_style_listing(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities, &objects);
     let modelled_assoc: HashSet<String> = objects
@@ -1120,8 +1125,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
         // A DIMSTYLE lists the dimensions that use it, and an MLEADERSTYLE the multileaders, among its persistent reactors, so a record's
         // reactors may name entities too.
-        let mut x =
-            extra(kind, t, kind == "BLOCK", false, if matches!(kind.as_str(), "DIMSTYLE" | "MLEADERSTYLE") { &reactor_targets } else { &kept });
+        let mut x = extra(kind, t, kind == "BLOCK", false, if lists_users(kind) { &reactor_targets } else { &kept });
         x.block_attributes = (kind == "BLOCK").then(|| block_attributes.get(&key.1).copied()).flatten();
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
