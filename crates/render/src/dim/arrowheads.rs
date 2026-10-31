@@ -60,7 +60,7 @@ impl Arrowhead {
     /// How far back from the tip the dimension line stops (blank heads are not crossed).
     pub fn inset(self, size: f64) -> f64 {
         match self {
-            Arrowhead::ClosedBlank | Arrowhead::DatumBlank => size,
+            Arrowhead::ClosedFilled | Arrowhead::Closed | Arrowhead::ClosedBlank | Arrowhead::DatumBlank => size,
             Arrowhead::DotBlank => size / 4.0,
             Arrowhead::Origin | Arrowhead::Origin2 => size / 2.0,
             Arrowhead::BoxBlank => size / 4.0,
