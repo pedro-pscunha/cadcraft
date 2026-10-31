@@ -262,6 +262,16 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
             notes.push(format!("MULTILEADER {}: no proxy graphics cache was written. The native MULTILEADER is preserved. An application that needs proxy graphics requires a regenerated cache to display it.", entity.handle.hex()));
         }
     }
+    // A record that needed a canonical reading and was read Legacy (it could not be kept raw): its Z, plane or frame can be lost.
+    if !d.source_symbols.legacy_needs.is_empty() {
+        let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
+        for entity in spaces.flat_map(|space| space.iter()) {
+            if let Some(why) = d.source_symbols.legacy_needs.get(&entity.handle) {
+                notes
+                    .push(format!("{why} It needed a canonical reading and was read Legacy; its Z values, plane or frame may be lost in this save."));
+            }
+        }
+    }
     notes
 }
 

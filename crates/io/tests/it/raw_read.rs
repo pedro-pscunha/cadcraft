@@ -109,3 +109,24 @@ fn a_unit_that_cannot_be_kept_raw_is_read_legacy_with_a_note() {
     assert_eq!(legacy_count(&d), 1);
     assert!(d.read_notes.iter().any(|n| n.contains("cannot be kept raw")), "{:?}", d.read_notes);
 }
+
+#[test]
+fn a_needing_unit_read_legacy_because_it_cannot_be_raw_is_named_in_every_save() {
+    // The same unit as above: a needing INSERT with an ATTRIB and no closing SEQEND. It is read Legacy with a read note, and every
+    // later save says again that it needed a canonical reading, so no save goes out silent about it.
+    let text = "0\nSECTION\n2\nENTITIES\n0\nINSERT\n5\nA1\n8\n0\n66\n1\n2\nNOPE\n10\n0\n20\n0\n30\n0\n210\n0\n220\n1\n230\n1\n\
+0\nATTRIB\n5\nA2\n8\n0\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n2\nT\n0\nENDSEC\n0\nEOF\n";
+    let mut d = read(text, raw_path());
+    for name in ["x.dxf", "x.dwg"] {
+        let (_, notes) = cadcraft_io::write_with_noted(&d, name, &cadcraft_io::SaveOptions::default()).unwrap();
+        assert!(notes.iter().any(|n| n.contains("INSERT A1") && n.contains("read Legacy")), "{name}: {notes:?}");
+    }
+    // Once the record is gone from the drawing, the save has nothing to say about it.
+    d.remove_entity(Handle(0xA1));
+    let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
+    assert!(!notes.iter().any(|n| n.contains("INSERT A1")), "{notes:?}");
+    // A record that is Legacy because nothing needs more says nothing.
+    let plain = read(&fixture("a10_cycle_all_plain"), raw_path());
+    let (_, notes) = cadcraft_io::write_with_noted(&plain, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
+    assert!(!notes.iter().any(|n| n.contains("read Legacy")), "{notes:?}");
+}

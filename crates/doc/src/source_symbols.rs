@@ -30,6 +30,9 @@ pub struct SourceSymbols {
     /// The persistent reactors of each entity that had two or more, in the order the file listed them (AutoCAD notifies them in
     /// that order, and its own save keeps it).
     pub reactor_order: BTreeMap<Handle, Vec<Handle>>,
+    /// The records that needed a canonical reading and were read Legacy because they could not be kept raw (no closing SEQEND, a
+    /// repeated identity), with the type and the reason: every save of the drawing says so while the record is in it.
+    pub legacy_needs: BTreeMap<Handle, String>,
 }
 
 impl SourceSymbols {
