@@ -224,11 +224,14 @@ fn session(setup: &Setup, state: State) -> (Session, Vec<Handle>) {
                 make_canonical_in(&mut session, *handle, Vec3::new(0.0, 0.6, 0.8));
                 reached.push(*handle);
             }
-            // A record with followers (a block reference with attributes, a table) has no single-record raw unit: it stays legacy.
             State::Raw => {
-                if catch_unwind(AssertUnwindSafe(|| make_raw(&mut session, *handle))).is_ok() {
-                    reached.push(*handle);
-                }
+                make_raw(&mut session, *handle);
+                assert_eq!(
+                    session.doc().unwrap().entity(*handle).unwrap().geometry_revision,
+                    GeometryRevision::RawSource,
+                    "Raw fixture preparation cannot retain a Legacy operand"
+                );
+                reached.push(*handle);
             }
         }
     }
@@ -319,6 +322,27 @@ fn sweep() -> (String, Vec<String>) {
         writeln!(table, "{command}\tunprobed").unwrap();
     }
     (table, breaks)
+}
+
+#[test]
+fn raw_preparation_cannot_leave_a_requested_operand_legacy() {
+    let setup = setup();
+    let (session, reached) = session(&setup, State::Raw);
+    assert_eq!(reached.len(), setup.operands.len(), "every requested Raw operand must be prepared or fail the sweep");
+    for (token, handle) in &setup.operands {
+        assert_eq!(session.doc().unwrap().entity(*handle).unwrap().geometry_revision, GeometryRevision::RawSource, "{token}");
+    }
+}
+
+#[test]
+fn a_real_raw_table_reaches_the_named_read_only_guard() {
+    let setup = setup();
+    let handle = setup.operands.iter().find(|(token, _)| *token == "B").unwrap().1;
+    let (mut session, _) = session(&setup, State::Raw);
+    let before = session.doc().unwrap().clone();
+    let error = session.execute("table.set", &json!({"handle": handle.hex(), "row": 0, "col": 0, "text": "changed"})).unwrap_err().to_string();
+    assert!(error.contains("ACAD_TABLE") && error.contains("read-only") && error.contains(&handle.hex()), "{error}");
+    assert_eq!(session.doc().unwrap(), &before);
 }
 
 #[test]

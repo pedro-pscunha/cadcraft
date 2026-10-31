@@ -56,6 +56,18 @@ pub fn lift(session: &mut Session, handle: Handle, z: f64) {
 pub fn make_raw(session: &mut Session, handle: Handle) {
     let entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
     let (kind, groups) = cadcraft_io::entity_groups(session.doc().unwrap(), &entity);
+    // TABLE requires document-level graphics/style context and is not emitted by entity_groups.
+    let (kind, groups) = if kind.is_empty() {
+        let text = cadcraft_io::write_dxf(session.doc().unwrap());
+        cadcraft_dxf::sections(&cadcraft_dxf::parse(text.as_bytes()).unwrap())
+            .into_iter()
+            .filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS"))
+            .flat_map(|section| cadcraft_dxf::records(&section.tags))
+            .find(|(_, tags)| tags.iter().any(|tag| tag.code == 5 && Handle::parse_hex(&tag.str()) == Some(handle)))
+            .unwrap_or_else(|| panic!("the complete DXF must expose Raw operand {handle:?}"))
+    } else {
+        (kind, groups)
+    };
     let mut tags = vec![RawTag { code: 5, value: handle.hex() }, RawTag { code: 330, value: "1F".into() }];
     tags.extend(groups.iter().filter(|t| !matches!(t.code, 5 | 330)).map(|t| RawTag { code: t.code, value: t.str() }));
     let parent = RawRecord::new(kind, tags).expect("a raw record");

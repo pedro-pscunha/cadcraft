@@ -40,11 +40,6 @@ fn source_record(record: &RawRecord) -> Vec<Tag> {
     std::iter::once(Tag::s(0, record.kind())).chain(record.tags().iter().map(|tag| Tag::s(tag.code, &tag.value))).collect()
 }
 
-/// DXF 320–329 hold arbitrary handles, not translated object relationships (DXF Reference).
-pub(crate) fn raw_reference(code: i32) -> bool {
-    matches!(code, 330..=369 | 390..=399 | 480..=481 | 1005)
-}
-
 /// Remap only references whose target identity changed. Keep all other source text, including numeric spelling.
 pub(crate) fn remap_raw_references(tags: &[Tag], mut remap: impl FnMut(&str) -> Option<String>, out: &mut Vec<Tag>) {
     let mut depth = 0usize;
@@ -59,7 +54,7 @@ pub(crate) fn remap_raw_references(tags: &[Tag], mut remap: impl FnMut(&str) -> 
         }
         let owner = tag.code == 330 && depth == 0 && !owner_seen;
         owner_seen |= owner;
-        if raw_reference(tag.code)
+        if cadcraft_doc::foreign::is_pointer(tag.code)
             && !owner
             && let Some(mapped) = remap(&tag.str())
             && Handle::parse_hex(&mapped) != Handle::parse_hex(&tag.str())

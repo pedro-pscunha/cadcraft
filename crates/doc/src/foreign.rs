@@ -271,9 +271,20 @@ impl Foreign {
     }
 }
 
-/// DXF group codes whose values reference another record's handle.
+/// DXF group codes whose values are translated object references (DXF Reference: soft and hard
+/// pointers and owners, 330-369, 390-399, 480-481, and the xdata handle 1005). The 320-329
+/// "arbitrary handle" groups are taken as is, and the ACDSDATA link is a 320 ([`remap_data_store`]).
 pub fn is_pointer(code: i32) -> bool {
-    matches!(code,320..=369|390..=399|480..=481|1005)
+    matches!(code,330..=369|390..=399|480..=481|1005)
+}
+
+/// Point the data store's links (group 320, the entity a record belongs to) at the saved handles.
+pub(crate) fn remap_data_store(tags: &mut [RawTag], map: &BTreeMap<Handle, Handle>) {
+    for t in tags.iter_mut().filter(|t| t.code == 320) {
+        if let Some(new) = Handle::parse_hex(&t.value).and_then(|h| map.get(&h)) {
+            t.value = new.hex();
+        }
+    }
 }
 
 /// DXF dictionary record types, normalized without allocating a name.

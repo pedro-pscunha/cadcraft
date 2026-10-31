@@ -194,6 +194,17 @@ fn attribute_sequences_cannot_be_reordered_or_omitted() {
 }
 
 #[test]
+fn equal_object_payloads_do_not_make_reference_targets_interchangeable() {
+    let source = String::from_utf8(INSERT_SOURCE.to_vec())
+        .unwrap()
+        .replace("0\nSEQEND\n", "1001\nTEST_REFERENCES\n1005\nD1\n0\nSEQEND\n")
+        .replace("0\nEOF\n", "0\nSECTION\n2\nOBJECTS\n0\nXRECORD\n5\nD1\n2\nSAME_PAYLOAD\n0\nXRECORD\n5\nD2\n2\nSAME_PAYLOAD\n0\nENDSEC\n0\nEOF\n");
+    assert!(saved_unit_matches(source.as_bytes(), source.as_bytes(), "INSERT"));
+    let wrong = source.replace("1005\nD1\n", "1005\nD2\n");
+    assert!(!saved_unit_matches(source.as_bytes(), wrong.as_bytes(), "INSERT"));
+}
+
+#[test]
 fn reactor_and_xdata_references_cannot_be_dropped_or_retargeted() {
     let source =
         String::from_utf8(INSERT_SOURCE.to_vec()).unwrap().replace("5\nA2\n330\nA1\n", "5\nA2\n330\nA1\n102\n{ACAD_REACTORS\n330\nB2\n102\n}\n");

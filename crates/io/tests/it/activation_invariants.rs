@@ -172,6 +172,143 @@ fn i4_a_repeated_read_gives_the_same_outcome() {
     }
 }
 
+fn serialized_entities(drawing: &cadcraft_doc::Drawing) -> BTreeMap<(String, u64), Vec<u8>> {
+    let mut entities = BTreeMap::new();
+    let mut collect = |container: String, store: &cadcraft_doc::EntityStore| {
+        for entity in store.iter() {
+            entities.insert((container.clone(), entity.handle.0), serde_json::to_vec(entity.as_ref()).unwrap());
+        }
+    };
+    collect("ENTITIES".into(), &drawing.model);
+    for layout in &drawing.layouts {
+        collect(format!("PAPER/{}", layout.name), &layout.entities);
+    }
+    for (name, block) in &drawing.blocks {
+        collect(name.to_ascii_uppercase(), &block.entities);
+    }
+    entities
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReadOutcomes {
+    revisions: BTreeMap<(String, u64), cadcraft_doc::GeometryRevision>,
+    raw_units: BTreeMap<(String, u64), Vec<u8>>,
+    notes: Vec<String>,
+}
+
+fn read_outcomes(drawing: &cadcraft_doc::Drawing) -> ReadOutcomes {
+    let mut out = ReadOutcomes { revisions: BTreeMap::new(), raw_units: BTreeMap::new(), notes: drawing.read_notes.clone() };
+    let mut collect = |container: String, store: &cadcraft_doc::EntityStore| {
+        for entity in store.iter() {
+            let key = (container.clone(), entity.handle.0);
+            out.revisions.insert(key.clone(), entity.geometry_revision);
+            if let cadcraft_doc::EntityKind::Raw(raw) = &entity.kind {
+                out.raw_units.insert(key, serde_json::to_vec(raw).unwrap());
+                for record in raw.records() {
+                    out.revisions.insert((container.clone(), record.handle().0), cadcraft_doc::GeometryRevision::RawSource);
+                }
+            } else {
+                for attribute in entity.kind.attributes() {
+                    if let Some(handle) = attribute.handle {
+                        out.revisions.insert((container.clone(), handle.0), attribute.geometry_revision);
+                    }
+                }
+            }
+        }
+    };
+    collect("ENTITIES".into(), &drawing.model);
+    for layout in &drawing.layouts {
+        collect(format!("PAPER/{}", layout.name), &layout.entities);
+    }
+    for (name, block) in &drawing.blocks {
+        collect(name.to_ascii_uppercase(), &block.entities);
+    }
+    out.notes.sort();
+    out
+}
+
+#[test]
+fn i4_repeated_and_shuffled_raw_reads_match_the_graph_and_keep_source_units() {
+    use cadcraft_io::activation::records::{Container, NodeKey};
+    let policy = ReaderPolicy::new(ReaderMode::Off, ACTIVE_FAMILIES).with_raw_path();
+    let mut moved = 0;
+    // These source units are complete. Other graph fixtures deliberately omit INSERT SEQENDs;
+    // their malformed-read refusal belongs to M1, not a silent Legacy outcome in this proof.
+    let mut fixtures: Vec<_> = cases()
+        .into_iter()
+        .filter(|case| {
+            matches!(
+                case.name,
+                "b2_needs_insert_with_attributes_raw" | "b4_unreferenced_definition_with_needing_member" | "b5_dimension_with_star_d_block"
+            )
+        })
+        .map(|case| (case.name, case.text))
+        .collect();
+    fixtures.push(("a10_plain_cycle_control", String::from_utf8(include_bytes!("../data/activation/a10_plain_cycle_control.dxf").to_vec()).unwrap()));
+    for (name, text) in fixtures {
+        let bytes = text.as_bytes();
+        let drawing = cadcraft_io::read_with_need(bytes, "fixture.dxf", policy, &source_predicate(bytes)).unwrap();
+        let first = read_outcomes(&drawing);
+        assert!(!first.raw_units.is_empty(), "{name} must exercise an actual Raw read");
+        let secs = sections_of(&text);
+        let graph = RecordGraph::build(&secs, &predicate(&secs)).unwrap();
+        let activation = activate(graph.graph(), &policy.graph_policy());
+        for index in 0..graph.graph().nodes().len() as u32 {
+            let node = NodeId(index);
+            let Some(NodeKey::Record { container, .. }) = graph.key(node) else { continue };
+            let Some(handle) = graph.handle(node).and_then(cadcraft_doc::Handle::parse_hex) else { continue };
+            let container = match container {
+                Container::Entities => "ENTITIES".into(),
+                Container::Block(name) => name.clone(),
+            };
+            let expected = match activation.outcome(node).unwrap() {
+                Outcome::Legacy => cadcraft_doc::GeometryRevision::LegacyProjectedV1,
+                Outcome::Canonical => cadcraft_doc::GeometryRevision::CanonicalV2,
+                Outcome::Raw => cadcraft_doc::GeometryRevision::RawSource,
+            };
+            assert_eq!(first.revisions.get(&(container, handle.0)), Some(&expected), "{name}: actual read must consume the graph decision");
+        }
+        let repeated = cadcraft_io::read_with_need(bytes, "fixture.dxf", policy, &source_predicate(bytes)).unwrap();
+        assert_eq!(read_outcomes(&repeated), first, "{name}: repeated read");
+        let mut rng = Lcg(0x5EED);
+        for round in 0..8 {
+            let other = shuffled(&secs, &mut rng);
+            moved += usize::from(flat(&other) != flat(&secs));
+            let bytes = format!(
+                "{}0\nEOF\n",
+                other
+                    .iter()
+                    .map(|section| format!("0\nSECTION\n2\n{}\n{}0\nENDSEC\n", section.name, text_of(&records(&section.tags))))
+                    .collect::<String>()
+            )
+            .into_bytes();
+            let drawing = cadcraft_io::read_with_need(&bytes, "fixture.dxf", policy, &source_predicate(&bytes)).unwrap();
+            assert_eq!(read_outcomes(&drawing), first, "{name}: shuffled actual read {round}");
+        }
+    }
+    assert!(moved > 4, "the fixture shuffles must change source order");
+}
+
+#[test]
+fn a10_parsed_plain_cycle_stays_legacy_when_no_record_needs_activation() {
+    let bytes = include_bytes!("../data/activation/a10_plain_cycle_control.dxf");
+    let secs = sections(&parse(bytes).unwrap());
+    // This is the graph's all-Plain control. Conservative classification of unproved INSERTs remains separate.
+    let graph = RecordGraph::build(&secs, &|_| Need::Plain).unwrap();
+    let activation = activate(graph.graph(), &open());
+    assert!(activation.outcomes.iter().all(|outcome| *outcome == Outcome::Legacy));
+    let calls = std::cell::Cell::new(0);
+    let plain = |_: &cadcraft_io::activation::records::RecordView<'_>| {
+        calls.set(calls.get() + 1);
+        Need::Plain
+    };
+    let graph_read = cadcraft_io::read_with_need(bytes, "a10.dxf", ReaderPolicy::default().with_raw_path(), &plain).unwrap();
+    assert_eq!(calls.get(), 4);
+    assert!(read_outcomes(&graph_read).raw_units.is_empty());
+    assert!(read_outcomes(&graph_read).revisions.values().all(|revision| *revision == cadcraft_doc::GeometryRevision::LegacyProjectedV1));
+    assert_eq!(graph_read, cadcraft_io::read_with_policy(bytes, "a10.dxf", ReaderPolicy::default()).unwrap());
+}
+
 // ---- I3 ----
 
 fn open() -> Policy {
@@ -194,7 +331,24 @@ fn i3_a_drawing_with_no_needing_record_activates_nothing_and_reads_as_the_legacy
         // The read in every mode is the Legacy read, field for field.
         let legacy = cadcraft_io::read_with_policy(bytes, name, ReaderPolicy::new(ReaderMode::Off, ACTIVE_FAMILIES)).unwrap();
         for mode in [ReaderMode::Safe, ReaderMode::All] {
-            assert_eq!(cadcraft_io::read_with_policy(bytes, name, ReaderPolicy::new(mode, ACTIVE_FAMILIES)).unwrap(), legacy, "{name} {mode:?}");
+            let calls = std::cell::Cell::new(0);
+            let plain = |_: &cadcraft_io::activation::records::RecordView<'_>| {
+                calls.set(calls.get() + 1);
+                Need::Plain
+            };
+            let policy = ReaderPolicy::new(mode, ACTIVE_FAMILIES).with_raw_path();
+            assert!(policy.needs_graph());
+            let read = cadcraft_io::read_with_need(bytes, name, policy, &plain).unwrap();
+            let records = graph.graph().nodes().iter().filter(|node| matches!(node.kind, cadcraft_io::activation::NodeKind::Record(_))).count();
+            assert_eq!(calls.get(), records, "{name} {mode:?}: the read must classify every record through the graph");
+            assert_eq!(read, legacy, "{name} {mode:?}");
+            assert_eq!(serialized_entities(&read), serialized_entities(&legacy), "{name} {mode:?}: serialized finite fields must keep signed zero");
+            assert_eq!(cadcraft_io::write_dxf(&read), cadcraft_io::write_dxf(&legacy), "{name} {mode:?}: DXF bytes");
+            assert_eq!(
+                cadcraft_io::write(&read, "plain.dwg").unwrap(),
+                cadcraft_io::write(&legacy, "plain.dwg").unwrap(),
+                "{name} {mode:?}: DWG bytes"
+            );
         }
     }
 }

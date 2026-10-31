@@ -733,7 +733,7 @@ pub(crate) fn restore_source_handles(tags: &mut [Tag], d: &Drawing) -> BTreeMap<
             continue;
         }
         // The header's group 5 is the next free handle, not a record's.
-        if !(crate::dxf_write::raw_reference(t.code) || matches!(t.code, 5 | 105) && section != "HEADER") {
+        if !(is_pointer(t.code) || matches!(t.code, 5 | 105) && section != "HEADER") {
             continue;
         }
         if let Some(new) = renamed.get(&norm(&t.str())) {

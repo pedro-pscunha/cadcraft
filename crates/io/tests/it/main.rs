@@ -140,6 +140,7 @@ mod polyline_parent_plot_style;
 mod raw_dwg_bridge;
 mod raw_end_to_end;
 mod raw_read;
+mod reader_rollback;
 mod reader_switch;
 mod region_roundtrip;
 mod roundtrip_audit;

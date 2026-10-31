@@ -2189,6 +2189,47 @@ fn takes_operands(spec: &cadcraft_engine::CommandSpec) -> bool {
     READS_THE_SELECTION.contains(&spec.id) || input.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|word| OPERAND_WORDS.contains(&word))
 }
 
+fn uncovered_coverage_tuples() -> BTreeSet<String> {
+    let rows = live_rows();
+    let covered: BTreeSet<_> = rows.iter().map(|row| (row.command, row.role, format!("{:?}", row.revision))).collect();
+    let revisions = [Revision::Legacy, Revision::Canonical, Revision::Raw, Revision::LegacyFirst, Revision::CanonicalFirst];
+    let mut missing = BTreeSet::new();
+    for (command, roles) in DECLARED {
+        for role in *roles {
+            for revision in revisions {
+                if !covered.contains(&(*command, *role, format!("{revision:?}"))) {
+                    let status = if matches!(revision, Revision::LegacyFirst | Revision::CanonicalFirst) {
+                        "mixed_applicability_unreviewed"
+                    } else {
+                        "missing_curated_row"
+                    };
+                    missing.insert(format!("{command}\t{role:?}\t{revision:?}\t{status}"));
+                }
+            }
+        }
+    }
+    for command in include_str!("consumer_matrix/classes.txt").lines().filter_map(|line| line.strip_suffix(" operand")) {
+        for revision in revisions {
+            missing.insert(format!("{command}\tUnreviewed\t{revision:?}\trole_unreviewed"));
+        }
+    }
+    missing
+}
+
+#[test]
+fn the_tracked_coverage_gap_list_names_every_uncovered_command_role_revision_tuple() {
+    let missing = uncovered_coverage_tuples();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/consumer_matrix/coverage_gaps.tsv");
+    if std::env::var_os("CADCRAFT_COVERAGE_UPDATE").is_some() {
+        let header = "# Stage0 coverage gaps, not proof that every listed role is consumed.\n# Unreviewed means the command has an operand but no curated role contract.\n# Mixed applicability must be reviewed; a one-operand command can mark those tuples inapplicable in its role review.\n# A covered coarse tuple still needs its plane, parameter branch and interactive/UI obligations.\n# The sweep's works/refused result never counts as a curated numeric or typed-refusal row.\n# command\trole\trevision\tstatus\n";
+        std::fs::write(&path, format!("{header}{}\n", missing.iter().cloned().collect::<Vec<_>>().join("\n"))).unwrap();
+        return;
+    }
+    let text = std::fs::read_to_string(path).expect("the uncovered tuple inventory must be tracked");
+    let recorded: BTreeSet<_> = text.lines().filter(|line| !line.starts_with('#') && !line.trim().is_empty()).map(str::to_string).collect();
+    assert_eq!(recorded, missing, "review and refresh CADCRAFT_COVERAGE_UPDATE=1 after adding curated rows or role contracts");
+}
+
 #[test]
 fn every_registered_command_has_rows_a_class_and_for_an_operand_a_sweep_line() {
     let specs = command_specs();

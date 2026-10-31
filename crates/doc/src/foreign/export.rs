@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::{
-    ForeignExtra, ForeignKey, ForeignObject, is_dictionary, is_pointer, object_owner, owner_index, remap_model, remap_tags, strip_dictionary_entries,
+    ForeignExtra, ForeignKey, ForeignObject, is_dictionary, is_pointer, object_owner, owner_index, remap_data_store, remap_model, remap_tags,
+    strip_dictionary_entries,
 };
 use crate::{Drawing, DuplicationSource, Entity, EntityKind, EntityStore, Handle, RawTag};
 
@@ -201,7 +202,7 @@ impl Drawing {
             .into_iter()
             .map(|(h, snapshot)| (map.get(&h).copied().unwrap_or(h), snapshot.remapped(&map, &owners)))
             .collect();
-        remap_tags(&mut foreign.data_store, &map);
+        remap_data_store(&mut foreign.data_store, &map);
     }
 }
 

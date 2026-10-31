@@ -14,15 +14,22 @@ fn i5_each_fixture_reports_the_records_each_component_activated() {
         let graph = RecordGraph::build(&secs, &predicate(&secs)).unwrap();
         let report = graph.report(&case.policy);
         let activation = activate(graph.graph(), &case.policy);
-        // The components partition the nodes, and a component is activated whole or not at all.
-        assert_eq!(report.components.iter().map(|c| c.nodes).sum::<usize>(), graph.graph().nodes().len(), "{}", case.name);
+        // Records and definitions partition the graph without conflating their activation counts.
+        assert_eq!(
+            report.components.iter().map(|component| component.records + component.definitions).sum::<usize>(),
+            graph.graph().nodes().len(),
+            "{}",
+            case.name
+        );
         for component in &report.components {
+            let counts = (component.activated_records, component.activated_definitions);
             match component.outcome {
-                ComponentOutcome::Canonical => assert_eq!(component.activated, component.nodes, "{}", case.name),
-                _ => assert_eq!(component.activated, 0, "{}", case.name),
+                ComponentOutcome::Canonical => assert_eq!(counts, (component.records, component.definitions), "{}", case.name),
+                _ => assert_eq!(counts, (0, 0), "{}", case.name),
             }
         }
-        assert_eq!(report.activated(), activation.activated(), "{}", case.name);
+        let activated_definitions = report.components.iter().map(|component| component.activated_definitions).sum::<usize>();
+        assert_eq!(report.activated() + activated_definitions, activation.activated(), "{}", case.name);
         // The Raw records are named by their handles, in file order.
         let raw: Vec<String> = (0..graph.graph().nodes().len() as u32)
             .map(cadcraft_io::activation::NodeId)
@@ -38,20 +45,51 @@ fn i5_each_fixture_reports_the_records_each_component_activated() {
 }
 
 #[test]
-fn i5_the_counts_of_two_fixtures() {
+fn i5_record_definition_and_attribute_counts_are_independent() {
     let by_name = |name: &str| cases().into_iter().find(|c| c.name == name).unwrap();
     // A1: the tilted INSERT, its definition and the two members are one component of four, all activated.
     let a1 = by_name("a1_tilted_insert_over_plain_definition");
     let report =
         RecordGraph::build(&sections(&parse(a1.text.as_bytes()).unwrap()), &source_predicate(a1.text.as_bytes())).unwrap().report(&a1.policy);
-    assert_eq!(report.components.iter().map(|c| (c.nodes, c.activated)).collect::<Vec<_>>(), [(4, 4)]);
+    assert_eq!(report.activated(), 3, "a definition must not inflate the activated record count");
+    assert_eq!(
+        report
+            .components
+            .iter()
+            .map(|component| (component.records, component.definitions, component.activated_records, component.activated_definitions))
+            .collect::<Vec<_>>(),
+        [(3, 1, 3, 1)]
+    );
+    let a2 = by_name("a2_needing_attribute_on_plain_insert");
+    let report =
+        RecordGraph::build(&sections(&parse(a2.text.as_bytes()).unwrap()), &source_predicate(a2.text.as_bytes())).unwrap().report(&a2.policy);
+    assert_eq!(report.activated(), 4, "INSERT, two ATTRIBs and the definition's LINE are four records");
+    assert_eq!((report.components[0].definitions, report.components[0].activated_definitions), (1, 1));
     // B1: the definition and its two plain members stay Legacy. The SPLINE and unproved INSERT stay Raw.
     let b1 = by_name("b1_needs_member_in_component_that_cannot_activate");
     let report =
         RecordGraph::build(&sections(&parse(b1.text.as_bytes()).unwrap()), &source_predicate(b1.text.as_bytes())).unwrap().report(&b1.policy);
     assert_eq!(report.components.len(), 1);
-    assert_eq!((report.components[0].nodes, report.components[0].activated), (5, 0));
+    assert_eq!(
+        (
+            report.components[0].records,
+            report.components[0].definitions,
+            report.components[0].activated_records,
+            report.components[0].activated_definitions
+        ),
+        (4, 1, 0, 0)
+    );
     assert_eq!(report.components[0].raw, ["B1", "E1"]);
+}
+
+#[test]
+fn i5_an_empty_definition_is_not_an_authored_record() {
+    let text = b"0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nEMPTY\n70\n0\n0\nENDBLK\n0\nENDSEC\n0\nEOF\n";
+    let graph = RecordGraph::build(&sections(&parse(text).unwrap()), &|_| cadcraft_io::activation::Need::Plain).unwrap();
+    let report = graph.report(&cadcraft_io::activation::Policy { mask: FamilySet::ALL, readers: FamilySet::ALL, definitions: true });
+    assert_eq!(report.components.len(), 1);
+    assert_eq!((report.components[0].records, report.components[0].definitions), (0, 1));
+    assert_eq!((report.activated(), report.components[0].activated_definitions), (0, 0));
 }
 
 #[test]
