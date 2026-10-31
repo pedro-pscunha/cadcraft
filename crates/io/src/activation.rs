@@ -10,10 +10,26 @@
 //! Canonical when it can activate ([`Failure`] lists why it cannot), else each `needs` unit is Raw and everything else stays
 //! Legacy. A Raw unit is an exception to revision agreement: it is neither Legacy nor Canonical.
 
+#[cfg(test)]
+#[path = "activation_inspections.rs"]
+mod inspections;
 pub mod records;
 #[cfg(test)]
 #[path = "activation_work_tests.rs"]
 mod work_tests;
+
+#[cfg(not(test))]
+type ComponentList = Vec<Component>;
+#[cfg(test)]
+type ComponentList = inspections::InspectedVec<Component, 0>;
+#[cfg(not(test))]
+type ComponentMembers = Vec<NodeId>;
+#[cfg(test)]
+type ComponentMembers = inspections::InspectedVec<NodeId, 1>;
+#[cfg(not(test))]
+type EdgeList = Vec<Edge>;
+#[cfg(test)]
+type EdgeList = inspections::InspectedVec<Edge, 2>;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -205,7 +221,7 @@ pub enum GraphError {
 #[derive(Clone, Debug)]
 pub struct Graph {
     nodes: Vec<Node>,
-    edges: Vec<Edge>,
+    edges: EdgeList,
 }
 
 impl Graph {
@@ -244,6 +260,8 @@ impl Graph {
                 }
             }
         }
+        #[cfg(test)]
+        let edges = EdgeList::new(edges);
         Ok(Graph { nodes, edges })
     }
 
@@ -295,6 +313,8 @@ pub enum Failure {
 
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(test)]
+        work_tests::REASON_FORMATS.with(|count| count.set(count.get() + 1));
         match self {
             Failure::DefinitionBeforeStage6(_) => write!(f, "it belongs to a block definition, which cannot be read Canonical before stage 6"),
             Failure::FamilyOutsideMask(family) => write!(f, "{family:?} records are outside the reader mask"),
@@ -319,10 +339,25 @@ pub enum ComponentOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Component {
     /// The nodes of the component, ascending.
-    pub nodes: Vec<NodeId>,
+    pub nodes: ComponentMembers,
     pub outcome: ComponentOutcome,
     /// Why it cannot activate (empty unless `outcome` is [`ComponentOutcome::Raw`]), ascending and without repeats.
     pub failures: Vec<Failure>,
+    /// One cached display summary. Node-specific details remain in `failures`.
+    reason: Option<String>,
+}
+
+fn component_reason(failures: &[Failure]) -> Option<String> {
+    let mut seen = BTreeSet::new();
+    let mut reasons = Vec::new();
+    for failure in failures {
+        let reason = failure.to_string();
+        if seen.insert(reason.clone()) {
+            reasons.push(reason);
+        }
+    }
+    // Failure text has a finite vocabulary: node IDs do not make the per-record summary grow.
+    (!reasons.is_empty()).then(|| reasons.join("; "))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -330,20 +365,15 @@ pub struct Activation {
     /// The outcome of every node, by node index.
     outcomes: Vec<Outcome>,
     /// The components, by their lowest node.
-    components: Vec<Component>,
+    components: ComponentList,
     component_by_node: Vec<usize>,
 }
 
 impl Activation {
-    /// Why the component of `node` could not activate, as one sentence; `None` when it did not need to.
-    pub fn reason_for(&self, node: NodeId) -> Option<String> {
-        #[cfg(test)]
-        work_tests::REASON_PROBES.with(|count| count.set(count.get() + 1));
+    /// The component's cached, deduplicated display summary; `None` when it did not need to activate.
+    pub fn reason_for(&self, node: NodeId) -> Option<&str> {
         let component = self.components.get(*self.component_by_node.get(node.index())?)?;
-        if component.failures.is_empty() {
-            return None;
-        }
-        Some(component.failures.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+        component.reason.as_deref()
     }
 
     /// The outcome of every node, in node order.
@@ -373,8 +403,6 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     let mut sets = Sets::new(n);
     let mut owned: BTreeMap<NodeId, Vec<NodeId>> = BTreeMap::new();
     for edge in &graph.edges {
-        #[cfg(test)]
-        work_tests::OWNERSHIP_PROBES.with(|count| count.set(count.get() + 1));
         let (a, b) = match *edge {
             Edge::Contains { definition, member } => (definition, member),
             Edge::Refers { user, definition } => (user, definition),
@@ -394,9 +422,11 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     let mut outcomes = vec![Outcome::Legacy; n];
     let mut components: Vec<Component> = Vec::with_capacity(members.len());
     for nodes in members.into_values() {
+        #[cfg(test)]
+        let nodes = ComponentMembers::new(nodes);
         let needs = nodes.iter().any(|id| matches!(graph.nodes[id.index()].need, Need::Needs { .. }) && is_record(graph, *id));
         if !needs {
-            components.push(Component { nodes, outcome: ComponentOutcome::Legacy, failures: Vec::new() });
+            components.push(Component { nodes, outcome: ComponentOutcome::Legacy, failures: Vec::new(), reason: None });
             continue;
         }
         let failures = failures(graph, policy, &nesting, &nodes);
@@ -404,12 +434,13 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
             for id in &nodes {
                 outcomes[id.index()] = Outcome::Canonical;
             }
-            components.push(Component { nodes, outcome: ComponentOutcome::Canonical, failures });
+            components.push(Component { nodes, outcome: ComponentOutcome::Canonical, failures, reason: None });
         } else {
             for id in raw_units(graph, &nodes, &owned) {
                 outcomes[id.index()] = Outcome::Raw;
             }
-            components.push(Component { nodes, outcome: ComponentOutcome::Raw, failures });
+            let reason = component_reason(&failures);
+            components.push(Component { nodes, outcome: ComponentOutcome::Raw, failures, reason });
         }
     }
     components.sort_by_key(|c| c.nodes.first().copied());
@@ -419,6 +450,8 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
             component_by_node[node.index()] = index;
         }
     }
+    #[cfg(test)]
+    let components = ComponentList::new(components);
     Activation { outcomes, components, component_by_node }
 }
 
