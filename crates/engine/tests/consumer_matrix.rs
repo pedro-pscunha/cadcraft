@@ -6,8 +6,10 @@
 //!   does not count: every row's control with the same parameters on a legacy drawing must succeed.
 //! - A pending row belongs to an open finding of the plan (none is open: F3 closed with 5774fbf8). Its expectation is what the fix must deliver, it must still
 //!   fail today, and the test that checks it fails the day it passes, so the row cannot outlive its fix silently.
-//! - The registry lint: every registered command is declared here with the roles its rows cover, or is in
-//!   `consumer_matrix/undeclared.txt`. A new command gets rows or an explicit entry; a declared command leaves the list.
+//! - The registry lint: every registered command is declared here with the roles its rows cover, or has a line in
+//!   `consumer_matrix/classes.txt`: `n/a` for a command that reads no object (checked against its parameters), or `operand` for one that
+//!   does. An `operand` command is run by `consumer_sweep.rs` on a legacy, a canonical and a raw operand, and its outcome per revision
+//!   is recorded in `consumer_matrix/sweep.txt`. A new command with an operand fails here until it has rows or a sweep line.
 //!
 //! The layers a `run()` sweep cannot reach (interactive previews, UI adapters, paper-viewport display) stay as their own tests; the
 //! DIMTEDIT preview of F3 is one of them (`it/canonical_previews.rs`).
@@ -1197,15 +1199,81 @@ fn find(command: &str) -> bool {
     command_specs().iter().any(|spec| spec.id == command)
 }
 
+/// The words of a command's input parameters that name an object it reads.
+const OPERAND_WORDS: &[&str] = &[
+    "handle",
+    "handles",
+    "handles2",
+    "h1",
+    "h2",
+    "h3",
+    "object",
+    "objects",
+    "target",
+    "targets",
+    "source",
+    "edges",
+    "selection",
+    "pick",
+    "fence",
+    "crossing",
+    "window",
+    "polygon",
+    "reference",
+    "ids",
+];
+
+/// The commands that read the current selection or the objects of the drawing without a parameter that names them.
+const READS_THE_SELECTION: &[&str] = &[
+    "erase.selection",
+    "grip",
+    "hatchtoback",
+    "texttofront.text",
+    "texttofront.dimensions",
+    "texttofront.leaders",
+    "texttofront.all",
+    "constraints.inspect",
+];
+
+/// The sweep may leave this many operand commands unprobed (no parameter template that a legacy drawing accepts: viewports, dynamic
+/// blocks, file output). The count only goes down.
+const UNPROBED_CEILING: usize = 31;
+
+fn takes_operands(spec: &cadcraft_engine::CommandSpec) -> bool {
+    let input = spec.params.split('→').next().unwrap_or_default();
+    READS_THE_SELECTION.contains(&spec.id) || input.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|word| OPERAND_WORDS.contains(&word))
+}
+
 #[test]
-fn every_registered_command_has_rows_or_an_explicit_entry_in_the_undeclared_list() {
-    let registry: BTreeSet<&str> = command_specs().iter().map(|spec| spec.id).collect();
+fn every_registered_command_has_rows_a_class_and_for_an_operand_a_sweep_line() {
+    let specs = command_specs();
+    let registry: BTreeSet<&str> = specs.iter().map(|spec| spec.id).collect();
     let declared: BTreeSet<&str> = DECLARED.iter().map(|(command, _)| *command).collect();
-    let undeclared: BTreeSet<&str> = include_str!("consumer_matrix/undeclared.txt").lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let unknown: Vec<_> = registry.iter().filter(|c| !declared.contains(**c) && !undeclared.contains(**c)).collect();
-    assert!(unknown.is_empty(), "commands with no rows and no entry in consumer_matrix/undeclared.txt: {unknown:?}");
-    let stale: Vec<_> = undeclared.iter().filter(|c| !registry.contains(**c)).collect();
-    assert!(stale.is_empty(), "undeclared entries that are not registered commands: {stale:?}");
-    let both: Vec<_> = undeclared.iter().filter(|c| declared.contains(**c)).collect();
-    assert!(both.is_empty(), "commands that have rows and are still listed as undeclared: {both:?}");
+    let classes: std::collections::BTreeMap<&str, &str> = include_str!("consumer_matrix/classes.txt")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.rsplit_once(' ').unwrap_or_else(|| panic!("classes.txt: bad line {line:?}")))
+        .collect();
+    let unknown: Vec<_> = registry.iter().filter(|c| !declared.contains(**c) && !classes.contains_key(**c)).collect();
+    assert!(
+        unknown.is_empty(),
+        "commands with no rows and no line in consumer_matrix/classes.txt (`n/a`, or `operand` and a sweep line): {unknown:?}"
+    );
+    let stale: Vec<_> = classes.keys().filter(|c| !registry.contains(**c)).collect();
+    assert!(stale.is_empty(), "classes.txt lines for commands that are not registered: {stale:?}");
+    let both: Vec<_> = classes.keys().filter(|c| declared.contains(**c)).collect();
+    assert!(both.is_empty(), "commands that have rows and still have a line in classes.txt: {both:?}");
+    for spec in specs.iter().filter(|spec| classes.contains_key(spec.id)) {
+        match classes[spec.id] {
+            "n/a" => assert!(!takes_operands(spec), "{} is marked n/a but takes an operand: {}", spec.id, spec.params),
+            "operand" => assert!(takes_operands(spec), "{} is marked operand but its parameters name no object: {}", spec.id, spec.params),
+            other => panic!("classes.txt: {} has the class {other:?}", spec.id),
+        }
+    }
+    let sweep = include_str!("consumer_matrix/sweep.txt");
+    let swept: BTreeSet<&str> = sweep.lines().filter_map(|line| line.split('\t').next()).collect();
+    let operands: BTreeSet<&str> = classes.iter().filter(|(_, class)| **class == "operand").map(|(command, _)| *command).collect();
+    assert_eq!(swept, operands, "operand commands and sweep lines differ (CADCRAFT_SWEEP_UPDATE=1 cargo test --test consumer_sweep)");
+    let unprobed = sweep.lines().filter(|line| line.ends_with("\tunprobed")).count();
+    assert!(unprobed <= UNPROBED_CEILING, "{unprobed} operand commands are unprobed; the ceiling is {UNPROBED_CEILING}");
 }
