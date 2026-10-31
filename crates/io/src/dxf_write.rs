@@ -177,6 +177,15 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false).0
 }
 
+/// The save path checks Raw identities before repair and the final values and references after remapping.
+pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<u8>> {
+    crate::raw_preservation::preflight(d)?;
+    let (tags, references) = tags_for(d, version, version, false);
+    let bytes = cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes();
+    crate::raw_preservation::RawSaveCheck::new(d, &references)?.verify_dxf(&bytes)?;
+    Ok(bytes)
+}
+
 struct SaveExtents {
     min: Option<Vec3>,
     max: Option<Vec3>,

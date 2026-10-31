@@ -28,6 +28,12 @@ struct SourceRecord<'a> {
     parent: bool,
 }
 
+struct OutputInventory {
+    handles: BTreeSet<u64>,
+    unexposed: BTreeSet<u64>,
+    source_unicode_escapes: bool,
+}
+
 pub(crate) struct RawSaveCheck<'a> {
     drawing: &'a Drawing,
     references: &'a WrittenReferences,
@@ -68,6 +74,11 @@ pub(crate) fn require_ascii(drawing: &Drawing) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Check the original identities and Common before any writer repairs handles.
+pub(crate) fn preflight(drawing: &Drawing) -> Result<()> {
+    RawSaveCheck::new(drawing, &WrittenReferences::default()).map(|_| ())
 }
 
 fn descendants(roots: impl Iterator<Item = Handle>, index: &BTreeMap<Handle, Vec<(Handle, usize)>>) -> std::result::Result<Vec<usize>, FieldError> {
@@ -211,6 +222,26 @@ impl<'a> RawSaveCheck<'a> {
             .map_err(|error| failure(first, first.source.parent().kind(), first.entity.handle, "decoded fields", error.to_string()))?;
         let decoded =
             Decoded::new(&tags).map_err(|error| failure(first, first.source.parent().kind(), first.entity.handle, error.field, error.reason))?;
+        let inventory = OutputInventory { handles: inspection.handles, unexposed: inspection.unexposed, source_unicode_escapes: true };
+        self.verify_decoded(&decoded, &inventory)
+    }
+
+    pub(crate) fn verify_dxf(&self, bytes: &[u8]) -> Result<()> {
+        let Some(first) = self.units.first() else { return Ok(()) };
+        let tags = cadcraft_dxf::parse(bytes)
+            .map_err(|error| failure(first, first.source.parent().kind(), first.entity.handle, "independent DXF decode", error.to_string()))?;
+        let decoded =
+            Decoded::new(&tags).map_err(|error| failure(first, first.source.parent().kind(), first.entity.handle, error.field, error.reason))?;
+        // Raw strings and the final ASCII decode already passed through the same DXF string decoder.
+        let inventory = OutputInventory {
+            handles: decoded.by_handle.keys().map(|handle| handle.0).collect(),
+            unexposed: BTreeSet::new(),
+            source_unicode_escapes: false,
+        };
+        self.verify_decoded(&decoded, &inventory)
+    }
+
+    fn verify_decoded(&self, decoded: &Decoded<'_>, inspection: &OutputInventory) -> Result<()> {
         for unit in &self.units {
             let start = decoded
                 .by_handle
@@ -241,8 +272,8 @@ impl<'a> RawSaveCheck<'a> {
                         parent: offset == 0,
                     },
                     actual,
-                    &inspection,
-                    &decoded,
+                    inspection,
+                    decoded,
                 )?;
                 if offset == 0 {
                     self.common(unit, actual)?;
@@ -263,7 +294,7 @@ impl<'a> RawSaveCheck<'a> {
                 let actual = decoded
                     .get(mapped)
                     .ok_or_else(|| failure(unit, &source.kind, source.handle, "record", "owned metadata is missing from the decode"))?;
-                self.compare_object(unit, source, mapped, actual, &inspection, &decoded)?;
+                self.compare_object(unit, source, mapped, actual, inspection, decoded)?;
             }
             let actual_owned = descendants(unit.source.records().map(RawRecord::handle), &decoded.owned)
                 .map_err(|error| failure(unit, unit.source.parent().kind(), unit.entity.handle, error.field, error.reason))?;
@@ -287,7 +318,7 @@ impl<'a> RawSaveCheck<'a> {
         source: &ForeignObject,
         mapped: Handle,
         actual: &WireRecord<'_>,
-        inspection: &cadcraft_dwg::DwgInspection,
+        inspection: &OutputInventory,
         decoded: &Decoded<'_>,
     ) -> Result<()> {
         if actual.kind != source.kind {
@@ -307,10 +338,11 @@ impl<'a> RawSaveCheck<'a> {
         unit: &Unit<'_>,
         source: SourceRecord<'_>,
         actual: &WireRecord<'_>,
-        inspection: &cadcraft_dwg::DwgInspection,
+        inspection: &OutputInventory,
         records: &Decoded<'_>,
     ) -> Result<()> {
-        let expected = fields::parse(source.tags, true).map_err(|error| failure(unit, source.kind, source.handle, error.field, error.reason))?;
+        let expected = fields::parse(source.tags, inspection.source_unicode_escapes)
+            .map_err(|error| failure(unit, source.kind, source.handle, error.field, error.reason))?;
         let SourceRecord { kind, handle, mapped_identity, parent, .. } = source;
         let changed = if parent { crate::dxf_write::raw_changed_properties(unit.source, unit.entity) } else { Vec::new() };
         if inspection.unexposed.contains(&mapped_identity.0) || !inspection.handles.contains(&mapped_identity.0) {
@@ -333,6 +365,12 @@ impl<'a> RawSaveCheck<'a> {
         }
         expected.retain(|field, _| !(field.common() && changed.contains(&field.code)));
         decoded.retain(|field, _| !(field.common() && changed.contains(&field.code)));
+        if parent && unit.source.parent().owner().is_none() {
+            expected.insert(
+                Field { class: String::new(), groups: Vec::new(), application: None, embedded: 0, code: 330, index: 0 },
+                Value::Handle(Handle(0)),
+            );
+        }
         for (field, value) in &mut expected {
             if field.code == 5 && field.class.is_empty() {
                 *value = Value::Handle(mapped_identity);
@@ -340,7 +378,15 @@ impl<'a> RawSaveCheck<'a> {
             if fields::reference(field.code)
                 && let Value::Handle(old) = value
             {
-                if parent && field.code == 330 && field.class.is_empty() && field.groups.is_empty() && field.application.is_none() && old.0 == 0 {
+                // The emitter always assigns the parent to its current containing space.
+                if parent
+                    && field.code == 330
+                    && field.index == 0
+                    && field.class.is_empty()
+                    && field.groups.is_empty()
+                    && field.application.is_none()
+                    && field.embedded == 0
+                {
                     *old = self
                         .references
                         .roles
@@ -358,7 +404,7 @@ impl<'a> RawSaveCheck<'a> {
         compare_fields(unit, kind, handle, &expected, &decoded)
     }
 
-    fn plot_style(&self, unit: &Unit<'_>, actual: &Fields, inspection: &cadcraft_dwg::DwgInspection) -> Result<()> {
+    fn plot_style(&self, unit: &Unit<'_>, actual: &Fields, inspection: &OutputInventory) -> Result<()> {
         let get = |code| actual.iter().find(|(field, _)| field.common() && field.code == code).map(|(_, value)| value);
         let style = unit.entity.common.plot_style.trim();
         let (kind, target) = if style.eq_ignore_ascii_case("bylayer") {

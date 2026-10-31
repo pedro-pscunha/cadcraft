@@ -16,6 +16,8 @@ mod info;
 mod mcp;
 mod output;
 mod perf;
+#[cfg(test)]
+mod raw_save_routes;
 mod run;
 mod sample;
 
