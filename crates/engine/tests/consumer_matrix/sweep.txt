@@ -135,18 +135,18 @@ selectsimilar	template=0	legacy=works	canonical=works	raw=works
 shapes	template=0	legacy=works	canonical=refused: Extent query refused object 106: A canonical spline needs its Z values.; object 10C: The legacy ...	raw=works
 splinedit	template=81	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw SPLINE object 106 is read-only: The source has no exact geometry adapter.
 stretch	template=112	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.break	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.cellstyle	template=69	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.deletecol	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.deleterow	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.formula	template=120	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.insertcol	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.insertrow	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.merge	template=121	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.break	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.cellstyle	template=69	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.deletecol	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.deleterow	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.formula	template=120	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.insertcol	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.insertrow	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.merge	template=121	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
 table.recalc	template=0	legacy=works	canonical=works	raw=works
-table.set	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-table.unmerge	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
-tabledit	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.set	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+table.unmerge	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
+tabledit	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw ACAD_TABLE object 111 is read-only: The source has no exact geometry adapter.
 textedit	template=51	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select a text, mtext, attribute definition or dimension.
 texts	template=0	legacy=works	canonical=works	raw=works
 texttofront	template=0	legacy=works	canonical=works	raw=works
