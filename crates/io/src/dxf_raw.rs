@@ -532,6 +532,9 @@ fn keep_classes(d: &mut Drawing, classes: &Recs) {
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
     for (_, _, t) in tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD") {
+        if let Some(name) = val(t, 2).filter(|_| val(t, 70).is_some() && crate::dxf_ext::block_record_units(t).is_some()) {
+            source.design_center_blocks.insert(up(&name));
+        }
         let (Some(name), Some(open)) = (val(t, 2), t.iter().position(|g| g.code == 102 && g.str().trim() == "{BLKREFS")) else { continue };
         let refs: Vec<Handle> = t[open + 1..].iter().take_while(|g| g.code == 331).filter_map(|g| handle(&g.str())).collect();
         if !refs.is_empty() {

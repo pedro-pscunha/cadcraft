@@ -432,3 +432,36 @@ fn a_multileader_remains_one_native_record_at_every_target() {
         assert_eq!((count("MULTILEADER"), count("LEADER"), count("MTEXT")), (1, 0, 0), "{version:?}: {kinds:?}");
     }
 }
+
+/// A block record that holds the `DesignCenter Data` xdata beside its group 70 (AutoCAD keeps it in every version) gets it back in a
+/// file of 2007 or later; a block that had none does not get it.
+#[test]
+fn design_center_xdata_beside_group_70_is_kept() {
+    let record = |name: &str, handle: &str, xdata: bool| {
+        let mut r = format!(
+            "0\nBLOCK_RECORD\n5\n{handle}\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\n{name}\n340\n0\n70\n6\n280\n1\n281\n0\n"
+        );
+        if xdata {
+            r += "1001\nACAD\n1000\nDesignCenter Data\n1002\n{\n1070\n1\n1070\n6\n1002\n}\n";
+        }
+        r
+    };
+    let source = format!(
+        "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n5\n1\n100\nAcDbSymbolTable\n70\n2\n{}{}0\nENDTAB\n0\nENDSEC\n\
+         0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n20\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nWith\n70\n0\n10\n0\n20\n0\n30\n0\n3\nWith\n1\n\n0\nENDBLK\n5\n21\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n\
+         0\nBLOCK\n5\n22\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nWithout\n70\n0\n10\n0\n20\n0\n30\n0\n3\nWithout\n1\n\n0\nENDBLK\n5\n23\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nEOF\n",
+        record("With", "30", true),
+        record("Without", "31", false)
+    );
+    let d = read_dxf(source.as_bytes()).unwrap();
+    for version in [Version::R2007, Version::R2018] {
+        let text = save(&d, version);
+        let tables = sections(&cadcraft_dxf::parse(text.as_bytes()).unwrap()).into_iter().find(|s| s.name == "TABLES").unwrap();
+        let has = |name: &str| {
+            let record =
+                records(&tables.tags).into_iter().find(|(k, t)| k == "BLOCK_RECORD" && t.iter().any(|t| t.code == 2 && t.str() == name)).unwrap().1;
+            record.iter().filter(|t| t.code == 1000 && t.str() == "DesignCenter Data").count()
+        };
+        assert_eq!((has("With"), has("Without")), (1, 0), "{version:?}");
+    }
+}
