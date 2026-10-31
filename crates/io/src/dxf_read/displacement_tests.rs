@@ -61,6 +61,29 @@ fn point(tags: &[Tag], code: i32) -> Vec3 {
 }
 
 #[test]
+fn legacy_native_dimension_at_z3_displays_local_zero_children_without_changing_save_bytes() {
+    // Numeric control from AutoCAD LT2025, tilted UCS (0,.6,.8), ELEVATION3, DIMLINEAR1180.
+    // This synthetic excerpt is not an AutoCAD-produced file.
+    let dimension = cadcraft_dxf::parse(b"5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbDimension\n2\n*D1\n10\n-10\n20\n-8.600000000000001\n30\n10.2\n11\n5\n21\n14.875\n31\n3\n70\n32\n3\nStandard\n210\n0\n220\n0.6\n230\n0.8\n100\nAcDbAlignedDimension\n13\n0\n23\n-6.2\n33\n8.4\n14\n-10\n24\n-6.2\n34\n8.4\n50\n0\n100\nAcDbRotatedDimension\n").unwrap();
+    let line = cadcraft_dxf::parse(b"5\n301\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n10.625\n30\n0\n11\n0\n21\n14.25\n31\n0\n").unwrap();
+    let drawing = drawing_from_source(GeometryRevision::LegacyProjectedV1, dimension, line);
+    let before_dxf = crate::write(&drawing, "native-plane.dxf").unwrap();
+    let before_dwg = crate::write(&drawing, "native-plane.dwg").unwrap();
+    let list = cadcraft_render::build(&drawing, &cadcraft_doc::Space::Model, &cadcraft_render::Options { text: false, ..Default::default() });
+    assert!(list.geometry_refusals.is_empty(), "{:?}", list.geometry_refusals);
+    // The native plane projects OCS y to -.8*y and Z to +.6*Z, so Z3 shifts both endpoints by +1.8.
+    for y in [-6.7, -9.6] {
+        assert!(
+            list.verts.iter().any(|point| (*point - cadcraft_geom::Vec2::new(0.0, y)).len() < 1e-10),
+            "missing native elevated endpoint {y}: {:?}",
+            list.verts
+        );
+    }
+    assert_eq!(crate::write(&drawing, "native-plane.dxf").unwrap(), before_dxf);
+    assert_eq!(crate::write(&drawing, "native-plane.dwg").unwrap(), before_dwg);
+}
+
+#[test]
 fn canonical_dimension_picture_uses_the_plane_elevation_when_clone_z_is_not_serialized() {
     let (mut dimension, mut line) = source_records();
     dimension.retain(|tag| !matches!(tag.code, 12 | 22 | 32));
