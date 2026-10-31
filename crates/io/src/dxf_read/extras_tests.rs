@@ -58,7 +58,8 @@ fn canonical_geometry_keeps_marks_but_does_not_schedule_a_legacy_xy_shift() {
     let EntityKind::Dimension(dimension) = kind else { panic!("dimension") };
     assert_eq!(dimension.marks.jog_line, Some(Vec3::new(4.0, 5.0, 6.0)));
     assert!((dimension.marks.oblique.unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-12);
-    assert!(rx.dim_block_shifts.is_empty());
+    assert_eq!(rx.dim_block_shifts.len(), 1);
+    assert!(matches!(rx.dim_block_shifts[0].offset, dimension_blocks::BlockOffset::Canonical(value) if value == Vec3::new(1.0, 2.0, 3.0)));
 }
 
 #[test]
