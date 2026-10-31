@@ -235,3 +235,11 @@ reverse reactors to the pin of the earlier refresh. No record is lost or added.
 | ENTITIES/LWPOLYLINE | the persistent reactors of the polyline a hatch is associated with keep the order of the imported link (DPInc 50C0AB: 50C0AC, 50C0AA, where aede6b44 had 50C0AA, 50C0AC) | acadrust da83d2d / 1e5eaa6 (imported hatch reverse reactors) | dxf, dwg | 1 (rt7/DPInc.dwg) | 1 each |
 
 The measurement was made on a head that also merged raw280-zero-default (a659db03), which moved no output.
+
+# Golden refresh for the zombie flag of a used class (acadrust 1494e57)
+
+17 of the 126 outputs move, all DWG, compared record by record with the outputs of 519ffe4c (whose golden the strict check passed). No record is lost or added.
+
+| record | cause | pin | format | drawings | records |
+|---|---|---|---|---|---|
+| CLASSES/CLASS | group 280: a class that objects use keeps the zombie flag its file gave it (the flag was reset to 0 for every used class) | acadrust 1494e57 | dwg | 17 (15 `dim1` files, Even-Manuel_de_Nobrega, rt7/Planeta-Toulouse and Planeta-Toulouse-acad) | 1 to 12 per output, 146 in all |
