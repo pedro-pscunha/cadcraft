@@ -335,3 +335,43 @@ fn exception_the_current_multileader_style_in_a_dwg_and_in_an_old_dxf() {
     assert!(private_xrecords(&tags).is_empty());
     assert!(tags.windows(2).any(|w| w[0].code == 9 && w[0].str() == "$CMLEADERSTYLE" && w[1].str() == "Notes"));
 }
+
+/// The other private data stays where the DXF Reference and the DWG have no group for it: a named view's layer state and layout,
+/// a layout's saved paper-space view, an arc-length dimension's centre and a dimension's jog line. Each is written alone,
+/// and reopens.
+#[test]
+fn exception_the_rest_of_the_private_data_has_no_native_home() {
+    let mut d = Drawing::new_metric();
+    d.views.push(NamedView {
+        name: "Plan".into(),
+        center: Vec2::new(5.0, 5.0),
+        height: 10.0,
+        width: 14.0,
+        layer_state: Some("Walls only".into()),
+        twist: 0.0,
+        layout: None,
+    });
+    d.layouts[0].view = Some((Vec2::new(5.0, 4.0), 12.0));
+    d.add(&Space::Paper("Layout1".into()), Common::default(), viewport(1, &[])).unwrap();
+    let mut arc = match fixture().model.iter().find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some(dm.clone()) } else { None }) {
+        Some(dm) => dm,
+        None => unreachable!(),
+    };
+    arc.assoc.clear();
+    arc.kind = DimKind::ArcLength;
+    arc.p15 = Vec3::new(5.0, -4.0, 0.0);
+    arc.marks.jog_line = Some(Vec3::new(5.0, 3.0, 0.0));
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(arc)).unwrap();
+    for name in ["x.dxf", "x.dwg"] {
+        let (bytes, tags) = saved(&d, name, Version::R2018);
+        let mut kinds: Vec<String> = private_xdata(&tags).into_iter().filter(|k| k != "TABLESTYLE").collect();
+        kinds.sort();
+        assert_eq!(kinds, ["DIMENSION", "LAYOUT", "VIEW"], "{name}");
+        let back = cadcraft_io::read(&bytes, name).unwrap();
+        assert_eq!(back.views.first().and_then(|v| v.layer_state.as_deref()), Some("Walls only"), "{name}: view layer state");
+        assert_eq!(back.layouts[0].view, Some((Vec2::new(5.0, 4.0), 12.0)), "{name}: paper-space view");
+        let dim = back.model.iter().find_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some(dm.clone()) } else { None }).unwrap();
+        assert_eq!(dim.kind, DimKind::ArcLength, "{name}");
+        assert_eq!((dim.p15, dim.marks.jog_line), (Vec3::new(5.0, -4.0, 0.0), Some(Vec3::new(5.0, 3.0, 0.0))), "{name}");
+    }
+}
