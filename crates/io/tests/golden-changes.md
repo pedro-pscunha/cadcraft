@@ -173,3 +173,17 @@ writer of today (5d67f225), use Data, Title, Header, so a read took the headings
 | record | cause | format | drawings | records |
 |---|---|---|---|---|
 | OBJECTS/TABLESTYLE (1150) | the cell-style blocks of the sample in AutoCAD's order | dxf, dwg | examples/apartment.dxf | 1 each |
+
+# Golden refresh for the findings of the final compare (7a4b0edc)
+
+Seven fixes move 74 of the 126 outputs. The records that differ from the golden, compared one by one, are only these; no record is lost or added.
+
+| record | cause | fix commit | format | drawings | records |
+|---|---|---|---|---|---|
+| BLOCKS/MTEXT, ENTITIES/MTEXT | MTEXT text cut in 250 characters before the `^I` coding (groups 1 and 3) | cut the MTEXT text in 250 characters before the ^I coding | dxf | 11 (BLOCKS), 7 (ENTITIES) | 454, 24 |
+| BLOCKS/MTEXT | the same, seen through the DWG | the same | dwg | 1 | 1 |
+| OBJECTS/MLINESTYLE | the built-in style is STANDARD in group 2 | write the built-in multiline style as STANDARD in its object | dxf, dwg | 24 | 24 each |
+| OBJECTS/MLEADERSTYLE | group 330: the multileaders that use the style stay among its reactors | keep the multileaders that are an MLEADERSTYLE's persistent reactors | dxf, dwg | 24 | 38 each |
+| OBJECTS/IMAGEDEF | the reactors in the order the file listed them | keep the order of the reactors of an IMAGEDEF | dxf | 3 | 6 |
+| TABLES/TABLE | groups 71 and 340 of the DIMSTYLE table header | list the DIMSTYLE records the file listed | dxf | 13 | 13 |
+| CLASSES/CLASS | group 280: the file's zombie flag | pin acadrust 35bc458 (flags_from_file) | dwg | 24 | 757 |
