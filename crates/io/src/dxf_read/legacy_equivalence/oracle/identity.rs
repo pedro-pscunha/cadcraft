@@ -2,7 +2,7 @@
 use crate::activation::records::Container;
 use cadcraft_doc::Handle;
 use cadcraft_dxf::{Tag, records, sections};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::dxf_read::legacy_equivalence) enum Placement {
@@ -39,7 +39,7 @@ pub(super) enum MetadataIdentity {
 
 pub(super) struct RecordIndex {
     metadata: BTreeMap<Handle, Vec<MetadataIdentity>>,
-    definitions: BTreeSet<String>,
+    definitions: BTreeMap<String, usize>,
     records: Vec<Record>,
     positions: BTreeMap<Position, usize>,
     handles: BTreeMap<Handle, Vec<usize>>,
@@ -50,7 +50,7 @@ impl RecordIndex {
         let tags = cadcraft_dxf::parse(bytes).unwrap();
         let mut index = Self {
             metadata: BTreeMap::new(),
-            definitions: BTreeSet::new(),
+            definitions: BTreeMap::new(),
             records: Vec::new(),
             positions: BTreeMap::new(),
             handles: BTreeMap::new(),
@@ -73,7 +73,7 @@ impl RecordIndex {
             for (kind, groups) in records(&section.tags) {
                 if kind == "BLOCK" {
                     let name = groups.iter().find(|tag| tag.code == 2).map(Tag::str).unwrap_or_default();
-                    index.definitions.insert(name.trim().to_ascii_uppercase());
+                    *index.definitions.entry(name.trim().to_ascii_uppercase()).or_default() += 1;
                     placement = Placement::Container(Container::block(&name));
                     continue;
                 }
@@ -96,9 +96,14 @@ impl RecordIndex {
         index
     }
 
+    pub fn definition_count(&self, name: &str) -> usize {
+        self.definitions.get(name).copied().unwrap_or(0)
+    }
+
     pub fn named_target(&self, kind: &str, name: &str) -> bool {
         if kind == "BLOCK_RECORD" {
-            return self.definitions.contains(name) || matches!(name, "*MODEL_SPACE" | "*PAPER_SPACE");
+            let count = self.definition_count(name);
+            return count == 1 || count == 0 && matches!(name, "*MODEL_SPACE" | "*PAPER_SPACE");
         }
         if matches!((kind, name), ("LAYER", "0") | ("LTYPE", "BYLAYER" | "BYBLOCK" | "CONTINUOUS") | ("STYLE", "STANDARD")) {
             return true;

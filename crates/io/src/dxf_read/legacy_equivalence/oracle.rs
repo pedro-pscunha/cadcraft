@@ -1,8 +1,10 @@
 //! Test-only differential definition. Neither branch uses the static classification decision.
 mod identity;
+mod owners;
 mod units;
 pub(super) use identity::RecordIdentity;
-use identity::{Placement, Record, RecordIndex};
+use identity::{Record, RecordIndex};
+use owners::Ownership;
 use units::{Relations, UnitIndex};
 
 use super::{LegacyDisposition, classify_legacy_unit, family_of_kind, policy};
@@ -325,9 +327,7 @@ fn run_corpus(owner: Option<&str>) {
         let drawing = crate::dxf_read::read_with_policy(&source, crate::activation::ReaderPolicy::resolve(Some("off")).unwrap()).unwrap();
         let version = crate::save_version(&drawing);
         drop(drawing);
-        let parsed = cadcraft_dxf::parse(&source).unwrap();
-        let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), version);
-        drop(parsed);
+        let ownership = Ownership::new(&original);
         let source_units = UnitIndex::new(&original);
         for operation in Operation::ALL {
             let measured = measure_with_origin(&source, operation, from_dwg);
@@ -338,12 +338,8 @@ fn run_corpus(owner: Option<&str>) {
                 let identity = original.identity(record);
                 let kind = &record.kind;
                 let tags = &record.groups;
-                let owner = match &record.position.placement {
-                    Placement::Container(container) => classifier.derived_owner(container),
-                    Placement::UnscopedBlocks => None,
-                };
-                if let Some(owner) = owner {
-                    *derived.entry(format!("{:?}", owner.family)).or_default() += 1;
+                if let Some(owners) = ownership.get(record) {
+                    *derived.entry(owners.summary()).or_default() += 1;
                     continue;
                 }
                 let Some(classification) = classify_legacy_unit(&[(kind.clone(), tags.clone())], version) else { continue };
@@ -376,16 +372,12 @@ fn run_corpus(owner: Option<&str>) {
 fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/apartment.dxf");
     let source = std::fs::read(path).unwrap();
-    let parsed = cadcraft_dxf::parse(&source).unwrap();
-    let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), Version::R2000);
     let mut checked = 0;
     let original = RecordIndex::new(&source);
+    let ownership = Ownership::new(&original);
     for record in original.iter() {
-        let owner = match &record.position.placement {
-            Placement::Container(container) => classifier.derived_owner(container),
-            Placement::UnscopedBlocks => None,
-        };
-        if record.kind != "LINE" || owner.is_none_or(|owner| owner.family != crate::activation::Family::Table) {
+        let owners = ownership.get(record);
+        if record.kind != "LINE" || owners.is_none_or(|owners| !owners.owners.iter().any(|owner| owner.family == crate::activation::Family::Table)) {
             continue;
         }
         let isolated = isolate_line(&source, record);
