@@ -89,7 +89,11 @@ impl RecordIndex {
     pub fn corresponding(&self, source: &RecordIndex, record: &Record) -> Option<&Record> {
         match source.identity(record) {
             RecordIdentity::Handle(handle) => self.unique_handle(handle),
-            RecordIdentity::Occurrence(position) => self.positions.get(&position).and_then(|offset| self.records.get(*offset)),
+            RecordIdentity::Occurrence(position) => {
+                let target = self.positions.get(&position).and_then(|offset| self.records.get(*offset))?;
+                let reserved = target.handle.and_then(|handle| source.unique_handle(handle));
+                reserved.is_none_or(|owner| owner.position == record.position).then_some(target)
+            }
         }
     }
 }
@@ -114,6 +118,15 @@ mod tests {
                 assert_eq!(target.corresponding(&source, record).unwrap().handle, Some(handle));
             }
         }
+    }
+
+    #[test]
+    fn occurrence_fallback_cannot_claim_another_sources_unique_record() {
+        let source = index("0\nLINE\n0\nLINE\n5\nA1\n");
+        let target = index("0\nLINE\n5\nA1\n");
+        let records: Vec<_> = source.iter().collect();
+        assert!(target.corresponding(&source, records[0]).is_none());
+        assert!(target.corresponding(&source, records[1]).is_some());
     }
 
     #[test]
