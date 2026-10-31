@@ -99,8 +99,10 @@ pub struct Rx {
     table_blocks: HashMap<String, Handle>,
     /// Those blocks as the file had them, by upper-case name.
     table_graphics: HashMap<String, std::sync::Arc<cadcraft_doc::Block>>,
-    /// Upper-case block names used by INSERTs.
+    /// Upper-case block names explicitly referenced by source records or modeled payloads.
     inserted: std::collections::HashSet<String>,
+    /// Raw-unit pointer targets resolved once every source TABLES section is available.
+    raw_block_handles: HashSet<Handle>,
     /// Upper-case names of blocks that xdata outside dimensions names (1005), such as a leader's
     /// DIMLDRBLK override: an arrowhead block named there is the file's, kept as read.
     xdata_blocks: HashSet<String>,
@@ -315,6 +317,9 @@ fn read_core(
     // A file CADCraft wrote names its own next handle (#495): its table records and objects
     // are numbered above it and rebuilt on save, so following $HANDSEED would drift every save.
     let own_seed = objs.xrecord_text(crate::dxf_ext::HANDSEED_KEY).and_then(|t| Handle::parse_hex(t.trim()));
+    let raw_blocks: Vec<_> =
+        rx.raw_block_handles.iter().filter_map(|handle| rx.brs.get(&handle.hex()).map(|name| name.to_ascii_uppercase())).collect();
+    rx.inserted.extend(raw_blocks);
     rx.xdata_blocks = xdata_blocks(&secs, &rx.brs);
     let (paper_block_for, first_layout) = setup_layouts(&mut d, &mut layout_objs, &rx);
     place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
