@@ -131,7 +131,13 @@ fn the_display_settings_of_a_wipeout_survive_the_dxf_and_the_dwg() {
 #[test]
 fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
     let out = dxf(&drawing(EntityKind::Wipeout(wipeout(frame()))));
-    let (_, kind) = cadcraft_io::canonical_fill_from_groups("WIPEOUT", &record(&out, "WIPEOUT")).unwrap();
+    let (_, kind) = cadcraft_io::canonical_fill_from_groups(
+        "WIPEOUT",
+        &record(&out, "WIPEOUT"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(kind, EntityKind::Wipeout(wipeout(frame())));
 }
 
@@ -148,7 +154,7 @@ fn the_canonical_reader_refuses_a_frame_that_spans_no_plane() {
         Tag::f(22, 0.0),
         Tag::f(32, 0.0),
     ];
-    assert!(cadcraft_io::canonical_fill_from_groups("WIPEOUT", &tags).is_none());
+    assert!(cadcraft_io::canonical_fill_from_groups("WIPEOUT", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }
 
 #[test]
@@ -226,7 +232,9 @@ fn each_helix_field_alone_reaches_the_dxf_and_the_dwg() {
 #[test]
 fn the_canonical_reader_returns_a_helix_as_the_canonical_writer_wrote_it() {
     let out = dxf(&drawing(EntityKind::Helix(helix())));
-    let (_, kind) = cadcraft_io::canonical_fill_from_groups("HELIX", &record(&out, "HELIX")).unwrap();
+    let (_, kind) =
+        cadcraft_io::canonical_fill_from_groups("HELIX", &record(&out, "HELIX"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     let EntityKind::Helix(read) = kind else { panic!("not a helix") };
     let want = helix();
     assert_eq!((read.frame, read.center, read.turns, read.ccw, read.constrain), (want.frame, want.center, want.turns, want.ccw, want.constrain));
@@ -240,7 +248,7 @@ fn the_canonical_reader_returns_a_helix_as_the_canonical_writer_wrote_it() {
 #[test]
 fn the_canonical_reader_refuses_a_helix_without_an_axis() {
     let tags = vec![Tag::s(100, "AcDbHelix"), Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(30, 0.0), Tag::f(11, 1.0), Tag::f(21, 0.0), Tag::f(31, 0.0)];
-    assert!(cadcraft_io::canonical_fill_from_groups("HELIX", &tags).is_none());
+    assert!(cadcraft_io::canonical_fill_from_groups("HELIX", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }
 
 fn mline() -> MLine {
@@ -311,7 +319,9 @@ fn each_mline_field_alone_reaches_the_dxf_and_the_dwg() {
 fn the_canonical_reader_returns_an_mline_as_the_canonical_writer_wrote_it() {
     let normal = Vec3::new(0.0, 2.0, 0.0);
     let out = dxf_in(EntityKind::MLine(mline()), normal);
-    let (c, kind) = cadcraft_io::canonical_fill_from_groups("MLINE", &record(&out, "MLINE")).unwrap();
+    let (c, kind) =
+        cadcraft_io::canonical_fill_from_groups("MLINE", &record(&out, "MLINE"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     assert_eq!(c.extrusion, normal);
     let EntityKind::MLine(read) = kind else { panic!("not an MLINE") };
     let want = mline();
@@ -325,7 +335,7 @@ fn the_canonical_reader_refuses_an_mline_without_a_plane() {
     let mut tags = record(&out, "MLINE");
     tags.retain(|t| t.code != 210 && t.code != 220 && t.code != 230);
     tags.extend([Tag::f(210, 0.0), Tag::f(220, 0.0), Tag::f(230, 0.0)]);
-    assert!(cadcraft_io::canonical_fill_from_groups("MLINE", &tags).is_none());
+    assert!(cadcraft_io::canonical_fill_from_groups("MLINE", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }
 
 fn hatch() -> Hatch {
@@ -467,7 +477,13 @@ fn each_hatch_edge_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader(
         let out = dxf(&d);
         assert_ne!(groups(&out, "HATCH"), base, "{name}");
         // The canonical reader returns the edited hatch.
-        let (c, kind) = cadcraft_io::canonical_fill_from_groups("HATCH", &record(&out, "HATCH")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        let (c, kind) = cadcraft_io::canonical_fill_from_groups(
+            "HATCH",
+            &record(&out, "HATCH"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: unreadable"));
         let EntityKind::Hatch(read) = kind else { panic!("not a hatch") };
         assert_eq!(c.extrusion, n, "{name}");
         assert_eq!(read.elevation, h.elevation, "{name}");
@@ -487,7 +503,13 @@ fn each_hatch_edge_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader(
         assert_eq!(s.paths[0].flags.bits(), 1, "{name}");
         // The edges come back through the DWG as they went in: the bridge converts the ellipse angles both ways.
         let back = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&cadcraft_io::write(&d, "x.dwg").unwrap()).unwrap()).unwrap();
-        let (_, kind) = cadcraft_io::canonical_fill_from_groups("HATCH", &record(&back, "HATCH")).unwrap_or_else(|| panic!("{name}: DWG unreadable"));
+        let (_, kind) = cadcraft_io::canonical_fill_from_groups(
+            "HATCH",
+            &record(&back, "HATCH"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: DWG unreadable"));
         let EntityKind::Hatch(via_dwg) = kind else { panic!("not a hatch") };
         for (l, hl) in h.loops.iter().enumerate() {
             assert_eq!(via_dwg.loops[l].edges.len(), hl.edges.len(), "{name}: DWG loop {l}");
@@ -505,7 +527,9 @@ fn the_canonical_hatch_reader_drops_the_vertices_the_legacy_one_keeps_beside_the
     let EntityKind::Hatch(legacy) = &back.model.iter().find(|e| matches!(e.kind, EntityKind::Hatch(_))).unwrap().kind else { panic!("hatch") };
     // The legacy reader keeps the exact edges beside the vertices that approximate them (the canonical reader drops the vertices).
     assert!(legacy.loops[0].exact_edges().is_some() && !legacy.loops[0].vertices.is_empty(), "the legacy loop keeps its edges");
-    let (_, kind) = cadcraft_io::canonical_fill_from_groups("HATCH", &record(&out, "HATCH")).unwrap();
+    let (_, kind) =
+        cadcraft_io::canonical_fill_from_groups("HATCH", &record(&out, "HATCH"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     let EntityKind::Hatch(exact) = kind else { panic!("hatch") };
     assert!(matches!(exact.loops[0].edges[3], HatchEdge::Spline(_)) && matches!(exact.loops[0].edges[2], HatchEdge::Ellipse { .. }));
     assert_eq!(legacy.loops[0].edges, exact.loops[0].edges, "the same edges");
@@ -518,8 +542,8 @@ fn the_canonical_hatch_reader_refuses_an_unknown_edge_and_a_zero_normal() {
     let mut tags = record(&out, "HATCH");
     let at = tags.iter().position(|t| t.code == 72 && t.i64() == 2).unwrap();
     tags[at] = Tag::i(72, 9);
-    assert!(cadcraft_io::canonical_fill_from_groups("HATCH", &tags).is_none());
+    assert!(cadcraft_io::canonical_fill_from_groups("HATCH", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
     let mut zero = record(&out, "HATCH");
     zero.iter_mut().filter(|t| matches!(t.code, 210 | 220 | 230)).for_each(|t| *t = Tag::f(t.code, 0.0));
-    assert!(cadcraft_io::canonical_fill_from_groups("HATCH", &zero).is_none());
+    assert!(cadcraft_io::canonical_fill_from_groups("HATCH", &zero, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }

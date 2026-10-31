@@ -123,7 +123,8 @@ fn point(g: &[(i32, String)], code: i32, nth: usize) -> Vec3 {
 }
 
 fn read_back(text: &str) -> MLeader {
-    let (_, kind) = cadcraft_io::canonical_mleader_from_groups(&record(text)).expect("a canonical multileader");
+    let (_, kind) = cadcraft_io::canonical_mleader_from_groups(&record(text), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+        .expect("a canonical multileader");
     let EntityKind::MLeader(m) = kind else { panic!("not a multileader") };
     m
 }
@@ -347,5 +348,5 @@ fn the_canonical_reader_refuses_a_text_without_a_plane_or_a_direction() {
     tags[n] = Tag::f(21, 0.0);
     let n = tags.iter().position(|t| t.code == 11).unwrap();
     tags[n] = Tag::f(11, 0.0);
-    assert!(cadcraft_io::canonical_mleader_from_groups(&tags).is_none());
+    assert!(cadcraft_io::canonical_mleader_from_groups(&tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }

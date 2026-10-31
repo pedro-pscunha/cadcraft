@@ -36,6 +36,12 @@ fn host() -> Drawing {
     let mut tree = Block::new("SITE|Tree");
     tree.entities.push(line("0"));
     d.blocks.insert("SITE|Tree".into(), Arc::new(tree));
+    Arc::make_mut(&mut d.foreign)
+        .records
+        .entry(("BLOCK".into(), "SITE|TREE".into()))
+        .or_default()
+        .subclass
+        .push(RawTag { code: 70, value: "16".into() });
     d.layers.push(Layer { name: "SITE|Walls".into(), color: Color::Index(1), ..Layer::default() });
     d.linetypes.push(Linetype { name: "SITE|Dashed".into(), ..Linetype::continuous() });
     d.text_styles.push(TextStyle { name: "SITE|Notes".into(), ..TextStyle::default() });
@@ -56,6 +62,44 @@ fn host() -> Drawing {
         d.add(&Space::Model, Common::default(), EntityKind::Insert(ins)).expect("add");
     }
     d
+}
+
+fn source_block(name: &str, flags: i64) -> Drawing {
+    let text = format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n70\n1\n0\nBLOCK_RECORD\n5\n30\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\n{name}\n70\n0\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n31\n330\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\n{name}\n70\n{flags}\n10\n0\n20\n0\n30\n0\n3\n{name}\n1\n\n0\nLINE\n5\n32\n330\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n0\nENDBLK\n5\n33\n330\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nEOF\n"
+    );
+    read_dxf(text.as_bytes()).unwrap()
+}
+
+#[test]
+fn nondependent_block_names_with_a_vertical_bar_keep_their_body_in_dxf_and_dwg() {
+    for flags in [0, 32] {
+        let source = source_block("A|B", flags);
+        assert_eq!(source.block("A|B").unwrap().entities.len(), 1);
+        for format in ["saved.dxf", "saved.dwg"] {
+            let bytes = cadcraft_io::write(&source, format).unwrap();
+            let restored = cadcraft_io::read(&bytes, format).unwrap();
+            let block = restored.block("A|B").unwrap_or_else(|| panic!("flags {flags} {format}: non-dependent block was purged"));
+            let entity = block.entities.iter().next().expect("block body retained");
+            let EntityKind::Line(line) = &entity.kind else {
+                panic!("block line changed type");
+            };
+            assert_eq!(line.a, Vec3::new(1.0, 2.0, 0.0));
+            assert_eq!(line.b, Vec3::new(3.0, 4.0, 0.0));
+        }
+    }
+}
+
+#[test]
+fn dependency_flags_without_a_qualified_name_still_mark_external_blocks() {
+    for flags in [16, 16 | 32] {
+        let source = source_block("External", flags);
+        for format in ["saved.dxf", "saved.dwg"] {
+            let bytes = cadcraft_io::write(&source, format).unwrap();
+            let restored = cadcraft_io::read(&bytes, format).unwrap();
+            assert!(restored.block("External").is_none(), "flags {flags} {format}: external block was saved as a host block");
+        }
+    }
 }
 
 #[test]

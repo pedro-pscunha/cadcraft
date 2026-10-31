@@ -26,6 +26,8 @@ fn refusing_new_canonical_extents_omits_the_pair_and_notes_the_handle_once() {
     let mut drawing = Drawing::new_metric();
     let mut entity = Entity::new(Handle(0x2A0), EntityKind::Circle(Circle { center: Vec3::new(1.0, 2.0, 3.0), radius: 4.0 }));
     entity.geometry_revision = GeometryRevision::CanonicalV2;
+    // A canonical circle with a valid plane now grows the extents; a zero extrusion has no plane, so its bounds refuse.
+    entity.common.extrusion = Vec3::ZERO;
     drawing.model.push(entity);
     let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, "canonical.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
     let reopened = cadcraft_io::read(&bytes, "canonical.dxf").unwrap();

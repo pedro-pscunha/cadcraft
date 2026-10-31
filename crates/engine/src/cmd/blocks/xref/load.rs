@@ -435,6 +435,10 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
         for e in d.duplicate_entities(vec![entities], cadcraft_doc::DuplicationSource::OtherDrawing).map_err(|error| error.to_string())? {
             nb.entities.push(e);
         }
+        // Imported definitions belong to the loaded xref, independently of their qualified names.
+        let extra = Arc::make_mut(&mut d.foreign).records.entry(("BLOCK".into(), nb.name.to_ascii_uppercase())).or_default();
+        extra.subclass.retain(|tag| tag.code != 70);
+        extra.subclass.push(cadcraft_doc::RawTag { code: 70, value: (16 | 32 | i64::from(nb.anonymous)).to_string() });
         d.blocks.insert(nb.name.clone(), Arc::new(nb));
     }
     let mut store = EntityStore::new();

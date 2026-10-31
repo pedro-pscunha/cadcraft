@@ -13,9 +13,11 @@ use cadcraft_doc::{
 use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
-use crate::activation::{ReaderPolicy, WIRED_FAMILIES};
+use crate::activation::{Activation, NodeId, Outcome, ReaderPolicy, WIRED_FAMILIES};
 use crate::{IoError, Result};
 
+#[cfg(test)]
+mod canonical_context_tests;
 mod common;
 mod curve_canonical;
 pub(crate) mod dimassoc;
@@ -28,6 +30,8 @@ mod fill_canonical;
 mod hatch;
 mod mleader_canonical;
 mod objects;
+#[cfg(test)]
+mod rx_activation_tests;
 mod tables;
 mod text;
 mod text_canonical;
@@ -60,9 +64,13 @@ pub(crate) fn page_setup_from_groups(tags: &[Tag]) -> PageSetup {
     objects::page_setup(&common::T(tags))
 }
 
-/// Handle maps and references gathered while reading.
+/// Handle maps and references of one document read. Canonical helpers borrow the reader's context.
 #[derive(Default)]
-struct Rx {
+pub struct Rx {
+    /// The immutable policy of this load; its mask is not process-global.
+    reader_policy: ReaderPolicy,
+    /// Prepared component outcomes, indexed by the record adapter's graph NodeId.
+    activation: Option<Activation>,
     /// The DXF was made from a DWG file by the DWG reader.
     from_dwg: bool,
     /// STYLE record handle (upper case) → text style name.
@@ -100,6 +108,21 @@ struct Rx {
     dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
     /// Upper-case names of the layout blocks that hold a paper-space viewport CADCraft wrote (see `dxf_write::paper_view`).
     marked_sheets: HashSet<String>,
+}
+
+impl Rx {
+    pub fn reader_policy(&self) -> ReaderPolicy {
+        self.reader_policy
+    }
+
+    /// The prepared revision of a graph node. An unprepared context or an unknown node has no decision.
+    pub fn revision_for(&self, node: NodeId) -> Option<cadcraft_doc::GeometryRevision> {
+        self.activation.as_ref()?.outcome(node).map(|outcome| match outcome {
+            Outcome::Legacy => cadcraft_doc::GeometryRevision::LegacyProjectedV1,
+            Outcome::Canonical => cadcraft_doc::GeometryRevision::CanonicalV2,
+            Outcome::Raw => cadcraft_doc::GeometryRevision::RawSource,
+        })
+    }
 }
 
 /// Remember the layouts that have viewports but no paper-space viewport (id 1) in the file: AutoCAD files have some (31 viewports
@@ -180,7 +203,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, from_dwg: bool, poli
     d.layouts.clear();
     // A file without $INSUNITS declares no units (#1209); only new drawings take the template's.
     d.header.set_i64("INSUNITS", 0);
-    let mut rx = Rx { pstyles: plot_style_names(&secs), from_dwg, ..Rx::default() };
+    let mut rx = Rx { reader_policy: policy, pstyles: plot_style_names(&secs), from_dwg, ..Rx::default() };
     d.plot_style_names = rx.pstyles.values().cloned().collect();
     d.plot_style_names.sort();
     let mut blocks: Vec<BlockDef> = Vec::new();

@@ -352,7 +352,9 @@ fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
     t.backward = true;
     t.upside_down = true;
     let out = dxf(&drawing(EntityKind::Text(t.clone()), normal, -0.5));
-    let (c, kind) = cadcraft_io::canonical_text_from_groups("TEXT", &record(&out, "TEXT")).unwrap();
+    let (c, kind) =
+        cadcraft_io::canonical_text_from_groups("TEXT", &record(&out, "TEXT"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     assert_eq!((c.extrusion, c.thickness), (normal, -0.5));
     let EntityKind::Text(mut read) = kind else { panic!("not TEXT") };
     // Degrees in the file: the angles come back to the last bit of rounding.
@@ -362,7 +364,9 @@ fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
 
     let m = mtext();
     let out = dxf(&drawing(EntityKind::MText(m.clone()), normal, 0.0));
-    let (c, kind) = cadcraft_io::canonical_text_from_groups("MTEXT", &record(&out, "MTEXT")).unwrap();
+    let (c, kind) =
+        cadcraft_io::canonical_text_from_groups("MTEXT", &record(&out, "MTEXT"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     assert_eq!(c.extrusion, normal);
     let EntityKind::MText(read) = kind else { panic!("not MTEXT") };
     assert_eq!(read.insert, m.insert);
@@ -371,7 +375,13 @@ fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
 
     let a = cadcraft_doc::Attrib::new("TAG", text());
     let out = dxf(&drawing(EntityKind::AttDef(a.clone()), Vec3::new(0.0, -1.0, 0.0), 0.0));
-    let (c, kind) = cadcraft_io::canonical_text_from_groups("ATTDEF", &record(&out, "ATTDEF")).unwrap();
+    let (c, kind) = cadcraft_io::canonical_text_from_groups(
+        "ATTDEF",
+        &record(&out, "ATTDEF"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(c.extrusion, Vec3::new(0.0, -1.0, 0.0));
     let EntityKind::AttDef(read) = kind else { panic!("not ATTDEF") };
     let mut text = read.text;
@@ -392,7 +402,8 @@ fn the_canonical_reader_keeps_an_attribs_own_plane_and_its_embedded_planes() {
         type_72: None,
     });
     let out = dxf(&insert_with(a.clone(), Vec3::new(1.0, 0.0, 0.0)));
-    let read = cadcraft_io::canonical_attrib_from_groups(&record(&out, "ATTRIB"), None).unwrap();
+    let read = cadcraft_io::canonical_attrib_from_groups(&record(&out, "ATTRIB"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+        .unwrap();
     assert_eq!(read.geometry_revision, GeometryRevision::CanonicalV2);
     assert_eq!(read.plane, a.plane);
     let mut text = read.text.clone();
@@ -408,7 +419,7 @@ fn the_canonical_reader_keeps_an_attribs_own_plane_and_its_embedded_planes() {
 #[test]
 fn the_canonical_reader_refuses_a_normal_without_a_direction() {
     let tags = vec![Tag::s(1, "A"), Tag::f(40, 1.0), Tag::f(210, 0.0), Tag::f(220, 0.0), Tag::f(230, 0.0)];
-    assert!(cadcraft_io::canonical_text_from_groups("TEXT", &tags).is_none());
+    assert!(cadcraft_io::canonical_text_from_groups("TEXT", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }
 
 /// The block `TAG` with a definition of thickness `def` and, in an insert, an attribute of thickness `inst` (legacy text).

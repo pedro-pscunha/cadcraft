@@ -9,11 +9,12 @@
 use cadcraft_doc::{Common, EntityKind};
 use cadcraft_dxf::Tag;
 
-use super::common::{T, common};
+use super::common::{T, canonical_common, common};
+use super::{Drawing, Rx};
 
 /// A MULTILEADER from the groups of a DXF record (without its `0` group), read canonically. `None` for a text or a block
 /// content whose normal has no direction, or a text direction with no length.
-pub fn canonical_mleader_from_groups(tags: &[Tag]) -> Option<(Common, EntityKind)> {
+pub fn canonical_mleader_from_groups(tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<(Common, EntityKind)> {
     let leader = crate::dxf_mleader::read_canonical(tags)?;
-    Some((common(&T(tags)), EntityKind::MLeader(leader)))
+    Some((canonical_common(common(&T(tags)), tags, drawing, rx)?, EntityKind::MLeader(leader)))
 }
