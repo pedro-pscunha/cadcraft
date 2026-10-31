@@ -11,6 +11,8 @@ struct LinearDimState {
     measurement: f64,
     text_width: f64,
     text_height: f64,
+    /// The height of the ink of the text: the offset of text above the line counts it.
+    ink_height: f64,
     has_text: bool,
     tick_like: bool,
     arrow_width: f64,
@@ -68,10 +70,16 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
     let u = if dimension_axis == Vec2::ZERO || !dimension_axis.is_finite() { direction } else { dimension_axis };
     let n = u.perp();
     let (text_width, text_height) = config.measure(&g.mtext);
+    let ink_height = config.ink_height(&g.mtext);
     let has_text = text_width > 0.0;
     let tick_like = config.ticks || (config.first_arrow.is_tick() && config.second_arrow.is_tick());
     let arrow_width = if tick_like { 0.0 } else { config.arrow_size };
-    let arrows_fit = tick_like || measurement > 2.0 * config.arrow_size + 1e-9;
+    // Text above or below the line (DIMTAD) does not share the line with the arrowheads: AutoCAD keeps it between the extension lines
+    // when the line is longer than the text and a gap on each side, and puts the arrowheads inside when the line is at least two
+    // arrowheads and two gaps long (measured in LT 2025, ISO-25, `/tmp/cad/elev-oracle10`).
+    let beside = st.text_above != 0;
+    let arrows_fit = tick_like
+        || if beside { measurement >= 2.0 * config.arrow_size + 2.0 * config.gap - 1e-9 } else { measurement > 2.0 * config.arrow_size + 1e-9 };
     let along_angle = readable(u.angle());
     let extent = |angle: f64| {
         let axis = Vec2::from_angle(angle);
@@ -81,8 +89,8 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
     let tvp = if st.text_above == 0 && st.text_vertical_pos.is_finite() { st.text_vertical_pos } else { 0.0 };
     let centred = st.text_above == 0 && tvp.abs() < 0.7;
     let text_need = if centred { 2.0 * (extent(inside_angle) + config.gap) } else { 2.0 * extent(inside_angle) };
-    let fits = !has_text || measurement >= text_need + 2.0 * arrow_width;
-    let text_fits = !has_text || measurement >= text_need;
+    let fits = !has_text || if beside { measurement > text_need + 2.0 * config.gap + 1e-9 } else { measurement >= text_need + 2.0 * arrow_width };
+    let text_fits = !has_text || if beside { fits } else { measurement >= text_need };
     let just = st.text_just.min(4);
     let (text_inside, arrows_inside) = if d.user_text_pos || !has_text || just >= 3 {
         (true, arrows_fit)
@@ -110,6 +118,7 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
         measurement,
         text_width,
         text_height,
+        ink_height,
         has_text,
         tick_like,
         arrow_width,
@@ -140,7 +149,9 @@ fn position_linear_text(config: &DimConfig<'_>, state: &mut LinearDimState) {
     state.angle = if state.text_outside { if st.text_outside_horizontal { 0.0 } else { along_angle } } else { inside_angle };
     state.half_extent = extent(state.angle);
     state.along_center = if state.text_outside {
-        state.f2 + state.u * (2.0 * config.arrow_size.max(config.tick_size) + config.gap + state.half_extent)
+        // One arrowhead past the extension line when the arrowheads are inside, two when they are outside too (beside the line).
+        let arrows = if state.centred || !state.arrows_inside { 2.0 } else { 1.0 } * config.arrow_size.max(config.tick_size);
+        state.f2 + state.u * (arrows + config.gap + state.half_extent)
     } else {
         match state.just {
             1 => state.f1 + state.u * (state.arrow_width + config.gap + state.half_extent + config.arrow_size),
@@ -151,8 +162,7 @@ fn position_linear_text(config: &DimConfig<'_>, state: &mut LinearDimState) {
     state.side_out = if (config.dimension.defpt.xy() - state.p1).dot(state.n) >= 0.0 { state.n } else { -state.n };
     state.text_axis = Vec2::from_angle(state.angle);
     let off_along = |axis: Vec2| {
-        let glyph_extent = state.text_width * state.text_axis.dot(axis).abs() / 2.0
-            + state.text_height * state.text_axis.perp().dot(axis).abs() * if st.text_above == 1 { 0.6 } else { 0.5 };
+        let glyph_extent = state.text_width * state.text_axis.dot(axis).abs() / 2.0 + state.ink_height * state.text_axis.perp().dot(axis).abs() * 0.5;
         config.gap + glyph_extent
     };
     let above = if state.angle.abs() < 1e-12 && state.n.y.abs() > 1e-9 {

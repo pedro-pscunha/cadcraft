@@ -53,6 +53,59 @@ pub(super) fn draw_jogged_radius(config: &DimConfig<'_>, g: &mut DimGeometry, te
     *text_mid_out = text_mid;
 }
 
+/// The DIMCEN mark of a circle: a cross, with centre lines out past the circle for a negative DIMCEN.
+fn center_mark(g: &mut DimGeometry, st: &super::DimStyle, k: f64, center: Vec2, r: f64) {
+    if st.center_mark != 0.0 && st.center_mark.is_finite() {
+        let c = st.center_mark.abs() * k;
+        g.ext(vec![center - Vec2::X * c, center + Vec2::X * c]);
+        g.ext(vec![center - Vec2::Y * c, center + Vec2::Y * c]);
+        if st.center_mark < 0.0 && r > 2.0 * c {
+            // Centre lines out past the circle.
+            for dv in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
+                g.ext(vec![center + dv * (2.0 * c), center + dv * (r + c)]);
+            }
+        }
+    }
+}
+
+/// A radius or diameter dimension whose text is above the line (DIMTAD 1, 2, 4), unmoved, as AutoCAD lays it out (LT 2025, ISO-25, 30
+/// radii from 1 to 15, `/tmp/cad/elev-oracle11`): the arrowhead is outside the circle pointing in, a line runs across the circle (DIMTOFL),
+/// and a leader starts at the arrowhead base and runs out for an arrowhead, a gap, the text and a gap, with the text above the leader
+/// one arrowhead and one gap from its base. A diameter has a second arrowhead outside at the other end, with a stub of an arrowhead.
+fn draw_radial_beside(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
+    let d = config.dimension;
+    let st = config.style;
+    let (asz, gap) = (config.arrow_size, config.gap);
+    let a = d.defpt.xy();
+    let b = d.p15.xy();
+    let radius = matches!(d.kind, DimKind::Radius);
+    let (center, r) = if radius { (a, a.dist(b)) } else { (a.mid(b), a.dist(b) / 2.0) };
+    let meas = if radius { r } else { 2.0 * r };
+    g.mtext = linear_text(meas, d, st, if radius { "R" } else { "%%c" });
+    g.measurement = meas;
+    let (tw, _) = config.measure(&g.mtext);
+    let tht = config.ink_height(&g.mtext);
+    let u = (b - center).normalized();
+    let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
+    let tip = center + u * r;
+    let base = tip + u * asz;
+    config.end(g, config.second_arrow, tip, -u);
+    if st.force_line_inside {
+        g.dim(vec![if radius { center } else { center - u * r }, tip]);
+    }
+    if !radius {
+        let far = center - u * r;
+        config.end(g, config.first_arrow, far, u);
+        g.dim(vec![far - u * asz, far - u * (2.0 * asz)]);
+    }
+    let along = if tw > 0.0 { tw } else { 0.0 };
+    g.dim(vec![base, base + u * (asz + 2.0 * gap + along)]);
+    let angle = readable(u.angle());
+    let axis = Vec2::from_angle(angle);
+    *text_angle_out = angle;
+    *text_mid_out = base + u * (asz + gap + along / 2.0) + axis.perp() * (gap + tht * 0.5);
+}
+
 pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
     let d = config.dimension;
     let st = config.style;
@@ -67,6 +120,9 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
     let text_angle: f64;
     let mut text_mid = *text_mid_out;
 
+    if st.text_above != 0 && !st.text_outside_horizontal && !d.user_text_pos {
+        return draw_radial_beside(config, g, text_angle_out, text_mid_out);
+    }
     let a = d.defpt.xy();
     let b = d.p15.xy();
     let radius = matches!(d.kind, DimKind::Radius);
@@ -135,16 +191,8 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
     // The DIMCEN mark is drawn only when no dimension line runs inside the circle (text
     // outside without DIMTOFL), never with a line through the centre.
     let line_outside = !st.force_line_inside && tpos.dist(center) >= r;
-    if line_outside && st.center_mark != 0.0 && st.center_mark.is_finite() {
-        let c = st.center_mark.abs() * k;
-        g.ext(vec![center - Vec2::X * c, center + Vec2::X * c]);
-        g.ext(vec![center - Vec2::Y * c, center + Vec2::Y * c]);
-        if st.center_mark < 0.0 && r > 2.0 * c {
-            // Centre lines out past the circle.
-            for dv in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
-                g.ext(vec![center + dv * (2.0 * c), center + dv * (r + c)]);
-            }
-        }
+    if line_outside {
+        center_mark(g, st, k, center, r);
     }
     *text_angle_out = text_angle;
     *text_mid_out = text_mid;

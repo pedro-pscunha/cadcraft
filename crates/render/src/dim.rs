@@ -273,6 +273,17 @@ impl<'a> DimConfig<'a> {
         (layout.bounds.width(), layout.bounds.height())
     }
 
+    /// The height of the ink of `text` (its glyphs from the lowest descender to the highest ascender), which AutoCAD sets a gap above the
+    /// dimension line when the text is above it. The block height of `measure` is the same for every string.
+    fn ink_height(&self, text: &str) -> f64 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        let layout = cadcraft_fonts::layout_mtext_with(text, &self.text_params(Vec2::ZERO, 0.0));
+        let (low, high) = layout.strokes.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), p| (low.min(p.y), high.max(p.y)));
+        if high > low { high - low } else { layout.bounds.height() }
+    }
+
     fn end(&self, geometry: &mut DimGeometry, kind: Arrowhead, tip: Vec2, direction: Vec2) -> f64 {
         if self.ticks {
             geometry.dim(tick(tip, direction, self.tick_size));

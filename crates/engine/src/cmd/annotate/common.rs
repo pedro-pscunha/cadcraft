@@ -182,9 +182,13 @@ pub(super) fn circle_of(s: &Session, h: Handle) -> Option<(Vec2, f64)> {
 }
 
 /// The dimension line location of a radius/diameter dimension puts the text there, inside or
-/// outside the circle, as a user-positioned text (DXF flag 70 bit 128), like AutoCAD.
-pub(super) fn text_at(mut k: EntityKind, at: Vec2) -> EntityKind {
-    if let EntityKind::Dimension(d) = &mut k {
+/// outside the circle, as a user-positioned text (DXF flag 70 bit 128), like AutoCAD. A location outside the circle only gives the
+/// direction when the style puts the text above the line (DIMTAD 1, 2, 4): AutoCAD lays that text out itself (measured in LT 2025, ISO-25).
+pub(super) fn text_at(s: &Session, mut k: EntityKind, at: Vec2, center: Vec2, radius: f64) -> EntityKind {
+    let beside = s.doc().ok().and_then(|d| d.dim_style(&style(s)).map(|st| st.text_above != 0)).unwrap_or(false);
+    if let EntityKind::Dimension(d) = &mut k
+        && !(beside && at.dist(center) > radius)
+    {
         d.text_mid = v3(at);
         d.user_text_pos = true;
     }
