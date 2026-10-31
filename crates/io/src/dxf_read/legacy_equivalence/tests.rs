@@ -53,6 +53,19 @@ fn tested_zero_z_primitives_are_plain() {
     }
 }
 
+pub(super) fn polyline_hatch(closed: i64) -> String {
+    format!(
+        "0\nHATCH\n5\n100\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\nSOLID\n70\n1\n71\n0\n91\n1\n92\n2\n72\n0\n73\n{closed}\n93\n3\n10\n0\n20\n0\n10\n4\n20\n0\n10\n0\n20\n3\n97\n0\n75\n0\n76\n1\n98\n0\n"
+    )
+}
+
+#[test]
+fn open_polyline_hatch_boundaries_stay_needs() {
+    assert_eq!(disposition(&polyline_hatch(0)), LegacyDisposition::Needs);
+    assert_eq!(disposition(&polyline_hatch(1)), LegacyDisposition::Plain);
+    assert_eq!(disposition(&polyline_hatch(1).replace("73\n1\n", "")), LegacyDisposition::Needs);
+}
+
 #[test]
 fn positive_z_hatch_with_an_ellipse_edge_is_plain_after_the_legacy_fix() {
     assert_eq!(disposition(ELLIPSE_HATCH), LegacyDisposition::Plain);

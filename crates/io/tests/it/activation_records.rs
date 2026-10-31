@@ -160,6 +160,18 @@ fn mleader_aliases_keep_both_content_reference_forms_and_ignore_the_linetype_han
 }
 
 #[test]
+fn second_tables_section_block_handles_keep_multileader_reference_edges() {
+    let leader = rec("MULTILEADER", "5\nA1\n8\n0\n344\nBR1\n");
+    let mut secs = dxf("0\nBLOCK_RECORD\n5\nBR0\n2\nOTHER\n", &[block("MLB", &[line("B1")])], &[leader]);
+    let later = dxf("0\nBLOCK_RECORD\n5\nBR1\n2\nMLB\n", &[], &[]);
+    secs.extend(later.into_iter().filter(|section| section.name == "TABLES"));
+    let graph = RecordGraph::build(&secs, &plain).unwrap();
+    let user = graph.node(&key(Container::Entities, 0)).unwrap();
+    let definition = graph.node(&NodeKey::definition("MLB")).unwrap();
+    assert!(edges_of(&graph).contains(&Edge::Refers { user, definition }));
+}
+
+#[test]
 fn a_multileader_refers_to_its_block_content_by_either_handle_group() {
     // The block record handle of the content: group 344 of the entity, or group 341 of a context that has block contents (296 = 1).
     let outer = rec("MULTILEADER", "5\nA1\n8\n0\n300\nCONTEXT_DATA{\n290\n0\n296\n1\n341\nBR1\n301\n}\n344\nBR1\n");
@@ -237,6 +249,30 @@ fn the_family_of_every_entity_type_with_a_reader_is_named() {
     assert_eq!(family_of_kind("ACAD_TABLE"), Some(Family::Table));
     assert_eq!(family_of_kind("MULTILEADER"), Some(Family::MLeader));
     assert_eq!(family_of_kind("3DSOLID"), None);
+}
+
+#[test]
+fn second_blocks_section_records_continue_ordinals_and_reach_the_graph() {
+    let mut secs = dxf("", &[block("Door", &[line("B1")])], &[]);
+    let later = dxf(
+        "",
+        &[block("DOOR", &[rec("ACME_PROXY", "5\nB2\n"), rec("CIRCLE", "5\nB3\n10\n0\n20\n0\n30\n5\n40\n1\n")]), block("Late", &[line("C1")])],
+        &[],
+    );
+    secs.extend(later.into_iter().filter(|section| section.name == "BLOCKS"));
+    let need = |view: &cadcraft_io::activation::records::RecordView| {
+        if view.family == Family::Circle { Need::Needs { readable: true } } else { Need::Plain }
+    };
+    let graph = RecordGraph::build(&secs, &need).unwrap();
+    assert!(graph.node(&key(Container::block("DOOR"), 0)).is_some());
+    assert!(graph.node(&key(Container::block("DOOR"), 1)).is_none(), "the proxy keeps ordinal 1");
+    let needing = graph.node(&key(Container::block("DOOR"), 2)).expect("the second BLOCKS section must have a graph node");
+    assert_eq!(graph.graph().nodes()[needing.0 as usize].need, Need::Needs { readable: true });
+    assert_eq!(graph.handle(needing), Some("B3"));
+    let definition = graph.node(&NodeKey::definition("DOOR")).unwrap();
+    assert!(edges_of(&graph).contains(&Edge::Contains { definition, member: needing }));
+    assert!(graph.node(&NodeKey::definition("LATE")).is_some());
+    assert!(graph.node(&key(Container::block("LATE"), 0)).is_some());
 }
 
 #[test]

@@ -189,7 +189,7 @@ pub(super) fn policy(family: Family, source_version: Version) -> Policy {
         ),
         Tolerance => (1, &["AcDbFcf"], &[1, 3, 10, 20, 30, 11, 21, 31, 210, 220, 230], "TOLERANCE stores a WCS point, direction and plane."),
         Hatch => (
-            2,
+            3,
             &["AcDbHatch"],
             &[
                 2, 10, 20, 30, 11, 21, 40, 41, 42, 43, 44, 45, 46, 47, 49, 50, 51, 52, 53, 63, 70, 71, 72, 73, 74, 75, 76, 77, 78, 91, 92, 93, 94,
