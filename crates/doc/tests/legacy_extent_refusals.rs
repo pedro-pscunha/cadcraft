@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use cadcraft_doc::{Block, DocError, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, Line, Space, legacy_entity_bounds};
+use cadcraft_doc::{Block, DocError, Drawing, Entity, EntityKind, GeometryRevision, Handle, Insert, Line, legacy_entity_bounds};
 use cadcraft_geom::Vec3;
 
 fn canonical_line() -> Entity {
@@ -11,11 +11,9 @@ fn canonical_line() -> Entity {
 
 #[test]
 fn legacy_queries_refuse_a_canonical_root_with_its_handle() {
-    let mut drawing = Drawing::new_metric();
+    let drawing = Drawing::new_metric();
     let entity = canonical_line();
     assert!(matches!(legacy_entity_bounds(&drawing, &entity, 0), Err(DocError::CanonicalExtent(Handle(0x200)))));
-    drawing.model.push(entity);
-    assert!(matches!(drawing.legacy_extents(&Space::Model), Err(DocError::CanonicalExtent(Handle(0x200)))));
 }
 
 #[test]
@@ -39,6 +37,4 @@ fn a_legacy_insert_cannot_hide_a_canonical_descendant() {
         }),
     );
     assert!(matches!(legacy_entity_bounds(&drawing, &entity, 0), Err(DocError::CanonicalExtent(Handle(0x200)))));
-    drawing.model.push(entity);
-    assert!(matches!(drawing.legacy_extents(&Space::Model), Err(DocError::CanonicalExtent(Handle(0x200)))));
 }

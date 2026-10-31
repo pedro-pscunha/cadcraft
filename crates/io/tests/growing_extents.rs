@@ -71,15 +71,77 @@ fn an_added_entity_without_a_snapshot_grows_saved_extents() {
 }
 
 #[test]
-fn a_refused_added_canonical_entity_keeps_legacy_growth_and_adds_one_note() {
+fn canonical_world_bounds_grow_the_saved_pair_alongside_legacy_edits() {
     let mut drawing = source();
     move_line(&mut drawing, Vec3::new(1000.0, 1000.0, 0.0));
     let mut canonical = Entity::new(Handle(0x2A0), EntityKind::Circle(Circle { center: Vec3::new(1e6, 1e6, 0.0), radius: 4.0 }));
     canonical.geometry_revision = GeometryRevision::CanonicalV2;
+    canonical.common.extrusion = Vec3::new(0.0, 0.0, -1.0);
     drawing.model.push(canonical);
+    for name in ["canonical-growth.dxf", "canonical-growth.dwg"] {
+        let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, name, &cadcraft_io::SaveOptions::default()).unwrap();
+        let reopened = cadcraft_io::read(&bytes, name).unwrap();
+        // Negative OCS X places the circle at WCS (-1e6,1e6), not (+1e6,1e6).
+        assert_eq!(reopened.header.point("EXTMIN"), Some(Vec3::new(-1_000_004.0, -30.0, -40.0)), "{name}");
+        assert_eq!(reopened.header.point("EXTMAX"), Some(Vec3::new(1010.0, 1_000_004.0, 50.0)), "{name}");
+        assert!(notes.is_empty(), "{name}: {notes:?}");
+    }
+}
+
+#[test]
+fn a_headerless_canonical_drawing_gets_world_extents() {
+    let mut drawing = Drawing::new_metric();
+    assert!(drawing.header.point("EXTMIN").is_none() && drawing.header.point("EXTMAX").is_none());
+    let mut canonical = Entity::new(Handle(0x2A0), EntityKind::Circle(Circle { center: Vec3::new(100.0, 20.0, 3.0), radius: 2.0 }));
+    canonical.geometry_revision = GeometryRevision::CanonicalV2;
+    canonical.common.extrusion = Vec3::new(0.0, 0.0, -1.0);
+    drawing.model.push(canonical);
+    for name in ["canonical-fresh.dxf", "canonical-fresh.dwg"] {
+        let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, name, &cadcraft_io::SaveOptions::default()).unwrap();
+        let reopened = cadcraft_io::read(&bytes, name).unwrap();
+        assert_eq!(reopened.header.point("EXTMIN"), Some(Vec3::new(-102.0, 18.0, 0.0)), "{name}");
+        assert_eq!(reopened.header.point("EXTMAX"), Some(Vec3::new(-98.0, 22.0, 0.0)), "{name}");
+        assert!(notes.is_empty(), "{name}: {notes:?}");
+    }
+}
+
+#[test]
+fn unsupported_canonical_bounds_keep_available_growth_and_name_every_refusal() {
+    let mut drawing = source();
+    move_line(&mut drawing, Vec3::new(1000.0, 1000.0, 0.0));
+    for handle in [0x2A0, 0x2A1] {
+        let mut canonical = Entity::new(Handle(handle), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 4.0 }));
+        canonical.geometry_revision = GeometryRevision::CanonicalV2;
+        canonical.common.extrusion = Vec3::ZERO;
+        drawing.model.push(canonical);
+    }
     let (bytes, notes) = cadcraft_io::write_with_noted(&drawing, "refused.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
     let reopened = cadcraft_io::read(&bytes, "refused.dxf").unwrap();
     assert_eq!(reopened.header.point("EXTMAX"), Some(Vec3::new(1010.0, 1000.0, 50.0)));
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].contains("2A0"), "{notes:?}");
+    assert!(notes[0].contains("2A0") && notes[0].contains("2A1"), "{notes:?}");
+}
+
+#[test]
+fn legacy_save_bytes_match_the_frozen_writer() {
+    // Full ASCII DXF fingerprints captured at e0f63fd2 before the extent dispatch changes.
+    for (case, expected, length) in [
+        ("unchanged", 0x08ff_ffaf_b945_8399_u64, 18051),
+        ("inward", 0x24dd_ebb2_0b3a_666d, 18051),
+        ("far", 0x20b3_61b2_c71c_6426, 18065),
+        ("added", 0xd30d_dd4c_e88f_03c7, 18198),
+    ] {
+        let mut drawing = source();
+        match case {
+            "inward" => move_line(&mut drawing, Vec3::new(5.0, 5.0, 0.0)),
+            "far" => move_line(&mut drawing, Vec3::new(1000.0, 1000.0, 0.0)),
+            "added" => drawing
+                .model
+                .push(Entity::new(Handle(0x300), EntityKind::Line(Line { a: Vec3::new(1200.0, 1300.0, 0.0), b: Vec3::new(1210.0, 1310.0, 0.0) }))),
+            _ => {}
+        }
+        let bytes = cadcraft_io::write(&drawing, "legacy.dxf").unwrap();
+        let fingerprint = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3));
+        assert_eq!((fingerprint, bytes.len()), (expected, length), "{case}");
+    }
 }
