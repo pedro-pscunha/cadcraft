@@ -37,6 +37,7 @@ mod dimension_and_face_flags;
 mod dimension_association_xdata;
 mod dimension_group_order;
 mod dimstyle_fidelity;
+mod dimstyle_reactors;
 mod dimstyle_vars_roundtrip;
 mod dimtfill_roundtrip;
 mod drafting_spacing;
