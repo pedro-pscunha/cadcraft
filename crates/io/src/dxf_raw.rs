@@ -560,6 +560,32 @@ fn keep_classes(d: &mut Drawing, classes: &Recs) {
     }
 }
 
+/// Remember the DIMSTYLE records that the header of the DIMSTYLE table listed.
+fn keep_dim_style_listing(d: &mut Drawing, tables: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    if let Some((_, _, t)) = tables.iter().find(|(kind, _, t)| kind == "TABLE" && val(t, 2).is_some_and(|name| name.eq_ignore_ascii_case("DIMSTYLE")))
+    {
+        source.dim_style_listing = t.iter().filter(|g| g.code == 340).filter_map(|g| handle(&g.str())).collect();
+    }
+}
+
+/// List the DIMSTYLE records the file listed in the header of the DIMSTYLE table, those of them the save holds.
+pub(crate) fn list_dim_styles(tags: &mut Vec<Tag>, d: &Drawing) {
+    if d.source_symbols.dim_style_listing.is_empty() {
+        return;
+    }
+    let Some(table) = tags.windows(2).position(|w| w[0].code == 0 && w[0].str() == "TABLE" && w[1].code == 2 && w[1].str() == "DIMSTYLE") else {
+        return;
+    };
+    let end = tags[table + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |n| table + 1 + n);
+    let Some(count) = tags[table..end].iter().position(|t| t.code == 71).map(|n| table + n) else { return };
+    let written: HashSet<Handle> =
+        tags[end..].iter().take_while(|t| !(t.code == 0 && t.str() == "ENDTAB")).filter(|t| t.code == 105).filter_map(|t| handle(&t.str())).collect();
+    let listed: Vec<Tag> = d.source_symbols.dim_style_listing.iter().filter(|h| written.contains(h)).map(|h| Tag::s(340, h.hex())).collect();
+    tags[count] = Tag::i(71, listed.len() as i64);
+    tags.splice(count + 1..end, listed);
+}
+
 /// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -995,6 +1021,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ids = identities(&tables, &blocks, &objects);
     keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&tables, &entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
+    keep_dim_style_listing(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities, &objects);
     let modelled_assoc: HashSet<String> = objects
