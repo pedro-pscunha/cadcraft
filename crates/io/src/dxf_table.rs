@@ -109,7 +109,8 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
         name: name.to_string(),
         text_height: data_h.unwrap_or(def.text_height),
         margin: first(40, head).filter(|m| *m >= 0.0).unwrap_or(def.margin),
-        title: head.iter().find(|t| t.code == 280).map(Tag::i64).unwrap_or(0) == 0,
+        // AutoCAD writes the object's version (280) before the description; the title switch is the last 280.
+        title: head.iter().rfind(|t| t.code == 280).map(Tag::i64).unwrap_or(0) == 0,
         header: head.iter().find(|t| t.code == 281).map(Tag::i64).unwrap_or(0) == 0,
         cell_styles: Vec::new(),
         description: head.iter().find(|t| t.code == 3).map(Tag::str).unwrap_or_default(),
@@ -197,10 +198,20 @@ pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str, ltypes: Option<&H
         Tag::i(63, i64::from(cs.fill.unwrap_or(Color::Index(7)).to_aci())),
         Tag::i(283, i64::from(cs.fill.is_some())),
     ];
+    // The cell data type (512, general), its unit type and its format string, as AutoCAD writes them for a cell of no special format.
+    if cs.format == cadcraft_doc::CellFormat::General {
+        out.extend([Tag::i(90, 512), Tag::i(91, 0), Tag::s(1, "")]);
+    }
     let b: [&CellBorder; 6] = cs.borders.as_array();
-    out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(274 + k as i32, i64::from(x.lineweight.to_dxf()))));
-    out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(284 + k as i32, i64::from(x.visible))));
-    out.extend(b.iter().enumerate().map(|(k, x)| Tag::i(64 + k as i32, i64::from(x.color.to_aci()))));
+    // Each border's lineweight, visibility and colour together, in AutoCAD's order.
+    for (k, x) in b.iter().enumerate() {
+        let k = k as i32;
+        out.extend([
+            Tag::i(274 + k, i64::from(x.lineweight.to_dxf())),
+            Tag::i(284 + k, i64::from(x.visible)),
+            Tag::i(64 + k, i64::from(x.color.to_aci())),
+        ]);
+    }
     if let Some(ltypes) = ltypes {
         let rgb = |c: Color| if let Color::True(rgb) = c { Some(i64::from(rgb.to_u32() & 0xFF_FFFF)) } else { None };
         out.extend(rgb(cs.text_color).map(|v| Tag::i(420, v)));
