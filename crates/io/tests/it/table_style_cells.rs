@@ -48,6 +48,36 @@ fn source() -> String {
 }
 
 #[test]
+fn cell_data_types_are_kept_per_source_cell_style() {
+    let mut tags = cadcraft_dxf::parse(source().replace("3\n\n70\n", "3\nSOURCE_DATA_FORMAT\n70\n").as_bytes()).unwrap();
+    for (tag, value) in tags.iter_mut().filter(|tag| tag.code == 90).zip([4, 512, 4]) {
+        *tag = cadcraft_dxf::Tag::i(90, value);
+    }
+    let source = cadcraft_dxf::write_ascii(&tags);
+    let drawing = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let style = drawing.table_styles.iter().find(|style| style.name == "Schedule").unwrap();
+    assert_eq!(style.cell_style("Data").data_format.unwrap().data_type, 4);
+    assert!(style.cell_style("Title").data_format.is_none(), "the implicit general format must stay implicit");
+    assert_eq!(style.cell_style("Header").data_format.unwrap().data_type, 4);
+    for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&drawing)) {
+        let style = section(&text, "OBJECTS")
+            .into_iter()
+            .find(|(kind, tags)| kind == "TABLESTYLE" && tags.iter().any(|tag| tag.code == 3 && tag.str() == "SOURCE_DATA_FORMAT"))
+            .unwrap()
+            .1;
+        assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 512, 4], "{what}");
+        let reopened = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+        let saved = cadcraft_io::write_dxf(&reopened);
+        let style = section(&saved, "OBJECTS")
+            .into_iter()
+            .find(|(kind, tags)| kind == "TABLESTYLE" && tags.iter().any(|tag| tag.code == 3 && tag.str() == "SOURCE_DATA_FORMAT"))
+            .unwrap()
+            .1;
+        assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 512, 4], "{what} reopened");
+    }
+}
+
+#[test]
 fn a_table_style_is_written_in_autocads_form() {
     let d = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
     assert!(!d.table_styles.iter().find(|s| s.name == "Schedule").unwrap().title, "the title is suppressed by the last 280");
