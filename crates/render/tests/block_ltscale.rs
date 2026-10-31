@@ -44,6 +44,22 @@ fn dashes(d: &Drawing) -> Vec<f64> {
 }
 
 #[test]
+fn zero_stored_linetype_scales_render_with_finite_bounded_geometry() {
+    for own in ["DASHED", "BYBLOCK"] {
+        let mut drawing = drawing(0.0, own);
+        let block = Arc::make_mut(drawing.blocks.get_mut("B").unwrap());
+        let mut line = block.entities.iter().next().unwrap().as_ref().clone();
+        line.common.ltscale = 0.0;
+        block.entities.replace(line);
+        let scene = build(&drawing, &Space::Model, &Options::default());
+        assert!(!scene.prims.is_empty() && scene.prims.len() < 1000);
+        assert!(scene.prims.iter().flat_map(|primitive| scene.points(primitive)).all(|point| point.is_finite()));
+        assert_eq!(drawing.model.iter().next().unwrap().common.ltscale, 0.0);
+        assert_eq!(drawing.block("B").unwrap().entities.iter().next().unwrap().common.ltscale, 0.0);
+    }
+}
+
+#[test]
 fn the_linetype_scale_of_a_block_reference_scales_the_dashes_inside() {
     for own in ["DASHED", "BYBLOCK"] {
         let one = dashes(&drawing(1.0, own));
