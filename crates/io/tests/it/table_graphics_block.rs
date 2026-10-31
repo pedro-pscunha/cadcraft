@@ -75,5 +75,9 @@ fn the_sample_table_draws_its_title_larger_than_its_headings_before_and_after_an
     .unwrap();
     let saved = cadcraft_io::write_dxf(&d);
     let saved = saved.as_str();
-    assert_eq!((mtext_height(saved, "ROOM SCHEDULE"), mtext_height(saved, "Room")), (title, heading), "the edited table keeps the heights of the file");
+    assert_eq!(
+        (mtext_height(saved, "ROOM SCHEDULE"), mtext_height(saved, "Room")),
+        (title, heading),
+        "the edited table keeps the heights of the file"
+    );
 }
