@@ -126,12 +126,12 @@ fn unsupported_canonical_bounds_keep_available_growth_and_name_every_refusal() {
 fn legacy_save_bytes_match_the_frozen_writer() {
     // Full ASCII DXF fingerprints: captured at e0f63fd2 before the extent dispatch changes, and recaptured when the writer
     // started to write a table style in AutoCAD's form (the version group 280, and the data type, unit type and format of each
-    // cell style: 83 bytes).
+    // cell style: 83 bytes), and again when an MLEADERSTYLE began to write its group 298 (8 bytes).
     for (case, expected, length) in [
-        ("unchanged", 0x643c_2265_f906_e335_u64, 18134),
-        ("inward", 0x1c82_4595_2530_2df9, 18134),
-        ("far", 0x0423_17a0_51da_8dd0, 18148),
-        ("added", 0xff09_45ba_3666_fa1f, 18281),
+        ("unchanged", 0x5cf7_2ef0_327c_fba8_u64, 18142),
+        ("inward", 0xa4f5_c39e_8db1_2d3c, 18142),
+        ("far", 0x054f_6891_b461_90a1, 18156),
+        ("added", 0x6333_5a91_a0bc_4166, 18289),
     ] {
         let mut drawing = source();
         match case {

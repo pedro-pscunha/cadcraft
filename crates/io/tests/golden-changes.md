@@ -210,3 +210,17 @@ Compared record by record (the DWG as the DXF rendition of `cadcraft_dwg`) again
 |---|---|---|---|---|
 | OBJECTS/DICTIONARY (root, handle C) | the named object dictionary lists ACAD_IMAGE_DICT again | dxf, dwg | 5 | 1 each |
 | OBJECTS/DICTIONARY (the empty image dictionary: 3FB209 in Rocontec, 4E6B in the four tear files) | the dictionary of the file comes back, with its handle | dxf, dwg | 5 | 1 each |
+
+# Golden refresh for the acadrust-side findings
+
+Five fixes move 64 of the 126 outputs, compared record by record with the outputs of the base (b0f04e7d, whose golden the strict check passed). No record is lost or added.
+
+| record | cause | fix | format | drawings | records |
+|---|---|---|---|---|---|
+| OBJECTS/MLEADERSTYLE | group 298 kept (R2013+ and the DWG) | keep group 298 of an MLEADERSTYLE | dwg | 6 | 13 |
+| TABLES/BLOCK_RECORD | the ACAD DesignCenter Data xdata through the DWG bridge | keep the DesignCenter Data xdata of a block record through the DWG bridge | dwg | 10 | 51 |
+| TABLES/VPORT | group 63: ambient color ByLayer (256) instead of 250 | acadrust c6753f9 | dwg | 32 | 32 |
+| ENTITIES/VERTEX | a ByLayer vertex keeps its own properties | acadrust b416245 | dxf | 1 | 13 |
+| TABLES/LAYER | the xdata applications of a layer keep their order | acadrust b1921b8 | dxf | 12 | 1618 |
+
+The width axis (5f7a992), the 1005 handle (579d393) and the same-release inspection (58fabeb) moved no output of the corpus.

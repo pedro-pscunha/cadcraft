@@ -721,6 +721,8 @@ pub struct MLeaderStyle {
     pub text_color: i64,
     pub text_frame: bool,
     pub text_always_left: bool,
+    /// Group 298, a flag AutoCAD 2013 and later write (not documented): kept as the file gave it.
+    pub unknown_298: bool,
     pub align_space: f64,
     pub block: String,
     pub block_color: i64,
@@ -773,6 +775,7 @@ impl Default for MLeaderStyle {
             text_color: BYBLOCK_COLOR,
             text_frame: false,
             text_always_left: false,
+            unknown_298: false,
             align_space: 4.0,
             block: String::new(),
             block_color: BYBLOCK_COLOR,

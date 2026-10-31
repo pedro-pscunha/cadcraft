@@ -109,6 +109,7 @@ mod mleader_pre2007;
 mod mleader_proxy_graphics;
 mod mleader_roots;
 mod mleader_roundtrip;
+mod mleaderstyle_flag_298;
 mod mleaderstyle_reactors;
 mod mline_dictionary_names;
 mod mline_roundtrip;
