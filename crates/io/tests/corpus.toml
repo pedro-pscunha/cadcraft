@@ -209,3 +209,83 @@ families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader"
 path = "/tmp/cad/dim1/dim1-vp68-2018.dxf"
 owner = "mateus-lima fixtures"
 families = ["Arc", "Circle", "Dimension", "Ellipse", "Insert", "Line", "MLeader", "MText", "Point", "Solid", "Spline", "Table", "Viewport"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a10_cycle_all_plain.dxf"
+owner = "activation fixtures"
+families = ["Insert", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a11_cycle_with_needs_seed.dxf"
+owner = "activation fixtures"
+families = ["Insert", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a1_tilted_insert_over_plain_definition.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a2_needing_attribute_on_plain_insert.dxf"
+owner = "activation fixtures"
+families = ["Attrib", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a3_canonical_container_reaches_nested_target.dxf"
+owner = "activation fixtures"
+families = ["Insert", "Line", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a4_plain_insert_over_definition_with_tilted_child.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a5_nested_chain.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Insert"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a6_shared_definition_in_model_and_in_another_definition.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a7_mleader_block_content_tilted.dxf"
+owner = "activation fixtures"
+families = ["Circle", "MLeader"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a8_dimension_graphics_block_tilted.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Dimension", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/a9_xref_with_tilted_child.dxf"
+owner = "activation fixtures"
+families = ["Insert"]
+
+[[file]]
+path = "crates/io/tests/data/activation/b1_needs_member_in_component_that_cannot_activate.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Insert", "Line", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/b2_needs_insert_with_attributes_raw.dxf"
+owner = "activation fixtures"
+families = ["Attrib", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/b3_component_with_unmasked_family.dxf"
+owner = "activation fixtures"
+families = ["Insert", "Line", "Spline"]
+
+[[file]]
+path = "crates/io/tests/data/activation/b4_unreferenced_definition_with_needing_member.dxf"
+owner = "activation fixtures"
+families = ["Circle", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/b5_dimension_with_star_d_block.dxf"
+owner = "activation fixtures"
+families = ["Dimension", "Line"]
