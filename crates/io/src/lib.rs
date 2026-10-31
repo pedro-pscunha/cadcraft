@@ -90,17 +90,41 @@ pub fn read_with_need(
     policy: activation::ReaderPolicy,
     need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
 ) -> Result<Drawing> {
-    let name = name.as_ref();
+    read_inner(bytes, name.as_ref(), policy, need, false).map(|(d, _)| d)
+}
+
+/// The read of every public entry: one decode, one parse and one graph, and with `report` the activation the graph comes to.
+fn read_inner(
+    bytes: &[u8],
+    name: &Path,
+    policy: activation::ReaderPolicy,
+    need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
+    report: bool,
+) -> Result<(Drawing, Option<activation::records::ReadReport>)> {
     if cadcraft_dwg::is_dwg(bytes) {
+        #[cfg(test)]
+        work_done::DWG_DECODES.with(|n| n.set(n.get() + 1));
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read_from_dwg(&dxf, policy, need).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        let in_dwg = |e: IoError| IoError::Format(format!("{e} (in the DXF converted from this DWG)"));
+        let (mut d, graph_report) = if report {
+            dxf_read::read_report_from_dwg(&dxf, policy, need).map(|(d, r)| (d, Some(r))).map_err(in_dwg)?
+        } else {
+            (dxf_read::read_from_dwg(&dxf, policy, need).map_err(in_dwg)?, None)
+        };
         d.read_notes.extend(notes);
-        return Ok(d);
+        return Ok((d, graph_report));
     }
+    let dxf = |bytes: &[u8]| -> Result<(Drawing, Option<activation::records::ReadReport>)> {
+        if report {
+            dxf_read::read_report_with_need(bytes, policy, need).map(|(d, r)| (d, Some(r)))
+        } else {
+            dxf_read::read_with_need(bytes, policy, need).map(|d| (d, None))
+        }
+    };
     match (Format::from_path(name), ext(name).as_str()) {
-        (Some(Format::Svg | Format::Svgz), _) => svg_read::read(bytes),
-        (Some(Format::Dxf), _) => dxf_read::read_with_need(bytes, policy, need),
-        (_, e) if bytes.len() > 4 => dxf_read::read_with_need(bytes, policy, need).map_err(|_| IoError::Unsupported(e.to_string())),
+        (Some(Format::Svg | Format::Svgz), _) => svg_read::read(bytes).map(|d| (d, None)),
+        (Some(Format::Dxf), _) => dxf(bytes),
+        (_, e) if bytes.len() > 4 => dxf(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
         (_, e) => Err(IoError::Unsupported(e.to_string())),
     }
 }
@@ -118,15 +142,11 @@ pub fn read_report_with(
     policy: activation::ReaderPolicy,
     need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
 ) -> Result<(Drawing, activation::records::ReadReport)> {
-    let drawing = read_with_need(bytes, name, policy, need)?;
-    let dxf = if cadcraft_dwg::is_dwg(bytes) {
-        std::borrow::Cow::Owned(cadcraft_dwg::dwg_to_dxf(bytes).map_err(IoError::Format)?)
-    } else {
-        std::borrow::Cow::Borrowed(bytes)
-    };
-    let tags = cadcraft_dxf::parse(&dxf).map_err(|e| IoError::Format(e.to_string()))?;
-    let graph = activation::records::RecordGraph::build(&cadcraft_dxf::sections(&tags), need).map_err(|e| IoError::Format(format!("{e:?}")))?;
-    Ok((drawing, graph.report(&policy.graph_policy())))
+    match read_inner(bytes, name.as_ref(), policy, need, true)? {
+        (drawing, Some(report)) => Ok((drawing, report)),
+        // An SVG has no records to graph.
+        (_, None) => Err(IoError::Format("an SVG has no record graph to report".into())),
+    }
 }
 
 /// Write a drawing in the format chosen by the name's extension. Images (PNG, SVG, PDF) show
@@ -285,4 +305,16 @@ pub fn write_dxf(d: &Drawing) -> String {
 mod dxf_region;
 
 #[cfg(test)]
+mod read_report_tests;
+#[cfg(test)]
 mod tests;
+
+/// How many DWG decodes and record graphs this thread made, for the tests that a read does each once.
+#[cfg(test)]
+pub(crate) mod work_done {
+    use std::cell::Cell;
+    std::thread_local! {
+        pub(crate) static DWG_DECODES: Cell<usize> = const { Cell::new(0) };
+        pub(crate) static GRAPHS: Cell<usize> = const { Cell::new(0) };
+    }
+}

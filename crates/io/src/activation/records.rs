@@ -325,6 +325,8 @@ impl RecordGraph {
     /// The graph of the records of `sections`; `need` says whether Legacy would lose data from a record (the section 3 predicate;
     /// until it lands the caller passes a stand-in).
     pub fn build(sections: &[Section], need: &dyn Fn(&RecordView) -> Need) -> Result<RecordGraph, GraphError> {
+        #[cfg(test)]
+        crate::work_done::GRAPHS.with(|n| n.set(n.get() + 1));
         let mut b = Builder {
             need,
             nodes: Vec::new(),

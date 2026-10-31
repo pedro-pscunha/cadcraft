@@ -13,7 +13,7 @@ use cadcraft_doc::{
 use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
-use crate::activation::records::{Container, NodeKey, Ordinals, RecordGraph, RecordView};
+use crate::activation::records::{Container, NodeKey, Ordinals, ReadReport, RecordGraph, RecordView};
 use crate::activation::{Activation, Need, NodeId, Outcome, ReaderPolicy, WIRED_FAMILIES, activate};
 use crate::{IoError, Result};
 
@@ -216,6 +216,16 @@ pub fn read_from_dwg(bytes: &[u8], policy: ReaderPolicy, need: &dyn Fn(&RecordVi
     read_budgeted(bytes, 4_000_000, true, policy, need)
 }
 
+/// [`read_with_need`], and the activation the graph of the file's records comes to: one parse and one graph for both.
+pub fn read_report_with_need(bytes: &[u8], policy: ReaderPolicy, need: &dyn Fn(&RecordView) -> Need) -> Result<(Drawing, ReadReport)> {
+    read_reporting(bytes, 4_000_000, false, policy, need)
+}
+
+/// [`read_from_dwg`], with the report of [`read_report_with_need`].
+pub fn read_report_from_dwg(bytes: &[u8], policy: ReaderPolicy, need: &dyn Fn(&RecordView) -> Need) -> Result<(Drawing, ReadReport)> {
+    read_reporting(bytes, 4_000_000, true, policy, need)
+}
+
 /// A block definition read from BLOCKS: name, base point, description, entities (owner, paper
 /// flag, entity) and block flags.
 type BlockDef = (String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64);
@@ -224,13 +234,30 @@ type BlockDef = (String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)
 type LayoutDef = (String, u32, String, PageSetup);
 
 /// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
-fn read_budgeted(
+fn read_budgeted(bytes: &[u8], table_cells_left: usize, from_dwg: bool, policy: ReaderPolicy, need: &dyn Fn(&RecordView) -> Need) -> Result<Drawing> {
+    read_core(bytes, table_cells_left, from_dwg, policy, need, false).map(|(d, _)| d)
+}
+
+fn read_reporting(
+    bytes: &[u8],
+    table_cells_left: usize,
+    from_dwg: bool,
+    policy: ReaderPolicy,
+    need: &dyn Fn(&RecordView) -> Need,
+) -> Result<(Drawing, ReadReport)> {
+    let (d, report) = read_core(bytes, table_cells_left, from_dwg, policy, need, true)?;
+    report.map(|report| (d, report)).ok_or_else(|| IoError::Format("the read made no report".into()))
+}
+
+/// The read itself; with `report`, the activation of the file's graph too (built once, whether or not the read needs it).
+fn read_core(
     bytes: &[u8],
     mut table_cells_left: usize,
     from_dwg: bool,
     policy: ReaderPolicy,
     need: &dyn Fn(&RecordView) -> Need,
-) -> Result<Drawing> {
+    report: bool,
+) -> Result<(Drawing, Option<ReadReport>)> {
     // No canonical reader is called yet: a mask that asks for one cannot be honored, and the read says so.
     if let Some(family) = policy.mask().families().find(|f| !WIRED_FAMILIES.contains(*f)) {
         return Err(IoError::Format(format!("the reader policy turns on {family:?}, which has no canonical reader")));
@@ -246,10 +273,14 @@ fn read_budgeted(
     d.header.set_i64("INSUNITS", 0);
     let mut rx = Rx { reader_policy: policy, pstyles: plot_style_names(&secs), from_dwg, ..Rx::default() };
     // The activation of the file, before any entity is built; a plain read at stage 0 skips it.
-    if policy.needs_graph() {
+    let mut read_report = None;
+    if policy.needs_graph() || report {
         let graph = RecordGraph::build(&secs, need).map_err(|e| IoError::Format(format!("the activation graph is invalid: {e:?}")))?;
-        rx.activation = Some(activate(graph.graph(), &policy.graph_policy()));
-        rx.records = Some(graph);
+        read_report = report.then(|| graph.report(&policy.graph_policy()));
+        if policy.needs_graph() {
+            rx.activation = Some(activate(graph.graph(), &policy.graph_policy()));
+            rx.records = Some(graph);
+        }
     }
     d.plot_style_names = rx.pstyles.values().cloned().collect();
     d.plot_style_names.sort();
@@ -315,7 +346,7 @@ fn read_budgeted(
     d.skipped_records = skipped;
     keep_block_previews(&mut d, rx.block_previews);
     keep_table_graphics(&mut d, &rx.table_blocks, rx.table_graphics);
-    Ok(d)
+    Ok((d, read_report))
 }
 
 /// Give each block the preview its file had, keyed to the contents it has now: the last step of reading, after
