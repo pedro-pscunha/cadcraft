@@ -192,7 +192,8 @@ fn a_canonical_arc_boundary_draws_without_replacing_its_source_edge() {
     source.model.push(entity);
     let before = source.model.clone();
     let display = display(&source);
-    let area: f64 = display.tris.chunks_exact(3).map(|triangle| ((triangle[1] - triangle[0]).cross(triangle[2] - triangle[0]) * 0.5).abs()).sum();
+    let area: f64 =
+        display.tris.as_chunks::<3>().0.iter().map(|triangle| ((triangle[1] - triangle[0]).cross(triangle[2] - triangle[0]) * 0.5).abs()).sum();
     assert!((area - 4.0 * std::f64::consts::PI * 0.8).abs() < 0.1, "{area}");
     assert_eq!(source.model, before);
 }
