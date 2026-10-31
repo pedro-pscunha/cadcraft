@@ -20,6 +20,33 @@ fn family_lookup_is_shared_and_aliases_are_explicit() {
 }
 
 #[test]
+fn table_and_dimension_graphics_have_owners_instead_of_independent_verdicts() {
+    use crate::activation::records::{Container, NodeKey, RecordView};
+    let tags =
+        cadcraft_dxf::parse(b"0\nSECTION\n2\nENTITIES\n0\nACAD_TABLE\n5\nA1\n2\n*T1\n0\nDIMENSION\n5\nA2\n2\n*D1\n0\nENDSEC\n0\nEOF\n").unwrap();
+    let classifier = LegacyClassifier::new(&cadcraft_dxf::sections(&tags), Version::R2018);
+    let groups = unit("0\nLINE\n10\n1\n20\n2\n11\n3\n21\n4\n").remove(0).1;
+    for (name, family, handle) in [("*t1", Family::Table, 0xA1), ("*d1", Family::Dimension, 0xA2)] {
+        let key = NodeKey::record(Container::block(name), 0, None);
+        let view = RecordView { key: &key, kind: "LINE", family: Family::Line, groups: &groups };
+        assert_eq!(
+            classifier.record(&view),
+            LegacyRecordClassification::OwnerDerived(DerivedOwner { family, handle: Some(cadcraft_doc::Handle(handle)) })
+        );
+    }
+    for container in [Container::Entities, Container::block("AUTHORED")] {
+        let key = NodeKey::record(container, 0, None);
+        let view = RecordView { key: &key, kind: "LINE", family: Family::Line, groups: &groups };
+        assert!(matches!(
+            classifier.record(&view),
+            LegacyRecordClassification::Authored(LegacyClassification { disposition: LegacyDisposition::Plain, .. })
+        ));
+    }
+    assert_eq!(disposition("0\nACAD_TABLE\n2\n*T1\n"), LegacyDisposition::Needs);
+    assert_eq!(disposition("0\nDIMENSION\n2\n*D1\n"), LegacyDisposition::Needs);
+}
+
+#[test]
 fn tested_zero_z_primitives_are_plain() {
     for text in ["0\nLINE\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n", "0\nCIRCLE\n10\n1\n20\n2\n30\n0\n40\n3\n"] {
         assert_eq!(disposition(text), LegacyDisposition::Plain, "{text}");
