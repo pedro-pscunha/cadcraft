@@ -73,6 +73,24 @@ fn unsupported_owned_fields_and_disabled_gradient_data_need_activation() {
 }
 
 #[test]
+fn annotative_hatch_needs_the_unsupported_annotation_path() {
+    let source = format!("{ELLIPSE_HATCH}1001\nAcadAnnotative\n1000\nAnnotativeData\n1002\n{{\n1070\n1\n1070\n1\n1002\n}}\n");
+    assert_eq!(disposition(&source), LegacyDisposition::Needs);
+}
+
+#[test]
+fn repeated_scalar_fields_and_misaligned_vertex_fields_need_activation() {
+    for source in [
+        "0\nLINE\n10\n1\n20\n2\n11\n3\n21\n4\n230\n1\n230\n2\n",
+        "0\nLWPOLYLINE\n90\n2\n70\n0\n10\n0\n20\n0\n40\n1\n40\n2\n10\n1\n20\n1\n",
+        "0\nLWPOLYLINE\n90\n2\n70\n0\n10\n0\n10\n1\n20\n0\n20\n1\n",
+    ] {
+        assert_eq!(disposition(source), LegacyDisposition::Needs, "{source}");
+    }
+    assert_eq!(disposition(&ELLIPSE_HATCH.replace("91\n1\n", "91\n1\n91\n1\n")), LegacyDisposition::Needs);
+}
+
+#[test]
 fn spatial_and_malformed_source_fields_fail_closed() {
     assert_eq!(disposition("0\nLINE\n10\n1\n20\n2\n30\n5\n11\n3\n21\n4\n31\n5\n"), LegacyDisposition::Needs);
     let mut source = unit("0\nLINE\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n");

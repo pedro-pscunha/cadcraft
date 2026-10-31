@@ -20,10 +20,10 @@ fn required(tags: &[Tag], codes: &[i32]) -> bool {
     codes.iter().all(|code| count(tags, *code) == 1 && scalar(tags, *code, f64::NAN).is_some())
 }
 fn count_matches(tags: &[Tag], declared: i32, values: i32) -> bool {
-    scalar(tags, declared, -1.0) == Some(count(tags, values) as f64)
+    count(tags, declared) == 1 && scalar(tags, declared, -1.0) == Some(count(tags, values) as f64)
 }
 fn flag(tags: &[Tag], code: i32, allowed: i64) -> bool {
-    scalar(tags, code, 0.0).is_some_and(|value| value >= 0.0 && value.fract() == 0.0 && (value as i64) & !allowed == 0)
+    count(tags, code) <= 1 && scalar(tags, code, 0.0).is_some_and(|value| value >= 0.0 && value.fract() == 0.0 && (value as i64) & !allowed == 0)
 }
 fn all_zero(tags: &[Tag], codes: &[i32]) -> bool {
     tags.iter().filter(|tag| codes.contains(&tag.code)).all(|tag| number(tag) == Some(0.0))
@@ -40,6 +40,7 @@ fn planar(tags: &[Tag], z: &[i32]) -> bool {
         && scalar(tags, 230, 1.0) == Some(1.0)
         && scalar(tags, 39, 0.0) == Some(0.0)
         && all_zero(tags, z)
+        && [210, 220, 230, 39].iter().chain(z).all(|code| count(tags, *code) <= 1)
 }
 
 pub(super) fn plain(family: Family, tags: &[Tag], has_followers: bool) -> bool {
@@ -67,6 +68,8 @@ pub(super) fn plain(family: Family, tags: &[Tag], has_followers: bool) -> bool {
                 && count(tags, 10) >= 2
                 && count(tags, 91) == 0
                 && scalar(tags, 38, 0.0) == Some(0.0)
+                && [38, 43].iter().all(|code| count(tags, *code) <= 1)
+                && polyline_vertices(tags)
         }
         Hatch => hatch(tags),
         // These families stay conservative until their structural/edit oracle cases prove a plain subset.
@@ -75,8 +78,36 @@ pub(super) fn plain(family: Family, tags: &[Tag], has_followers: bool) -> bool {
     }
 }
 
+fn polyline_vertices(tags: &[Tag]) -> bool {
+    let mut vertex = false;
+    let mut fields = 0u8;
+    for tag in tags.iter().take_while(|tag| tag.code < 1000) {
+        if tag.code == 10 {
+            if vertex && fields & 1 == 0 {
+                return false;
+            }
+            vertex = true;
+            fields = 0;
+        } else {
+            let bit = match tag.code {
+                20 => 1,
+                40 => 2,
+                41 => 4,
+                42 => 8,
+                _ => continue,
+            };
+            if !vertex || fields & bit != 0 {
+                return false;
+            }
+            fields |= bit;
+        }
+    }
+    vertex && fields & 1 != 0
+}
+
 fn hatch(tags: &[Tag]) -> bool {
-    if scalar(tags, 70, 0.0) != Some(1.0)
+    if crate::dxf_read::tables::annotative(tags)
+        || scalar(tags, 70, 0.0) != Some(1.0)
         || scalar(tags, 71, 0.0) != Some(0.0)
         || scalar(tags, 98, 0.0) != Some(0.0)
         || tags.iter().any(|tag| (450..=470).contains(&tag.code))
@@ -94,7 +125,9 @@ fn hatch(tags: &[Tag]) -> bool {
             .and_then(|rest| rest.iter().position(|tag| matches!(tag.code, 92 | 75)))
             .map_or(tags.len(), |offset| start + 1 + offset);
         let Some(body) = tags.get(start + 1..end) else { return false };
-        let Some(flags) = number(&tags[start]).filter(|value| value.fract() == 0.0 && *value >= 0.0 && *value <= 31.0) else { return false };
+        let Some(flags) = tags.get(start).and_then(number).filter(|value| value.fract() == 0.0 && *value >= 0.0 && *value <= 31.0) else {
+            return false;
+        };
         if (flags as i64) & 2 != 0 {
             if !count_matches(body, 93, 10) || count(body, 10) != count(body, 20) || !flag(body, 72, 1) || !flag(body, 73, 1) {
                 return false;
@@ -111,7 +144,7 @@ fn hatch(tags: &[Tag]) -> bool {
                     .and_then(|rest| rest.iter().position(|tag| matches!(tag.code, 72 | 97)))
                     .map_or(body.len(), |offset| at + 1 + offset);
                 let Some(fields) = body.get(at + 1..stop) else { return false };
-                let valid = match number(&body[at]) {
+                let valid = match body.get(at).and_then(number) {
                     Some(1.0) => required(fields, &[10, 20, 11, 21]),
                     Some(2.0) => {
                         required(fields, &[10, 20, 40, 50, 51, 73]) && flag(fields, 73, 1) && scalar(fields, 40, 0.0).is_some_and(|value| value > 0.0)

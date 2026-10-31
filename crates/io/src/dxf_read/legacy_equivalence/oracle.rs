@@ -147,10 +147,12 @@ fn reference_fields(kind: &str, source: &[Tag], expected: &[Tag], version: Versi
         }
     }
     if kind == "LWPOLYLINE" && matches!(operation, Operation::Scale) {
-        // Constant width is a drawing length. The independent native transform
-        // scales vertex widths but currently omits group 43.
-        if let Some(width) = source.iter().find(|tag| tag.code == 43) {
-            result.insert((43, 0), (width.f64() * 2.0).to_string());
+        // Constant and vertex widths are drawing lengths. Their scale comes from
+        // source fields, independently of the native transform's width omissions.
+        for (key, width) in fields(kind, source, version) {
+            if matches!(key.0, 40 | 41 | 43) {
+                result.insert(key, (width.parse::<f64>().unwrap() * 2.0).to_string());
+            }
         }
     }
     if kind == "HATCH" && matches!(operation, Operation::Mirror) {
@@ -178,6 +180,10 @@ fn reference_fields(kind: &str, source: &[Tag], expected: &[Tag], version: Versi
 }
 
 fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>, input_scale: f64) -> bool {
+    fields_contained(kind, expected, actual, input_scale) && fields_contained(kind, actual, expected, input_scale)
+}
+
+fn fields_contained(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>, input_scale: f64) -> bool {
     expected.iter().all(|(key, expected)| {
         let default = family_of_kind(kind).and_then(|family| policy::omitted_default(family, key.0));
         actual.get(key).map(String::as_str).or_else(|| default.map(|(value, _)| value)).is_some_and(|actual| {
@@ -263,10 +269,12 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
                 let actual_fields = actual.get(&handle).map(|(_, tags)| fields(&kind, tags, version)).unwrap_or_default();
                 let expected_fields =
                     expected.get(&handle).map(|(_, tags)| reference_fields(&kind, &source_tags, tags, version, operation)).unwrap_or_default();
+                let extras: Vec<_> = actual_fields.iter().filter(|(key, _)| !expected_fields.contains_key(key)).take(8).collect();
+                eprintln!("LEGACY_ADDITIONS kind={kind} handle={handle:?} operation={operation:?} fields={extras:?}");
                 for (label, target) in [("reference", &expected_fields), ("source", &source_fields)] {
                     let differences: Vec<_> = target
                         .iter()
-                        .filter(|(key, value)| !equivalent(&kind, &BTreeMap::from([(**key, (*value).clone())]), &actual_fields, input_scale))
+                        .filter(|(key, value)| !fields_contained(&kind, &BTreeMap::from([(**key, (*value).clone())]), &actual_fields, input_scale))
                         .take(8)
                         .map(|(key, value)| (key, value, actual_fields.get(key)))
                         .collect();
@@ -410,6 +418,14 @@ fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
 }
 
 #[test]
+fn comparison_rejects_unexpected_nondefault_fields() {
+    let source = BTreeMap::from([((10, 0), "1".to_string())]);
+    let mut actual = source.clone();
+    actual.insert((39, 0), "3".to_string());
+    assert!(!equivalent("LINE", &source, &actual, 32.0));
+}
+
+#[test]
 fn reference_uses_source_angles_and_scales_polyline_constant_width() {
     let arc = cadcraft_dxf::parse(b"50\n90.14528841801683\n51\n115.93705821811227\n").unwrap();
     let changed = cadcraft_dxf::parse(b"50\n90.14529003267106\n51\n115.93705948035071\n").unwrap();
@@ -417,6 +433,11 @@ fn reference_uses_source_angles_and_scales_polyline_constant_width() {
     let polyline = cadcraft_dxf::parse(b"43\n0.25\n").unwrap();
     let expected = reference_fields("LWPOLYLINE", &polyline, &polyline, Version::R2018, Operation::Scale);
     assert_eq!(expected.get(&(43, 0)).unwrap().parse::<f64>().unwrap(), 0.5);
+    let vertices = cadcraft_dxf::parse(b"10\n0\n20\n0\n40\n0.25\n41\n0.5\n10\n1\n20\n1\n40\n0.75\n41\n1\n").unwrap();
+    let expected = reference_fields("LWPOLYLINE", &vertices, &vertices, Version::R2018, Operation::Scale);
+    for (key, value) in [((40, 0), 0.5), ((41, 0), 1.0), ((40, 1), 1.5), ((41, 1), 2.0)] {
+        assert_eq!(expected.get(&key).unwrap().parse::<f64>().unwrap(), value);
+    }
 }
 
 #[test]
@@ -433,6 +454,8 @@ fn external_corpus_has_no_false_plain() {
 #[test]
 fn every_declared_plain_family_has_a_replay_disabled_edit_witness() {
     let cases = [
+        ("LINE", "10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n"),
+        ("CIRCLE", "10\n1\n20\n2\n30\n0\n40\n3\n"),
         ("POINT", "10\n1\n20\n2\n30\n0\n50\n0\n"),
         ("ARC", "10\n1\n20\n2\n30\n0\n40\n3\n50\n20\n51\n120\n"),
         ("ELLIPSE", "10\n1\n20\n2\n30\n0\n11\n3\n21\n0\n31\n0\n40\n0.5\n41\n0\n42\n3\n"),
@@ -443,17 +466,20 @@ fn every_declared_plain_family_has_a_replay_disabled_edit_witness() {
         ("3DFACE", "10\n0\n20\n0\n11\n2\n21\n0\n12\n2\n22\n1\n13\n0\n23\n1\n70\n0\n"),
         ("LWPOLYLINE", "90\n2\n70\n0\n10\n1\n20\n2\n10\n3\n20\n4\n42\n0.25\n"),
     ];
-    for (kind, fields) in cases {
-        let source = format!(
-            "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\n{kind}\n5\n100\n{fields}0\nENDSEC\n0\nEOF\n"
-        );
-        let records = records(source.as_bytes());
-        let unit = records.get(&Handle(0x100)).unwrap().clone();
-        if classify_legacy_unit(&[unit], Version::R2018).unwrap().disposition != LegacyDisposition::Plain {
-            continue;
-        }
-        for operation in Operation::ALL {
-            assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "{kind} {operation:?}");
+    for version in Version::ALL {
+        for (kind, fields) in cases {
+            let code = version.code();
+            let source = format!(
+                "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\n{code}\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\n{kind}\n5\n100\n{fields}0\nENDSEC\n0\nEOF\n"
+            );
+            let records = records(source.as_bytes());
+            let unit = records.get(&Handle(0x100)).unwrap().clone();
+            if classify_legacy_unit(&[unit], version).unwrap().disposition != LegacyDisposition::Plain {
+                continue;
+            }
+            for operation in Operation::ALL {
+                assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "{version:?} {kind} {operation:?}");
+            }
         }
     }
 }
@@ -461,9 +487,12 @@ fn every_declared_plain_family_has_a_replay_disabled_edit_witness() {
 #[test]
 fn ellipse_hatch_is_plain_only_when_its_actual_edits_are_lossless() {
     let record = super::tests::ELLIPSE_HATCH.replacen("HATCH\n", "HATCH\n5\n100\n", 1);
-    let source = format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{record}0\nENDSEC\n0\nEOF\n");
-    for operation in Operation::ALL {
-        assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "HATCH {operation:?}");
+    for version in Version::ALL {
+        let code = version.code();
+        let source = format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\n{code}\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{record}0\nENDSEC\n0\nEOF\n");
+        for operation in Operation::ALL {
+            assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "{version:?} HATCH {operation:?}");
+        }
     }
 }
 

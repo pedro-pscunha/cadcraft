@@ -41,6 +41,13 @@ impl Policy {
 #[cfg(test)]
 pub(super) fn omitted_default(family: Family, code: i32) -> Option<(&'static str, &'static str)> {
     match (family, code) {
+        (Family::Line | Family::Point | Family::Circle | Family::Arc | Family::Ellipse | Family::Ray | Family::XLine, 30 | 31)
+        | (Family::Solid | Family::Trace | Family::Face3d, 30..=33) => Some(("0", "An omitted coordinate Z defaults to zero.")),
+        (_, 210 | 220) if policy(family, Version::R2018).headerless_groups.contains(&code) => {
+            Some(("0", "The default extrusion has zero X and Y components."))
+        }
+        (_, 230) if policy(family, Version::R2018).headerless_groups.contains(&code) => Some(("1", "The default extrusion is the positive Z axis.")),
+        (_, 39) if policy(family, Version::R2018).headerless_groups.contains(&code) => Some(("0", "An omitted thickness defaults to zero.")),
         (Family::Face3d, 70) => Some(("0", "3DFACE has no invisible edges when group 70 is absent.")),
         (Family::Point, 50) => Some(("0", "POINT's omitted ECS display angle defaults to zero.")),
         (Family::LwPolyline, 38 | 40 | 41 | 42 | 43) => Some(("0", "LWPOLYLINE elevation, widths and each vertex bulge default to zero.")),
