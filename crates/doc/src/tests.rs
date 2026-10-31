@@ -55,10 +55,7 @@ fn legacy_point_display_angle_follows_rotation_and_mirror() {
 fn legacy_arc_translation_keeps_angles_far_from_the_origin() {
     let start = 0.3;
     let end = 0.9;
-    let mut entity = Entity::new(
-        Handle(8),
-        EntityKind::Arc(Arc { center: Vec3::new(1e9, -2e9, 0.0), radius: 0.001, start, end }),
-    );
+    let mut entity = Entity::new(Handle(8), EntityKind::Arc(Arc { center: Vec3::new(1e9, -2e9, 0.0), radius: 0.001, start, end }));
     let mut translation = cadcraft_geom::Mat4::IDENTITY;
     translation.m[0][3] = 17.0;
     translation.m[1][3] = -23.0;
