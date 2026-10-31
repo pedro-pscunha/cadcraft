@@ -36,12 +36,21 @@ pub(super) fn draw_jogged_radius(config: &DimConfig<'_>, g: &mut DimGeometry, te
         let run = h.abs() / ang.tan().max(1e-6);
         let tj = (jp - center).dot(u).clamp(0.0, r);
         if st.text_above != 0 && d.user_text_pos && text_mid.dist(center) > r {
+            // Where the jog goes along the radius (AutoCAD LT 2025, ISO-25, 34 cases over radii 2, 5 and 10 and several override centres and jog
+            // locations, `/tmp/cad/elev-oracle13` to `elev16`, all within 0.02): the jog is centred on the middle line between the radius and the
+            // line through the override centre, at the distance from Q along it that the jog location is from Q, where Q is the middle of the
+            // jog if it began at the override centre. A jog location past Q along the radius, or one that puts the jog inside the arrowhead,
+            // gives the middle of the radius and the override centre instead.
+            let origin_along = (o - center).dot(u);
+            let q = origin_along + run / 2.0;
+            let (along, side) = ((jp - center).dot(u), (jp - center).dot(n));
+            let reach = q - (q - along).hypot(side - h / 2.0);
+            let middle = if along <= q + 1e-9 && reach >= r - 1e-9 { reach } else { (origin_along + r) / 2.0 };
             // Text above the line, outside the circle (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle13`): the arrowhead is outside pointing in,
             // and the line runs from its base out along the radius, jogs back at DIMJOGANG to the line through the override centre
             // and on to it. The jog is centred where the jog location falls along the radius.
-            let along = (jp - center).dot(u);
             let base = tip + u * asz;
-            let (p2, p1) = (center + u * (along + run / 2.0), center + u * (along - run / 2.0) + n * h);
+            let (p2, p1) = (center + u * (middle + run / 2.0), center + u * (middle - run / 2.0) + n * h);
             g.dim(vec![base, p2, p1, o]);
             end(g, blk2, tip, -u);
             text_angle = if st.text_outside_horizontal { 0.0 } else { readable(u.angle()) };
