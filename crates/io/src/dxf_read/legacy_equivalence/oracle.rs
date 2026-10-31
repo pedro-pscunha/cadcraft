@@ -1,4 +1,8 @@
 //! Test-only differential definition. Neither branch uses the static classification decision.
+mod identity;
+pub(super) use identity::RecordIdentity;
+use identity::{Placement, Record, RecordIndex};
+
 use super::{LegacyDisposition, classify_legacy_unit, family_of_kind, policy};
 use cadcraft_doc::{Drawing, EntityStore, Handle};
 use cadcraft_dxf::{Tag, Version};
@@ -77,23 +81,6 @@ fn transform(drawing: &mut Drawing, operation: Operation) -> BTreeSet<Handle> {
     }
     assert!(crate::dxf_geometry::eligible(drawing).is_empty(), "the oracle must not use geometry replay");
     refused
-}
-
-fn records(bytes: &[u8]) -> BTreeMap<Handle, (String, Vec<Tag>)> {
-    let tags = cadcraft_dxf::parse(bytes).unwrap();
-    cadcraft_dxf::sections(&tags)
-        .into_iter()
-        .filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS"))
-        .flat_map(|section| cadcraft_dxf::records(&section.tags))
-        .filter(|(kind, _)| family_of_kind(kind).is_some())
-        .filter_map(|record| {
-            let handle = record.1.iter().find(|tag| tag.code == 5).and_then(|tag| Handle::parse_hex(&tag.str()))?;
-            Some((handle, record))
-        })
-        .fold(BTreeMap::new(), |mut indexed, (handle, record)| {
-            assert!(indexed.insert(handle, record).is_none(), "ambiguous family record handle {handle:?}");
-            indexed
-        })
 }
 
 fn fields(kind: &str, tags: &[Tag], version: Version) -> BTreeMap<(i32, usize), String> {
@@ -211,11 +198,11 @@ fn fields_contained(kind: &str, expected: &BTreeMap<(i32, usize), String>, actua
     })
 }
 
-pub(super) fn measure(source: &[u8], operation: Operation) -> BTreeMap<Handle, bool> {
+pub(super) fn measure(source: &[u8], operation: Operation) -> BTreeMap<RecordIdentity, bool> {
     measure_with_origin(source, operation, false)
 }
 
-fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> BTreeMap<Handle, bool> {
+fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> BTreeMap<RecordIdentity, bool> {
     let policy = crate::activation::ReaderPolicy::resolve(Some("off")).unwrap();
     let mut legacy = if from_dwg {
         crate::dxf_read::read_from_dwg(source, policy, &|_| crate::activation::Need::Plain)
@@ -225,9 +212,9 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
     .unwrap();
     let version = crate::save_version(&legacy);
     let refused = transform(&mut legacy, operation);
-    let actual = records(crate::write_dxf(&legacy).as_bytes());
+    let actual = RecordIndex::new(crate::write_dxf(&legacy).as_bytes());
     drop(legacy);
-    let original = records(source);
+    let original = RecordIndex::new(source);
     let mut native = acadrust::DxfReader::from_reader(Cursor::new(source.to_vec())).unwrap().read().unwrap();
     for entity in native.entities_mut() {
         entity.apply_transform(&operation.native());
@@ -235,88 +222,45 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
     let mut bytes = Vec::new();
     acadrust::DxfWriter::new(&native).keep_heavy_polylines().write_to_writer(&mut bytes).unwrap();
     drop(native);
-    let expected = records(&bytes);
+    let expected = RecordIndex::new(&bytes);
     drop(bytes);
     let mut reported = BTreeSet::new();
-    original
-        .into_iter()
-        .filter(|(_, (kind, _))| family_of_kind(kind).is_some())
-        .map(|(handle, (kind, source_tags))| {
-            let source_fields = fields(&kind, &source_tags, version);
-            // Bound roundoff by input magnitude too: rotation can cancel a large coordinate to zero.
-            let input_scale = source_fields
-                .iter()
-                .filter(|((code, _), _)| (10..=49).contains(code))
-                .filter_map(|(_, value)| value.parse::<f64>().ok())
-                .filter(|value| value.is_finite())
-                .map(f64::abs)
-                .fold(32.0, f64::max)
-                * 2.0;
-            let good = !refused.contains(&handle)
-                && actual.get(&handle).zip(expected.get(&handle)).is_some_and(|((actual_kind, actual_tags), (expected_kind, expected_tags))| {
-                    actual_kind == &kind
-                        && expected_kind == &kind
-                        && equivalent(
-                            &kind,
-                            &reference_fields(&kind, &source_tags, expected_tags, version, operation),
-                            &fields(&kind, actual_tags, version),
-                            input_scale,
-                        )
-                        && (!matches!(operation, Operation::Identity)
-                            || equivalent(&kind, &source_fields, &fields(&kind, actual_tags, version), input_scale))
-                });
-            if !good
-                && classify_legacy_unit(&[(kind.clone(), source_tags.clone())], version)
-                    .is_some_and(|classification| classification.disposition == LegacyDisposition::Plain)
-                && reported.insert(kind.clone())
-            {
-                let actual_fields = actual.get(&handle).map(|(_, tags)| fields(&kind, tags, version)).unwrap_or_default();
-                let expected_fields =
-                    expected.get(&handle).map(|(_, tags)| reference_fields(&kind, &source_tags, tags, version, operation)).unwrap_or_default();
-                let extras: Vec<_> = actual_fields.iter().filter(|(key, _)| !expected_fields.contains_key(key)).take(8).collect();
-                eprintln!("LEGACY_ADDITIONS kind={kind} handle={handle:?} operation={operation:?} fields={extras:?}");
-                for (label, target) in [("reference", &expected_fields), ("source", &source_fields)] {
-                    let differences: Vec<_> = target
-                        .iter()
-                        .filter(|(key, value)| !fields_contained(&kind, &BTreeMap::from([(**key, (*value).clone())]), &actual_fields, input_scale))
-                        .take(8)
-                        .map(|(key, value)| (key, value, actual_fields.get(key)))
-                        .collect();
-                    eprintln!(
-                        "LEGACY_DIFFERENCE kind={kind} handle={handle:?} operation={operation:?} refused={} branch={label} fields={differences:?}",
-                        refused.contains(&handle)
-                    );
-                }
-            }
-            (handle, good)
-        })
-        .collect()
-}
-
-fn containers(source: &[u8]) -> BTreeMap<Handle, crate::activation::records::Container> {
-    use crate::activation::records::Container;
-    let tags = cadcraft_dxf::parse(source).unwrap();
-    let mut result = BTreeMap::new();
-    for section in cadcraft_dxf::sections(&tags).into_iter().filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
-        let mut container = Container::Entities;
-        for (kind, groups) in cadcraft_dxf::records(&section.tags) {
-            if kind == "BLOCK"
-                && let Some(name) = groups.iter().find(|tag| tag.code == 2)
-            {
-                container = Container::block(&name.str());
-            }
-            if let Some(handle) = groups.iter().find(|tag| tag.code == 5).and_then(|tag| Handle::parse_hex(&tag.str())) {
-                result.insert(handle, container.clone());
-            }
-            if kind == "ENDBLK" {
-                container = Container::Entities;
+    original.iter().map(|record| {
+        let identity = original.identity(record);
+        let kind = &record.kind;
+        let source_tags = &record.groups;
+        let source_fields = fields(kind, source_tags, version);
+        let input_scale = source_fields.iter().filter(|((code, _), _)| (10..=49).contains(code))
+            .filter_map(|(_, value)| value.parse::<f64>().ok()).filter(|value| value.is_finite())
+            .map(f64::abs).fold(32.0, f64::max) * 2.0;
+        let actual_record = actual.corresponding(&original, record);
+        let expected_record = expected.corresponding(&original, record);
+        let was_refused = actual_record.and_then(|record| record.handle).is_some_and(|handle| refused.contains(&handle));
+        let good = !was_refused && actual_record.zip(expected_record).is_some_and(|(actual, expected)| {
+            actual.kind == *kind && expected.kind == *kind
+                && equivalent(kind, &reference_fields(kind, source_tags, &expected.groups, version, operation), &fields(kind, &actual.groups, version), input_scale)
+                && (!matches!(operation, Operation::Identity) || equivalent(kind, &source_fields, &fields(kind, &actual.groups, version), input_scale))
+        });
+        if !good && classify_legacy_unit(&[(kind.clone(), source_tags.clone())], version)
+            .is_some_and(|classification| classification.disposition == LegacyDisposition::Plain)
+            && reported.insert(kind.clone())
+        {
+            let actual_fields = actual_record.map(|record| fields(kind, &record.groups, version)).unwrap_or_default();
+            let expected_fields = expected_record.map(|record| reference_fields(kind, source_tags, &record.groups, version, operation)).unwrap_or_default();
+            let extras: Vec<_> = actual_fields.iter().filter(|(key, _)| !expected_fields.contains_key(key)).take(8).collect();
+            eprintln!("LEGACY_ADDITIONS kind={kind} identity={identity:?} operation={operation:?} fields={extras:?}");
+            for (label, target) in [("reference", &expected_fields), ("source", &source_fields)] {
+                let differences: Vec<_> = target.iter().filter(|(key, value)| {
+                    !fields_contained(kind, &BTreeMap::from([(**key, (*value).clone())]), &actual_fields, input_scale)
+                }).take(8).map(|(key, value)| (key, value, actual_fields.get(key))).collect();
+                eprintln!("LEGACY_DIFFERENCE kind={kind} identity={identity:?} operation={operation:?} refused={was_refused} branch={label} fields={differences:?}");
             }
         }
-    }
-    result
+        (identity, good)
+    }).collect()
 }
 
-fn isolate_line(source: &[u8], record: &(String, Vec<Tag>)) -> Vec<u8> {
+fn isolate_line(source: &[u8], record: &Record) -> Vec<u8> {
     let parsed = cadcraft_dxf::parse(source).unwrap();
     let mut tags = Vec::new();
     for section in cadcraft_dxf::sections(&parsed).into_iter().filter(|section| !matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
@@ -324,8 +268,8 @@ fn isolate_line(source: &[u8], record: &(String, Vec<Tag>)) -> Vec<u8> {
         tags.extend(section.tags);
         tags.push(Tag::s(0, "ENDSEC"));
     }
-    tags.extend([Tag::s(0, "SECTION"), Tag::s(2, "ENTITIES"), Tag::s(0, &record.0)]);
-    tags.extend(record.1.iter().map(|tag| if tag.code == 330 { Tag::s(330, "0") } else { tag.clone() }));
+    tags.extend([Tag::s(0, "SECTION"), Tag::s(2, "ENTITIES"), Tag::s(0, &record.kind)]);
+    tags.extend(record.groups.iter().map(|tag| if tag.code == 330 { Tag::s(330, "0") } else { tag.clone() }));
     tags.extend([Tag::s(0, "ENDSEC"), Tag::s(0, "EOF")]);
     cadcraft_dxf::write_ascii(&tags).into_bytes()
 }
@@ -352,32 +296,38 @@ fn run_corpus(owner: Option<&str>) {
         let input = std::fs::read(&path).unwrap_or_else(|error| panic!("corpus input {}: {error}", entry.path));
         let from_dwg = path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("dwg"));
         let source = if from_dwg { cadcraft_dwg::dwg_to_dxf(&input).unwrap() } else { input };
-        let original = records(&source);
+        let original = RecordIndex::new(&source);
         let drawing = crate::dxf_read::read_with_policy(&source, crate::activation::ReaderPolicy::resolve(Some("off")).unwrap()).unwrap();
         let version = crate::save_version(&drawing);
         drop(drawing);
         let parsed = cadcraft_dxf::parse(&source).unwrap();
         let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), version);
         drop(parsed);
-        let places = containers(&source);
         for operation in Operation::ALL {
             let measured = measure_with_origin(&source, operation, from_dwg);
             let mut counts: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
             let mut derived: BTreeMap<String, usize> = BTreeMap::new();
-            for (handle, (kind, tags)) in &original {
-                if let Some(owner) = places.get(handle).and_then(|place| classifier.derived_owner(place)) {
+            for record in original.iter() {
+                let identity = original.identity(record);
+                let kind = &record.kind;
+                let tags = &record.groups;
+                let owner = match &record.position.placement {
+                    Placement::Container(container) => classifier.derived_owner(container),
+                    Placement::UnscopedBlocks => None,
+                };
+                if let Some(owner) = owner {
                     *derived.entry(format!("{:?}", owner.family)).or_default() += 1;
                     continue;
                 }
                 let Some(classification) = classify_legacy_unit(&[(kind.clone(), tags.clone())], version) else { continue };
                 let count = counts.entry(format!("{:?}", classification.family)).or_default();
-                let lossless = measured.get(handle) == Some(&true);
+                let lossless = measured.get(&identity) == Some(&true);
                 match (classification.disposition, lossless) {
                     (LegacyDisposition::Plain, true) => count.0 += 1,
                     (LegacyDisposition::Plain, false) => {
                         count.1 += 1;
                         if failures.len() < 50 {
-                            failures.push(format!("{} {version:?} {kind} {handle:?} {operation:?}: false plain", entry.path));
+                            failures.push(format!("{} {version:?} {kind} {identity:?} {operation:?}: false plain", entry.path));
                         }
                     }
                     (LegacyDisposition::Needs, true) => count.2 += 1,
@@ -401,20 +351,21 @@ fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
     let source = std::fs::read(path).unwrap();
     let parsed = cadcraft_dxf::parse(&source).unwrap();
     let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), Version::R2000);
-    let places = containers(&source);
     let mut checked = 0;
-    for (handle, record) in records(&source) {
-        if record.0 != "LINE"
-            || places
-                .get(&handle)
-                .and_then(|place| classifier.derived_owner(place))
-                .is_none_or(|owner| owner.family != crate::activation::Family::Table)
-        {
+    let original = RecordIndex::new(&source);
+    for record in original.iter() {
+        let owner = match &record.position.placement {
+            Placement::Container(container) => classifier.derived_owner(container),
+            Placement::UnscopedBlocks => None,
+        };
+        if record.kind != "LINE" || owner.is_none_or(|owner| owner.family != crate::activation::Family::Table) {
             continue;
         }
-        let isolated = isolate_line(&source, &record);
+        let isolated = isolate_line(&source, record);
+        let isolated_records = RecordIndex::new(&isolated);
+        let identity = isolated_records.identity(isolated_records.iter().next().unwrap());
         for operation in Operation::ALL {
-            assert_eq!(measure(&isolated, operation).get(&handle), Some(&true), "isolated derived LINE {handle:?} {operation:?}");
+            assert_eq!(measure(&isolated, operation).get(&identity), Some(&true), "isolated derived LINE {identity:?} {operation:?}");
         }
         checked += 1;
     }
@@ -424,14 +375,30 @@ fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
 #[test]
 fn structural_metadata_cannot_replace_a_family_record_in_the_oracle_index() {
     let source = b"0\nSECTION\n2\nBLOCKS\n0\nLINE\n5\nB1\n10\n0\n20\n0\n11\n1\n21\n1\n0\nENDBLK\n5\nB1\n0\nENDSEC\n0\nEOF\n";
-    assert_eq!(records(source).get(&Handle(0xB1)).unwrap().0, "LINE");
+    assert_eq!(RecordIndex::new(source).unique_handle(Handle(0xB1)).unwrap().kind, "LINE");
 }
 
 #[test]
-#[should_panic(expected = "ambiguous family record handle")]
-fn duplicate_family_handles_stop_the_oracle_instead_of_dropping_a_record() {
+fn duplicate_family_handles_remain_distinct_in_the_oracle_index() {
     let source = b"0\nSECTION\n2\nENTITIES\n0\nLINE\n5\nB1\n0\nCIRCLE\n5\nB1\n0\nENDSEC\n0\nEOF\n";
-    records(source);
+    assert_eq!(RecordIndex::new(source).iter().count(), 2);
+}
+
+#[test]
+fn missing_family_handles_remain_distinct_in_the_oracle_index() {
+    let source = b"0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n0\nLINE\n10\n2\n20\n2\n11\n3\n21\n3\n0\nENDSEC\n0\nEOF\n";
+    assert_eq!(RecordIndex::new(source).iter().count(), 2);
+}
+
+#[test]
+fn handleless_records_reach_the_replay_disabled_edit_oracle() {
+    let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n0\nLINE\n10\n5\n20\n6\n30\n0\n11\n7\n21\n8\n31\n0\n0\nENDSEC\n0\nEOF\n";
+    for operation in Operation::ALL {
+        let measured = measure(source, operation);
+        assert_eq!(measured.len(), 2);
+        assert!(measured.keys().all(|identity| matches!(identity, RecordIdentity::Occurrence(_))));
+        assert!(measured.values().all(|lossless| *lossless), "{operation:?}: {measured:?}");
+    }
 }
 
 #[test]
@@ -494,13 +461,18 @@ fn every_declared_plain_family_has_a_replay_disabled_edit_witness() {
             let source = format!(
                 "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\n{code}\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\n{kind}\n5\n100\n{fields}0\nENDSEC\n0\nEOF\n"
             );
-            let records = records(source.as_bytes());
-            let unit = records.get(&Handle(0x100)).unwrap().clone();
+            let records = RecordIndex::new(source.as_bytes());
+            let record = records.unique_handle(Handle(0x100)).unwrap();
+            let unit = (record.kind.clone(), record.groups.clone());
             if classify_legacy_unit(&[unit], version).unwrap().disposition != LegacyDisposition::Plain {
                 continue;
             }
             for operation in Operation::ALL {
-                assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "{version:?} {kind} {operation:?}");
+                assert_eq!(
+                    measure(source.as_bytes(), operation).get(&RecordIdentity::Handle(Handle(0x100))),
+                    Some(&true),
+                    "{version:?} {kind} {operation:?}"
+                );
             }
         }
     }
@@ -513,7 +485,11 @@ fn ellipse_hatch_is_plain_only_when_its_actual_edits_are_lossless() {
         let code = version.code();
         let source = format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\n{code}\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{record}0\nENDSEC\n0\nEOF\n");
         for operation in Operation::ALL {
-            assert_eq!(measure(source.as_bytes(), operation).get(&Handle(0x100)), Some(&true), "{version:?} HATCH {operation:?}");
+            assert_eq!(
+                measure(source.as_bytes(), operation).get(&RecordIdentity::Handle(Handle(0x100))),
+                Some(&true),
+                "{version:?} HATCH {operation:?}"
+            );
         }
     }
 }
@@ -521,9 +497,11 @@ fn ellipse_hatch_is_plain_only_when_its_actual_edits_are_lossless() {
 #[test]
 fn point_display_angle_fix_matches_the_independent_rotation_reference() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nPOINT\n5\n100\n10\n1\n20\n2\n30\n0\n50\n15\n0\nENDSEC\n0\nEOF\n";
-    let record = records(source).remove(&Handle(0x100)).unwrap();
+    let index = RecordIndex::new(source);
+    let source_record = index.unique_handle(Handle(0x100)).unwrap();
+    let record = (source_record.kind.clone(), source_record.groups.clone());
     assert_eq!(classify_legacy_unit(&[record], Version::R2018).unwrap().disposition, LegacyDisposition::Needs);
-    assert_eq!(measure(source, Operation::Rotate).get(&Handle(0x100)), Some(&true));
+    assert_eq!(measure(source, Operation::Rotate).get(&RecordIdentity::Handle(Handle(0x100))), Some(&true));
 }
 
 #[test]
@@ -531,10 +509,12 @@ fn primitive_plain_candidates_satisfy_the_differential_definition() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n100\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n0\nCIRCLE\n5\n101\n10\n1\n20\n2\n30\n0\n40\n3\n0\nENDSEC\n0\nEOF\n";
     for operation in Operation::ALL {
         let measured = measure(source, operation);
-        for (handle, (kind, tags)) in records(source) {
-            let decision = classify_legacy_unit(&[(kind, tags)], Version::R2018).unwrap();
+        let index = RecordIndex::new(source);
+        for record in index.iter() {
+            let identity = index.identity(record);
+            let decision = classify_legacy_unit(&[(record.kind.clone(), record.groups.clone())], Version::R2018).unwrap();
             if decision.disposition == LegacyDisposition::Plain {
-                assert_eq!(measured.get(&handle), Some(&true), "{operation:?} {handle:?}");
+                assert_eq!(measured.get(&identity), Some(&true), "{operation:?} {identity:?}");
             }
         }
     }
