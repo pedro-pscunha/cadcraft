@@ -111,6 +111,161 @@ fn mutate(bytes: Vec<u8>, mutation: Mutation) -> Vec<u8> {
     changed
 }
 
+fn attribute_version_groups(bytes: &[u8]) -> (String, Vec<i64>) {
+    let parsed = cadcraft_dxf::parse(bytes).unwrap();
+    let sections = sections(&parsed);
+    let header = sections.iter().find(|section| section.name == "HEADER").unwrap();
+    let version = header.tags.windows(2).find(|pair| pair[0].code == 9 && pair[0].str() == "$ACADVER").unwrap()[1].str();
+    let attribute = sections
+        .iter()
+        .filter(|section| section.name == "ENTITIES")
+        .flat_map(|section| records(&section.tags))
+        .find(|(kind, tags)| kind == "ATTRIB" && tags.iter().any(|tag| tag.code == 5 && Handle::parse_hex(&tag.str()) == Some(Handle(0x201))))
+        .unwrap()
+        .1;
+    let mut in_attribute = false;
+    let groups = attribute
+        .iter()
+        .filter_map(|tag| {
+            if tag.code == 100 {
+                in_attribute = tag.str() == "AcDbAttribute";
+            }
+            (in_attribute && tag.code == 280).then(|| tag.i64())
+        })
+        .collect();
+    (version, groups)
+}
+
+#[test]
+fn binary_inspection_promotes_pre_r2007_and_adds_only_the_documented_attribute_zero_fields() {
+    let source = include_bytes!("../tests/data/activation/r5_raw_insert_with_full_tables.dxf");
+    let need = |view: &crate::activation::records::RecordView<'_>| {
+        if matches!(view.kind, "INSERT" | "ATTRIB") { crate::activation::Need::Needs { readable: true } } else { crate::activation::Need::Plain }
+    };
+    let policy = crate::activation::ReaderPolicy::new(crate::activation::ReaderMode::Off, crate::activation::FamilySet::NONE).with_raw_path();
+    let drawing = crate::read_with_need(source, "source.dxf", policy, &need).unwrap();
+    let bridge = crate::dxf_write::dwg_bridge(&drawing, cadcraft_dxf::Version::R2000);
+    assert_eq!(attribute_version_groups(&bridge.bytes), ("AC1015".into(), vec![0, 0]), "the first bridge already carries both explicit zeros");
+    let first = crate::write(&drawing, "first.dwg").unwrap();
+    let ascii = cadcraft_dwg::dwg_to_dxf(&first).unwrap();
+    let binary = cadcraft_dwg::inspect_dwg(&first, cadcraft_dwg::Limits::DEFAULT).unwrap().dxf;
+    assert_eq!(attribute_version_groups(&ascii), ("AC1018".into(), vec![]), "normal reopen exposes the R2004 DWG actually written");
+    assert_eq!(attribute_version_groups(&binary), ("AC1024".into(), vec![0, 0]), "only the inspection rendition promotes binary DXF to R2010");
+    let reopened = crate::read_with_need(&first, "first.dwg", policy, &need).unwrap();
+    let EntityKind::Raw(raw) = &reopened.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
+    let attribute = raw.records().find(|record| record.handle() == Handle(0x201)).unwrap();
+    assert!(!attribute.tags().iter().any(|tag| tag.code == 280), "Raw admission must not add a version field");
+    let bridge = crate::dxf_write::dwg_bridge(&reopened, crate::save_version(&reopened));
+    assert_eq!(
+        attribute_version_groups(&bridge.bytes),
+        ("AC1015".into(), vec![]),
+        "the second bridge uses the R2000 schema and does not add the fields either"
+    );
+    let second = crate::write(&reopened, "second.dwg").expect("the binary inspection's documented zero defaults must not prevent a second save");
+    assert_eq!(attribute_version_groups(&cadcraft_dwg::dwg_to_dxf(&second).unwrap()), ("AC1018".into(), vec![]));
+}
+
+#[test]
+fn nonzero_attribute_version_and_a_third_zero_occurrence_still_refuse() {
+    for extra in [false, true] {
+        let mut drawing = fixtures::drawing("INSERT");
+        let EntityKind::Raw(raw) = &drawing.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
+        let followers = raw
+            .followers()
+            .iter()
+            .map(|record| {
+                let mut tags = record.tags().to_vec();
+                if record.handle() == Handle(0x201) {
+                    if extra {
+                        let end = tags.iter().position(|tag| tag.code == 1001).unwrap_or(tags.len());
+                        tags.insert(end, RawTag { code: 280, value: "0".into() });
+                    } else {
+                        tags.iter_mut().find(|tag| tag.code == 280).unwrap().value = "1".into();
+                    }
+                }
+                RawRecord::new(record.kind().into(), tags).unwrap()
+            })
+            .collect();
+        let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
+        drawing.model.replace(Entity::from_raw(unit));
+        let error = crate::write(&drawing, "invalid-version.dwg").expect_err("only the two documented zero defaults can be equivalent");
+        match error {
+            crate::IoError::RawPreservation { record, handle, field, .. } => {
+                assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
+                assert!(field.contains(if extra { "group 280[2]" } else { "group 280[0]" }), "{field}");
+            }
+            error => panic!("unexpected error: {error}"),
+        }
+    }
+}
+
+#[test]
+fn the_attribute_zero_rule_cannot_hide_a_changed_lock_bit() {
+    let drawing = fixtures::drawing("INSERT");
+    let result = crate::write_dwg_with(&drawing, crate::Version::R2018, |bridge, page| {
+        let (bytes, notes) = cadcraft_dwg::dxf_to_dwg_as_noted(bridge, "AC1032", page)?;
+        let mut document = acadrust::DwgReader::from_stream(Cursor::new(bytes)).read().unwrap();
+        let mut changed = false;
+        for entity in document.entities_mut() {
+            if let EntityType::Insert(insert) = entity {
+                for attribute in &mut insert.attributes {
+                    if attribute.common.handle.value() == 0x201 {
+                        attribute.common.raw_record = None;
+                        attribute.lock_position = true;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed);
+        Ok((acadrust::DwgWriter::write_to_vec(&document).unwrap(), notes))
+    });
+    match result {
+        Err(crate::IoError::RawPreservation { record, handle, field, .. }) => {
+            assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
+            assert!(field.contains("group 280[1]"), "{field}");
+        }
+        result => panic!("a changed lock bit must refuse: {result:?}"),
+    }
+}
+
+#[test]
+fn attribute_version_equivalence_is_limited_to_two_zero_fields_in_the_own_subclass() {
+    let source = super::fields::parse(
+        &[
+            RawTag { code: 100, value: "AcDbAttribute".into() },
+            RawTag { code: 280, value: "0".into() },
+            RawTag { code: 280, value: "0".into() },
+            RawTag { code: 280, value: "0".into() },
+        ],
+        true,
+    )
+    .unwrap();
+    for (field, value) in source.iter().filter(|(field, _)| field.code == 280) {
+        let default = super::fields::default_value("ATTRIB", field, &source);
+        assert_eq!(default, (field.index < 2).then_some(super::fields::Value::Integer(0)));
+        if field.index < 2 {
+            assert_eq!(default.as_ref(), Some(value));
+        }
+        assert!(super::fields::default_value("ATTDEF", field, &source).is_none());
+    }
+    for tags in [
+        vec![(100, "AcDbText"), (280, "0")],
+        vec![(100, "AcDbAttribute"), (102, "{PRIVATE"), (280, "0"), (102, "}")],
+        vec![(100, "AcDbAttribute"), (1001, "RAW_APP"), (280, "0")],
+        vec![(100, "AcDbAttribute"), (101, "Embedded Object"), (280, "0")],
+    ] {
+        let tags: Vec<_> = tags.into_iter().map(|(code, value)| RawTag { code, value: value.into() }).collect();
+        let fields = super::fields::parse(&tags, true).unwrap();
+        let field = fields.keys().find(|field| field.code == 280).unwrap();
+        assert!(super::fields::default_value("ATTRIB", field, &fields).is_none());
+    }
+    let nonzero =
+        super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "1".into() }], true).unwrap();
+    let (field, value) = nonzero.iter().find(|(field, _)| field.code == 280).unwrap();
+    assert_ne!(super::fields::default_value("ATTRIB", field, &nonzero).as_ref(), Some(value));
+}
+
 #[test]
 fn all_non_numeric_raw_corruption_refuses_and_leaves_the_output_file_unchanged() {
     let drawing = drawing();

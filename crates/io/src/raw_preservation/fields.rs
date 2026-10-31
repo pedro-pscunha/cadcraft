@@ -183,7 +183,19 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
 ///
 /// Optional-field defaults are listed here only after a documented format rule justifies them.
 pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Option<Value> {
-    if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 || field.index != 0 {
+    if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 {
+        return None;
+    }
+    // DXF Reference, ATTRIB: AcDbAttribute's first 280 is version 0 (R2010),
+    // and its second 280 is the lock-position flag. ODA20.4.4 has no version
+    // byte before R2010 or lock bit before R2007, so both absent values are zero.
+    // Binary DXF inspection promotes older output to R2010 and emits those zeros.
+    // Nonzero values still compare strictly; a third 280 is not a documented field.
+    // https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-7DD8B495-C3F8-48CD-A766-14F9D7D0DD9B.htm
+    if kind == "ATTRIB" && field.class == "AcDbAttribute" && field.code == 280 && field.index < 2 {
+        return Some(Value::Integer(0));
+    }
+    if field.index != 0 {
         return None;
     }
     let zero_alignment = |class: &str, code: i32| {
