@@ -174,6 +174,39 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
     Ok(fields)
 }
 
+/// The expected fields as a release below R2010 can hold them. DXF Reference, ATTRIB / ODA 20.4.4: AcDbAttribute's first 280 is
+/// the version, stored from R2010, and its second is the lock-position flag, stored from R2007. A decode of an older release
+/// has no version, so a version of 0, the default, is set aside and the lock becomes the first 280 (a source that holds one 280
+/// was read from such a release, and that 280 is the lock). A nonzero version stays and
+/// is refused, as does a third 280.
+/// https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-7DD8B495-C3F8-48CD-A766-14F9D7D0DD9B.htm
+pub(crate) fn for_release(expected: Fields, kind: &str, target: Version) -> Fields {
+    let attribute_280 = |field: &Field| {
+        kind == "ATTRIB"
+            && field.class == "AcDbAttribute"
+            && field.code == 280
+            && field.groups.is_empty()
+            && field.application.is_none()
+            && field.embedded == 0
+    };
+    let version = expected.iter().find(|(field, _)| attribute_280(field) && field.index == 0);
+    // A source with one 280 was read from a release without a version: that 280 is the lock.
+    let both = expected.keys().filter(|field| attribute_280(field)).count() >= 2;
+    if target >= Version::R2010 || !both || !version.is_some_and(|(_, value)| *value == Value::Integer(0)) {
+        return expected;
+    }
+    expected
+        .into_iter()
+        .filter(|(field, _)| !(attribute_280(field) && field.index == 0))
+        .map(|(mut field, value)| {
+            if attribute_280(&field) {
+                field.index -= 1;
+            }
+            (field, value)
+        })
+        .collect()
+}
+
 /// Accepted wire equivalences, with their reasons. No rule ignores an unknown field.
 /// - Numeric spelling: DXF text and the finite binary64/integer value it encodes are equal.
 /// - Handle spelling: leading zeros and hex case do not change the database identity.
@@ -186,18 +219,10 @@ pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields, target: 
     if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 {
         return None;
     }
-    // DXF Reference, ATTRIB: AcDbAttribute's first 280 is the version (stored from R2010) and its second is the
-    // lock-position flag (from R2007), ODA 20.4.4. A release that cannot store a field holds nothing for it, so a 0, the
-    // documented default, loses nothing there. A nonzero value, a third 280 and any other scope stay strict, and a release
-    // that can store the field must keep it.
-    // https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-7DD8B495-C3F8-48CD-A766-14F9D7D0DD9B.htm
+    // ATTRIB's lock-position flag, the first 280 once [`for_release`] has set the version aside: a release before R2007 stores
+    // none, so a 0, the documented default, loses nothing there. Everything else stays strict.
     if kind == "ATTRIB" && field.class == "AcDbAttribute" && field.code == 280 {
-        let stored_from = match field.index {
-            0 => Version::R2010,
-            1 => Version::R2007,
-            _ => return None,
-        };
-        return (target < stored_from).then_some(Value::Integer(0));
+        return (field.index == 0 && target < Version::R2007).then_some(Value::Integer(0));
     }
     if field.index != 0 {
         return None;

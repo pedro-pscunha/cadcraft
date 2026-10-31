@@ -208,7 +208,8 @@ fn old_targets_save_the_zero_attribute_fields_they_cannot_store() {
 
 #[test]
 fn a_nonzero_attribute_field_still_refuses_at_a_release_that_cannot_store_it() {
-    for (version, lock, group) in [(Some("1"), None, "group 280[0]"), (None, Some("1"), "group 280[1]")] {
+    // Below R2010 a zero version is set aside, so the lock is the first 280 there.
+    for (version, lock, group) in [(Some("1"), None, "group 280[0]"), (None, Some("1"), "group 280[0]")] {
         let drawing = drawing_with_attribute_280(version, lock);
         for target in [crate::Version::R2000, crate::Version::R2004] {
             match save_at(&drawing, target) {
@@ -230,22 +231,30 @@ fn the_default_rule_follows_the_target_release() {
     )
     .unwrap();
     let zero = Some(super::fields::Value::Integer(0));
-    for (target, version_default, lock_default) in [
-        (crate::Version::R2000, true, true),
-        (crate::Version::R2004, true, true),
-        (crate::Version::R2007, true, false),
-        (crate::Version::R2010, false, false),
-        (crate::Version::R2018, false, false),
+    // The version is set aside below R2010; the lock is then the first 280, and a default only before R2007.
+    for (target, lock_default) in [
+        (crate::Version::R2000, true),
+        (crate::Version::R2004, true),
+        (crate::Version::R2007, false),
+        (crate::Version::R2010, false),
+        (crate::Version::R2018, false),
     ] {
-        for field in source.keys().filter(|field| field.code == 280) {
-            let expected = if field.index == 0 { version_default } else { lock_default };
+        let kept = super::fields::for_release(source.clone(), "ATTRIB", target);
+        let indices: Vec<usize> = kept.keys().filter(|field| field.code == 280).map(|field| field.index).collect();
+        assert_eq!(indices, if target < crate::Version::R2010 { vec![0] } else { vec![0, 1] }, "{target:?}");
+        for field in kept.keys().filter(|field| field.code == 280) {
+            let expected = lock_default && field.index == 0;
             assert_eq!(
-                super::fields::default_value("ATTRIB", field, &source, target),
+                super::fields::default_value("ATTRIB", field, &kept, target),
                 expected.then(|| zero.clone()).flatten(),
                 "{target:?} {field:?}"
             );
         }
     }
+    // A source with one 280 was read from a release without a version: that 280 is the lock, and stays.
+    let lock_only =
+        super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "0".into() }], true).unwrap();
+    assert_eq!(super::fields::for_release(lock_only.clone(), "ATTRIB", crate::Version::R2007), lock_only);
 }
 
 #[test]
@@ -271,13 +280,16 @@ fn nonzero_attribute_version_and_a_third_zero_occurrence_still_refuse() {
             .collect();
         let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
         drawing.model.replace(Entity::from_raw(unit));
-        let error = crate::write(&drawing, "invalid-version.dwg").expect_err("every explicit attribute version field must survive");
-        match error {
-            crate::IoError::RawPreservation { record, handle, field, .. } => {
-                assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
-                assert!(field.contains(if extra { "group 280[2]" } else { "group 280[0]" }), "{field}");
+        for (target, third) in [(crate::Version::R2018, "group 280[2]"), (crate::Version::R2004, "group 280[1]")] {
+            let error = save_at(&drawing, target).expect_err("every explicit attribute version field must survive");
+            match error {
+                crate::IoError::RawPreservation { record, handle, field, .. } => {
+                    assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
+                    // Below R2010 the zero version is set aside, so the third 280 is the second.
+                    assert!(field.contains(if extra { third } else { "group 280[0]" }), "{target:?}: {field}");
+                }
+                error => panic!("unexpected error: {error}"),
             }
-            error => panic!("unexpected error: {error}"),
         }
     }
 }
@@ -327,8 +339,8 @@ fn attribute_zero_defaults_are_limited_to_two_fields_in_the_own_subclass() {
     let target = crate::Version::R2000;
     for (field, value) in source.iter().filter(|(field, _)| field.code == 280) {
         let default = super::fields::default_value("ATTRIB", field, &source, target);
-        assert_eq!(default, (field.index < 2).then_some(super::fields::Value::Integer(0)));
-        if field.index < 2 {
+        assert_eq!(default, (field.index == 0).then_some(super::fields::Value::Integer(0)));
+        if field.index == 0 {
             assert_eq!(default.as_ref(), Some(value));
         }
         assert!(super::fields::default_value("ATTDEF", field, &source, target).is_none());
@@ -604,4 +616,21 @@ fn an_unmodified_native_control_passes_the_same_runtime_check() {
             crate::write_dwg_with(&drawing, crate::Version::R2018, |bridge, page| cadcraft_dwg::dxf_to_dwg_as_noted(bridge, "AC1032", page)).unwrap();
         assert!(!bytes.is_empty());
     }
+}
+
+#[test]
+fn an_r2007_target_saves_a_raw_attribute_twice_with_zero_version_and_lock() {
+    // R2007 stores the lock bit, as the first 280, but not the version byte.
+    let drawing = fixtures::drawing("INSERT");
+    let first = save_at(&drawing, crate::Version::R2007).expect("R2007 first save");
+    let policy = crate::activation::ReaderPolicy::new(crate::activation::ReaderMode::Off, crate::activation::FamilySet::NONE).with_raw_path();
+    let need = |view: &crate::activation::records::RecordView<'_>| {
+        if matches!(view.kind, "INSERT" | "ATTRIB") { crate::activation::Need::Needs { readable: true } } else { crate::activation::Need::Plain }
+    };
+    let reopened = crate::read_with_need(&first, "first.dwg", policy, &need).unwrap();
+    let second = save_at(&reopened, crate::Version::R2007).expect("R2007 second save");
+    crate::read_with_need(&second, "second.dwg", policy, &need).unwrap();
+    // A lock of 1 is stored at R2007 and survives; a lock the DWG would lose refuses at an older release (above).
+    let locked = drawing_with_attribute_280(None, Some("1"));
+    save_at(&locked, crate::Version::R2007).expect("R2007 stores the lock bit");
 }

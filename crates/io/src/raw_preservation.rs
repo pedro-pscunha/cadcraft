@@ -350,7 +350,7 @@ impl<'a> RawSaveCheck<'a> {
         if inspection.unexposed.contains(&mapped_identity.0) || !inspection.handles.contains(&mapped_identity.0) {
             return Err(failure(unit, kind, handle, "semantic payload / 5", "the independent decoder cannot expose the required record"));
         }
-        let mut expected = expected;
+        let mut expected = fields::for_release(expected, kind, self.target);
         let mut raw = Vec::with_capacity(actual.tags.len());
         for tag in actual.tags {
             if let TagValue::Real(value) = tag.value
