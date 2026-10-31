@@ -1093,6 +1093,15 @@ fn live_rows() -> Vec<Row> {
         fixture: circle_at_elevation,
         expect: Expect::Ok(|v| near(number(v, "area")?, 4.0 * std::f64::consts::PI)),
     });
+    out.push(Row {
+        command: "area",
+        role: Role::Primary,
+        branch: "ellipse, major (3,0,4), ratio 0.5, kept as read",
+        revision: Revision::Raw,
+        plane: PlusZ,
+        fixture: area_ellipse,
+        expect: Expect::Refuses("raw"),
+    });
     // Point-based creation: nothing under the picks changes the new object, in any revision of the operand.
     let creations: [(&str, &str, fn() -> Fixture, Expect); 9] = [
         ("point", "at", point_fixture, Expect::Edits(point_made)),
