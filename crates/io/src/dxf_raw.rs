@@ -1206,12 +1206,18 @@ pub(crate) fn has_variable_dictionary(f: &Foreign) -> bool {
     variable_dictionary(f).is_some()
 }
 
-/// The current multileader style the kept variable dictionary names becomes the drawing's, unless the header already names one.
+/// The current multileader style the kept variable dictionary names is the drawing's, Standard included: the variable is the file's
+/// own record of it, and a private copy or a header variable an older CADCraft wrote is read only when there is none. A name that
+/// no style of the file has is repaired as AUDIT does (Standard), and the variable is reported as skipped.
 fn take_current_mleader_style(d: &mut Drawing, f: &Foreign) {
-    if d.header.str("CMLEADERSTYLE", "Standard").trim().eq_ignore_ascii_case("Standard")
-        && let Some(style) = kept_mleader_style(f).filter(|s| !s.trim().eq_ignore_ascii_case("Standard"))
-    {
-        d.header.set_str("CMLEADERSTYLE", style.trim());
+    let Some(style) = kept_mleader_style(f).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else { return };
+    if style.eq_ignore_ascii_case("Standard") {
+        d.header.set_str("CMLEADERSTYLE", "Standard");
+    } else if d.mleader_styles.iter().any(|s| s.name.eq_ignore_ascii_case(&style)) {
+        d.header.set_str("CMLEADERSTYLE", &style);
+    } else {
+        d.header.set_str("CMLEADERSTYLE", "Standard");
+        *d.skipped_records.entry("DICTIONARYVAR CMLEADERSTYLE".into()).or_default() += 1;
     }
 }
 
@@ -1249,7 +1255,7 @@ fn with_current_mleader_style(d: &Drawing, f: &Foreign, target: cadcraft_dxf::Ve
             }
             let dictionary_handle = patched.objects.get(dictionary)?.handle;
             let top = all_entities(d).map(|e| e.handle.0).chain(f.objects.iter().chain(&f.table_records).map(|o| o.handle.0)).max().unwrap_or(0);
-            let new = Handle(top.max(d.handseed).saturating_add(1));
+            let new = Handle(top.max(d.handseed).checked_add(1)?);
             patched
                 .objects
                 .get_mut(dictionary)?
@@ -1610,6 +1616,8 @@ fn written_records(tags: &[Tag]) -> Vec<Rec> {
 pub(crate) struct WrittenReferences {
     pub handles: BTreeMap<Handle, Handle>,
     pub roles: BTreeMap<ForeignKey, Handle>,
+    /// The writer found no handle above the ones it gave (see `dxf_write::require_handle_room`).
+    pub handles_exhausted: bool,
 }
 
 impl WrittenReferences {
@@ -1658,7 +1666,7 @@ impl Map<'_> {
             self.alive.iter().filter_map(|(old, new)| Some((Handle::parse_hex(old)?, Handle::parse_hex(new)?))).collect();
         handles.extend(self.f.targets.keys().filter_map(|old| Some((*old, Handle::parse_hex(&self.get(&old.hex())?)?))));
         let roles = self.roles.iter().filter_map(|(role, value)| Some((role.clone(), Handle::parse_hex(value)?))).collect();
-        WrittenReferences { handles, roles }
+        WrittenReferences { handles, roles, handles_exhausted: false }
     }
 
     fn write_record(

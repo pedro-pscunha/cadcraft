@@ -171,6 +171,11 @@ fn hostile_handle_seed_does_not_panic() {
         let mut q = p.clone();
         q[at].1 = bad.to_string();
         let text: String = q.iter().map(|(c, v)| format!("{c}\r\n{v}\r\n")).collect();
+        // A seed at the largest handle leaves no handle above it: the read fails (see `handle_exhaustion_fails_the_read_and_the_save`).
+        if bad == "FFFFFFFFFFFFFFFF" {
+            assert!(cadcraft_io::read_dxf(text.as_bytes()).is_err());
+            continue;
+        }
         let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
         let again = cadcraft_io::write_dxf(&back);
         assert_eq!(dim_blocks(&again).len(), 1, "{bad}");

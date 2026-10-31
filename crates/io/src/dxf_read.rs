@@ -296,6 +296,7 @@ fn read_core(
     // CADCraft wrote keeps its table records' and objects' handles (`source_symbols.handles`), and a
     // new handle is above the file's `$HANDSEED`.
     reserve_instance_handles(&mut secs, &mut d);
+    require_handle_room(&d)?;
     let mut skipped = BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
@@ -326,11 +327,6 @@ fn read_core(
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
-    // Keep handles unique against the header's seed.
-    let seed = d.header.str("HANDSEED", "");
-    if let Some(h) = Handle::parse_hex(&seed) {
-        d.bump_handseed(Handle(h.0.saturating_sub(1)));
-    }
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
@@ -344,7 +340,8 @@ fn read_core(
     }
     d.allocate_missing_attribute_handles();
     d.remember_raw_dimassocs();
-    d.skipped_records = skipped;
+    require_handle_room(&d)?;
+    d.skipped_records.extend(skipped);
     keep_block_previews(&mut d, rx.block_previews);
     keep_table_graphics(&mut d, &rx.table_blocks, rx.table_graphics);
     Ok((d, read_report))
@@ -371,10 +368,31 @@ fn keep_table_graphics(d: &mut Drawing, names: &HashMap<String, Handle>, mut gra
     }
 }
 
+/// A file whose handles leave no room above them (a `$HANDSEED` or a record at or near the largest handle) is not read: a handle is
+/// never given twice, and never starts again from a low one.
+fn require_handle_room(d: &Drawing) -> crate::Result<()> {
+    if d.has_handle_room() {
+        Ok(())
+    } else {
+        Err(IoError::Format(format!(
+            "the file's handles reach {:X}, with no room above them for the handles of new objects",
+            d.handseed.saturating_sub(1)
+        )))
+    }
+}
+
 /// Take every handle the file uses, and reserve its persistent child identities. A colliding input
 /// identity is omitted before raw-data reading, so its dictionary cannot be attached to whichever
 /// different record already owns the handle.
 fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing) {
+    // The file's next handle first: a record without a handle is given one while the sections are read, and the handles above the
+    // highest one in use but below the file's `$HANDSEED` are the ones its erased objects had.
+    for section in secs.iter().filter(|s| s.name == "HEADER") {
+        if let Some(seed) = section.tags.windows(2).find(|w| w[0].code == 9 && w[0].str() == "$HANDSEED").and_then(|w| Handle::parse_hex(&w[1].str()))
+        {
+            d.bump_handseed(Handle(seed.0.saturating_sub(1)));
+        }
+    }
     let mut used = HashSet::new();
     for section in secs.iter().filter(|s| s.name != "HEADER") {
         let mut kind = String::new();

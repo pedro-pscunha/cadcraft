@@ -2,6 +2,8 @@
 
 use crate::{Attrib, Drawing, EntityKind, EntityStore, Handle};
 
+/// The next handle. At the largest handle the seed stays there ([`Drawing::has_handle_room`] is false long before), and a read or a save
+/// of such a drawing fails instead of writing a handle twice.
 pub(crate) fn allocate_handle(next: &mut u64) -> Handle {
     let h = Handle(*next);
     *next = next.saturating_add(1);

@@ -172,7 +172,7 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
         Some(Format::Dxf) => {
             let bytes = if opts.binary {
                 raw_preservation::require_ascii(d)?;
-                cadcraft_dxf::write_binary(&dxf_write::tags(d, version), version.utf8())
+                cadcraft_dxf::write_binary(&dxf_write::checked_tags(d, version)?, version.utf8())
             } else {
                 dxf_write::checked_ascii(d, version)?
             };
@@ -197,6 +197,7 @@ fn write_dwg_with(
 ) -> Result<(Vec<u8>, Vec<String>)> {
     raw_preservation::preflight(drawing)?;
     let bridge = dxf_write::dwg_bridge(drawing, version);
+    dxf_write::require_handle_room(&bridge.references)?;
     let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references, version)?;
     let page = drawing.header.str("DWGCODEPAGE", "ANSI_1252");
     let page = page.trim();

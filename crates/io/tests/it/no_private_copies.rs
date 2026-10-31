@@ -401,21 +401,32 @@ fn exception_the_current_multileader_style_before_r2004_stays_an_xrecord() {
     }
 }
 
-/// A file as AutoCAD writes it, with the variable dictionary: the current multileader style `style` (none: the dictionary has other
-/// variables only).
-fn autocad_variables_file(style: Option<&str>) -> String {
-    let entry = if style.is_some() { "3\nCMLEADERSTYLE\n350\n2F8D\n" } else { "" };
-    let variable = style.map_or(String::new(), |s| {
-        format!("0\nDICTIONARYVAR\n5\n2F8D\n102\n{{ACAD_REACTORS\n330\n322\n102\n}}\n330\n322\n100\nDictionaryVariables\n280\n0\n1\n{s}\n")
-    });
-    format!(
-        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n50000\n0\nENDSEC\n\
-         0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n100\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n0\nENDSEC\n\
-         0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n281\n1\n3\nAcDbVariableDictionary\n350\n322\n\
-         0\nDICTIONARY\n5\n322\n102\n{{ACAD_REACTORS\n330\nC\n102\n}}\n330\nC\n100\nAcDbDictionary\n281\n1\n3\nCANNOSCALE\n350\n2F8F\n{entry}\
-         0\nDICTIONARYVAR\n5\n2F8F\n102\n{{ACAD_REACTORS\n330\n322\n102\n}}\n330\n322\n100\nDictionaryVariables\n280\n0\n1\n1:1\n{variable}\
-         0\nENDSEC\n0\nEOF\n"
-    )
+/// A file as AutoCAD writes it: the multileader styles `styles` (real MLEADERSTYLE records), and the variable dictionary with the variable
+/// CMLEADERSTYLE naming `variable` (none: the dictionary has no such variable). The first style is the drawing's own while the file is made.
+fn variables_file(styles: &[&str], variable: Option<&str>) -> String {
+    let mut d = Drawing::new_metric();
+    for style in styles {
+        d.mleader_styles.push(MLeaderStyle { name: (*style).into(), ..MLeaderStyle::default() });
+    }
+    d.header.set_str("CMLEADERSTYLE", styles.first().copied().unwrap_or("Notes"));
+    d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })).unwrap();
+    let mut tags = parse(&cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap()).unwrap();
+    let entry = tags.windows(2).position(|w| w[0].code == 3 && w[0].str() == "CMLEADERSTYLE" && w[1].code == 350).expect("the variable's entry");
+    let handle = tags[entry + 1].str();
+    let record =
+        (0..tags.len()).find(|&k| tags[k].code == 0 && tags[k].str() == "DICTIONARYVAR" && tags[k + 1].str() == handle).expect("the variable");
+    let end = record_end(&tags, record);
+    match variable {
+        Some(value) => {
+            let at = (record..end).find(|&k| tags[k].code == 1).expect("the value");
+            tags[at] = Tag::s(1, value);
+        }
+        None => {
+            tags.drain(record..end);
+            tags.drain(entry..entry + 2);
+        }
+    }
+    cadcraft_dxf::write_ascii(&tags)
 }
 
 /// The value of the CMLEADERSTYLE variable and the number of them (and of `$CMLEADERSTYLE` header variables) in a DXF.
@@ -457,7 +468,7 @@ fn the_current_multileader_style_is_the_variable_from_r2004() {
 fn the_current_multileader_style_of_an_autocad_file_follows_the_drawing() {
     let options = SaveOptions { version: Some(Version::R2018), binary: false };
     for name in ["x.dxf", "x.dwg"] {
-        let mut d = cadcraft_io::read_dxf(autocad_variables_file(Some("Linha_MEDIO")).as_bytes()).unwrap();
+        let mut d = cadcraft_io::read_dxf(variables_file(&["Linha_MEDIO", "Notes"], Some("Linha_MEDIO")).as_bytes()).unwrap();
         assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{name}: read");
         let kept = cadcraft_io::write_with(&d, name, &options).unwrap();
         assert_eq!(cadcraft_io::read(&kept, name).unwrap().header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "{name}: unedited");
@@ -466,8 +477,9 @@ fn the_current_multileader_style_of_an_autocad_file_follows_the_drawing() {
         assert_eq!(mleader_variable(&tags).0, ["Standard"], "{name}: the variable of the switch");
         assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Standard", "{name}: switched");
         // A variable dictionary without the variable.
-        let mut d = cadcraft_io::read_dxf(autocad_variables_file(None).as_bytes()).unwrap();
+        let mut d = cadcraft_io::read_dxf(variables_file(&["Linha_MEDIO", "Notes"], None).as_bytes()).unwrap();
         assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Standard", "{name}: none");
+        assert!(d.mleader_styles.iter().any(|s| s.name == "Notes"), "the style records are read");
         d.header.set_str("CMLEADERSTYLE", "Notes");
         let (bytes, tags) = saved(&d, name, Version::R2018);
         assert_eq!(mleader_variable(&tags).0, ["Notes"], "{name}: a variable made");
@@ -595,6 +607,201 @@ fn a_save_of_an_autocad_file_is_the_same_file_again() {
             let twice = cadcraft_io::write_with(&cadcraft_io::read(&once, name).unwrap(), name, &options).unwrap();
             let thrice = cadcraft_io::write_with(&cadcraft_io::read(&twice, name).unwrap(), name, &options).unwrap();
             assert!(twice == thrice, "seed {seed} {name}: the second save differs from the third");
+        }
+    }
+}
+
+/// A CADCraft R2018 DXF whose `$HANDSEED` is `seed`, far above its records' handles (a file in which objects were erased).
+fn source_with_seed(seed: &str) -> String {
+    let mut d = Drawing::new_metric();
+    d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(3.0, 3.0, 0.0) })).unwrap();
+    let mut tags = parse(&cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap()).unwrap();
+    let at = tags.iter().position(|t| t.code == 9 && t.str() == "$HANDSEED").expect("$HANDSEED");
+    tags[at + 1] = Tag::s(5, seed);
+    cadcraft_dxf::write_ascii(&tags)
+}
+
+/// A DWG save of a file whose `$HANDSEED` is far above its live handles keeps the seed: every handle the save made, CADCraft's or the
+/// DWG writer's, is at or above it (an erased handle is never given again), and the second save is the third.
+#[test]
+fn unedited_dwg_save_preserves_source_handseed() {
+    let source = source_with_seed("500000");
+    let source_handles: std::collections::HashSet<u64> = record_handles(&parse(source.as_bytes()).unwrap()).into_iter().collect();
+    assert!(source_handles.iter().all(|h| *h < 0x500000), "the source has no handle at the seed");
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let once = cadcraft_io::write_with(&d, "x.dwg", &options).unwrap();
+    let tags = parse(&cadcraft_dwg::dwg_to_dxf(&once).unwrap()).unwrap();
+    assert!(header_seed(&tags) >= 0x500000, "the DWG seed is {:X}", header_seed(&tags));
+    let made: Vec<u64> = record_handles(&tags).into_iter().filter(|h| !source_handles.contains(h)).collect();
+    assert!(
+        made.iter().all(|h| *h >= 0x500000),
+        "handles made below the source seed: {:X?}",
+        made.iter().filter(|h| **h < 0x500000).collect::<Vec<_>>()
+    );
+    let twice = cadcraft_io::write_with(&cadcraft_io::read(&once, "x.dwg").unwrap(), "x.dwg", &options).unwrap();
+    let thrice = cadcraft_io::write_with(&cadcraft_io::read(&twice, "x.dwg").unwrap(), "x.dwg", &options).unwrap();
+    assert!(twice == thrice, "the second save differs from the third");
+}
+
+/// An erased handle is never given again: with the highest live handle at 0x4FFF and a seed of 0x500000, a new entity has a handle of
+/// 0x500000 or more.
+#[test]
+fn source_handseed_above_all_live_handles_is_never_reused() {
+    let mut d = cadcraft_io::read_dxf(autocad_file("500000").as_bytes()).unwrap();
+    let line = d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(3.0, 3.0, 0.0) })).unwrap();
+    assert!(line.0 >= 0x500000, "the new entity has {line:?}");
+}
+
+/// A record with no handle gets one while the file is read, before the records after it are read: the handle is above the file's
+/// `$HANDSEED` even though a table or object with a high handle comes later (here 0x4FFF in OBJECTS, and a seed of 0x500000).
+#[test]
+fn read_time_repaired_vertex_respects_source_handseed() {
+    let file = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n500000\n0\nENDSEC\n\
+         0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n\
+         0\nPOLYLINE\n5\n100\n8\n0\n66\n1\n10\n0\n20\n0\n30\n0\n70\n0\n\
+         0\nVERTEX\n8\n0\n10\n0\n20\n0\n30\n0\n0\nVERTEX\n8\n0\n10\n1\n20\n1\n30\n0\n0\nSEQEND\n8\n0\n0\nENDSEC\n\
+         0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n281\n1\n3\nKEEP_ME\n350\n4FFF\n\
+         0\nXRECORD\n5\n4FFF\n330\nC\n100\nAcDbXrecord\n280\n1\n1\nx\n0\nENDSEC\n0\nEOF\n";
+    let d = cadcraft_io::read_dxf(file.as_bytes()).unwrap();
+    let mut made = Vec::new();
+    for e in d.model.iter() {
+        if !matches!(e.kind, EntityKind::Polyline3d(_) | EntityKind::LwPolyline(_)) && e.handle.0 != 0x100 {
+            made.push(e.handle.0);
+        }
+        made.extend(e.kind.polyline_records().filter_map(|r| r.handle).filter(|h| h.0 != 0x100).map(|h| h.0));
+    }
+    assert!(made.len() >= 3, "the line and the polyline's records are given handles: {made:X?}");
+    assert!(made.iter().all(|h| *h >= 0x500000), "handles given while reading are below the seed: {made:X?}");
+}
+
+/// No higher handle exists: a `$HANDSEED` of the largest handle, one within 0xFFF of it, or a record at the largest handle fails the
+/// read, and a drawing in that state fails the save in DXF and DWG, instead of starting again from a low handle or giving one twice.
+#[test]
+fn handle_exhaustion_fails_the_read_and_the_save() {
+    for seed in ["FFFFFFFFFFFFFFFF", "FFFFFFFFFFFFF000"] {
+        assert!(cadcraft_io::read_dxf(autocad_file(seed).as_bytes()).is_err(), "seed {seed}");
+    }
+    let top = autocad_file("5000").replace("5\n100\n8\n0\n10", "5\nFFFFFFFFFFFFFFFF\n8\n0\n10");
+    assert!(cadcraft_io::read_dxf(top.as_bytes()).is_err(), "a record at the largest handle");
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    for name in ["x.dxf", "x.dwg"] {
+        for binary in [false, true] {
+            if binary && name.ends_with(".dwg") {
+                continue;
+            }
+            let options = SaveOptions { binary, ..options };
+            let mut near = Drawing::new_metric();
+            near.handseed = u64::MAX - 0xFFF;
+            assert!(cadcraft_io::write_with(&near, name, &options).is_err(), "{name} binary {binary}: a seed within 0xFFF of the largest handle");
+            let mut at_top = Drawing::new_metric();
+            at_top.model.push(Entity::new(Handle(u64::MAX), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) })));
+            assert!(cadcraft_io::write_with(&at_top, name, &options).is_err(), "{name} binary {binary}: an entity at the largest handle");
+        }
+    }
+}
+
+/// The header variable of an old CADCraft DXF is not written back: AutoCAD's DXF has no `$CMLEADERSTYLE`, so a read of such a file
+/// (or of a DWG, whose DXF form acadrust gives the variable) and a save write the style as the variable only.
+#[test]
+fn an_old_header_variable_of_the_current_style_is_not_written_back() {
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    let mut tags = parse(&cadcraft_io::write_with(&fixture(), "x.dxf", &options).unwrap()).unwrap();
+    let end = tags.iter().position(|t| t.code == 0 && t.str() == "ENDSEC").unwrap();
+    tags.splice(end..end, [Tag::s(9, "$CMLEADERSTYLE"), Tag::s(2, "Notes")]);
+    let old = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert_eq!(old.header.str("CMLEADERSTYLE", ""), "Notes");
+    let count = |tags: &[Tag]| tags.iter().filter(|t| t.code == 9 && t.str() == "$CMLEADERSTYLE").count();
+    let (bytes, saved_tags) = saved(&old, "x.dxf", Version::R2018);
+    assert_eq!(count(&saved_tags), 0, "an old DXF saved as DXF");
+    assert_eq!(cadcraft_io::read(&bytes, "x.dxf").unwrap().header.str("CMLEADERSTYLE", ""), "Notes");
+    let (bytes, _) = saved(&old, "x.dwg", Version::R2018);
+    assert_eq!(cadcraft_io::read(&bytes, "x.dwg").unwrap().header.str("CMLEADERSTYLE", ""), "Notes", "an old DXF saved as DWG");
+    // A DWG read and saved as DXF.
+    let dwg = cadcraft_io::write_with(&fixture(), "x.dwg", &options).unwrap();
+    let from_dwg = cadcraft_io::read(&dwg, "x.dwg").unwrap();
+    let (_, tags) = saved(&from_dwg, "x.dxf", Version::R2018);
+    assert_eq!(count(&tags), 0, "a DWG saved as DXF");
+    assert_eq!(mleader_variable(&tags).0, ["Notes"]);
+}
+
+/// The XRECORD CADCRAFT_MLEADERSTYLE of a file, in the named object dictionary (what an older CADCraft wrote before R2004).
+fn add_private_style_xrecord(tags: &mut Vec<Tag>, style: &str) {
+    let objects = tags.iter().position(|t| t.code == 2 && t.str() == "OBJECTS").unwrap();
+    let root = (objects..tags.len()).find(|&i| tags[i].code == 0 && tags[i].str() == "DICTIONARY").unwrap();
+    let root_handle = tags[root..].iter().find(|t| t.code == 5).unwrap().str();
+    let entry = (root..tags.len()).find(|&i| tags[i].code == 281).unwrap() + 1;
+    tags.splice(entry..entry, [Tag::s(3, "CADCRAFT_MLEADERSTYLE"), Tag::s(350, "FFFF0")]);
+    let endsec = (objects..tags.len()).find(|&i| tags[i].code == 0 && tags[i].str() == "ENDSEC").unwrap();
+    tags.splice(
+        endsec..endsec,
+        [Tag::s(0, "XRECORD"), Tag::s(5, "FFFF0"), Tag::s(330, root_handle), Tag::s(100, "AcDbXrecord"), Tag::i(280, 1), Tag::s(1, style)],
+    );
+}
+
+/// The variable of the variable dictionary is the current style, Standard included: a private XRECORD or a header variable an older
+/// CADCraft wrote is read only when the file has no variable, and never wins over it.
+#[test]
+fn the_native_current_style_wins_over_a_private_copy_and_a_legacy_header() {
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    // Native Standard, a stale private Notes.
+    let mut tags = parse(variables_file(&["Notes"], Some("Standard")).as_bytes()).unwrap();
+    add_private_style_xrecord(&mut tags, "Notes");
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Standard", "native Standard, private Notes");
+    for name in ["x.dxf", "x.dwg"] {
+        let (bytes, tags) = saved(&d, name, Version::R2018);
+        assert_eq!(mleader_variable(&tags).0, ["Standard"], "{name}");
+        assert_eq!(cadcraft_io::read(&bytes, name).unwrap().header.str("CMLEADERSTYLE", ""), "Standard", "{name}");
+    }
+    // Native Linha_MEDIO, a legacy header Notes.
+    let mut tags = parse(variables_file(&["Linha_MEDIO", "Notes"], Some("Linha_MEDIO")).as_bytes()).unwrap();
+    let end = tags.iter().position(|t| t.code == 0 && t.str() == "ENDSEC").unwrap();
+    tags.splice(end..end, [Tag::s(9, "$CMLEADERSTYLE"), Tag::s(2, "Notes")]);
+    let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Linha_MEDIO", "native Linha_MEDIO, legacy header Notes");
+    let kept = cadcraft_io::write_with(&d, "x.dxf", &options).unwrap();
+    assert_eq!(cadcraft_io::read(&kept, "x.dxf").unwrap().header.str("CMLEADERSTYLE", ""), "Linha_MEDIO");
+}
+
+/// A native variable that names a style the file does not have is not the current style: the read repairs it as AUDIT does (Standard)
+/// and reports the variable as skipped, so the current style and the style of a new multileader agree.
+#[test]
+fn a_native_current_style_that_names_no_style_is_repaired_and_reported() {
+    let d = cadcraft_io::read_dxf(variables_file(&["Notes"], Some("Deleted_Style")).as_bytes()).unwrap();
+    assert_eq!(d.header.str("CMLEADERSTYLE", ""), "Standard");
+    assert_eq!(d.skipped_records.get("DICTIONARYVAR CMLEADERSTYLE"), Some(&1), "{:?}", d.skipped_records);
+    // A name that exists is kept, whatever its case, and reports nothing.
+    let d = cadcraft_io::read_dxf(variables_file(&["Notes"], Some("NOTES")).as_bytes()).unwrap();
+    assert_eq!(d.header.str("CMLEADERSTYLE", "").to_ascii_lowercase(), "notes");
+    assert!(d.skipped_records.is_empty(), "{:?}", d.skipped_records);
+}
+
+/// The hatch background of the native form (even "no colour") decides: the `HATCH` xdata of an older CADCraft is read only when the
+/// hatch has no `HATCHBACKGROUNDCOLOR` application.
+#[test]
+fn a_native_hatch_background_wins_over_an_old_private_colour() {
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    for (native, expected) in [(None, Some(BACKGROUND)), (Some(-939524096_i64), None)] {
+        let mut tags = parse(&cadcraft_io::write_with(&fixture(), "x.dxf", &options).unwrap()).unwrap();
+        let hatch = (0..tags.len()).find(|&i| tags[i].code == 0 && tags[i].str() == "HATCH").unwrap();
+        let end = record_end(&tags, hatch);
+        let app = (hatch..end).find(|&i| tags[i].code == 1001 && tags[i].str() == "HATCHBACKGROUNDCOLOR").unwrap();
+        if let Some(packed) = native {
+            tags[app + 1] = Tag::i(1071, packed);
+        }
+        tags.splice(
+            app..app,
+            [Tag::s(1001, "CADCRAFT"), Tag::s(1000, "HATCH"), Tag::f(1011, 0.0), Tag::f(1021, 0.0), Tag::f(1031, 0.0), Tag::s(1000, "Blue")],
+        );
+        let d = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+        let background =
+            |d: &Drawing| d.model.iter().find_map(|e| if let EntityKind::Hatch(h) = &e.kind { Some(h.background) } else { None }).unwrap();
+        assert_eq!(background(&d), expected, "native {native:?}");
+        for name in ["x.dxf", "x.dwg"] {
+            let (bytes, tags) = saved(&d, name, Version::R2018);
+            assert!(private_xdata(&tags).iter().all(|k| k != "HATCH"), "{name}: the old private colour is gone");
+            assert_eq!(background(&cadcraft_io::read(&bytes, name).unwrap()), expected, "native {native:?} {name}");
         }
     }
 }

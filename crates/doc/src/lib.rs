@@ -169,6 +169,9 @@ impl Default for Drawing {
     }
 }
 
+/// The handles a drawing keeps free below the largest one (see [`Drawing::has_handle_room`]).
+pub const HANDLE_ROOM: u64 = 0x1_0000;
+
 impl Drawing {
     /// An empty drawing with the standard tables (inch-based, like acad.dwt-style defaults).
     pub fn new_imperial() -> Self {
@@ -232,6 +235,12 @@ impl Drawing {
         identity::allocate_handle(&mut self.handseed)
     }
     /// Make sure future handles don't collide with `h` (after loading a file).
+    /// Whether the next handle leaves room for the handles a read, a command and a save still take: [`HANDLE_ROOM`] below the
+    /// largest handle. A drawing past it has no higher handle to give, and is neither read nor saved (a handle is never given twice).
+    pub fn has_handle_room(&self) -> bool {
+        self.handseed <= u64::MAX - HANDLE_ROOM
+    }
+
     pub fn bump_handseed(&mut self, h: Handle) {
         if h.0 >= self.handseed {
             self.handseed = h.0.saturating_add(1);

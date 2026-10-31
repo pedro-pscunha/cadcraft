@@ -410,9 +410,13 @@ fn unpack_color(v: i64) -> Option<Color> {
     }
 }
 
-/// The background colour of a hatch's `HATCHBACKGROUNDCOLOR` xdata among the groups of an entity.
-pub(crate) fn hatch_background(tags: &[Tag]) -> Option<Color> {
-    xdata(tags, HATCH_BACKGROUND_APP).iter().find(|t| t.code == 1071).and_then(|t| unpack_color(t.i64()))
+/// A hatch's `HATCHBACKGROUNDCOLOR` xdata among the groups of an entity: `None` when it has none, else its colour (`None` inside for
+/// "no colour"). An older CADCraft's `HATCH` xdata is read only when there is none.
+pub(crate) fn hatch_background(tags: &[Tag]) -> Option<Option<Color>> {
+    if !tags.iter().any(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case(HATCH_BACKGROUND_APP)) {
+        return None;
+    }
+    Some(xdata(tags, HATCH_BACKGROUND_APP).iter().find(|t| t.code == 1071).and_then(|t| unpack_color(t.i64())))
 }
 
 /// The `HATCHBACKGROUNDCOLOR` application of kept (foreign) xdata: `None` when the hatch has none, else its colour (`None` inside

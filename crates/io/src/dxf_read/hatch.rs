@@ -4,7 +4,7 @@ use cadcraft_doc::{HatchEdge, HatchSpline};
 
 pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
     let (origin, old_background) = hatch_xdata(tags);
-    let background = crate::dxf_ext::hatch_background(tags).or(old_background);
+    let background = crate::dxf_ext::hatch_background(tags).unwrap_or(old_background);
     let pattern = t.s(2).unwrap_or_else(|| "SOLID".into());
     let solid = t.i(70).unwrap_or(0) == 1;
     let n_loops = t.i(91).unwrap_or(0).clamp(0, 100_000) as usize;

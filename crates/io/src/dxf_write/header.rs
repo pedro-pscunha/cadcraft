@@ -195,8 +195,9 @@ fn preserved_header_vars(w: &mut W, d: &Drawing, target: Version) {
     for (name, codes) in &d.header.dxf_codes {
         if written.contains(name)
             // ACADMAINTVER is the producing application's maintenance version, in the source format's group code;
-            // AutoCAD refuses a DXF whose value or code it does not take for its version and writes its own.
-            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED" | "CEPSNID" | "ACADMAINTVER")
+            // AutoCAD refuses a DXF whose value or code it does not take for its version and writes its own. CMLEADERSTYLE is in
+            // no AutoCAD DXF header: the style is the variable of the variable dictionary (an old CADCraft DXF's header variable is read).
+            || matches!(name.as_str(), "ACADVER" | "DWGCODEPAGE" | "EXTMIN" | "EXTMAX" | "HANDSEED" | "CEPSNID" | "ACADMAINTVER" | "CMLEADERSTYLE")
             || (!w.dwg_bridge && bridge_header(name))
             || target < header_since(name, source)
         {
