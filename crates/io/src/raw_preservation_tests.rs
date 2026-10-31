@@ -137,7 +137,7 @@ fn attribute_version_groups(bytes: &[u8]) -> (String, Vec<i64>) {
 }
 
 #[test]
-fn binary_inspection_promotes_pre_r2007_and_adds_only_the_documented_attribute_zero_fields() {
+fn binary_inspection_keeps_the_actual_dwg_release_without_new_attribute_fields() {
     let source = include_bytes!("../tests/data/activation/r5_raw_insert_with_full_tables.dxf");
     let need = |view: &crate::activation::records::RecordView<'_>| {
         if matches!(view.kind, "INSERT" | "ATTRIB") { crate::activation::Need::Needs { readable: true } } else { crate::activation::Need::Plain }
@@ -146,11 +146,13 @@ fn binary_inspection_promotes_pre_r2007_and_adds_only_the_documented_attribute_z
     let drawing = crate::read_with_need(source, "source.dxf", policy, &need).unwrap();
     let bridge = crate::dxf_write::dwg_bridge(&drawing, cadcraft_dxf::Version::R2000);
     assert_eq!(attribute_version_groups(&bridge.bytes), ("AC1015".into(), vec![0, 0]), "the first bridge already carries both explicit zeros");
-    let first = crate::write(&drawing, "first.dwg").unwrap();
+    // This deliberately old target cannot retain the source's future-version fields.
+    // Decode its completed bytes directly to isolate the inspector's release contract.
+    let (first, _) = cadcraft_dwg::dxf_to_dwg_as_noted(&bridge.bytes, "AC1018", Some("ANSI_1252")).unwrap();
     let ascii = cadcraft_dwg::dwg_to_dxf(&first).unwrap();
     let binary = cadcraft_dwg::inspect_dwg(&first, cadcraft_dwg::Limits::DEFAULT).unwrap().dxf;
     assert_eq!(attribute_version_groups(&ascii), ("AC1018".into(), vec![]), "normal reopen exposes the R2004 DWG actually written");
-    assert_eq!(attribute_version_groups(&binary), ("AC1024".into(), vec![0, 0]), "only the inspection rendition promotes binary DXF to R2010");
+    assert_eq!(attribute_version_groups(&binary), ("AC1018".into(), vec![]), "inspection must retain the actual release without newer fields");
     let reopened = crate::read_with_need(&first, "first.dwg", policy, &need).unwrap();
     let EntityKind::Raw(raw) = &reopened.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
     let attribute = raw.records().find(|record| record.handle() == Handle(0x201)).unwrap();
@@ -161,8 +163,24 @@ fn binary_inspection_promotes_pre_r2007_and_adds_only_the_documented_attribute_z
         ("AC1015".into(), vec![]),
         "the second bridge uses the R2000 schema and does not add the fields either"
     );
-    let second = crate::write(&reopened, "second.dwg").expect("the binary inspection's documented zero defaults must not prevent a second save");
+    let second = crate::write(&reopened, "second.dwg").expect("same-release inspection must permit a second save without new fields");
     assert_eq!(attribute_version_groups(&cadcraft_dwg::dwg_to_dxf(&second).unwrap()), ("AC1018".into(), vec![]));
+}
+
+#[test]
+fn old_targets_refuse_to_drop_explicit_future_attribute_fields() {
+    let drawing = fixtures::drawing("INSERT");
+    for version in [crate::Version::R2000, crate::Version::R2004] {
+        let options = crate::SaveOptions { version: Some(version), binary: false };
+        let error = crate::write_with(&drawing, "old.dwg", &options).expect_err("old releases cannot retain explicit future fields");
+        match error {
+            crate::IoError::RawPreservation { record, handle, field, .. } => {
+                assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
+                assert!(field.contains("group 280[0]"), "{field}");
+            }
+            error => panic!("unexpected error: {error}"),
+        }
+    }
 }
 
 #[test]
@@ -188,7 +206,7 @@ fn nonzero_attribute_version_and_a_third_zero_occurrence_still_refuse() {
             .collect();
         let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
         drawing.model.replace(Entity::from_raw(unit));
-        let error = crate::write(&drawing, "invalid-version.dwg").expect_err("only the two documented zero defaults can be equivalent");
+        let error = crate::write(&drawing, "invalid-version.dwg").expect_err("every explicit attribute version field must survive");
         match error {
             crate::IoError::RawPreservation { record, handle, field, .. } => {
                 assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
@@ -200,7 +218,7 @@ fn nonzero_attribute_version_and_a_third_zero_occurrence_still_refuse() {
 }
 
 #[test]
-fn the_attribute_zero_rule_cannot_hide_a_changed_lock_bit() {
+fn inspection_cannot_hide_a_changed_attribute_lock_bit() {
     let drawing = fixtures::drawing("INSERT");
     let result = crate::write_dwg_with(&drawing, crate::Version::R2018, |bridge, page| {
         let (bytes, notes) = cadcraft_dwg::dxf_to_dwg_as_noted(bridge, "AC1032", page)?;
@@ -230,7 +248,7 @@ fn the_attribute_zero_rule_cannot_hide_a_changed_lock_bit() {
 }
 
 #[test]
-fn attribute_version_equivalence_is_limited_to_two_zero_fields_in_the_own_subclass() {
+fn attribute_version_fields_have_no_absence_equivalence_in_any_scope() {
     let source = super::fields::parse(
         &[
             RawTag { code: 100, value: "AcDbAttribute".into() },
@@ -241,12 +259,8 @@ fn attribute_version_equivalence_is_limited_to_two_zero_fields_in_the_own_subcla
         true,
     )
     .unwrap();
-    for (field, value) in source.iter().filter(|(field, _)| field.code == 280) {
-        let default = super::fields::default_value("ATTRIB", field, &source);
-        assert_eq!(default, (field.index < 2).then_some(super::fields::Value::Integer(0)));
-        if field.index < 2 {
-            assert_eq!(default.as_ref(), Some(value));
-        }
+    for field in source.keys().filter(|field| field.code == 280) {
+        assert!(super::fields::default_value("ATTRIB", field, &source).is_none());
         assert!(super::fields::default_value("ATTDEF", field, &source).is_none());
     }
     for tags in [

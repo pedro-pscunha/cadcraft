@@ -155,8 +155,11 @@ mod native {
         }
         let mut out = CappedWriter { buf: Vec::new(), limit: limits.max_dxf_bytes, exceeded: false };
         let written = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut writer = acadrust::DxfWriter::new(&doc).for_dwg_bridge().keep_heavy_polylines();
-            writer.set_binary(semantic);
+            let writer = if semantic {
+                acadrust::DxfWriter::new(&doc).for_dwg_inspection()
+            } else {
+                acadrust::DxfWriter::new(&doc).for_dwg_bridge().keep_heavy_polylines()
+            };
             writer.write_to_writer(&mut out)
         }))
         .map_err(|_| "the DWG→DXF conversion failed on this file".to_string())?;
