@@ -354,23 +354,27 @@ impl EntityKind {
                 t3(&mut l.a);
                 t3(&mut l.b);
             }
-            EntityKind::Point(p) => t3(&mut p.p),
+            EntityKind::Point(p) => {
+                t3(&mut p.p);
+                let direction = m.apply_vec(Vec2::from_angle(p.angle));
+                p.angle = cadcraft_geom::norm_angle(direction.y.atan2(direction.x));
+            }
             EntityKind::Circle(c) => {
                 t3(&mut c.center);
                 c.radius *= s;
             }
             EntityKind::Arc(a) => {
-                let sp = m.apply(Vec2::polar(a.center.xy(), a.radius, a.start));
-                let ep = m.apply(Vec2::polar(a.center.xy(), a.radius, a.end));
+                // Directions avoid cancellation when the radius is small relative to the center.
+                let start = m.apply_vec(Vec2::from_angle(a.start)).angle();
+                let end = m.apply_vec(Vec2::from_angle(a.end)).angle();
                 t3(&mut a.center);
                 a.radius *= s;
-                let c = a.center.xy();
                 if mirror {
-                    a.start = c.angle_to(ep);
-                    a.end = c.angle_to(sp);
+                    a.start = end;
+                    a.end = start;
                 } else {
-                    a.start = c.angle_to(sp);
-                    a.end = c.angle_to(ep);
+                    a.start = start;
+                    a.end = end;
                 }
             }
             EntityKind::Ellipse(e) => {

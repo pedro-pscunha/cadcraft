@@ -74,26 +74,37 @@ fn segment_entities(e: &Entity, segs: impl IntoIterator<Item = Segment>) -> Vec<
         .collect()
 }
 
-fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::Dimension) -> Vec<Entity> {
+/// The ARC that a run of points lies on from its first to its last point through the middle one, when every point is on that circle.
+fn arc_through(points: &[Vec2]) -> Option<cadcraft_geom::Arc> {
+    let (first, last) = (*points.first()?, *points.last()?);
+    let arc = cadcraft_geom::Arc::from_3_points(first, *points.get(points.len() / 2)?, last)?;
+    let tolerance = 1e-6 * (1.0 + arc.radius);
+    points.iter().all(|p| (p.dist(arc.center) - arc.radius).abs() <= tolerance).then_some(arc)
+}
+
+/// The pieces of the dimension `dm` as an EXPLODE leaves them (and as a dimension made with DIMASSOC 0 is): LINEs, ARCs, SOLID arrowheads and
+/// the MTEXT, on the properties of `e`. A run of straight segments is one LINE per segment, a run on a circle one ARC; a closed run (the
+/// inspection frame) stays a polyline.
+pub(crate) fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::Dimension) -> Vec<Entity> {
     // The dimension as drawn: its overrides, DIMSCALE (0 = the drawing's) and text font.
     let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
     let g = cadcraft_render::dimension_in(d, dm);
-    let line_entity = |l: &Vec<Vec2>| {
+    let piece = |kind: EntityKind| Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind };
+    let line_entity = |l: &Vec<Vec2>| -> Vec<Entity> {
         if l.len() == 2 {
-            Some(Entity { geometry_revision: Default::default(), handle: Handle(0), common: e.common.clone(), kind: line(*l.first()?, *l.get(1)?) })
+            l.windows(2).map(|w| piece(line(w[0], w[1]))).collect()
+        } else if l.first() == l.last() {
+            vec![piece(lwpoly(l.iter().map(|p| PolyVertex::new(*p)).collect(), false))]
+        } else if let Some(a) = arc_through(l) {
+            vec![piece(arc(&a))]
         } else {
-            Some(Entity {
-                geometry_revision: Default::default(),
-                handle: Handle(0),
-                common: e.common.clone(),
-                kind: lwpoly(l.iter().map(|p| PolyVertex::new(*p)).collect(), false),
-            })
+            l.windows(2).map(|w| piece(line(w[0], w[1]))).collect()
         }
     };
     // The text's marks (arc length symbol, DIMINSPECT frame) go after the text background.
     let text_marks = &g.text_marks;
     let marks = |want: bool| g.lines.iter().enumerate().filter(move |(i, _)| text_marks.contains(i) == want).map(|(_, l)| l);
-    let mut v: Vec<Entity> = marks(false).filter_map(&line_entity).collect();
+    let mut v: Vec<Entity> = marks(false).flat_map(&line_entity).collect();
     for t in &g.fills {
         if let [a, b, c] = t.as_slice() {
             v.push(Entity {
@@ -118,7 +129,7 @@ fn explode_dimension(d: &cadcraft_doc::Drawing, e: &Entity, dm: &cadcraft_doc::D
             kind: EntityKind::Solid(cadcraft_doc::Solid { corners: [v3(*p0), v3(*p1), v3(*p3), v3(*p2)] }),
         });
     }
-    v.extend(marks(true).filter_map(&line_entity));
+    v.extend(marks(true).flat_map(&line_entity));
     if !g.value.is_empty() {
         v.push(Entity {
             geometry_revision: Default::default(),

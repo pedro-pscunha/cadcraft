@@ -170,6 +170,16 @@ fn plan(
     })
 }
 
+/// The Z of the circle or arc among `hs` that `p` lies on.
+fn circle_z(s: &Session, hs: &[Handle], p: Vec2) -> Option<f64> {
+    let d = s.doc().ok()?;
+    hs.iter().find_map(|h| match &d.entity(*h)?.kind {
+        EntityKind::Circle(c) if (c.center.xy().dist(p) - c.radius).abs() <= 1e-6 * (1.0 + c.radius) => Some(c.center.z),
+        EntityKind::Arc(a) if (a.center.xy().dist(p) - a.radius).abs() <= 1e-6 * (1.0 + a.radius) => Some(a.center.z),
+        _ => None,
+    })
+}
+
 /// The nearest point of `pts` to `q` within `tol`, by index.
 fn nearest(pts: &[Vec2], q: Vec2, tol: f64) -> Option<usize> {
     pts.iter().enumerate().filter(|(_, p)| p.dist(q) <= tol).min_by(|a, b| a.1.dist(q).total_cmp(&b.1.dist(q))).map(|(i, _)| i)
@@ -217,7 +227,26 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => ix.auto_assoc(&[("p13", dm.p13.xy()), ("p14", dm.p14.xy())]),
             };
         }
-        let h = s.add_entity(k)?;
+        if let EntityKind::Dimension(dm) = &mut k
+            && let DimKind::Radius | DimKind::Diameter = dm.kind
+            && let Some(z) = circle_z(s, &hs, dm.p15.xy())
+        {
+            // The centre and the point on the circle are at the circle's Z; `draw` adds the elevation to them (measured in LT 2025).
+            let shift = z - s.elevation();
+            dm.defpt.z += shift;
+            dm.p15.z += shift;
+        }
+        let h = s.draw(k)?;
+        // AutoCAD puts the dimension line and the text at the elevation and the two measured points of a linear or ordinate dimension at Z 0, not at
+        // the Z of the objects (measured in LT 2025).
+        s.doc_mut()?.modify_entity(h, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind
+                && matches!(dm.kind, DimKind::Linear { .. } | DimKind::Ordinate { .. })
+            {
+                dm.p13.z = 0.0;
+                dm.p14.z = 0.0;
+            }
+        })?;
         s.last_dim = Some(h);
         out.push(h.hex());
     }

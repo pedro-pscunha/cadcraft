@@ -524,7 +524,18 @@ impl Session {
         let mut common = self.current_common();
         let (kinds, mut out) = match (self.lisp_preview(cursor), &self.running) {
             (Some(k), _) => (k, Vec::new()),
-            (None, Some(r)) => (r.machine.preview(self, cursor), r.machine.preview_objects(self, cursor)),
+            (None, Some(r)) => {
+                let mut kinds = r.machine.preview(self, cursor);
+                let mut objects = r.machine.preview_objects(self, cursor);
+                // What a draw command shows is what it will make: at the current elevation.
+                if crate::DRAWN_AT_ELEVATION.contains(&r.machine.name()) {
+                    kinds
+                        .iter_mut()
+                        .chain(objects.iter_mut().map(|object| &mut object.kind))
+                        .for_each(|kind| crate::raise_to(kind, self.elevation()));
+                }
+                (kinds, objects)
+            }
             (None, None) => (Vec::new(), Vec::new()),
         };
         if !out.is_empty() {

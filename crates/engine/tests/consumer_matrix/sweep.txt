@@ -1,0 +1,194 @@
+-attedit	template=123	legacy=works	canonical=works	raw=works
+-block	template=44	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+-group	template=0	legacy=works	canonical=works	raw=works
+aiobjectscaleadd	template=0	legacy=works	canonical=works	raw=works
+aiobjectscaleremove	template=0	legacy=works	canonical=works	raw=works
+align	template=37	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+annoreset	template=0	legacy=works	canonical=works	raw=works
+annoupdate	template=0	legacy=works	canonical=works	raw=works
+annovisible.all	template=0	legacy=works	canonical=works	raw=works
+annovisible.current	template=0	legacy=works	canonical=works	raw=works
+arraypath	template=39	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+arraypolar	template=36	legacy=works	canonical=refused: Extent query refused object 118: Canonical geometry of object Handle(275) requires a revision-aw...	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+arrayrect	template=0	legacy=works	canonical=refused: Extent query refused object 120: Canonical geometry of object Handle(275) requires a revision-aw...	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+attedit	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+attsync	template=14	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `attsync`: `handle` is not a block reference
+autoconstrain	template=0	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+bedit	template=15	legacy=works	canonical=works	raw=refused: invalid parameters for `bedit`: `handle` is not a block reference
+blend	template=95	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+block	template=44	legacy=works	canonical=refused: Extent query refused object 114: Canonical geometry of object Handle(275) requires a revision-aw...	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+blocks.description	template=122	legacy=works	canonical=works	raw=works
+blocks.reference	template=15	legacy=works	canonical=works	raw=refused: invalid parameters for `blocks.reference`: `handle` is not a block reference
+blocks.reference.grips	template=1	legacy=works	canonical=works	raw=works
+break	template=28	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+breakatpoint	template=85	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+burst	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+chamfer	template=80	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LWPOLYLINE object 105 is read-only: The source has no exact geometry adapter.
+chspace	template=0	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+circle.ttr	template=95	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+circle.ttt	template=100	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+constraintbar	template=0	legacy=works	canonical=works	raw=works
+constraints.dof	template=0	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+constraints.inspect	template=0	legacy=works	canonical=works	raw=works
+copybase	template=26	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+copyclip	template=0	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+count	template=0	legacy=works	canonical=works	raw=works
+cutbase	template=26	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+cutclip	template=0	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+datalinkupdate	template=0	legacy=works	canonical=works	raw=works
+dcaligned	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dcangular	template=92	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dcdiameter	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dcdisplay	template=0	legacy=works	canonical=works	raw=works
+dchorizontal	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dclinear	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dcradius	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dcvertical	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+delconstraint	template=0	legacy=works	canonical=works	raw=works
+dimconstraint	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+dimdisassociate	template=0	legacy=works	canonical=works	raw=works
+dimedit	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimedit`: select dimensions
+dimedit.oblique	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimedit`: select dimensions
+diminspect	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `diminspect`: select dimensions
+dimjogline	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimjogline`: `handle` of a linear or aligned dimension is required
+dimoverride	template=45	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+dimreassociate	template=0	legacy=works	canonical=works	raw=works
+dimspace	template=54	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimspace`: `base` is not a dimension
+dimstyle.override	template=45	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+dimstyle.update	template=0	legacy=works	canonical=works	raw=works
+dimtedit	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+dimtedit.angle	template=50	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+dimtedit.center	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+dimtedit.home	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+dimtedit.left	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+dimtedit.right	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimtedit`: select dimensions
+divide	template=77	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+draworder	template=0	legacy=works	canonical=works	raw=works
+draworder.above	template=40	legacy=works	canonical=works	raw=works
+draworder.back	template=0	legacy=works	canonical=works	raw=works
+draworder.front	template=0	legacy=works	canonical=works	raw=works
+draworder.under	template=40	legacy=works	canonical=works	raw=works
+entities	template=0	legacy=works	canonical=works	raw=works
+explode	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+fillet	template=80	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LWPOLYLINE object 105 is read-only: The source has no exact geometry adapter.
+flatten	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+gccoincident	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gccollinear	template=92	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcconcentric	template=93	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcequal	template=92	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcfix	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gchorizontal	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcperpendicular	template=92	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcsmooth	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gctangent	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gcvertical	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+geomconstraint	template=101	legacy=works	canonical=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 102 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
+gradient	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+grip.mirror	template=41	legacy=works	canonical=refused: Canonical geometry has no measured convention for a reflection; it can be moved, rotated and sca...	raw=refused: invalid parameters for `grip.mirror`: no such grip
+grip.move	template=41	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+grip.rotate	template=27	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+grip.scale	template=41	legacy=works	canonical=works	raw=refused: invalid parameters for `grip.scale`: no such grip
+grip.stretch	template=41	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+group	template=0	legacy=works	canonical=works	raw=works
+groupedit	template=44	legacy=works	canonical=works	raw=works
+hatchpick	template=0	legacy=works	canonical=works	raw=refused: invalid parameters for `hatchpick`: 100 is not a closed object
+hatchtoback	template=0	legacy=works	canonical=works	raw=works
+hideobjects	template=0	legacy=works	canonical=works	raw=works
+intersect	template=16	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select at least one region.
+isolateobjects	template=0	legacy=works	canonical=works	raw=works
+laycur	template=0	legacy=works	canonical=works	raw=works
+laydel	template=108	legacy=works	canonical=works	raw=works
+layfrz	template=0	legacy=works	canonical=works	raw=works
+layiso	template=0	legacy=works	canonical=works	raw=works
+laylck	template=0	legacy=works	canonical=works	raw=works
+laymch	template=30	legacy=works	canonical=works	raw=works
+laymcur	template=0	legacy=works	canonical=works	raw=works
+laymrg	template=109	legacy=works	canonical=works	raw=works
+layoff	template=0	legacy=works	canonical=works	raw=works
+layulk	template=0	legacy=works	canonical=works	raw=works
+lengthen	template=0	legacy=works	canonical=works	raw=refused: Cannot measure that object.
+lisp	template=124	legacy=works	canonical=works	raw=works
+massprop	template=16	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select one or more regions.
+matchprop	template=103	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+measure	template=88	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+mleaderedit	template=61	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `mleaderedit`: `handle` is not a multileader
+mleaderedit.add	template=61	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `mleaderedit`: `handle` is not a multileader
+mleaderedit.remove	template=61	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `mleaderedit`: `handle` is not a multileader
+mocoro	template=38	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+ncopy	template=14	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select a block reference.
+objectscale	template=0	legacy=works	canonical=works	raw=works
+offset	template=76	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+overkill	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+pedit	template=79	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LWPOLYLINE object 105 is read-only: The source has no exact geometry adapter.
+pickstyle	template=0	legacy=works	canonical=works	raw=works
+plotstyle	template=0	legacy=works	canonical=works	raw=works
+plotwindow	template=95	legacy=works	canonical=works	raw=works
+properties.set	template=0	legacy=works	canonical=works	raw=works
+qselect	template=0	legacy=works	canonical=works	raw=works
+qselect.info	template=0	legacy=works	canonical=works	raw=works
+radius.measure	template=0	legacy=works	canonical=works	raw=refused: invalid parameters for `radius.measure`: select an arc, circle or polyline arc
+refedit	template=14	legacy=works	canonical=refused: invalid parameters for `refedit`: This canonical geometry payload has no implementation for this...	raw=refused: invalid parameters for `refedit`: select a block reference
+region	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+reverse	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
+select	template=0	legacy=works	canonical=works	raw=works
+selectsimilar	template=0	legacy=works	canonical=works	raw=works
+shapes	template=0	legacy=works	canonical=refused: Extent query refused object 106: A canonical spline needs its Z values.; object 10C: The legacy ...	raw=works
+splinedit	template=81	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw SPLINE object 106 is read-only: The source has no exact geometry adapter.
+stretch	template=112	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.break	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.cellstyle	template=69	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.deletecol	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.deleterow	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.formula	template=120	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.insertcol	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.insertrow	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.merge	template=121	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.recalc	template=0	legacy=works	canonical=works	raw=works
+table.set	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+table.unmerge	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+tabledit	template=65	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+textedit	template=51	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select a text, mtext, attribute definition or dimension.
+texts	template=0	legacy=works	canonical=works	raw=works
+texttofront	template=0	legacy=works	canonical=works	raw=works
+texttofront.all	template=0	legacy=works	canonical=works	raw=works
+texttofront.dimensions	template=0	legacy=works	canonical=works	raw=works
+texttofront.leaders	template=0	legacy=works	canonical=works	raw=works
+texttofront.text	template=0	legacy=works	canonical=works	raw=works
+trim	template=83	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
+txt2mtxt	template=4	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: No text objects selected.
+ungroup	template=44	legacy=works	canonical=works	raw=works
+union	template=16	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Select at least one region.
+view	template=0	legacy=works	canonical=works	raw=works
+volume.measure	template=118	legacy=works	canonical=works	raw=refused: invalid parameters for `area`: a raw object is kept as read and its geometry is not read
+zoom	template=0	legacy=works	canonical=works	raw=works
+zoom.object	template=0	legacy=works	canonical=works	raw=works
+arrayedit	unprobed
+blocks.reference.grip	unprobed
+blocks.reference.set	unprobed
+dataextraction	unprobed
+datalink	unprobed
+eattext	unprobed
+erase.selection	unprobed
+exportpdf	unprobed
+extend	unprobed
+gcparallel	unprobed
+gcsymmetric	unprobed
+grip	unprobed
+grip.option	unprobed
+hatch	unprobed
+hatchedit	unprobed
+join	unprobed
+mleaderalign	unprobed
+mledit	unprobed
+mspace	unprobed
+mview	unprobed
+plot	unprobed
+publish	unprobed
+refset	unprobed
+subtract	unprobed
+tableexport	unprobed
+viewport.set	unprobed
+vpclip	unprobed
+vplayer	unprobed
+wblock	unprobed
+xopen	unprobed

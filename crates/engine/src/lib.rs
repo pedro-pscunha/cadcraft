@@ -155,6 +155,150 @@ impl Default for Session {
     }
 }
 
+/// The interactive commands whose preview shows the object they will draw with `Session::draw`.
+pub(crate) const DRAWN_AT_ELEVATION: &[&str] = &[
+    "ARC",
+    "ATTDEF",
+    "CIRCLE",
+    "DIMALIGNED",
+    "DIMANGULAR",
+    "DIMARC",
+    "DIMDIAMETER",
+    "DIMLINEAR",
+    "DIMORDINATE",
+    "DIMRADIUS",
+    "DONUT",
+    "ELLIPSE",
+    "HELIX",
+    "INSERT",
+    "MLEADER",
+    "MTEXT",
+    "POLYGON",
+    "RAY",
+    "REVCLOUD",
+    "SPLINE",
+    "TABLE",
+    "TEXT",
+    "WIPEOUT",
+    "XLINE",
+];
+
+/// Move a flat object drawn at Z 0 to Z `z`. An object of a kind that has no Z of its own to move is left as it is.
+pub(crate) fn raise_to(kind: &mut EntityKind, z: f64) {
+    if z == 0.0 {
+        return;
+    }
+    match kind {
+        EntityKind::Line(l) => {
+            l.a.z += z;
+            l.b.z += z;
+        }
+        EntityKind::Solid(solid) => solid.corners.iter_mut().for_each(|corner| corner.z += z),
+        EntityKind::Circle(c) => c.center.z += z,
+        EntityKind::Arc(a) => a.center.z += z,
+        EntityKind::Ellipse(e) => e.center.z += z,
+        EntityKind::Ray(r) | EntityKind::XLine(r) => r.base.z += z,
+        EntityKind::Text(t) => {
+            t.insert.z += z;
+            if let Some(align) = &mut t.align_pt {
+                align.z += z;
+            }
+        }
+        EntityKind::AttDef(a) => {
+            a.text.insert.z += z;
+            if let Some(align) = &mut a.text.align_pt {
+                align.z += z;
+            }
+        }
+        EntityKind::MText(t) => t.insert.z += z,
+        EntityKind::Insert(i) => {
+            i.insert.z += z;
+            for attrib in &mut i.attribs {
+                attrib.text.insert.z += z;
+                if let Some(align) = &mut attrib.text.align_pt {
+                    align.z += z;
+                }
+            }
+        }
+        EntityKind::Helix(h) => h.center.z += z,
+        EntityKind::Table(t) => t.insert.z += z,
+        EntityKind::LwPolyline(p) => p.elevation += z,
+        EntityKind::Leader(l) => l.vertices.iter_mut().for_each(|v| v.z += z),
+        EntityKind::Dimension(dm) => raise_dimension(dm, z),
+        EntityKind::MLeader(m) => {
+            for root in &mut m.roots {
+                root.landing.z += z;
+                root.branches.iter_mut().flat_map(|b| b.vertices.iter_mut()).for_each(|v| v.z += z);
+            }
+            if let Some(text) = &mut m.text {
+                text.insert.z += z;
+            }
+            if let Some(block) = &mut m.block {
+                block.insert.z += z;
+            }
+            m.context.origin.z += z;
+        }
+        EntityKind::Spline(sp) => {
+            let space = sp.space.get_or_insert_with(|| cadcraft_geom::SplineSpace {
+                control: vec![0.0; sp.control.len()],
+                fit: vec![0.0; sp.fit.len()],
+                start_tangent: 0.0,
+                end_tangent: 0.0,
+            });
+            space.control.iter_mut().chain(space.fit.iter_mut()).for_each(|v| *v += z);
+        }
+        EntityKind::Wipeout(w) => raise_wipeout(w, z),
+        _ => {}
+    }
+}
+
+/// Raise the definition points that AutoCAD gives the elevation: the points a kind of dimension uses, and for an ordinate dimension
+/// not group 10, which is the origin of the UCS. Measured in AutoCAD LT 2025 (see the consumer matrix).
+fn raise_dimension(dm: &mut cadcraft_doc::Dimension, z: f64) {
+    use cadcraft_doc::DimKind::{Aligned, Angular, Angular3P, ArcLength, Diameter, Linear, Ordinate, Radius};
+    let (defpt, p13, p14, p15, p16) = match dm.kind {
+        Linear { .. } | Aligned => (true, true, true, false, false),
+        Radius | Diameter => (true, false, false, true, false),
+        Angular | ArcLength => (true, true, true, true, true),
+        Angular3P => (true, true, true, true, false),
+        Ordinate { .. } => (false, true, true, false, false),
+    };
+    dm.text_mid.z += z;
+    for (used, point) in [(defpt, &mut dm.defpt), (p13, &mut dm.p13), (p14, &mut dm.p14), (p15, &mut dm.p15), (p16, &mut dm.p16)] {
+        if used {
+            point.z += z;
+        }
+    }
+    if let Some(jogged) = &mut dm.marks.jogged {
+        jogged.center.z += z;
+        jogged.jog.z += z;
+    }
+}
+
+/// A wipeout at Z: a legacy wipeout has no Z, so it gets the image frame that the writer would make for it, with the Z in the origin.
+fn raise_wipeout(w: &mut cadcraft_doc::Wipeout, z: f64) {
+    use cadcraft_geom::{Bounds2, Vec2};
+    let bounds = Bounds2::from_points(w.boundary.iter().copied());
+    let origin = if bounds.is_empty() { Vec2::ZERO } else { bounds.min };
+    let (sx, sy) = (if bounds.width() > 0.0 { bounds.width() } else { 1.0 }, if bounds.height() > 0.0 { bounds.height() } else { 1.0 });
+    let mut outline = w.boundary.clone();
+    if let (Some(first), Some(last)) = (outline.first().copied(), outline.last().copied())
+        && first != last
+    {
+        outline.push(first);
+    }
+    let clip = outline.iter().map(|q| Vec2::new((q.x - origin.x) / sx - 0.5, 0.5 - (q.y - origin.y) / sy)).collect();
+    w.image = Some(cadcraft_doc::WipeoutFrame {
+        origin: cadcraft_geom::Vec3::new(origin.x, origin.y, z),
+        u: cadcraft_geom::Vec3::new(sx, 0.0, 0.0),
+        v: cadcraft_geom::Vec3::new(0.0, sy, 0.0),
+        size: Vec2::new(1.0, 1.0),
+        clip_type: 2,
+        clip,
+    });
+    w.boundary = outline;
+}
+
 impl Session {
     pub fn new() -> Self {
         let mut s = Session::empty();
@@ -279,6 +423,13 @@ impl Session {
             plot_style: h.str("CPLOTSTYLE", "ByLayer"),
             ..Common::default()
         }
+    }
+
+    /// Add an object that a draw command made on the plan view: it sits at the current elevation (ELEVATION), as AutoCAD draws it.
+    /// A command with a Z of its own (POINT, LINE, PLINE, an object it derives from another) uses `add_entity`.
+    pub fn draw(&mut self, mut kind: EntityKind) -> Result<Handle> {
+        raise_to(&mut kind, self.elevation());
+        self.add_entity(kind)
     }
 
     /// Add an entity to the current space with current properties.

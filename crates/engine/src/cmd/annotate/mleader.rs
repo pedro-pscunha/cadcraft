@@ -46,7 +46,7 @@ pub(super) fn run_mleader(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let k = mleader_kind(s, &pts, str_param(p, "text").unwrap_or(""), true).ok_or_else(|| bad("mleader", "bad points"))?;
     let k = crate::cmd::mleader_content::apply(s, k, &content)?;
-    Ok(json!({ "handle": s.add_entity(k)?.hex() }))
+    Ok(json!({ "handle": s.draw(k)?.hex() }))
 }
 
 pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
@@ -55,7 +55,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("leader", "need 2+ points"));
     }
     let st = style(s);
-    let h = s.add_entity(EntityKind::Leader(cadcraft_doc::Leader {
+    let h = s.draw(EntityKind::Leader(cadcraft_doc::Leader {
         vertices: pts.iter().map(|q| v3(*q)).collect(),
         arrow: true,
         spline: false,
@@ -67,7 +67,7 @@ pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
     if let (Some(t), Some(last)) = (str_param(p, "text"), pts.last()) {
         let th = s.doc()?.dim_style(&style(s)).map(|d| d.text_height).unwrap_or(0.18);
         out.push(
-            s.add_entity(EntityKind::MText(MText {
+            s.draw(EntityKind::MText(MText {
                 insert: v3(*last + Vec2::new(th * 0.5, th * 0.5)),
                 height: th,
                 width: 0.0,
@@ -206,7 +206,7 @@ impl MLeaderM {
         let text = self.text.clone().unwrap_or_default();
         let k = mleader_kind(s, &self.leader(None), &text, self.landing).ok_or_else(|| EngineError::Other("bad leader".into()))?;
         let k = crate::cmd::mleader_content::apply(s, k, &self.content_spec())?;
-        s.add_entity(k)?;
+        s.draw(k)?;
         Ok(Step::Done)
     }
     fn option_prompt(o: LeaderOpt) -> Prompt {

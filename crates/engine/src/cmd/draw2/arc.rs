@@ -212,7 +212,7 @@ impl Interactive for SeqM {
             return match i {
                 Input::Point(e) => {
                     let a = curves::arc_sed(st, e, dir).ok_or_else(|| other("Invalid end point."))?;
-                    s.add_entity(arc(&a))?;
+                    s.draw(arc(&a))?;
                     Ok(Step::Done)
                 }
                 Input::Enter => Ok(Step::Cancel),
@@ -255,10 +255,10 @@ impl Interactive for SeqM {
             Some(k) => {
                 if let EntityKind::Circle(c) = &k {
                     let r = c.radius;
-                    s.add_entity(k)?;
+                    s.draw(k)?;
                     s.doc_mut()?.header.set_f64("CIRCLERAD", r);
                 } else {
-                    s.add_entity(k)?;
+                    s.draw(k)?;
                 }
                 Ok(Step::Done)
             }
@@ -322,7 +322,7 @@ fn arc_from_params(p: &Value) -> Result<EntityKind> {
 
 pub(super) fn run_arc_variant(s: &mut Session, p: &Value) -> Result<Value> {
     let k = arc_from_params(p)?;
-    added(s.add_entity(k)?)
+    added(s.draw(k)?)
 }
 
 pub(super) fn run_arc_continue(s: &mut Session, p: &Value) -> Result<Value> {
@@ -332,7 +332,7 @@ pub(super) fn run_arc_continue(s: &mut Session, p: &Value) -> Result<Value> {
         _ => curves::last_curve_end(s)?.ok_or_else(|| bad("arc.continue", "no line or arc to continue from"))?,
     };
     let a = curves::arc_sed(st, e, dir).ok_or_else(|| bad("arc.continue", "end point is on the tangent line"))?;
-    let h = s.add_entity(arc(&a))?;
+    let h = s.draw(arc(&a))?;
     // The next continuation starts where this arc was drawn to, not at its stored CCW end.
     s.last_point = e;
     added(h)
@@ -365,7 +365,7 @@ impl Interactive for ArcContinueM {
         match i {
             Input::Point(e) => {
                 let a = curves::arc_sed(st, e, dir).ok_or_else(|| other("Invalid end point."))?;
-                s.add_entity(arc(&a))?;
+                s.draw(arc(&a))?;
                 Ok(Step::Done)
             }
             Input::Enter => Ok(Step::Cancel),

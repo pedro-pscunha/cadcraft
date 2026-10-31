@@ -18,6 +18,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 
 mod break_join;
 mod explode;
+pub(crate) use explode::explode_dimension;
 mod fillet;
 mod offset;
 mod select_then;
@@ -32,7 +33,7 @@ use fillet::{FilletM, run_chamfer, run_fillet};
 use offset::{OffsetM, run_offset};
 use select_then::{DisplaceM, Op, SelectThen};
 use stretch::{StretchM, run_stretch};
-pub(crate) use transform::{check_block_expansion, check_ellipse_transform, transform_entities};
+pub(crate) use transform::{check_block_expansion, check_ellipse_transform, transform_entities, world_map};
 use transform::{run_copy, run_erase, run_mirror, run_move, run_rotate, run_scale};
 pub(crate) use trim::{Edges, extend, trim};
 

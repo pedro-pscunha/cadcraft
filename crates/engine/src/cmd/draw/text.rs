@@ -54,7 +54,7 @@ pub(super) fn run_text(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let j = justify(str_param(p, "justify").unwrap_or("L")).ok_or_else(|| bad("text", "unknown justification"))?;
     let k = make_text(s, at, text, height, f64_or(p, "rotation", 0.0).to_radians(), j);
-    added(s.add_entity(k)?)
+    added(s.draw(k)?)
 }
 
 pub(super) fn run_mtext(s: &mut Session, p: &Value) -> Result<Value> {
@@ -87,7 +87,7 @@ pub(super) fn run_mtext(s: &mut Session, p: &Value) -> Result<Value> {
         direction: None,
         drawing_direction: None,
     });
-    added(s.add_entity(k)?)
+    added(s.draw(k)?)
 }
 
 pub(super) struct TextM {
@@ -171,7 +171,7 @@ impl Interactive for TextM {
             (Some(a), Some(h), Some(r), Input::Text(t)) => {
                 let at = a + Vec2::from_angle(r - std::f64::consts::FRAC_PI_2) * (h * 5.0 / 3.0 * self.line as f64);
                 let k = make_text(s, at, &t, h, r, self.justify);
-                s.add_entity(k)?;
+                s.draw(k)?;
                 self.line += 1;
                 if self.single_line {
                     return Ok(Step::Done);
@@ -254,7 +254,7 @@ impl Interactive for MTextM {
                 if self.lines.is_empty() {
                     return Ok(Step::Done);
                 }
-                s.add_entity(EntityKind::MText(self.opts.mtext(a, self.second, self.lines.join("\\P"))))?;
+                s.draw(EntityKind::MText(self.opts.mtext(a, self.second, self.lines.join("\\P"))))?;
                 return Ok(Step::Done);
             }
             (_, _, Input::Enter) => return Ok(Step::Done),

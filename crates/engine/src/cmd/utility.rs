@@ -374,8 +374,14 @@ fn run_angle(s: &mut Session, p: &Value) -> Result<Value> {
             Some((revision, EntityKind::Line(l))) => Some((revision, l)),
             _ => None,
         };
-        let (l1, l2) =
-            (line(h1).ok_or_else(|| bad("angle.measure", "h1 is not a line"))?, line(h2).ok_or_else(|| bad("angle.measure", "h2 is not a line"))?);
+        let not_a_line = |h: Handle, name: &str| {
+            let raw = matches!(d.entity(h).map(|e| &e.kind), Some(EntityKind::Raw(_)));
+            bad(
+                "angle.measure",
+                if raw { format!("{name} is a raw object, kept as read, and its geometry is not read") } else { format!("{name} is not a line") },
+            )
+        };
+        let (l1, l2) = (line(h1).ok_or_else(|| not_a_line(h1, "h1"))?, line(h2).ok_or_else(|| not_a_line(h2, "h2"))?);
         // A canonical line is a segment in space: the angle between two of them is the angle between their directions at the point
         // where they meet, not the angle of their plan views.
         if l1.0 == cadcraft_doc::GeometryRevision::CanonicalV2 || l2.0 == cadcraft_doc::GeometryRevision::CanonicalV2 {

@@ -255,7 +255,7 @@ pub(crate) fn insert_with(
             });
         }
     }
-    s.add_entity(EntityKind::Insert(ins))
+    s.draw(EntityKind::Insert(ins))
 }
 
 fn run_block(s: &mut Session, p: &Value) -> Result<Value> {
@@ -359,7 +359,7 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
     let at = point_req("attdef", p, "at")?;
     let h = f64_or(p, "height", s.doc()?.header.f64("TEXTSIZE", 0.2));
     let k = attdef_kind(s, tag, str_param(p, "prompt").unwrap_or(tag), str_param(p, "default").unwrap_or(""), at, h, bool_or(p, "invisible", false));
-    Ok(json!({ "handle": s.add_entity(k)?.hex() }))
+    Ok(json!({ "handle": s.draw(k)?.hex() }))
 }
 
 fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
@@ -897,7 +897,7 @@ impl Interactive for AttdefM {
                 if let Input::Point(p) = i {
                     let h = s.doc()?.header.f64("TEXTSIZE", 0.2);
                     let k = attdef_kind(s, tag, pr, def, p, h, false);
-                    s.add_entity(k)?;
+                    s.draw(k)?;
                     return Ok(Step::Done);
                 }
             }

@@ -2,7 +2,7 @@
 //! it with a typed reason before it writes anything.
 #![allow(dead_code)]
 
-use cadcraft_doc::{Common, Drawing, EntityKind, GeometryRevision, Handle, Line, Space};
+use cadcraft_doc::{Common, Drawing, Entity, EntityKind, GeometryRevision, Handle, Line, RawCompound, RawRecord, RawTag, Space};
 use cadcraft_engine::Session;
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
@@ -30,6 +30,39 @@ pub fn make_canonical_in(session: &mut Session, handle: Handle, extrusion: Vec3)
     entity.common.extrusion = extrusion;
     session.doc_mut().unwrap().model.push(entity);
     assert_eq!(session.doc().unwrap().entity(handle).unwrap().geometry_revision, GeometryRevision::CanonicalV2);
+}
+
+/// Move a canonical CIRCLE, LINE or POINT to Z `z`: its elevation, in the frame it is stored in.
+pub fn lift(session: &mut Session, handle: Handle, z: f64) {
+    if z == 0.0 {
+        return;
+    }
+    let mut entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
+    match &mut entity.kind {
+        EntityKind::Circle(c) => c.center.z = z,
+        EntityKind::Line(l) => {
+            l.a.z = z;
+            l.b.z = z;
+        }
+        EntityKind::Point(p) => p.p.z = z,
+        EntityKind::Ray(r) | EntityKind::XLine(r) => r.base.z = z,
+        other => panic!("lift: no elevation for {other:?}"),
+    }
+    session.doc_mut().unwrap().model.push(entity);
+}
+
+/// The same entity as a raw unit: the groups of its record, kept verbatim and read-only, under the same handle. A single record only
+/// (no INSERT with attributes, no POLYLINE with vertices).
+pub fn make_raw(session: &mut Session, handle: Handle) {
+    let entity = session.doc().unwrap().entity(handle).unwrap().as_ref().clone();
+    let (kind, groups) = cadcraft_io::entity_groups(session.doc().unwrap(), &entity);
+    let mut tags = vec![RawTag { code: 5, value: handle.hex() }, RawTag { code: 330, value: "1F".into() }];
+    tags.extend(groups.iter().filter(|t| !matches!(t.code, 5 | 330)).map(|t| RawTag { code: t.code, value: t.str() }));
+    let parent = RawRecord::new(kind, tags).expect("a raw record");
+    let compound =
+        RawCompound::new(parent, Vec::new(), entity.common.clone(), "The source has no exact geometry adapter.".into()).expect("a raw unit");
+    session.doc_mut().unwrap().model.push(Entity::from_raw(compound));
+    assert_eq!(session.doc().unwrap().entity(handle).unwrap().geometry_revision, GeometryRevision::RawSource);
 }
 
 pub fn session_of(drawing: &Drawing) -> Session {

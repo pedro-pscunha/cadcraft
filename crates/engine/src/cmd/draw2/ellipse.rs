@@ -39,7 +39,7 @@ fn ellipse_kind(e: &Ellipse) -> EntityKind {
 
 pub(super) fn run_ellipse_axis(s: &mut Session, p: &Value) -> Result<Value> {
     let e = axis_ellipse_params("ellipse.axis", p)?;
-    added(s.add_entity(ellipse_kind(&e))?)
+    added(s.draw(ellipse_kind(&e))?)
 }
 
 pub(super) fn run_ellipse_arc(s: &mut Session, p: &Value) -> Result<Value> {
@@ -63,5 +63,5 @@ pub(super) fn run_ellipse_arc(s: &mut Session, p: &Value) -> Result<Value> {
     let en = to_param(f64_req("ellipse.arc", p, "end")?);
     e.start = st;
     e.end = en;
-    added(s.add_entity(ellipse_kind(&e))?)
+    added(s.draw(ellipse_kind(&e))?)
 }

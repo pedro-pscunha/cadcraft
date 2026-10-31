@@ -208,12 +208,16 @@ fn erase_disassociate_and_reassociate() {
 }
 
 #[test]
-fn dimassoc_zero_makes_plain_dimensions() {
+fn dimassoc_zero_makes_the_pieces_of_a_dimension_and_no_dimension() {
     let mut s = Session::new();
     line(&mut s, [0.0, 0.0], [4.0, 0.0]);
     s.doc_mut().unwrap().header.set_i64("DIMASSOC", 0);
-    let d = h(&s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [4, 0], "at": [2, 1] })).unwrap());
-    assert!(dim(&s, d).assoc.is_empty());
+    let before = s.doc().unwrap().model.len();
+    s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [4, 0], "at": [2, 1] })).unwrap();
+    let made: Vec<_> = s.doc().unwrap().model.iter().skip(before).collect();
+    assert!(!made.is_empty());
+    assert!(made.iter().all(|e| !matches!(e.kind, EntityKind::Dimension(_))), "AutoCAD makes lines, arrowheads and text, not a dimension");
+    assert!(made.iter().any(|e| matches!(e.kind, EntityKind::MText(_))));
 }
 
 #[test]

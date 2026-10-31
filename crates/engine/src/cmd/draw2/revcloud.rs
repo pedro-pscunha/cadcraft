@@ -113,7 +113,9 @@ pub(super) fn run_revcloud(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("revcloud", "too many points"));
     }
     let vs = cloud_vertices(&pts, arc_len, per_edge, reverse).ok_or_else(|| bad("revcloud", "the boundary needs an area"))?;
-    let h = s.add_entity(cloud_entity(vs, calligraphy, arc_len))?;
+    let cloud = cloud_entity(vs, calligraphy, arc_len);
+    // A cloud made from an object keeps the object's place; a drawn one sits at the current elevation.
+    let h = if src.is_some() { s.add_entity(cloud)? } else { s.draw(cloud)? };
     if let Some(src) = src {
         let common = curves::entity(s, src)?.common;
         let d = s.doc_mut()?;
@@ -151,7 +153,7 @@ impl RevcloudM {
         let b = self.boundary(None);
         match cloud_vertices(&b, self.arc_len, self.kind != CloudKind::Free, false) {
             Some(vs) => {
-                s.add_entity(cloud_entity(vs, self.calligraphy, self.arc_len))?;
+                s.draw(cloud_entity(vs, self.calligraphy, self.arc_len))?;
                 s.echo("Revision cloud finished.");
                 Ok(Step::Done)
             }

@@ -29,7 +29,7 @@ pub(super) fn run_ray(s: &mut Session, p: &Value) -> Result<Value> {
     if dir == Vec2::ZERO {
         return Err(bad("ray", "through point equals base"));
     }
-    added(s.add_entity(EntityKind::Ray(RayLine { base: v3(b), dir: v3(dir) }))?)
+    added(s.draw(EntityKind::Ray(RayLine { base: v3(b), dir: v3(dir) }))?)
 }
 
 fn donut(center: Vec2, inside: f64, outside: f64) -> EntityKind {
@@ -49,7 +49,7 @@ pub(super) fn run_donut(s: &mut Session, p: &Value) -> Result<Value> {
     if inside > outside {
         return Err(bad("donut", "`inside` must not be larger than `outside`"));
     }
-    added(s.add_entity(donut(c, inside, outside))?)
+    added(s.draw(donut(c, inside, outside))?)
 }
 
 pub(super) struct PointM {
@@ -106,7 +106,7 @@ impl Interactive for RayM {
                     Some(b) => {
                         let d = (p - b).normalized();
                         if d != Vec2::ZERO {
-                            s.add_entity(EntityKind::Ray(RayLine { base: v3(b), dir: v3(d) }))?;
+                            s.draw(EntityKind::Ray(RayLine { base: v3(b), dir: v3(d) }))?;
                         }
                     }
                 }
@@ -156,7 +156,7 @@ impl Interactive for DonutM {
             }
             (Some(_), None, Input::Enter) => self.outside = Some(hdr(s, "DONUTOD", 1.0)),
             (Some(a), Some(b), Input::Point(p)) => {
-                s.add_entity(donut(p, a, b))?;
+                s.draw(donut(p, a, b))?;
                 let d = s.doc_mut()?;
                 d.header.set_f64("DONUTID", a);
                 d.header.set_f64("DONUTOD", b);
