@@ -110,38 +110,89 @@ fn canonical_clone_dwg_follows_autocads_wcs_2rd_oracle() {
     assert!((point(&dimension, 12) - Vec3::new(4.0, 0.32, -0.24)).len() < 1e-10, "{:?}", point(&dimension, 12));
 }
 
+fn shared_clone_drawing() -> Drawing {
+    let (source, line) = source_records();
+    let mut drawing = Drawing::new_metric();
+    let mut rx = Rx::default();
+    let mut entity_tags = Vec::new();
+    for (handle, offset) in [(Handle(0x200), Vec3::new(4.0, 5.0, 0.0)), (Handle(0x202), Vec3::new(14.0, 15.0, 0.0))] {
+        let mut tags = source.clone();
+        for (code, value) in [(12, offset.x), (22, offset.y), (32, offset.z), (210, 0.0), (220, 0.0), (230, 1.0)] {
+            *tags.iter_mut().find(|tag| tag.code == code).unwrap() = Tag::f(code, value);
+        }
+        *tags.iter_mut().find(|tag| tag.code == 5).unwrap() = Tag::s(5, handle.hex());
+        let (common, mut kind) = canonical_curve_from_groups("DIMENSION", &tags, &mut drawing, &rx).unwrap();
+        extras::entity_extras("DIMENSION", &tags, handle, &mut kind, &mut rx, GeometryRevision::CanonicalV2);
+        drawing.model.push(Entity { geometry_revision: GeometryRevision::CanonicalV2, handle, common, kind });
+        entity_tags.push(Tag::s(0, "DIMENSION"));
+        entity_tags.extend(tags);
+    }
+    let (common, kind) = canonical_curve_from_groups("LINE", &line, &mut drawing, &rx).unwrap();
+    let mut block = Block::new("*D1");
+    block.entities.push(Entity { geometry_revision: GeometryRevision::CanonicalV2, handle: Handle(0x301), common, kind });
+    drawing.blocks.insert("*D1".into(), std::sync::Arc::new(block));
+    shift_dimension_blocks(&mut drawing, &rx).unwrap();
+    let mut block_tags = vec![Tag::s(0, "BLOCK"), Tag::s(5, "300"), Tag::s(2, "*D1"), Tag::i(70, 1), Tag::s(0, "LINE")];
+    block_tags.extend(line);
+    block_tags.extend([Tag::s(0, "ENDBLK"), Tag::s(5, "302")]);
+    crate::dxf_raw::read(
+        &[Section { name: "BLOCKS".into(), tags: block_tags }, Section { name: "ENTITIES".into(), tags: entity_tags }],
+        &mut drawing,
+    );
+    drawing
+}
+
 #[test]
-fn canonical_shared_block_conflicts_refuse_before_any_model_mutation() {
-    use dimension_blocks::{BlockOffset, DimensionBlockShift};
-    let mut drawing = drawing(GeometryRevision::CanonicalV2);
-    let mut other = Block::new("*OTHER");
-    let mut child = Entity::new(Handle(0x501), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 2.0, 3.0) }));
-    child.geometry_revision = GeometryRevision::CanonicalV2;
-    other.entities.push(child);
-    drawing.blocks.insert("*OTHER".into(), std::sync::Arc::new(other));
-    let before = drawing.clone();
-    let rx = Rx {
-        dim_block_shifts: vec![
-            DimensionBlockShift { block: "*D1".into(), handle: Handle(0x200), offset: BlockOffset::Canonical(Vec3::ZERO) },
-            DimensionBlockShift { block: "*OTHER".into(), handle: Handle(0x201), offset: BlockOffset::Canonical(Vec3::new(1.0, 2.0, 3.0)) },
-            DimensionBlockShift { block: "*D1".into(), handle: Handle(0x202), offset: BlockOffset::Canonical(Vec3::new(4.0, 5.0, 6.0)) },
-        ],
-        ..Default::default()
-    };
-    let error = shift_dimension_blocks(&mut drawing, &rx).unwrap_err();
-    assert!(matches!(error, IoError::DimensionBlockDisplacement { first: Handle(0x200), other: Handle(0x202), .. }));
-    assert_eq!(drawing, before);
+fn canonical_shared_block_keeps_each_dimension_clone_point_and_the_source_picture() {
+    let drawing = shared_clone_drawing();
+    for name in ["shared-clones.dxf", "shared-clones.dwg"] {
+        let sections = decoded(&crate::write(&drawing, name).unwrap(), name);
+        let entities = sections.iter().find(|section| section.name == "ENTITIES").unwrap();
+        let dimensions: Vec<_> = records(&entities.tags).into_iter().filter(|(kind, _)| kind == "DIMENSION").collect();
+        assert_eq!(dimensions.len(), 2, "{name}");
+        for ((_, tags), expected) in dimensions.iter().zip([Vec3::new(4.0, 5.0, 0.0), Vec3::new(14.0, 15.0, 0.0)]) {
+            assert_eq!(point(tags, 12), expected, "{name}");
+            assert!(tags.iter().any(|tag| tag.code == 2 && tag.str() == "*D1"), "{name}");
+        }
+        let blocks = sections.iter().find(|section| section.name == "BLOCKS").unwrap();
+        let lines: Vec<_> = records(&blocks.tags).into_iter().filter(|(kind, _)| kind == "LINE").collect();
+        assert_eq!(lines.len(), 1, "{name}: shared picture must not split");
+        assert_eq!(point(&lines[0].1, 10), Vec3::new(1.0, 2.0, 3.0), "{name}");
+        assert_eq!(point(&lines[0].1, 11), Vec3::new(2.0, 4.0, 3.0), "{name}");
+        let source = source_records().1;
+        let retained: Vec<_> = lines[0].1.iter().filter(|tag| source.iter().any(|original| original.code == tag.code)).collect();
+        assert_eq!(retained, source.iter().collect::<Vec<_>>(), "{name}: source block tags");
+    }
+    for (handle, expected) in [(Handle(0x200), Vec3::new(5.0, 7.0, 3.0)), (Handle(0x202), Vec3::new(15.0, 17.0, 3.0))] {
+        let geometry = cadcraft_render::entity_world_geometry(&drawing, drawing.entity(handle).unwrap(), &Mat4::IDENTITY).unwrap();
+        assert!(
+            geometry
+                .primitives()
+                .iter()
+                .any(|primitive| matches!(primitive, cadcraft_doc::WorldPrimitive::Line { a, .. } if (*a - expected).len() < 1e-10))
+        );
+    }
+    let list = cadcraft_render::build(&drawing, &cadcraft_doc::Space::Model, &cadcraft_render::Options { text: false, ..Default::default() });
+    assert!(list.geometry_refusals.is_empty(), "{:?}", list.geometry_refusals);
+    for expected in [
+        cadcraft_geom::Vec2::new(5.0, 7.0),
+        cadcraft_geom::Vec2::new(6.0, 9.0),
+        cadcraft_geom::Vec2::new(15.0, 17.0),
+        cadcraft_geom::Vec2::new(16.0, 19.0),
+    ] {
+        assert!(list.verts.iter().any(|point| (*point - expected).len() < 1e-10), "missing {expected:?}");
+    }
 }
 
 #[test]
 fn legacy_shared_block_conflicts_keep_the_existing_no_normalization_rule() {
-    use dimension_blocks::{BlockOffset, DimensionBlockShift};
+    use dimension_blocks::DimensionBlockShift;
     let mut drawing = drawing(GeometryRevision::LegacyProjectedV1);
     let before = drawing.clone();
     let rx = Rx {
         dim_block_shifts: vec![
-            DimensionBlockShift { block: "*D1".into(), handle: Handle(0x200), offset: BlockOffset::Legacy(cadcraft_geom::Vec2::new(1.0, 2.0)) },
-            DimensionBlockShift { block: "*D1".into(), handle: Handle(0x202), offset: BlockOffset::Legacy(cadcraft_geom::Vec2::new(4.0, 5.0)) },
+            DimensionBlockShift { block: "*D1".into(), offset: cadcraft_geom::Vec2::new(1.0, 2.0) },
+            DimensionBlockShift { block: "*D1".into(), offset: cadcraft_geom::Vec2::new(4.0, 5.0) },
         ],
         ..Default::default()
     };

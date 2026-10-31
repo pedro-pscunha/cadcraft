@@ -43,11 +43,13 @@ pub struct GeometrySnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DimensionAsRead {
     points: [Vec3; 4],
+    /// The OCS insertion point (DXF 12) of this dimension's source graphics block.
+    pub clone_point: Vec3,
 }
 
 impl DimensionAsRead {
-    pub fn of(dm: &Dimension) -> DimensionAsRead {
-        DimensionAsRead { points: [dm.defpt, dm.p13, dm.p14, dm.p15] }
+    pub fn of(dm: &Dimension, clone_point: Vec3) -> DimensionAsRead {
+        DimensionAsRead { points: [dm.defpt, dm.p13, dm.p14, dm.p15], clone_point }
     }
 
     /// Whether `dm` is the dimension as it was read, moved, turned or mirrored as a whole: every distance between its

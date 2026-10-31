@@ -4,7 +4,7 @@ use cadcraft_doc::{DimKind, Dimension, EntityKind, GeometryRevision, Handle};
 use cadcraft_geom::{OcsFrame, Vec3};
 
 use super::common::T;
-use super::dimension_blocks::{BlockOffset, DimensionBlockShift};
+use super::dimension_blocks::DimensionBlockShift;
 use super::{Rx, Tag};
 
 pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx, revision: GeometryRevision) {
@@ -12,7 +12,7 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
         return;
     }
     resolve_references(kind, tags, h, k, rx);
-    apply_geometry(kind, tags, h, k, rx, revision);
+    apply_geometry(kind, tags, k, rx, revision);
 }
 
 /// Resolve document names, properties and associations without reinterpreting coordinate frames.
@@ -65,7 +65,7 @@ pub(super) fn resolve_references(kind: &str, tags: &[Tag], h: Handle, k: &mut En
     }
 }
 
-fn apply_geometry(kind: &str, tags: &[Tag], handle: Handle, k: &mut EntityKind, rx: &mut Rx, revision: GeometryRevision) {
+fn apply_geometry(kind: &str, tags: &[Tag], k: &mut EntityKind, rx: &mut Rx, revision: GeometryRevision) {
     match (kind, k) {
         ("ATTDEF", EntityKind::AttDef(a)) if rx.from_dwg => {
             // This group is not stored in DWG; its reader supplies a fixed value.
@@ -85,24 +85,10 @@ fn apply_geometry(kind: &str, tags: &[Tag], handle: Handle, k: &mut EntityKind, 
                 GeometryRevision::LegacyProjectedV1 => {
                     let shift = super::common::ocs_n(normal, t.p(12)).xy();
                     if let Some(name) = dm.block.as_ref().filter(|_| shift.is_finite() && (shift.x != 0.0 || shift.y != 0.0)) {
-                        rx.dim_block_shifts.push(DimensionBlockShift {
-                            block: name.to_ascii_uppercase(),
-                            handle,
-                            offset: BlockOffset::Legacy(shift),
-                        });
+                        rx.dim_block_shifts.push(DimensionBlockShift { block: name.to_ascii_uppercase(), offset: shift });
                     }
                 }
-                GeometryRevision::CanonicalV2 => {
-                    let offset = t.p(12);
-                    if let Some(name) = dm.block.as_ref().filter(|_| offset.is_finite()) {
-                        rx.dim_block_shifts.push(DimensionBlockShift {
-                            block: name.to_ascii_uppercase(),
-                            handle,
-                            offset: BlockOffset::Canonical(offset),
-                        });
-                    }
-                }
-                GeometryRevision::RawSource => {}
+                GeometryRevision::CanonicalV2 | GeometryRevision::RawSource => {}
             }
             dimension_oblique(dm, &t, normal, revision);
         }

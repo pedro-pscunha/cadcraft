@@ -787,6 +787,12 @@ fn dimension_block_definitions(
                 if d.entity(e.handle).is_none() && dm.block.is_some() {
                     continue;
                 }
+                if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2
+                    && let Some(name) = dm.block.as_ref().filter(|name| d.block(name).is_some())
+                {
+                    cx.dim_blocks.insert(e.handle, name.clone());
+                    continue;
+                }
                 let reused = dim_plan.reuse.get(&e.handle);
                 let ents: Vec<Entity>;
                 let name = match reused {

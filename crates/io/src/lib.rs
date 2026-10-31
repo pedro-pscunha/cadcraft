@@ -61,8 +61,6 @@ pub enum IoError {
     Unsupported(String),
     #[error("Save refused for raw unit {unit}: {record} ({handle}), field {field}: {reason}")]
     RawPreservation { unit: cadcraft_doc::Handle, record: String, handle: cadcraft_doc::Handle, field: String, reason: String },
-    #[error("Canonical dimensions {first} and {other} give block {block} different clone offsets. No geometry was changed.")]
-    DimensionBlockDisplacement { block: String, first: cadcraft_doc::Handle, other: cadcraft_doc::Handle },
 }
 
 pub type Result<T> = std::result::Result<T, IoError>;
