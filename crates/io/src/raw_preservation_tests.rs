@@ -167,18 +167,83 @@ fn binary_inspection_keeps_the_actual_dwg_release_without_new_attribute_fields()
     assert_eq!(attribute_version_groups(&cadcraft_dwg::dwg_to_dxf(&second).unwrap()), ("AC1018".into(), vec![]));
 }
 
+/// The fixture's ATTRIB with its AcDbAttribute 280 values replaced (version, lock) when given.
+fn drawing_with_attribute_280(version: Option<&str>, lock: Option<&str>) -> Drawing {
+    let mut drawing = fixtures::drawing("INSERT");
+    let EntityKind::Raw(raw) = &drawing.entity(Handle(0x200)).unwrap().kind else { panic!("Raw INSERT") };
+    let followers = raw
+        .followers()
+        .iter()
+        .map(|record| {
+            let mut tags = record.tags().to_vec();
+            if record.handle() == Handle(0x201) {
+                let mut values = [version, lock].into_iter();
+                for tag in tags.iter_mut().filter(|tag| tag.code == 280).take(2) {
+                    if let Some(value) = values.next().flatten() {
+                        tag.value = value.into();
+                    }
+                }
+            }
+            RawRecord::new(record.kind().into(), tags).unwrap()
+        })
+        .collect();
+    let unit = RawCompound::new(raw.parent().clone(), followers, raw.source_common().clone(), raw.reason().into()).unwrap();
+    drawing.model.replace(Entity::from_raw(unit));
+    drawing
+}
+
+fn save_at(drawing: &Drawing, version: crate::Version) -> crate::Result<Vec<u8>> {
+    crate::write_with(drawing, "target.dwg", &crate::SaveOptions { version: Some(version), binary: false })
+}
+
 #[test]
-fn old_targets_refuse_to_drop_explicit_future_attribute_fields() {
+fn old_targets_save_the_zero_attribute_fields_they_cannot_store() {
+    // DXF Reference, ATTRIB / ODA 20.4.4: the version byte exists from R2010, the lock bit from R2007; a 0 is the default.
     let drawing = fixtures::drawing("INSERT");
     for version in [crate::Version::R2000, crate::Version::R2004] {
-        let options = crate::SaveOptions { version: Some(version), binary: false };
-        let error = crate::write_with(&drawing, "old.dwg", &options).expect_err("old releases cannot retain explicit future fields");
-        match error {
-            crate::IoError::RawPreservation { record, handle, field, .. } => {
-                assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
-                assert!(field.contains("group 280[0]"), "{field}");
+        save_at(&drawing, version).unwrap_or_else(|error| panic!("{version:?}: zero version and lock must not block the save: {error}"));
+    }
+    save_at(&drawing, crate::Version::R2018).expect("a release that stores both fields keeps them");
+}
+
+#[test]
+fn a_nonzero_attribute_field_still_refuses_at_a_release_that_cannot_store_it() {
+    for (version, lock, group) in [(Some("1"), None, "group 280[0]"), (None, Some("1"), "group 280[1]")] {
+        let drawing = drawing_with_attribute_280(version, lock);
+        for target in [crate::Version::R2000, crate::Version::R2004] {
+            match save_at(&drawing, target) {
+                Err(crate::IoError::RawPreservation { record, handle, field, .. }) => {
+                    assert_eq!((record.as_str(), handle), ("ATTRIB", Handle(0x201)));
+                    assert!(field.contains(group), "{target:?}: {field}");
+                }
+                result => panic!("{target:?}: a nonzero {group} must refuse: {:?}", result.map(|bytes| bytes.len())),
             }
-            error => panic!("unexpected error: {error}"),
+        }
+    }
+}
+
+#[test]
+fn the_default_rule_follows_the_target_release() {
+    let source = super::fields::parse(
+        &[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "0".into() }, RawTag { code: 280, value: "0".into() }],
+        true,
+    )
+    .unwrap();
+    let zero = Some(super::fields::Value::Integer(0));
+    for (target, version_default, lock_default) in [
+        (crate::Version::R2000, true, true),
+        (crate::Version::R2004, true, true),
+        (crate::Version::R2007, true, false),
+        (crate::Version::R2010, false, false),
+        (crate::Version::R2018, false, false),
+    ] {
+        for field in source.keys().filter(|field| field.code == 280) {
+            let expected = if field.index == 0 { version_default } else { lock_default };
+            assert_eq!(
+                super::fields::default_value("ATTRIB", field, &source, target),
+                expected.then(|| zero.clone()).flatten(),
+                "{target:?} {field:?}"
+            );
         }
     }
 }
@@ -248,7 +313,7 @@ fn inspection_cannot_hide_a_changed_attribute_lock_bit() {
 }
 
 #[test]
-fn attribute_version_fields_have_no_absence_equivalence_in_any_scope() {
+fn attribute_zero_defaults_are_limited_to_two_fields_in_the_own_subclass() {
     let source = super::fields::parse(
         &[
             RawTag { code: 100, value: "AcDbAttribute".into() },
@@ -259,9 +324,14 @@ fn attribute_version_fields_have_no_absence_equivalence_in_any_scope() {
         true,
     )
     .unwrap();
-    for field in source.keys().filter(|field| field.code == 280) {
-        assert!(super::fields::default_value("ATTRIB", field, &source).is_none());
-        assert!(super::fields::default_value("ATTDEF", field, &source).is_none());
+    let target = crate::Version::R2000;
+    for (field, value) in source.iter().filter(|(field, _)| field.code == 280) {
+        let default = super::fields::default_value("ATTRIB", field, &source, target);
+        assert_eq!(default, (field.index < 2).then_some(super::fields::Value::Integer(0)));
+        if field.index < 2 {
+            assert_eq!(default.as_ref(), Some(value));
+        }
+        assert!(super::fields::default_value("ATTDEF", field, &source, target).is_none());
     }
     for tags in [
         vec![(100, "AcDbText"), (280, "0")],
@@ -272,12 +342,12 @@ fn attribute_version_fields_have_no_absence_equivalence_in_any_scope() {
         let tags: Vec<_> = tags.into_iter().map(|(code, value)| RawTag { code, value: value.into() }).collect();
         let fields = super::fields::parse(&tags, true).unwrap();
         let field = fields.keys().find(|field| field.code == 280).unwrap();
-        assert!(super::fields::default_value("ATTRIB", field, &fields).is_none());
+        assert!(super::fields::default_value("ATTRIB", field, &fields, target).is_none());
     }
     let nonzero =
         super::fields::parse(&[RawTag { code: 100, value: "AcDbAttribute".into() }, RawTag { code: 280, value: "1".into() }], true).unwrap();
     let (field, value) = nonzero.iter().find(|(field, _)| field.code == 280).unwrap();
-    assert_ne!(super::fields::default_value("ATTRIB", field, &nonzero).as_ref(), Some(value));
+    assert_ne!(super::fields::default_value("ATTRIB", field, &nonzero, target).as_ref(), Some(value));
 }
 
 #[test]
@@ -434,7 +504,7 @@ fn numeric_wire_equivalence_does_not_hide_changed_bits_or_repeated_defaults() {
     )
     .unwrap();
     let repeated = source.keys().find(|field| field.code == 41 && field.index == 1).unwrap();
-    assert!(super::fields::default_value("INSERT", repeated, &source).is_none());
+    assert!(super::fields::default_value("INSERT", repeated, &source, crate::Version::R2018).is_none());
 }
 
 #[test]

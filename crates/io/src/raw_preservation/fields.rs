@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use cadcraft_doc::{Handle, RawTag};
-use cadcraft_dxf::{Kind, kind_of};
+use cadcraft_dxf::{Kind, Version, kind_of};
 
 const MAX_SEMANTIC_BYTES: usize = 64 << 20;
 
@@ -182,9 +182,22 @@ pub(crate) fn parse(tags: &[RawTag], source_text: bool) -> Result<Fields, FieldE
 /// - Common-property overrides and reference remapping are checked separately against the model.
 ///
 /// Optional-field defaults are listed here only after a documented format rule justifies them.
-pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Option<Value> {
+pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields, target: Version) -> Option<Value> {
     if !field.groups.is_empty() || field.application.is_some() || field.embedded != 0 {
         return None;
+    }
+    // DXF Reference, ATTRIB: AcDbAttribute's first 280 is the version (stored from R2010) and its second is the
+    // lock-position flag (from R2007), ODA 20.4.4. A release that cannot store a field holds nothing for it, so a 0, the
+    // documented default, loses nothing there. A nonzero value, a third 280 and any other scope stay strict, and a release
+    // that can store the field must keep it.
+    // https://help.autodesk.com/cloudhelp/2018/ENU/AutoCAD-DXF/files/GUID-7DD8B495-C3F8-48CD-A766-14F9D7D0DD9B.htm
+    if kind == "ATTRIB" && field.class == "AcDbAttribute" && field.code == 280 {
+        let stored_from = match field.index {
+            0 => Version::R2010,
+            1 => Version::R2007,
+            _ => return None,
+        };
+        return (target < stored_from).then_some(Value::Integer(0));
     }
     if field.index != 0 {
         return None;

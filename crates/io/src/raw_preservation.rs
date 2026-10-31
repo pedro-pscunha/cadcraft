@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use cadcraft_doc::foreign::{ForeignObject, MAX_FOREIGN_DEPTH, object_owner};
 use cadcraft_doc::{Drawing, Entity, EntityKind, EntityStore, GeometryRevision, Handle, RawCompound, RawRecord, RawTag};
-use cadcraft_dxf::{Tag, Value as TagValue};
+use cadcraft_dxf::{Tag, Value as TagValue, Version};
 
 use crate::dxf_raw::WrittenReferences;
 use crate::{IoError, Result};
@@ -41,6 +41,8 @@ pub(crate) struct RawSaveCheck<'a> {
     identities: BTreeMap<Handle, usize>,
     foreign: BTreeSet<Handle>,
     owned: BTreeMap<Handle, Vec<(Handle, usize)>>,
+    /// The release the DWG is written at: what it cannot store, it holds no value for.
+    target: Version,
 }
 
 fn failure(unit: &Unit<'_>, kind: &str, handle: Handle, field: impl Into<String>, reason: impl Into<String>) -> IoError {
@@ -106,7 +108,7 @@ fn descendants(roots: impl Iterator<Item = Handle>, index: &BTreeMap<Handle, Vec
 }
 
 impl<'a> RawSaveCheck<'a> {
-    pub(crate) fn new(drawing: &'a Drawing, references: &'a WrittenReferences) -> Result<Self> {
+    pub(crate) fn new(drawing: &'a Drawing, references: &'a WrittenReferences, target: Version) -> Result<Self> {
         let mut units = Vec::new();
         collect(&drawing.model, "*Model_Space", &mut units);
         for (owner, layout) in drawing.paper_space_blocks() {
@@ -155,7 +157,7 @@ impl<'a> RawSaveCheck<'a> {
             }
             foreign.extend(drawing.foreign.targets.keys().copied());
         }
-        let check = Self { drawing, references, units, identities, foreign, owned };
+        let check = Self { drawing, references, units, identities, foreign, owned, target };
         for unit in &check.units {
             if unit.entity.geometry_revision != GeometryRevision::RawSource || unit.entity.handle != unit.source.parent().handle() {
                 return Err(failure(
@@ -401,7 +403,7 @@ impl<'a> RawSaveCheck<'a> {
                 }
             }
         }
-        compare_fields(unit, kind, handle, &expected, &decoded)
+        compare_fields(unit, kind, handle, &expected, &decoded, self.target)
     }
 
     fn plot_style(&self, unit: &Unit<'_>, actual: &Fields, inspection: &OutputInventory) -> Result<()> {
@@ -465,16 +467,16 @@ impl<'a> RawSaveCheck<'a> {
     }
 }
 
-fn compare_fields(unit: &Unit<'_>, kind: &str, handle: Handle, expected: &Fields, actual: &Fields) -> Result<()> {
+fn compare_fields(unit: &Unit<'_>, kind: &str, handle: Handle, expected: &Fields, actual: &Fields, target: Version) -> Result<()> {
     for (field, value) in expected {
         match actual.get(field) {
             Some(actual) if actual == value => {}
-            None if fields::default_value(kind, field, expected).as_ref() == Some(value) => {}
+            None if fields::default_value(kind, field, expected, target).as_ref() == Some(value) => {}
             _ => return Err(failure(unit, kind, handle, field.label(), "a required value is missing or differs")),
         }
     }
     for (field, value) in actual {
-        if !expected.contains_key(field) && fields::default_value(kind, field, expected).as_ref() != Some(value) {
+        if !expected.contains_key(field) && fields::default_value(kind, field, expected, target).as_ref() != Some(value) {
             return Err(failure(unit, kind, handle, field.label(), "the decode adds a field without a documented wire equivalence"));
         }
     }

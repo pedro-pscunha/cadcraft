@@ -195,7 +195,7 @@ fn write_dwg_with(
 ) -> Result<(Vec<u8>, Vec<String>)> {
     raw_preservation::preflight(drawing)?;
     let bridge = dxf_write::dwg_bridge(drawing, version);
-    let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references)?;
+    let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references, version)?;
     let page = drawing.header.str("DWGCODEPAGE", "ANSI_1252");
     let page = page.trim();
     let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);

@@ -37,8 +37,6 @@ fn assert_raw(drawing: &Drawing) {
 #[test]
 fn stage0_explicit_raw_policy_survives_on_off_and_off_on_reopens_in_both_formats() {
     let source = include_bytes!("../data/activation/r5_raw_insert_with_full_tables.dxf");
-    // The synthetic old-header source includes R2010 attribute fields. Use a target that retains them.
-    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
     for (from, to) in DIRECTIONS {
         for name in ["rollback.dxf", "rollback.dwg"] {
             let mut drawing = read_raw_policy(source, "source.dxf", from);
@@ -51,7 +49,7 @@ fn stage0_explicit_raw_policy_survives_on_off_and_off_on_reopens_in_both_formats
             let snapshot = line.common.geometry.as_ref().unwrap();
             assert_ne!(cadcraft_doc::geometry_key(&line.kind, &line.common).unwrap(), snapshot.model, "the real edit must invalidate replay");
             // A successful DWG write includes the independent complete RawSaveCheck precondition.
-            let saved = cadcraft_io::write_with(&drawing, name, &options).unwrap();
+            let saved = cadcraft_io::write(&drawing, name).unwrap();
             let mut reopened = read_raw_policy(&saved, name, to);
             let control = read_raw_policy(&saved, name, from);
             assert_raw(&reopened);
@@ -66,13 +64,13 @@ fn stage0_explicit_raw_policy_survives_on_off_and_off_on_reopens_in_both_formats
                 Err(cadcraft_doc::DocError::RawReadOnly { .. })
             ));
             assert_eq!(reopened, before);
-            let second_save = cadcraft_io::write_with(&reopened, name, &options).expect("a checked Raw unit must remain saveable after reopening");
-            assert_eq!(second_save, cadcraft_io::write_with(&control, name, &options).unwrap(), "{name}: the mode cannot change save bytes");
+            let second_save = cadcraft_io::write(&reopened, name).expect("a checked Raw unit must remain saveable after reopening");
+            assert_eq!(second_save, cadcraft_io::write(&control, name).unwrap(), "{name}: the mode cannot change save bytes");
             let second_reopen = read_raw_policy(&second_save, name, from);
             assert_raw(&second_reopen);
             assert_eq!(second_reopen, read_raw_policy(&second_save, name, to));
             reopened.transform_entity(Handle(0x90), &move_line).unwrap();
-            let saved_again = cadcraft_io::write_with(&reopened, name, &options).unwrap();
+            let saved_again = cadcraft_io::write(&reopened, name).unwrap();
             assert_raw(&read_raw_policy(&saved_again, name, from));
         }
     }

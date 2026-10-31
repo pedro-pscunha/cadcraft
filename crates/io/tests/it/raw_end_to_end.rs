@@ -185,9 +185,7 @@ fn a_raw_unit_of_a_file_with_full_tables_is_saved_to_dwg_and_reads_back_with_its
 fn dwg_reads_back_the_unit(chain: &Chain) {
     let (d, source) = read(chain.name);
     assert_eq!(raw_parents(&d), [(chain.kind.to_string(), Handle(chain.unit[0]))]);
-    // The old-header INSERT fixture contains R2010 fields. This positive save must retain them.
-    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
-    let bytes = cadcraft_io::write_with(&d, "x.dwg", &options).expect("a unit whose values the independent DWG read finds is written");
+    let bytes = cadcraft_io::write(&d, "x.dwg").expect("a unit whose values the independent DWG read finds is written");
     let dxf = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&bytes).unwrap()).unwrap();
     // The DXF save is the reference: it keeps every source group but the owner.
     let dxf_save = cadcraft_io::write_dxf(&d);
@@ -201,9 +199,11 @@ fn dwg_reads_back_the_unit(chain: &Chain) {
         let back: Vec<_> = groups_of(&dxf, handle).1.iter().map(normal).collect();
         // Every source group is in the DWG's record, once its spelling is normalised, except: the owner (330 outside a 102 group) and the
         // reactor, extension dictionary and 102 markers, which the DWG sets to its own block record and renumbers with the metadata
-        // objects; and the INSERT defaults that the DWG does not repeat (scale 1 and rotation 0).
+        // objects; and the defaults the DWG does not repeat (the INSERT's scale 1 and rotation 0, the ATTRIB's version and lock-position flags 280 = 0).
         let default = |g: &(i32, String)| {
-            matches!(g, (41..=43, v) if v.trim().parse::<f64>() == Ok(1.0)) || matches!(g, (50, v) if v.trim().parse::<f64>() == Ok(0.0))
+            matches!(g, (41..=43, v) if v.trim().parse::<f64>() == Ok(1.0))
+                || matches!(g, (50, v) if v.trim().parse::<f64>() == Ok(0.0))
+                || matches!(g, (280, v) if v.trim() == "0")
         };
         let missing: Vec<_> = from.iter().filter(|g| ![330, 360, 102].contains(&g.0) && !default(g) && !back.contains(&normal(g))).collect();
         assert!(missing.is_empty(), "{kind} {handle:X}: groups lost in the DWG: {missing:?}");
@@ -286,8 +286,7 @@ fn every_read_fixture_runs_the_whole_chain() {
             }
         }
         // DWG: a file with the tables its groups name is written and an independent read finds the unit's values (the test below), any other refuses.
-        let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2018), binary: false };
-        let dwg = cadcraft_io::write_with(&d, "x.dwg", &options);
+        let dwg = cadcraft_io::write(&d, "x.dwg");
         if chain.tables {
             assert!(dwg.is_ok(), "{name}: {:?}", dwg.err());
         } else {
