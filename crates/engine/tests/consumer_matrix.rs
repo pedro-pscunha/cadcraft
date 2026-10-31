@@ -795,6 +795,11 @@ fn live_rows() -> Vec<Row> {
         expect,
     };
     out.push(mirror(Revision::Legacy, Expect::Edits(after_mirror)));
+    // A reflection of canonical geometry has no measured convention (the normal of a mirrored circle, the sweep of a mirrored arc):
+    // it is refused in every plane, and the reason names the reflection.
+    for plane in planes {
+        out.push(Row { plane, ..mirror(Canonical, Expect::Refuses("reflection")) });
+    }
     out.push(mirror(Revision::Raw, Expect::Refuses("read-only")));
     rows
 }
