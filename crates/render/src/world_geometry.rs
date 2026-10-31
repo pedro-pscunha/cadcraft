@@ -23,16 +23,15 @@ pub(crate) fn entity_world_geometry_visiting(
 }
 
 pub(crate) fn dimension_picture_transform(entity: &Entity, dimension: &cadcraft_doc::Dimension, parent: &Mat4) -> cadcraft_doc::Result<Mat4> {
-    dimension.localized_for_revision(entity.common.extrusion, entity.geometry_revision)?;
-    let offset = if entity.geometry_revision == GeometryRevision::CanonicalV2 && dimension.block.is_some() {
-        entity
-            .common
-            .geometry
-            .as_ref()
-            .and_then(|snapshot| snapshot.dimension.as_ref())
-            .map_or(cadcraft_geom::Vec3::ZERO, |source| source.clone_point)
-    } else {
+    let local = dimension.localized_for_revision(entity.common.extrusion, entity.geometry_revision)?;
+    let elevation = cadcraft_geom::Vec3::new(0.0, 0.0, local.text_mid.z);
+    let offset = if dimension.block.is_none() {
         cadcraft_geom::Vec3::ZERO
+    } else if entity.geometry_revision == GeometryRevision::CanonicalV2 {
+        entity.common.geometry.as_ref().and_then(|snapshot| snapshot.dimension.as_ref()).map_or(elevation, |source| source.clone_point)
+    } else {
+        // Legacy XY clone offsets are already normalized into the block. Its plane elevation is separate.
+        elevation
     };
     if !offset.is_finite() {
         return Err(DocError::NonFinite(entity.handle));

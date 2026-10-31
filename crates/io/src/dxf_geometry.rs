@@ -531,8 +531,13 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
                     model: model.clone(),
                     text: texts.get(h).copied(),
                     dimension: dimensions.get(h).map(|dimension| {
-                        let coordinate = |code| tags.iter().take_while(|tag| tag.code < 1000).find(|tag| tag.code == code).map_or(0.0, Tag::f64);
-                        DimensionAsRead::of(dimension, cadcraft_geom::Vec3::new(coordinate(12), coordinate(22), coordinate(32)))
+                        let coordinate =
+                            |code, default| tags.iter().take_while(|tag| tag.code < 1000).find(|tag| tag.code == code).map_or(default, Tag::f64);
+                        // ODA common DIMENSION data supplies the missing ECS Z from its elevation (group 11).
+                        DimensionAsRead::of(
+                            dimension,
+                            cadcraft_geom::Vec3::new(coordinate(12, 0.0), coordinate(22, 0.0), coordinate(32, dimension.text_mid.z)),
+                        )
                     }),
                 }),
             );

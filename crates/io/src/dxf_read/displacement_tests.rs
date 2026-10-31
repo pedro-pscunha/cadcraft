@@ -11,6 +11,10 @@ fn source_records() -> (Vec<Tag>, Vec<Tag>) {
 
 fn drawing(revision: GeometryRevision) -> Drawing {
     let (dimension, line) = source_records();
+    drawing_from_source(revision, dimension, line)
+}
+
+fn drawing_from_source(revision: GeometryRevision, dimension: Vec<Tag>, line: Vec<Tag>) -> Drawing {
     let mut drawing = Drawing::new_metric();
     let mut rx = Rx::default();
     let (common, mut kind) = if revision == GeometryRevision::CanonicalV2 {
@@ -54,6 +58,35 @@ fn point(tags: &[Tag], code: i32) -> Vec3 {
         tags.iter().find(|tag| tag.code == code + 10).map_or(0.0, Tag::f64),
         tags.iter().find(|tag| tag.code == code + 20).map_or(0.0, Tag::f64),
     )
+}
+
+#[test]
+fn canonical_dimension_picture_uses_the_plane_elevation_when_clone_z_is_not_serialized() {
+    let (mut dimension, mut line) = source_records();
+    dimension.retain(|tag| !matches!(tag.code, 12 | 22 | 32));
+    for (code, value) in [(30, 3.0), (31, 3.0), (33, 3.0), (34, 3.0), (210, 0.0), (220, 0.0), (230, 1.0)] {
+        *dimension.iter_mut().find(|tag| tag.code == code).unwrap() = Tag::f(code, value);
+    }
+    for tag in line.iter_mut().filter(|tag| matches!(tag.code, 30 | 31)) {
+        *tag = Tag::f(tag.code, 0.0);
+    }
+    let drawing = drawing_from_source(GeometryRevision::CanonicalV2, dimension, line);
+    let entity = drawing.entity(Handle(0x200)).unwrap();
+    let geometry = cadcraft_render::entity_world_geometry(&drawing, entity, &Mat4::IDENTITY).unwrap();
+    assert!(geometry.primitives().iter().any(|primitive| matches!(primitive, cadcraft_doc::WorldPrimitive::Line { a, b }
+        if (*a - Vec3::new(1.0, 2.0, 3.0)).len() < 1e-10 && (*b - Vec3::new(2.0, 4.0, 3.0)).len() < 1e-10)));
+    for name in ["source-elevated.dxf", "source-elevated.dwg"] {
+        let bytes = crate::write(&drawing, name).unwrap();
+        let sections = decoded(&bytes, name);
+        let entities = sections.iter().find(|section| section.name == "ENTITIES").unwrap();
+        let dimension = records(&entities.tags).into_iter().find(|(kind, _)| kind == "DIMENSION").unwrap().1;
+        assert_eq!(point(&dimension, 11).z, 3.0, "{name}");
+        if name.ends_with("dxf") {
+            assert!(!dimension.iter().any(|tag| matches!(tag.code, 12 | 22 | 32)), "derived plane placement must not invent serialized clone groups");
+        } else {
+            assert_eq!(point(&dimension, 12), Vec3::ZERO, "the DWG clone point stays default; the common elevation supplies its plane");
+        }
+    }
 }
 
 #[test]
@@ -205,7 +238,7 @@ fn legacy_clone_normalization_keeps_the_frozen_output() {
     let drawing = drawing(GeometryRevision::LegacyProjectedV1);
     let bytes = crate::write(&drawing, "legacy-clone.dxf").unwrap();
     let hash = format!("{:x}", Sha256::digest(&bytes));
-    // Frozen at 5177f948 before the Canonical displacement change.
-    assert_eq!(hash, "3b09a2204cd6a671401be7bada6c6800a912fb02d0be476818b7615635f09c27");
-    assert_eq!(bytes.len(), 17676);
+    // Measured independently on the clean accepted 75c982ad base.
+    assert_eq!(hash, "5ad855b83fd5a9375753992f214f86eae47fa21699b306d974a467679164e714");
+    assert_eq!(bytes.len(), 17759);
 }

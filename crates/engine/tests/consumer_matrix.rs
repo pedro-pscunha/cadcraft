@@ -1791,6 +1791,49 @@ fn pending() -> Vec<Pending> {
     ]
 }
 
+#[test]
+fn session_draws_fresh_dimension_blocks_at_local_zero_and_keeps_plane_z3() {
+    let cases: [(&str, fn() -> Fixture); 8] = [
+        ("dimlinear", dimlinear_at_3),
+        ("dimaligned", dimaligned_at_3),
+        ("dimangular", dimangular_at_3),
+        ("dimradius", dimradius_at_3),
+        ("dimdiameter", dimdiameter_at_3),
+        ("dimordinate", dimordinate_at_3),
+        ("dimjogged", dimjogged_at_3),
+        ("dimarc", dimarc_at_3),
+    ];
+    for (command, fixture) in cases {
+        let fixture = fixture();
+        let mut session = session_of(&fixture.drawing);
+        session.execute(command, &fixture.params).unwrap();
+        let bytes = cadcraft_io::write(session.doc().unwrap(), "new-elevated-dimension.dxf").unwrap();
+        let sections = cadcraft_dxf::sections(&cadcraft_dxf::parse(&bytes).unwrap());
+        let entities = sections.iter().find(|section| section.name == "ENTITIES").unwrap();
+        let dimension = cadcraft_dxf::records(&entities.tags).into_iter().find(|(kind, _)| kind == "DIMENSION").unwrap().1;
+        assert!(!dimension.iter().any(|tag| matches!(tag.code, 12 | 22 | 32)), "{command}: AutoCAD omits serialized clone groups");
+        let text_z = dimension.iter().find(|tag| tag.code == 31).unwrap().f64();
+        assert!((text_z - 3.0).abs() < 1e-10, "{command}: dimension plane {text_z}");
+        let name = dimension.iter().find(|tag| tag.code == 2).unwrap().str();
+        let blocks = sections.iter().find(|section| section.name == "BLOCKS").unwrap();
+        let mut inside = false;
+        let mut children = 0;
+        for (kind, tags) in cadcraft_dxf::records(&blocks.tags) {
+            if kind == "BLOCK" {
+                inside = tags.iter().any(|tag| tag.code == 2 && tag.str() == name);
+            } else if kind == "ENDBLK" {
+                inside = false;
+            } else if inside {
+                children += 1;
+                for tag in tags.iter().filter(|tag| matches!(tag.code, 30..=36)) {
+                    assert_eq!(tag.f64(), 0.0, "{command}: source picture {kind} group{} must stay local", tag.code);
+                }
+            }
+        }
+        assert!(children > 0, "{command}: no picture");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // AutoCAD MIRROR controls. The vertical controls exercise the public spatial entity boundary:
 // the command accepts only a World-XY line, not a vertical UCS.

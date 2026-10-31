@@ -43,7 +43,7 @@ pub struct GeometrySnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DimensionAsRead {
     points: [Vec3; 4],
-    /// The OCS insertion point (DXF 12) of this dimension's source graphics block.
+    /// The source block's OCS insertion point. An omitted DXF 32 takes its Z from the dimension plane.
     pub clone_point: Vec3,
 }
 

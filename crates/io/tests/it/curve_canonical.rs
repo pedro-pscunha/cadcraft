@@ -838,8 +838,8 @@ fn a_dimension_block_of_a_canonical_dimension_holds_local_ocs_lines() {
     d.user_text_pos = false;
     let drawing = drawing(EntityKind::Dimension(d.clone()), NORMAL, 0.0);
     let text = dxf(&drawing);
-    // The block's coordinates are local: its LINE endpoints keep OCS elevation 2.
-    // The DIMENSION's own extrusion places the whole block, not the child LINE's extrusion.
+    // The block's coordinates stay at local Z 0. The DIMENSION's own plane supplies elevation 2,
+    // not a second copy of that elevation on each child.
     let blocks = tags_of(&text, "BLOCKS");
     let block_lines: Vec<Vec3> = blocks
         .iter()
@@ -850,7 +850,8 @@ fn a_dimension_block_of_a_canonical_dimension_holds_local_ocs_lines() {
         })
         .collect();
     assert!(!block_lines.is_empty(), "the dimension block has lines");
-    assert!(block_lines.iter().all(|p| (p.z - 2.0).abs() < 1e-9), "every block line keeps its local elevation: {block_lines:?}");
+    assert!(block_lines.iter().all(|point| point.z.abs() < 1e-9), "every block line stays at local Z 0: {block_lines:?}");
+    assert!((record(&text, "DIMENSION").iter().find(|tag| tag.code == 31).unwrap().f64() - 2.0).abs() < 1e-9);
     // And the DXF reads back as a document (the block is valid DXF).
     assert!(cadcraft_io::read(text.as_bytes(), "x.dxf").is_ok());
 }
