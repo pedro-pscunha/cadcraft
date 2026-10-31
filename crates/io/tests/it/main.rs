@@ -5,6 +5,7 @@ mod activation_fixtures;
 mod activation_graph;
 mod activation_invariants;
 mod activation_records;
+mod activation_report;
 mod angle_header;
 mod annotative_roundtrip;
 mod appid_case;

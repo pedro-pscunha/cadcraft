@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use cadcraft_dxf::{Section, Tag, records};
 
-use super::{Edge, Family, Graph, GraphError, Need, Node, NodeId};
+use super::{ComponentOutcome, Edge, Failure, Family, Graph, GraphError, Need, Node, NodeId, Outcome, Policy, activate};
 
 /// Where a top-level record sits.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -234,7 +234,59 @@ impl Builder<'_> {
     }
 }
 
+/// What a read decided for one component of the graph (I5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComponentReport {
+    /// The nodes of the component: records and definitions.
+    pub nodes: usize,
+    /// The nodes read Canonical: all of them, or none.
+    pub activated: usize,
+    pub outcome: ComponentOutcome,
+    /// Why the component could not activate, when it needed to.
+    pub failures: Vec<Failure>,
+    /// The handles of the records kept Raw, in file order.
+    pub raw: Vec<String>,
+}
+
+/// The activation decided for a file: one entry per component.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadReport {
+    pub components: Vec<ComponentReport>,
+}
+
+impl ReadReport {
+    /// The records read Canonical, in all.
+    pub fn activated(&self) -> usize {
+        self.components.iter().map(|c| c.activated).sum()
+    }
+}
+
 impl RecordGraph {
+    /// What the activation of the graph under `policy` comes to, per component.
+    pub fn report(&self, policy: &Policy) -> ReadReport {
+        let activation = activate(&self.graph, policy);
+        let components = activation
+            .components
+            .iter()
+            .map(|component| {
+                let outcome_of = |n: &NodeId| activation.outcome(*n);
+                ComponentReport {
+                    nodes: component.nodes.len(),
+                    activated: component.nodes.iter().filter(|n| outcome_of(n) == Some(Outcome::Canonical)).count(),
+                    outcome: component.outcome,
+                    failures: component.failures.clone(),
+                    raw: component
+                        .nodes
+                        .iter()
+                        .filter(|n| outcome_of(n) == Some(Outcome::Raw))
+                        .filter_map(|n| self.handle(*n).map(str::to_string))
+                        .collect(),
+                }
+            })
+            .collect();
+        ReadReport { components }
+    }
+
     /// The graph of the records of `sections`; `need` says whether Legacy would lose data from a record (the section 3 predicate;
     /// until it lands the caller passes a stand-in).
     pub fn build(sections: &[Section], need: &dyn Fn(&RecordView) -> Need) -> Result<RecordGraph, GraphError> {

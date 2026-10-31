@@ -92,6 +92,30 @@ pub fn read_with_policy(bytes: &[u8], name: impl AsRef<Path>, policy: activation
     }
 }
 
+/// [`read_with_policy`], and the activation the graph of its records comes to under the policy (I5 of the plan). No record needs
+/// Canonical until the section 3 predicate exists: [`read_report_with`] takes the stand-in.
+pub fn read_report(bytes: &[u8], name: impl AsRef<Path>, policy: activation::ReaderPolicy) -> Result<(Drawing, activation::records::ReadReport)> {
+    read_report_with(bytes, name, policy, &|_| activation::Need::Plain)
+}
+
+/// [`read_report`] with a function that says which records need Canonical.
+pub fn read_report_with(
+    bytes: &[u8],
+    name: impl AsRef<Path>,
+    policy: activation::ReaderPolicy,
+    need: &dyn Fn(&activation::records::RecordView) -> activation::Need,
+) -> Result<(Drawing, activation::records::ReadReport)> {
+    let drawing = read_with_policy(bytes, name, policy)?;
+    let dxf = if cadcraft_dwg::is_dwg(bytes) {
+        std::borrow::Cow::Owned(cadcraft_dwg::dwg_to_dxf(bytes).map_err(IoError::Format)?)
+    } else {
+        std::borrow::Cow::Borrowed(bytes)
+    };
+    let tags = cadcraft_dxf::parse(&dxf).map_err(|e| IoError::Format(e.to_string()))?;
+    let graph = activation::records::RecordGraph::build(&cadcraft_dxf::sections(&tags), need).map_err(|e| IoError::Format(format!("{e:?}")))?;
+    Ok((drawing, graph.report(&policy.graph_policy())))
+}
+
 /// Write a drawing in the format chosen by the name's extension. Images (PNG, SVG, PDF) show
 /// model space fitted to its extents. DXF and DWG are written in the drawing's version
 /// ([`save_version`]), DXF as ASCII.

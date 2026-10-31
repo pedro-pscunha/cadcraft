@@ -115,6 +115,18 @@ impl ReaderPolicy {
         if self.mode == ReaderMode::Off { FamilySet::NONE } else { self.active }
     }
 
+    /// Whether a plain read must build the activation graph. One condition decides it: today only a mask that turns a family on does.
+    /// The Raw path for the records that need Canonical (plan v3, section 9, Q1) will add its own case here, with an empty mask.
+    pub fn needs_graph(&self) -> bool {
+        self.mask() != FamilySet::NONE
+    }
+
+    /// The policy of the graph engine for this reader policy: the mask, the families with a canonical reader, and no definition
+    /// before stage 6.
+    pub fn graph_policy(&self) -> Policy {
+        Policy { mask: self.mask(), readers: WIRED_FAMILIES, definitions: false }
+    }
+
     /// Whether a record that Legacy loses nothing from is read Canonical too: only in mode `all`.
     pub fn reads_plain_canonical(&self) -> bool {
         self.mode == ReaderMode::All

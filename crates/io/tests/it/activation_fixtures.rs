@@ -341,7 +341,7 @@ pub(crate) fn stand_in(view: &RecordView) -> Need {
 
 // ---- the files ----
 
-fn dir() -> PathBuf {
+pub(crate) fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/activation")
 }
 
