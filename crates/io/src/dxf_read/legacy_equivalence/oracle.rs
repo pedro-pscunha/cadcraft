@@ -85,11 +85,15 @@ fn records(bytes: &[u8]) -> BTreeMap<Handle, (String, Vec<Tag>)> {
         .into_iter()
         .filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS"))
         .flat_map(|section| cadcraft_dxf::records(&section.tags))
+        .filter(|(kind, _)| family_of_kind(kind).is_some())
         .filter_map(|record| {
             let handle = record.1.iter().find(|tag| tag.code == 5).and_then(|tag| Handle::parse_hex(&tag.str()))?;
             Some((handle, record))
         })
-        .collect()
+        .fold(BTreeMap::new(), |mut indexed, (handle, record)| {
+            assert!(indexed.insert(handle, record).is_none(), "ambiguous family record handle {handle:?}");
+            indexed
+        })
 }
 
 fn fields(kind: &str, tags: &[Tag], version: Version) -> BTreeMap<(i32, usize), String> {
@@ -337,12 +341,12 @@ struct CorpusEntry {
     families: Vec<String>,
 }
 
-fn run_corpus(external: bool) {
+fn run_corpus(owner: Option<&str>) {
     let manifest: Corpus = toml::from_str(include_str!("../../../tests/corpus.toml")).unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut failures = Vec::new();
     let mut checked = 0usize;
-    for entry in manifest.file.into_iter().filter(|entry| external || entry.owner == "repo") {
+    for entry in manifest.file.into_iter().filter(|entry| owner.is_none_or(|owner| entry.owner == owner)) {
         let path = std::path::Path::new(&entry.path);
         let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
         let input = std::fs::read(&path).unwrap_or_else(|error| panic!("corpus input {}: {error}", entry.path));
@@ -418,6 +422,19 @@ fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
 }
 
 #[test]
+fn structural_metadata_cannot_replace_a_family_record_in_the_oracle_index() {
+    let source = b"0\nSECTION\n2\nBLOCKS\n0\nLINE\n5\nB1\n10\n0\n20\n0\n11\n1\n21\n1\n0\nENDBLK\n5\nB1\n0\nENDSEC\n0\nEOF\n";
+    assert_eq!(records(source).get(&Handle(0xB1)).unwrap().0, "LINE");
+}
+
+#[test]
+#[should_panic(expected = "ambiguous family record handle")]
+fn duplicate_family_handles_stop_the_oracle_instead_of_dropping_a_record() {
+    let source = b"0\nSECTION\n2\nENTITIES\n0\nLINE\n5\nB1\n0\nCIRCLE\n5\nB1\n0\nENDSEC\n0\nEOF\n";
+    records(source);
+}
+
+#[test]
 fn comparison_rejects_unexpected_nondefault_fields() {
     let source = BTreeMap::from([((10, 0), "1".to_string())]);
     let mut actual = source.clone();
@@ -442,13 +459,18 @@ fn reference_uses_source_angles_and_scales_polyline_constant_width() {
 
 #[test]
 fn repository_corpus_has_no_false_plain() {
-    run_corpus(false);
+    run_corpus(Some("repo"));
+}
+
+#[test]
+fn activation_corpus_has_no_false_plain() {
+    run_corpus(Some("activation fixtures"));
 }
 
 #[test]
 #[ignore = "external manifest corpus: run explicitly and fail if any listed input is missing"]
 fn external_corpus_has_no_false_plain() {
-    run_corpus(true);
+    run_corpus(None);
 }
 
 #[test]

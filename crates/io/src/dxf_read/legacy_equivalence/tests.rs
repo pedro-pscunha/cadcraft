@@ -102,6 +102,19 @@ fn repeated_scalar_fields_and_misaligned_vertex_fields_need_activation() {
 }
 
 #[test]
+fn compound_source_units_stay_needs_until_their_followers_are_proved() {
+    for text in [
+        "0\nINSERT\n5\nA1\n2\nDEF\n66\n1\n10\n0\n20\n0\n30\n0\n0\nATTRIB\n5\nA2\n10\n0\n20\n0\n30\n0\n40\n1\n1\nVALUE\n2\nTAG\n0\nSEQEND\n5\nA3\n",
+        "0\nPOLYLINE\n5\nA1\n66\n1\n70\n0\n0\nVERTEX\n5\nA2\n10\n0\n20\n0\n30\n0\n0\nVERTEX\n5\nA3\n10\n1\n20\n1\n30\n0\n0\nSEQEND\n5\nA4\n",
+    ] {
+        let source = unit(text);
+        for version in Version::ALL {
+            assert_eq!(classify_legacy_unit(&source, version).unwrap().disposition, LegacyDisposition::Needs, "{version:?} {text}");
+        }
+    }
+}
+
+#[test]
 fn spatial_and_malformed_source_fields_fail_closed() {
     assert_eq!(disposition("0\nLINE\n10\n1\n20\n2\n30\n5\n11\n3\n21\n4\n31\n5\n"), LegacyDisposition::Needs);
     let mut source = unit("0\nLINE\n10\n1\n20\n2\n30\n0\n11\n3\n21\n4\n31\n0\n");
