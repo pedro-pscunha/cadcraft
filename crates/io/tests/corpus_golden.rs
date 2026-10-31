@@ -8,11 +8,12 @@
 //! The check reads and saves drawings of up to 35 MB (minutes in all), so it is ignored by default:
 //!
 //! ```text
-//! cargo test -p cadcraft-io --test corpus_golden -- --ignored --nocapture
+//! cargo test -p cadcraft-io --test corpus_golden -- --ignored match --nocapture
 //! ```
 //!
 //! A save-fidelity change that moves the output on purpose refreshes the baseline with
-//! `write_golden_set` (same flags), in the commit that makes it.
+//! `write_golden_set` (`CADCRAFT_G1_WRITE=1`, and `-- --ignored write_golden_set`), in the commit that makes it. The filter `match` keeps the check
+//! from running `write_golden_set`, which rewrites the baseline.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -261,8 +262,12 @@ fn every_corpus_drawing_on_this_machine_matches_its_golden() {
 /// Makes the baseline: the golden outputs, the hash list and the families column of `corpus.toml`. `CADCRAFT_GOLDEN_SHA`
 /// names the sha it is made at; `CADCRAFT_GOLDEN_OWNER` restricts the run to the files of one owner.
 #[test]
-#[ignore = "rewrites tests/golden.sha256, tests/corpus.toml and the golden directory"]
+#[ignore = "rewrites tests/golden.sha256, tests/corpus.toml and the golden directory (needs CADCRAFT_G1_WRITE=1)"]
 fn write_golden_set() {
+    assert!(
+        std::env::var_os("CADCRAFT_G1_WRITE").is_some(),
+        "write_golden_set rewrites the baseline: set CADCRAFT_G1_WRITE=1 to run it, and filter the check with `-- --ignored match`"
+    );
     let sha = std::env::var("CADCRAFT_GOLDEN_SHA").unwrap_or_else(|_| "unknown".into());
     std::fs::create_dir_all(golden_dir()).unwrap();
     let mut hashes = read_hashes();
