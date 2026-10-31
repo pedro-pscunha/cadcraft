@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use cadcraft_doc::{Drawing, GeometryRevision, Handle};
-use cadcraft_engine::{Session, command_specs};
+use cadcraft_engine::{EngineError, Session, command_specs};
 use cadcraft_geom::Vec3;
 use consumer_support::*;
 use serde_json::{Value, json};
@@ -248,21 +248,28 @@ fn operand_commands() -> Vec<&'static str> {
     include_str!("consumer_matrix/classes.txt").lines().filter_map(|line| line.strip_suffix(" operand")).collect()
 }
 
+/// `works` or `refused: <reason>` for what a command returned. An internal error is a panic that `Session::execute` caught, not a refusal: it
+/// breaks the first invariant, whatever the revision.
+fn describe(outcome: &Result<Value, EngineError>) -> Result<String, String> {
+    match outcome {
+        Ok(_) => Ok("works".to_string()),
+        Err(EngineError::Internal(command, message)) => Err(format!("panicked: {command}: {}", short(message))),
+        Err(error) => Ok(format!("refused: {}", short(&error.to_string()))),
+    }
+}
+
 /// Run the command on the setup in `state`. `Err` is an invariant that the command broke.
 fn run(command: &str, params: &Value, setup: &Setup, state: State) -> Result<String, String> {
     let (mut session, reached) = session(setup, state);
     let before = session.doc().unwrap().clone();
     let outcome = catch_unwind(AssertUnwindSafe(|| session.execute(command, params))).map_err(|_| "panicked".to_string())?;
     let after = session.doc().unwrap();
-    let text = match &outcome {
-        Ok(_) => "works".to_string(),
-        Err(error) => {
-            if after.model != before.model || after.handseed != before.handseed {
-                return Err(format!("a refusal wrote to the drawing: {error}"));
-            }
-            format!("refused: {}", short(&error.to_string()))
-        }
-    };
+    let text = describe(&outcome)?;
+    if let Err(error) = &outcome
+        && (after.model != before.model || after.handseed != before.handseed)
+    {
+        return Err(format!("a refusal wrote to the drawing: {error}"));
+    }
     for handle in reached {
         let (old, new) = (before.entity(handle).unwrap(), after.entity(handle));
         let Some(new) = new else { continue };
@@ -322,6 +329,14 @@ fn sweep() -> (String, Vec<String>) {
         writeln!(table, "{command}\tunprobed").unwrap();
     }
     (table, breaks)
+}
+
+#[test]
+fn a_caught_panic_is_not_a_refusal() {
+    let internal = EngineError::Internal("move".into(), "index out of bounds".into());
+    assert_eq!(describe(&Err(internal)), Err("panicked: move: index out of bounds".to_string()));
+    assert_eq!(describe(&Ok(json!({}))), Ok("works".to_string()));
+    assert_eq!(describe(&Err(EngineError::Other("no".into()))), Ok("refused: no".to_string()));
 }
 
 #[test]
