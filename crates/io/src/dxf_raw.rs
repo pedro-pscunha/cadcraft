@@ -517,6 +517,28 @@ pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
     }
 }
 
+/// Put the reactors of every IMAGEDEF in the order AutoCAD lists them: its owner first, then the IMAGEDEF_REACTOR of each image by handle (the
+/// order they were made in).
+pub(crate) fn order_image_definition_reactors(tags: &mut [Tag]) {
+    let mut i = 0;
+    while i + 2 < tags.len() {
+        if tags[i].code == 0
+            && tags[i].str() == "IMAGEDEF"
+            && let Some(open) = tags[i..]
+                .iter()
+                .take_while(|t| t.code != 0 || t.str() == "IMAGEDEF")
+                .position(|t| t.code == 102 && t.str().trim() == "{ACAD_REACTORS")
+        {
+            let from = i + open + 2;
+            let len = tags[from.min(tags.len())..].iter().take_while(|g| g.code == 330).count();
+            if let Some(reactors) = tags.get_mut(from..from + len) {
+                reactors.sort_by_key(|g| handle(&g.str()));
+            }
+        }
+        i += 1;
+    }
+}
+
 /// Remember the CLASS records of the file (their groups 1, 2, 3, 90, 91, 280 and 281), in order.
 fn keep_classes(d: &mut Drawing, classes: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
@@ -2585,6 +2607,27 @@ fn max_handle(tags: &[Tag]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_reactors_of_an_image_definition_follow_the_handles_of_their_images() {
+        let mut tags: Vec<Tag> = [
+            (0, "IMAGEDEF"),
+            (5, "40"),
+            (102, "{ACAD_REACTORS"),
+            (330, "9999999"),
+            (330, "59292"),
+            (330, "59204"),
+            (330, "5937D"),
+            (102, "}"),
+            (330, "41"),
+        ]
+        .iter()
+        .map(|(c, v)| Tag::s(*c, *v))
+        .collect();
+        order_image_definition_reactors(&mut tags);
+        let reactors: Vec<String> = tags.iter().filter(|t| t.code == 330).take(4).map(Tag::str).collect();
+        assert_eq!(reactors, ["9999999", "59204", "59292", "5937D"]);
+    }
 
     #[test]
     fn a_constraint_group_form_is_told_by_its_groups_not_by_the_release() {
