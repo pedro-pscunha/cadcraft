@@ -102,6 +102,38 @@ fn source_block_references_keep_live_sibling_representation_inserts() {
 }
 
 #[test]
+fn raw_insert_parents_remain_in_reverse_lists_in_dxf_and_dwg() {
+    let (drawing, handles) = drawing();
+    let source = cadcraft_io::write_dxf(&drawing);
+    let policy = cadcraft_io::activation::ReaderPolicy::new(cadcraft_io::activation::ReaderMode::Off, cadcraft_io::activation::FamilySet::NONE)
+        .with_raw_path();
+    let need = |view: &cadcraft_io::activation::records::RecordView| {
+        if view.family == cadcraft_io::activation::Family::Insert {
+            cadcraft_io::activation::Need::Needs { readable: true }
+        } else {
+            cadcraft_io::activation::Need::Plain
+        }
+    };
+    let raw = cadcraft_io::read_with_need(source.as_bytes(), "source.dxf", policy, &need).unwrap();
+    assert!(raw.model.iter().all(|entity| matches!(entity.kind, EntityKind::Raw(_))));
+    let expected: Vec<_> = handles[..4].iter().map(|handle| handle.hex()).collect();
+    for (what, saved) in ["DXF", "DWG"].into_iter().zip(saved_twice(&raw)) {
+        assert_eq!(refs(&saved, "BOLT"), expected, "{what}: all Raw INSERT parents remain in BLKREFS");
+        assert_eq!(refs(&saved, "PLATE"), [handles[4].hex()], "{what}: the Raw PLATE instance remains listed");
+    }
+}
+
+#[test]
+fn stale_source_references_do_not_create_an_empty_blkrefs_group() {
+    let (mut drawing, _) = drawing();
+    std::sync::Arc::make_mut(&mut drawing.source_symbols).block_refs.insert("UNUSED".into(), vec![cadcraft_doc::Handle(0xDEADBEEF)]);
+    let saved = cadcraft_io::write_dxf(&drawing);
+    let tables = section(&saved, "TABLES");
+    let (_, record) = tables.iter().find(|(kind, tags)| kind == "BLOCK_RECORD" && val(tags, 2) == "UNUSED").unwrap();
+    assert!(!record.iter().any(|tag| tag.code == 102 && tag.str() == "{BLKREFS"), "no live INSERT means no BLKREFS wrapper");
+}
+
+#[test]
 fn the_order_the_file_listed_is_kept_and_new_inserts_follow() {
     let (d, h) = drawing();
     // The file listed the inserts of BOLT in an order that is not the handle order.

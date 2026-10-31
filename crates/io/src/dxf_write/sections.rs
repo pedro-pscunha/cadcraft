@@ -997,7 +997,9 @@ fn block_references(d: &Drawing, every: &[&Entity]) -> HashMap<String, Vec<Handl
         let current = refs.remove(name).unwrap_or_default();
         let mut kept: Vec<_> = listed.iter().filter(|handle| live.contains(handle)).copied().collect();
         kept.extend(current.into_iter().filter(|handle| !listed.contains(handle)));
-        refs.insert(name.clone(), kept);
+        if !kept.is_empty() {
+            refs.insert(name.clone(), kept);
+        }
     }
     refs
 }
