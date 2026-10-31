@@ -3,6 +3,8 @@ use crate::activation::{Family, records::family_of_kind};
 use cadcraft_dxf::{Tag, Version};
 
 #[cfg(test)]
+mod generated;
+#[cfg(test)]
 mod oracle;
 mod ownership;
 mod policy;
