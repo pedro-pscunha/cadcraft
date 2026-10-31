@@ -16,10 +16,19 @@ pub(crate) fn dependent(name: &str) -> bool {
     name.contains('|')
 }
 
+/// BLOCK flag 16 is dependency. Flag 32 is resolution, not ownership; the name is not evidence.
+fn block_dependent(d: &Drawing, name: &str) -> bool {
+    d.foreign
+        .records
+        .get(&("BLOCK".into(), name.to_ascii_uppercase()))
+        .and_then(|extra| extra.subclass.iter().find(|tag| tag.code == 70))
+        .is_some_and(|tag| tag.value.trim().parse::<i64>().is_ok_and(|flags| flags & 16 != 0))
+}
+
 /// The drawing as it is saved: xref blocks emptied, xref-dependent symbols other than layers and
 /// their linetypes dropped. `None` when the drawing has neither (it is saved as it is).
 pub(crate) fn saved_view(d: &Drawing) -> Option<Drawing> {
-    let has = d.blocks.values().any(|b| b.xref_path.is_some() || dependent(&b.name))
+    let has = d.blocks.values().any(|b| b.xref_path.is_some() || block_dependent(d, &b.name))
         || d.linetypes.iter().any(|l| dependent(&l.name))
         || d.text_styles.iter().any(|t| dependent(&t.name))
         || d.dim_styles.iter().any(|t| dependent(&t.name))
@@ -29,7 +38,7 @@ pub(crate) fn saved_view(d: &Drawing) -> Option<Drawing> {
         return None;
     }
     let mut v = d.clone();
-    v.blocks.retain(|name, _| !dependent(name));
+    v.blocks.retain(|name, _| !block_dependent(d, name));
     for b in v.blocks.values_mut() {
         if b.xref_path.is_some() && !b.entities.is_empty() {
             Arc::make_mut(b).entities = Default::default();
