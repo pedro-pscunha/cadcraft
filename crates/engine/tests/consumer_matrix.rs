@@ -1656,7 +1656,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 27] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 28] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1669,6 +1669,7 @@ fn live_rows() -> Vec<Row> {
         ("dimaligned", "DIMASSOC 0, two points", explode_dimaligned, exploded_linear),
         ("dimradius", "DIMASSOC 0, circle", explode_dimradius, exploded_radius),
         ("dimdiameter", "DIMASSOC 0, circle", explode_dimdiameter, exploded_diameter),
+        ("dimjogged", "DIMASSOC 0, circle", explode_dimjogged, exploded_jogged),
         ("dimordinate", "DIMASSOC 0, feature and leader", explode_dimordinate, exploded_ordinate),
         ("dimlinear", "DIMASSOC 0, object", explode_dimlinear_object, exploded_linear),
         ("dimangular", "arc at Z 7", dimangular_on_arc, angular_on_arc_made),
@@ -1712,19 +1713,6 @@ fn pending() -> Vec<Pending> {
             what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
                    measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
             row: None,
-        },
-        Pending {
-            finding: "DIMASSOC0-JOGGED",
-            what: "DIMJOGGED at DIMASSOC 0 makes 4 LINEs, AutoCAD 3 (the leader and the jog are three lines).",
-            row: Some(Row {
-                command: "dimjogged",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, circle",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimjogged,
-                expect: Expect::Edits(exploded_jogged),
-            }),
         },
         Pending {
             finding: "DIMASSOC0-ANGULAR-LINES",
@@ -1795,7 +1783,7 @@ fn the_pending_rows_are_exactly_the_open_findings() {
     let findings: Vec<&str> = pending().iter().map(|p| p.finding).collect();
     assert_eq!(
         findings,
-        vec!["MLINE-ELEVATION", "DIMASSOC0-JOGGED", "DIMASSOC0-ANGULAR-LINES", "DIMASSOC0-ANGULAR-VERTEX", "DIMASSOC0-ARC-LENGTH"],
+        vec!["MLINE-ELEVATION", "DIMASSOC0-ANGULAR-LINES", "DIMASSOC0-ANGULAR-VERTEX", "DIMASSOC0-ARC-LENGTH"],
         "F3 is closed (5774fbf8): a new finding gets its entry here"
     );
     assert!(pending().iter().all(|p| !p.what.is_empty()));

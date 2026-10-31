@@ -35,6 +35,18 @@ pub(super) fn draw_jogged_radius(config: &DimConfig<'_>, g: &mut DimGeometry, te
         let ang = if st.jog_angle.is_finite() { st.jog_angle.clamp(5.0, 90.0) } else { 45.0 }.to_radians();
         let run = h.abs() / ang.tan().max(1e-6);
         let tj = (jp - center).dot(u).clamp(0.0, r);
+        if st.text_above != 0 && d.user_text_pos && text_mid.dist(center) > r {
+            // Text above the line, outside the circle (AutoCAD LT 2025, ISO-25, `/tmp/cad/elev-oracle13`): the arrowhead is outside pointing in,
+            // and the line runs from its base out along the radius, jogs back at DIMJOGANG to the line through the override centre
+            // and on to it. The jog is centred where the jog location falls along the radius.
+            let along = (jp - center).dot(u);
+            let base = tip + u * asz;
+            let (p2, p1) = (center + u * (along + run / 2.0), center + u * (along - run / 2.0) + n * h);
+            g.dim(vec![base, p2, p1, o]);
+            end(g, blk2, tip, -u);
+            text_angle = if st.text_outside_horizontal { 0.0 } else { readable(u.angle()) };
+            break 'jogged;
+        }
         let (j1, j2) = (center + u * (tj + run / 2.0), center + u * (tj - run / 2.0) + n * h);
         g.dim(vec![tip, j1, j2, o]);
         end(g, blk2, tip, u);
