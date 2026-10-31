@@ -24,7 +24,7 @@ fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
         dim(s, DimKind::Radius, c, Vec2::ZERO, Vec2::ZERO, pt, "")
     };
     let k = match at {
-        Some(at) => text_at(k, at),
+        Some(at) => text_at(s, k, at, c, c.dist(pt)),
         None => k,
     };
     Ok(json!({ "handle": add_dim_from(s, k, source)?.hex() }))
@@ -57,7 +57,7 @@ impl RadialM {
         } else {
             dim(s, DimKind::Radius, c, Vec2::ZERO, Vec2::ZERO, pt, "")
         });
-        text_at(k, at)
+        text_at(s, k, at, c, r)
     }
 }
 
