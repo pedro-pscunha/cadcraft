@@ -1656,7 +1656,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 25] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 26] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1666,6 +1666,7 @@ fn live_rows() -> Vec<Row> {
         ("dim", "two points and a location", dim_at_3, made_dimension_at_3),
         ("qdim", "two lines at the elevation", qdim_at_3, qdim_made),
         ("dimlinear", "DIMASSOC 0, two points", explode_dimlinear, exploded_linear),
+        ("dimaligned", "DIMASSOC 0, two points", explode_dimaligned, exploded_linear),
         ("dimradius", "DIMASSOC 0, circle", explode_dimradius, exploded_radius),
         ("dimordinate", "DIMASSOC 0, feature and leader", explode_dimordinate, exploded_ordinate),
         ("dimlinear", "DIMASSOC 0, object", explode_dimlinear_object, exploded_linear),
@@ -1710,19 +1711,6 @@ fn pending() -> Vec<Pending> {
             what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
                    measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
             row: None,
-        },
-        Pending {
-            finding: "DIMASSOC0-ALIGNED",
-            what: "DIMALIGNED at DIMASSOC 0 makes 4 LINEs, AutoCAD 3: our dimension line is split around a text that AutoCAD places beside it (the text position differs too, 16.2,36.0 against 1.96,28.58).",
-            row: Some(Row {
-                command: "dimaligned",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, two points",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimaligned,
-                expect: Expect::Edits(exploded_linear),
-            }),
         },
         Pending {
             finding: "DIMASSOC0-DIAMETER",
@@ -1821,7 +1809,6 @@ fn the_pending_rows_are_exactly_the_open_findings() {
         findings,
         vec![
             "MLINE-ELEVATION",
-            "DIMASSOC0-ALIGNED",
             "DIMASSOC0-DIAMETER",
             "DIMASSOC0-JOGGED",
             "DIMASSOC0-ANGULAR-LINES",
