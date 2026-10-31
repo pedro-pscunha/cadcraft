@@ -11,8 +11,9 @@ use cadcraft_doc::{Attrib, AttribModes, AttribPlane, Common, EntityKind, Geometr
 use cadcraft_dxf::Tag;
 use cadcraft_geom::{OcsFrame, Vec2, Vec3};
 
-use super::common::{T, common};
+use super::common::{T, canonical_common, common};
 use super::text::{attdef, attrib_modes, attrib_props, mtext_from, split_embedded, text_fields};
+use super::{Drawing, Rx};
 
 /// The groups of the text itself: those before its attribute subclass, where the attribute type (71) comes after the flags.
 fn text_part(tags: &[Tag]) -> &[Tag] {
@@ -50,52 +51,55 @@ fn canonical_mtext(tags: &[Tag], c: &Common, normal: Vec3) -> Option<MText> {
     Some(mtext)
 }
 
-fn canonical_multiline(own: &[Tag], embedded: Option<&[Tag]>, c: &Common) -> Option<MultilineAttrib> {
+fn canonical_multiline(own: &[Tag], embedded: Option<&[Tag]>, c: &Common, rx: &Rx) -> Option<MultilineAttrib> {
     let embedded = embedded.filter(|e| !e.is_empty())?;
     let normal = normal_of(&T(embedded))?;
     let mtext = canonical_mtext(embedded, c, normal)?;
     let read_as = cadcraft_fonts::plain_mtext(&mtext.contents);
     let (embedded_46, type_72) = super::text::embedded_groups(own, embedded);
+    let type_72 = if rx.from_dwg { None } else { type_72 };
     Some(MultilineAttrib { geometry_revision: GeometryRevision::CanonicalV2, normal, mtext, read_as, embedded_46, type_72 })
 }
 
 /// A TEXT, MTEXT or ATTDEF from the groups of a DXF record (without its `0` group), read canonically. `None` for another
 /// kind, or when the normal has no direction. The caller sets the entity's `geometry_revision`.
-pub fn canonical_text_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
+pub fn canonical_text_from_groups(kind: &str, tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<(Common, EntityKind)> {
     let t = T(tags);
     let c = common(&t);
-    match kind.to_ascii_uppercase().as_str() {
+    let kind = match kind.to_ascii_uppercase().as_str() {
         "TEXT" => {
             normal_of(&t)?;
-            Some((c, EntityKind::Text(canonical_text(tags))))
+            EntityKind::Text(canonical_text(tags))
         }
         "MTEXT" => {
             let normal = normal_of(&t)?;
             let mtext = canonical_mtext(tags, &c, normal)?;
-            Some((c, EntityKind::MText(mtext)))
+            EntityKind::MText(mtext)
         }
         "ATTDEF" => {
             normal_of(&t)?;
             let (own, embedded) = split_embedded(tags);
             let mut a = attdef(tags, &c);
             a.text = canonical_text(own);
-            a.multiline = canonical_multiline(own, embedded, &c);
+            a.multiline = canonical_multiline(own, embedded, &c, rx);
             if let Some(m) = &a.multiline {
                 a.text.value.clone_from(&m.read_as);
             }
-            Some((c, EntityKind::AttDef(a)))
+            EntityKind::AttDef(a)
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some((canonical_common(c, tags, drawing, rx)?, kind))
 }
 
 /// An ATTRIB instance from its groups, read canonically with its own plane. `None` when its normal (or its embedded
-/// text's) has no direction.
-pub fn canonical_attrib_from_groups(tags: &[Tag], plot_style: Option<String>) -> Option<Attrib> {
+/// text's) has no direction or its plot style cannot resolve. Missing child identities use the document pool, and the
+/// document's DWG-origin flag controls derived embedded-text metadata.
+pub fn canonical_attrib_from_groups(tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<Attrib> {
     let tt = T(tags);
     let c = common(&tt);
     let (own, embedded) = split_embedded(tags);
-    let multiline = canonical_multiline(own, embedded, &c);
+    let multiline = canonical_multiline(own, embedded, &c, rx);
     if embedded.is_some_and(|e| !e.is_empty()) && multiline.is_none() {
         return None;
     }
@@ -106,9 +110,12 @@ pub fn canonical_attrib_from_groups(tags: &[Tag], plot_style: Option<String>) ->
         text.value.clone_from(&m.read_as);
     }
     let modes: AttribModes = attrib_modes(own);
+    canonical_common(c, tags, drawing, rx)?;
+    let handle = tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0).unwrap_or_else(|| drawing.new_handle());
+    let plot_style = super::entities::entity_plot_style(tags, rx);
     Some(Attrib {
         geometry_revision: GeometryRevision::CanonicalV2,
-        handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
+        handle: Some(handle),
         invisible: own_t.i(70).unwrap_or(0) & 1 != 0,
         props: attrib_props(&tt, plot_style),
         multiline,
@@ -122,7 +129,7 @@ pub fn canonical_attrib_from_groups(tags: &[Tag], plot_style: Option<String>) ->
 /// direction as the record holds it, in the plane of its normal. `None` for another kind, or when the normal has no
 /// direction or the frame direction is not in the plane (the legacy reader keeps such a record). The caller sets the
 /// entity's `geometry_revision`.
-pub fn canonical_layout_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
+pub fn canonical_layout_from_groups(kind: &str, tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<(Common, EntityKind)> {
     let t = T(tags);
     let c = common(&t);
     let normal = normal_of(&t)?;
@@ -141,5 +148,5 @@ pub fn canonical_layout_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common,
         }
         _ => return None,
     };
-    Some((c, kind))
+    Some((canonical_common(c, tags, drawing, rx)?, kind))
 }

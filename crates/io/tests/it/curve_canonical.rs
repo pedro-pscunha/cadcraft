@@ -185,18 +185,32 @@ fn the_canonical_readers_return_what_the_canonical_writer_wrote() {
     let normal = Vec3::new(0.0, 3.0, -4.0);
     let circle = Circle { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0 };
     let out = dxf(&drawing(EntityKind::Circle(circle.clone()), normal, 0.5));
-    let (c, kind) = cadcraft_io::canonical_curve_from_groups("CIRCLE", &record(&out, "CIRCLE")).unwrap();
+    let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+        "CIRCLE",
+        &record(&out, "CIRCLE"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!((c.extrusion, c.thickness, kind), (normal, 0.5, EntityKind::Circle(circle)));
 
     let arc = Arc { center: Vec3::new(1.0, 2.0, 3.0), radius: 2.0, start: 0.25, end: 2.0 };
     let out = dxf(&drawing(EntityKind::Arc(arc.clone()), normal, 0.0));
-    let (_, kind) = cadcraft_io::canonical_curve_from_groups("ARC", &record(&out, "ARC")).unwrap();
+    let (_, kind) =
+        cadcraft_io::canonical_curve_from_groups("ARC", &record(&out, "ARC"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     let EntityKind::Arc(read) = kind else { panic!("not an arc") };
     assert_eq!((read.center, read.radius), (arc.center, arc.radius));
     assert!((read.start - arc.start).abs() < 1e-12 && (read.end - arc.end).abs() < 1e-12, "no angle reversal under a negative Z");
 
     let out = dxf(&drawing(EntityKind::LwPolyline(polyline()), normal, 0.0));
-    let (c, kind) = cadcraft_io::canonical_curve_from_groups("LWPOLYLINE", &record(&out, "LWPOLYLINE")).unwrap();
+    let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+        "LWPOLYLINE",
+        &record(&out, "LWPOLYLINE"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(c.extrusion, normal);
     assert_eq!(kind, EntityKind::LwPolyline(polyline()), "no mirroring under a negative Z");
 }
@@ -204,10 +218,22 @@ fn the_canonical_readers_return_what_the_canonical_writer_wrote() {
 #[test]
 fn the_canonical_readers_refuse_a_bad_radius_and_a_zero_normal() {
     let tags = |radius: f64, nz: f64| vec![Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(30, 0.0), Tag::f(40, radius), Tag::f(230, nz)];
-    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 1.0)).is_some());
-    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(-1.0, 1.0)).is_none());
-    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(f64::NAN, 1.0)).is_none());
-    assert!(cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 0.0)).is_none());
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 1.0), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .is_some()
+    );
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(-1.0, 1.0), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .is_none()
+    );
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(f64::NAN, 1.0), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .is_none()
+    );
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("CIRCLE", &tags(1.0, 0.0), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .is_none()
+    );
 }
 
 #[test]
@@ -221,7 +247,9 @@ fn a_heavy_polyline_with_fit_data_round_trips_in_the_ocs() {
     let entities = tags_of(&out, "ENTITIES");
     let at = entities.iter().position(|(k, _)| k == "POLYLINE").expect("a POLYLINE");
     let children: Vec<(String, Vec<Tag>)> = entities[at + 1..].iter().take_while(|(k, _)| k == "VERTEX" || k == "SEQEND").cloned().collect();
-    let (c, kind) = cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children).unwrap();
+    let (c, kind) =
+        cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     assert_eq!(c.extrusion, normal);
     let EntityKind::LwPolyline(read) = kind else { panic!("not a polyline") };
     assert!(read.heavy);
@@ -283,12 +311,15 @@ fn the_canonical_reader_returns_solids_and_traces_in_the_ocs() {
     for (kind, trace) in [("SOLID", false), ("TRACE", true)] {
         let k = if trace { EntityKind::Trace(solid()) } else { EntityKind::Solid(solid()) };
         let out = dxf(&drawing(k.clone(), normal, 0.5));
-        let (c, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        let (c, read) =
+            cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+                .unwrap();
         assert_eq!((c.extrusion, c.thickness, read), (normal, 0.5, k), "{kind}");
     }
     // A triangle repeats its third corner.
     let tags = vec![Tag::f(10, 0.0), Tag::f(11, 1.0), Tag::f(12, 0.0), Tag::f(22, 1.0), Tag::f(230, 1.0)];
-    let (_, read) = cadcraft_io::canonical_curve_from_groups("SOLID", &tags).unwrap();
+    let (_, read) =
+        cadcraft_io::canonical_curve_from_groups("SOLID", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).unwrap();
     let EntityKind::Solid(s) = read else { panic!("solid") };
     assert_eq!(s.corners[3], s.corners[2]);
 }
@@ -342,7 +373,13 @@ fn check_splines(
         let (d, s, n) = make(mutate);
         let out = dxf(&d);
         assert_ne!(groups(&out, "SPLINE"), base_groups, "{name}");
-        let (c, kind) = cadcraft_io::canonical_curve_from_groups("SPLINE", &record(&out, "SPLINE")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+            "SPLINE",
+            &record(&out, "SPLINE"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: unreadable"));
         assert_eq!(c.extrusion, n, "{name}");
         let EntityKind::Spline(read) = kind else { panic!("not a spline") };
         assert_eq!(
@@ -425,12 +462,12 @@ fn the_canonical_spline_reader_refuses_mismatched_data() {
     // Drop a Z value: the counts no longer match.
     let at = tags.iter().position(|t| t.code == 30).unwrap();
     tags.remove(at);
-    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags).is_none());
+    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
     // Knots that do not fit the control points.
     let mut tags = record(&out, "SPLINE");
     let at = tags.iter().position(|t| t.code == 40).unwrap();
     tags.remove(at);
-    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags).is_none());
+    assert!(cadcraft_io::canonical_curve_from_groups("SPLINE", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none());
 }
 
 fn leader() -> cadcraft_doc::Leader {
@@ -474,7 +511,13 @@ fn each_leader_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
         let (d, l, n) = make(mutate);
         let out = dxf(&d);
         assert_ne!(groups(&out, "LEADER"), base, "{name}");
-        let (c, kind) = cadcraft_io::canonical_curve_from_groups("LEADER", &record(&out, "LEADER")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+            "LEADER",
+            &record(&out, "LEADER"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: unreadable"));
         assert_eq!(c.extrusion, n, "{name}");
         assert_eq!(kind, EntityKind::Leader(l.clone()), "{name}");
         let stored = dwg_entities(&d)
@@ -496,7 +539,13 @@ fn each_leader_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
 #[test]
 fn the_canonical_leader_reader_and_the_legacy_one_both_keep_z_and_the_frame() {
     let out = dxf(&drawing(EntityKind::Leader(leader()), Vec3::Z, 0.0));
-    let (_, kind) = cadcraft_io::canonical_curve_from_groups("LEADER", &record(&out, "LEADER")).unwrap();
+    let (_, kind) = cadcraft_io::canonical_curve_from_groups(
+        "LEADER",
+        &record(&out, "LEADER"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     let EntityKind::Leader(read) = kind else { panic!("not a leader") };
     assert_eq!(read.vertices[1].z, 2.0);
     let legacy = cadcraft_io::read(out.as_bytes(), "x.dxf").unwrap();
@@ -505,7 +554,10 @@ fn the_canonical_leader_reader_and_the_legacy_one_both_keep_z_and_the_frame() {
     assert_eq!(l.vertices[1].z, 2.0);
     assert_eq!(l.frame, read.frame);
     let tags = vec![Tag::f(10, 0.0), Tag::f(20, 0.0), Tag::f(10, 1.0)];
-    assert!(cadcraft_io::canonical_curve_from_groups("LEADER", &tags).is_none(), "the vertex coordinates must match in count");
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("LEADER", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none(),
+        "the vertex coordinates must match in count"
+    );
 }
 
 // Old serialized SPLINE and LEADER payloads.
@@ -558,7 +610,13 @@ fn an_old_plus_z_spline_keeps_its_2d_meaning_bit_for_bit_after_promotion_and_res
         assert_eq!(point(&after, 210), Some(normal), "the plane is kept as it was");
         assert_eq!(without_plane(after), before, "{normal:?}: identical groups after promotion and resave");
         // And the canonical reader returns the same XY bits.
-        let (_, kind) = cadcraft_io::canonical_curve_from_groups("SPLINE", &record(&dxf(&drawing_of(&e)), "SPLINE")).unwrap();
+        let (_, kind) = cadcraft_io::canonical_curve_from_groups(
+            "SPLINE",
+            &record(&dxf(&drawing_of(&e)), "SPLINE"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap();
         let EntityKind::Spline(read) = kind else { panic!("spline") };
         assert_eq!((read.control, read.knots, read.weights, read.fit), (s.control.clone(), s.knots.clone(), s.weights.clone(), s.fit.clone()));
     }
@@ -688,8 +746,13 @@ fn each_linear_dimension_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_r
         assert!(near(point(&g, 10).unwrap(), d.defpt) && near(point(&g, 13).unwrap(), d.p13) && near(point(&g, 14).unwrap(), d.p14), "{name}");
         assert!(near(point(&g, 11).unwrap(), d.text_mid), "{name}: the OCS text midpoint keeps its Z: {g:?}");
         assert!(near(point(&g, 210).unwrap(), n), "{name}");
-        let (_, kind) =
-            cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap_or_else(|| panic!("{name}: unreadable"));
+        let (_, kind) = cadcraft_io::canonical_curve_from_groups(
+            "DIMENSION",
+            &record(&out, "DIMENSION"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: unreadable"));
         let EntityKind::Dimension(read) = kind else { panic!("not a dimension") };
         assert_eq!((read.defpt, read.text_mid, read.p13, read.p14), (d.defpt, d.text_mid, d.p13, d.p14), "{name}");
         let (DimKind::Linear { rotation: a }, DimKind::Linear { rotation: b }) = (read.kind, d.kind) else { panic!("kind") };
@@ -719,8 +782,13 @@ fn the_other_dimension_kinds_keep_their_points_in_the_dxf_the_dwg_and_the_canoni
     for kind in [DimKind::Aligned, DimKind::Angular, DimKind::Angular3P, DimKind::Radius, DimKind::Diameter, DimKind::Ordinate { x_type: true }] {
         let d = dimension(kind);
         let (out, g) = dimension_groups(&d, NORMAL);
-        let (_, read) =
-            cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap_or_else(|| panic!("{kind:?}: unreadable"));
+        let (_, read) = cadcraft_io::canonical_curve_from_groups(
+            "DIMENSION",
+            &record(&out, "DIMENSION"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap_or_else(|| panic!("{kind:?}: unreadable"));
         let EntityKind::Dimension(read) = read else { panic!("not a dimension") };
         assert_eq!(read.kind, kind);
         assert_eq!((read.defpt, read.text_mid), (d.defpt, d.text_mid), "{kind:?}");
@@ -748,12 +816,20 @@ fn the_canonical_dimension_reader_applies_the_oblique_angle_in_the_plane_and_ref
     d.marks.oblique = Some(std::f64::consts::FRAC_PI_6);
     let (out, g) = dimension_groups(&d, NORMAL);
     assert!((num(&g, 52).unwrap() - 30.0).abs() < 1e-9, "{g:?}");
-    let (_, read) = cadcraft_io::canonical_curve_from_groups("DIMENSION", &record(&out, "DIMENSION")).unwrap();
+    let (_, read) = cadcraft_io::canonical_curve_from_groups(
+        "DIMENSION",
+        &record(&out, "DIMENSION"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     let EntityKind::Dimension(read) = read else { panic!("dimension") };
     assert!((read.marks.oblique.unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-9);
     let mut zero = record(&out, "DIMENSION");
     zero.iter_mut().filter(|t| matches!(t.code, 210 | 220 | 230)).for_each(|t| *t = Tag::f(t.code, 0.0));
-    assert!(cadcraft_io::canonical_curve_from_groups("DIMENSION", &zero).is_none());
+    assert!(
+        cadcraft_io::canonical_curve_from_groups("DIMENSION", &zero, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none()
+    );
 }
 
 #[test]
@@ -842,7 +918,13 @@ fn each_line_and_point_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_rea
             near(point(&g, 10).unwrap(), l.a) && near(point(&g, 11).unwrap(), l.b) && near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t),
             "{name}"
         );
-        let (c, kind) = cadcraft_io::canonical_curve_from_groups("LINE", &record(&out, "LINE")).unwrap();
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+            "LINE",
+            &record(&out, "LINE"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap();
         assert_eq!((c.extrusion, c.thickness, kind), (n, t, EntityKind::Line(l.clone())), "{name}");
         let s = dwg_entities(&d).into_iter().find_map(|e| if let EntityType::Line(x) = e { Some(x) } else { None }).expect("a LINE");
         assert!(near(v3(s.start), l.a) && near(v3(s.end), l.b) && near(v3(s.normal), n) && s.thickness == t, "{name}: DWG");
@@ -868,7 +950,13 @@ fn each_line_and_point_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_rea
         assert_ne!(g, base, "{name}");
         assert!(near(point(&g, 10).unwrap(), p.p) && near(point(&g, 210).unwrap(), n) && num(&g, 39) == Some(t), "{name}");
         assert!((num(&g, 50).unwrap() - p.angle.to_degrees()).abs() < 1e-9, "{name}");
-        let (_, kind) = cadcraft_io::canonical_curve_from_groups("POINT", &record(&out, "POINT")).unwrap();
+        let (_, kind) = cadcraft_io::canonical_curve_from_groups(
+            "POINT",
+            &record(&out, "POINT"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap();
         let EntityKind::Point(read) = kind else { panic!("point") };
         assert_eq!(read.p, p.p, "{name}");
         assert!((read.angle - p.angle).abs() < 1e-12, "{name}");
@@ -917,7 +1005,13 @@ fn each_ellipse_field_alone_reaches_the_dxf_the_dwg_and_the_canonical_reader() {
         assert_ne!(g, base, "{name}");
         assert!(near(point(&g, 10).unwrap(), e.center) && near(point(&g, 11).unwrap(), e.major) && near(point(&g, 210).unwrap(), n), "{name}");
         assert_eq!((num(&g, 40), num(&g, 41), num(&g, 42)), (Some(e.ratio), Some(e.start), Some(e.end)), "{name}");
-        let (c, kind) = cadcraft_io::canonical_curve_from_groups("ELLIPSE", &record(&out, "ELLIPSE")).unwrap();
+        let (c, kind) = cadcraft_io::canonical_curve_from_groups(
+            "ELLIPSE",
+            &record(&out, "ELLIPSE"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default(),
+        )
+        .unwrap();
         assert_eq!((c.extrusion, kind), (n, EntityKind::Ellipse(e.clone())), "{name}");
         let s = dwg_entities(&d).into_iter().find_map(|x| if let EntityType::Ellipse(x) = x { Some(x) } else { None }).expect("an ELLIPSE");
         assert!(near(v3(s.center), e.center) && near(v3(s.major_axis), e.major) && near(v3(s.normal), n), "{name}: DWG");
@@ -935,7 +1029,13 @@ fn a_3dface_a_3d_polyline_and_a_mesh_keep_their_wcs_positions() {
         hidden_edges: 5,
     };
     let out = dxf(&drawing(EntityKind::Face3d(face.clone()), NORMAL, 0.0));
-    let (_, kind) = cadcraft_io::canonical_curve_from_groups("3DFACE", &record(&out, "3DFACE")).unwrap();
+    let (_, kind) = cadcraft_io::canonical_curve_from_groups(
+        "3DFACE",
+        &record(&out, "3DFACE"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(kind, EntityKind::Face3d(face.clone()));
     let stored = dwg_entities(&drawing(EntityKind::Face3d(face.clone()), NORMAL, 0.0))
         .into_iter()
@@ -953,7 +1053,9 @@ fn a_3dface_a_3d_polyline_and_a_mesh_keep_their_wcs_positions() {
     let entities = tags_of(&out, "ENTITIES");
     let at = entities.iter().position(|(k, _)| k == "POLYLINE").expect("a POLYLINE");
     let children: Vec<(String, Vec<Tag>)> = entities[at + 1..].iter().take_while(|(k, _)| k == "VERTEX" || k == "SEQEND").cloned().collect();
-    let (c, kind) = cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children).unwrap();
+    let (c, kind) =
+        cadcraft_io::canonical_polyline_from_groups(&entities[at].1, &children, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     assert_eq!(c.extrusion, NORMAL, "the 3D polyline keeps its extrusion");
     let EntityKind::Polyline3d(read) = kind else { panic!("not a 3D polyline") };
     assert_eq!((read.points, read.closed), (poly.points, poly.closed));
@@ -967,7 +1069,9 @@ fn a_ray_a_construction_line_and_an_image_keep_their_wcs_frames() {
         let out = dxf(&d);
         let g = groups(&out, kind);
         assert!(near(point(&g, 10).unwrap(), ray.base) && near(point(&g, 11).unwrap(), ray.dir), "{kind}");
-        let (_, read) = cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind)).unwrap();
+        let (_, read) =
+            cadcraft_io::canonical_curve_from_groups(kind, &record(&out, kind), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+                .unwrap();
         assert_eq!(read, canonical, "{kind}");
         let stored = dwg_entities(&d);
         let (base, dir) = stored
@@ -992,7 +1096,9 @@ fn a_ray_a_construction_line_and_an_image_keep_their_wcs_frames() {
     };
     let d = drawing(EntityKind::Image(image.clone()), NORMAL, 0.0);
     let out = dxf(&d);
-    let (_, read) = cadcraft_io::canonical_curve_from_groups("IMAGE", &record(&out, "IMAGE")).unwrap();
+    let (_, read) =
+        cadcraft_io::canonical_curve_from_groups("IMAGE", &record(&out, "IMAGE"), &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default())
+            .unwrap();
     let EntityKind::Image(read) = read else { panic!("image") };
     assert_eq!((read.insert, read.u, read.v, read.size, read.clip), (image.insert, image.u, image.v, image.size, image.clip));
 }

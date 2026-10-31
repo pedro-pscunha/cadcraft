@@ -8,12 +8,13 @@ use cadcraft_doc::{Common, EntityKind, HelixFrame, Wipeout, WipeoutFrame};
 use cadcraft_dxf::Tag;
 use cadcraft_geom::{OcsFrame, Vec3};
 
-use super::common::{T, common};
+use super::common::{T, canonical_common, common};
+use super::{Drawing, Rx};
 
 /// A WIPEOUT, HELIX, MLINE or HATCH from the groups of a DXF record (without its `0` group), read canonically. `None` for another
 /// kind, or when the image frame of a wipeout is degenerate (its U and V vectors do not span a plane) or the axis of a
 /// helix has no direction.
-pub fn canonical_fill_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
+pub fn canonical_fill_from_groups(kind: &str, tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<(Common, EntityKind)> {
     let t = T(tags);
     let c = common(&t);
     let kind = match kind.to_ascii_uppercase().as_str() {
@@ -59,5 +60,5 @@ pub fn canonical_fill_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, E
         }
         _ => return None,
     };
-    Some((c, kind))
+    Some((canonical_common(c, tags, drawing, rx)?, kind))
 }

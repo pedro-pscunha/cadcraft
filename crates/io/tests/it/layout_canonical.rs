@@ -137,14 +137,26 @@ fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
     let mut t = tolerance();
     t.dir = Vec3::new(0.0, 0.8, -0.6);
     let out = dxf(&drawing(EntityKind::Tolerance(t.clone()), normal));
-    let (c, kind) = cadcraft_io::canonical_layout_from_groups("TOLERANCE", &record(&out, "TOLERANCE")).unwrap();
+    let (c, kind) = cadcraft_io::canonical_layout_from_groups(
+        "TOLERANCE",
+        &record(&out, "TOLERANCE"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(c.extrusion, normal);
     assert_eq!(kind, EntityKind::Tolerance(t));
 
     let mut table = table();
     table.dir = Vec3::new(1.0, 0.0, 0.0);
     let out = dxf(&drawing(EntityKind::Table(table.clone()), normal));
-    let (c, kind) = cadcraft_io::canonical_layout_from_groups("ACAD_TABLE", &record(&out, "ACAD_TABLE")).unwrap();
+    let (c, kind) = cadcraft_io::canonical_layout_from_groups(
+        "ACAD_TABLE",
+        &record(&out, "ACAD_TABLE"),
+        &mut cadcraft_doc::Drawing::default(),
+        &cadcraft_io::Rx::default(),
+    )
+    .unwrap();
     assert_eq!(c.extrusion, normal);
     let EntityKind::Table(read) = kind else { panic!("not a table") };
     assert_eq!((read.insert, read.dir, read.col_widths, read.row_heights), (table.insert, table.dir, table.col_widths, table.row_heights));
@@ -154,9 +166,19 @@ fn the_canonical_reader_returns_what_the_canonical_writer_wrote() {
 fn the_canonical_reader_refuses_a_direction_outside_the_plane_and_a_zero_normal() {
     // The direction (1, 0, 0) is not perpendicular to the normal (1, 0, 1).
     let out = dxf(&drawing(EntityKind::Tolerance(Tolerance { dir: Vec3::new(1.0, 0.0, 0.0), ..tolerance() }), Vec3::new(1.0, 0.0, 1.0)));
-    assert!(cadcraft_io::canonical_layout_from_groups("TOLERANCE", &record(&out, "TOLERANCE")).is_none());
+    assert!(
+        cadcraft_io::canonical_layout_from_groups(
+            "TOLERANCE",
+            &record(&out, "TOLERANCE"),
+            &mut cadcraft_doc::Drawing::default(),
+            &cadcraft_io::Rx::default()
+        )
+        .is_none()
+    );
     let tags = vec![Tag::s(1, "x"), Tag::f(210, 0.0), Tag::f(220, 0.0), Tag::f(230, 0.0)];
-    assert!(cadcraft_io::canonical_layout_from_groups("TOLERANCE", &tags).is_none());
+    assert!(
+        cadcraft_io::canonical_layout_from_groups("TOLERANCE", &tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).is_none()
+    );
 }
 
 #[test]

@@ -74,6 +74,28 @@ pub(super) fn common(t: &T) -> Common {
     c
 }
 
+/// Resolve Common properties and reserve the source identity only after a canonical payload succeeds.
+pub(super) fn canonical_common(mut common: Common, tags: &[Tag], drawing: &mut super::Drawing, rx: &super::Rx) -> Option<Common> {
+    let style = super::entities::entity_plot_style(tags, rx);
+    let mut in_entity = false;
+    let requires_style = tags.iter().take_while(|tag| tag.code < 1000).any(|tag| {
+        if tag.code == 100 {
+            in_entity = tag.str() == "AcDbEntity";
+        }
+        in_entity && tag.code == 390 && super::Handle::parse_hex(&tag.str()).is_none_or(|handle| handle.0 != 0)
+    });
+    if requires_style && style.is_none() {
+        return None;
+    }
+    if let Some(style) = style {
+        common.plot_style = style;
+    }
+    if let Some(handle) = T(tags).s(5).and_then(|value| super::Handle::parse_hex(&value)) {
+        drawing.bump_handseed(handle);
+    }
+    Some(common)
+}
+
 /// Apply the OCS → WCS transform for 2D entities with a non-default extrusion.
 pub(super) fn ocs(c: &Common, p: Vec3) -> Vec3 {
     ocs_n(c.extrusion, p)

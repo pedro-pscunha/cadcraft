@@ -7,7 +7,7 @@ fn dimension_tags() -> Vec<Tag> {
 #[test]
 fn canonical_dimension_oblique_survives_the_document_extras_pass() {
     let tags = dimension_tags();
-    let (_, mut kind) = canonical_curve_from_groups("DIMENSION", &tags).unwrap();
+    let (_, mut kind) = canonical_curve_from_groups("DIMENSION", &tags, &mut Drawing::default(), &Rx::default()).unwrap();
     extras::entity_extras("DIMENSION", &tags, Handle(0x200), &mut kind, &mut Rx::default(), cadcraft_doc::GeometryRevision::CanonicalV2);
     let EntityKind::Dimension(dimension) = kind else { panic!("dimension") };
     // The OCS X axis of normal (0,3,4) is (-1,0,0). The dimension runs along +OCS X.
@@ -23,7 +23,12 @@ fn reference_resolution_changes_only_reference_properties_in_either_revision() {
             cadcraft_dxf::parse(b"1001\nACAD\n1000\nDSTYLE\n1002\n{\n1070\n340\n1005\nA0\n1070\n342\n1005\nB0\n1070\n345\n1005\nC0\n1002\n}\n")
                 .unwrap(),
         );
-        let (_, mut kind) = if canonical { canonical_curve_from_groups("DIMENSION", &tags) } else { entities::entity("DIMENSION", &tags) }.unwrap();
+        let (_, mut kind) = if canonical {
+            canonical_curve_from_groups("DIMENSION", &tags, &mut Drawing::default(), &Rx::default())
+        } else {
+            entities::entity("DIMENSION", &tags)
+        }
+        .unwrap();
         let mut expected = kind.clone();
         let EntityKind::Dimension(dimension) = &mut expected else { panic!("dimension") };
         dimension.overrides =
@@ -47,7 +52,7 @@ fn canonical_geometry_keeps_marks_but_does_not_schedule_a_legacy_xy_shift() {
         )
         .unwrap(),
     );
-    let (_, mut kind) = canonical_curve_from_groups("DIMENSION", &tags).unwrap();
+    let (_, mut kind) = canonical_curve_from_groups("DIMENSION", &tags, &mut Drawing::default(), &Rx::default()).unwrap();
     let mut rx = Rx::default();
     extras::entity_extras("DIMENSION", &tags, Handle(0x200), &mut kind, &mut rx, cadcraft_doc::GeometryRevision::CanonicalV2);
     let EntityKind::Dimension(dimension) = kind else { panic!("dimension") };

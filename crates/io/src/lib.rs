@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 pub use cadcraft_doc::Format;
 pub use cadcraft_dxf::Version;
 pub use dxf_read::{
-    canonical_attrib_from_groups, canonical_curve_from_groups, canonical_fill_from_groups, canonical_layout_from_groups,
+    Rx, canonical_attrib_from_groups, canonical_curve_from_groups, canonical_fill_from_groups, canonical_layout_from_groups,
     canonical_mleader_from_groups, canonical_polyline_from_groups, canonical_text_from_groups, entity_from_groups,
 };
 pub use dxf_write::entity_groups;

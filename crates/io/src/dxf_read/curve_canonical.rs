@@ -8,12 +8,13 @@ use cadcraft_doc::{Arc, Circle, Common, Drawing, EntityKind, Solid};
 use cadcraft_dxf::Tag;
 use cadcraft_geom::OcsFrame;
 
-use super::common::{T, common};
+use super::Rx;
+use super::common::{T, canonical_common, common};
 
 /// A CIRCLE, ARC, SOLID, TRACE, SPLINE, LEADER, DIMENSION, LINE, POINT, ELLIPSE, 3DFACE, RAY, XLINE, IMAGE or LWPOLYLINE from the groups of a DXF record (without its `0` group), read canonically. `None` for
 /// another kind, a normal without direction, a radius that is not a positive finite number, or an LWPOLYLINE that is a
-/// CADCraft region.
-pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
+/// CADCraft region. The document context resolves plot styles and reserves source identities; an unresolved style returns `None`.
+pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag], drawing: &mut Drawing, rx: &Rx) -> Option<(Common, EntityKind)> {
     let t = T(tags);
     let c = common(&t);
     OcsFrame::new(c.extrusion)?;
@@ -51,17 +52,29 @@ pub fn canonical_curve_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, 
         }
         _ => return None,
     };
-    Some((c, kind))
+    Some((canonical_common(c, tags, drawing, rx)?, kind))
 }
 
 /// A 2D or 3D POLYLINE or a polygon or polyface mesh from its parent record and the child records that follow it (VERTEX, then SEQEND), each with its groups
 /// without the `0` group, read canonically: the vertices stay in the OCS, with the fit data and record identities as
-/// the legacy reader keeps them. `None` for a 3D polyline or a mesh, or a normal without direction.
-pub fn canonical_polyline_from_groups(parent: &[Tag], children: &[(String, Vec<Tag>)]) -> Option<(Common, EntityKind)> {
+/// the legacy reader keeps them. The caller supplies the document's identity pool and reference maps. `None` for a normal without direction or an unresolved plot style.
+pub fn canonical_polyline_from_groups(
+    parent: &[Tag],
+    children: &[(String, Vec<Tag>)],
+    drawing: &mut Drawing,
+    rx: &Rx,
+) -> Option<(Common, EntityKind)> {
     let t = T(parent);
-    OcsFrame::new(common(&t).extrusion)?;
-    let (mut drawing, rx) = (Drawing::default(), Default::default());
-    let (c, kind) = super::entities::polyline_entity_in(children, &mut 0, &t, &mut drawing, &rx, true);
+    let c = common(&t);
+    OcsFrame::new(c.extrusion)?;
+    canonical_common(c, parent, drawing, rx)?;
+    for (kind, tags) in children.iter().take_while(|(kind, _)| matches!(kind.as_str(), "VERTEX" | "SEQEND")) {
+        canonical_common(common(&T(tags)), tags, drawing, rx)?;
+        if kind == "SEQEND" {
+            break;
+        }
+    }
+    let (c, kind) = super::entities::polyline_entity_in(children, &mut 0, &t, drawing, rx, true);
     matches!(kind, EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) | EntityKind::PolylineMesh(_)).then_some((c, kind))
 }
 
