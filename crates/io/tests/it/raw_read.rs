@@ -37,6 +37,20 @@ fn legacy_count(d: &Drawing) -> usize {
 }
 
 #[test]
+fn second_blocks_section_needs_records_are_raw_in_the_real_read() {
+    use crate::activation_fixtures::{block, circle, file, line};
+    let first = file("", &[block("FIRST", 0, &[line("B2")])], &[]);
+    let later = format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n", block("LATE", 0, &[circle("C1", true)]));
+    let text = first.replace("0\nSECTION\n2\nENTITIES\n", &format!("{later}0\nSECTION\n2\nENTITIES\n"));
+    let drawing = read(&text, raw_path());
+    let late = drawing.block("LATE").unwrap();
+    let entity = late.entities.iter().next().unwrap();
+    assert!(matches!(&entity.kind, EntityKind::Raw(raw) if raw.parent().kind() == "CIRCLE" && raw.parent().handle() == Handle(0xC1)));
+    assert_eq!(entity.geometry_revision, GeometryRevision::RawSource);
+    assert!(drawing.read_notes.iter().any(|note| note.contains("CIRCLE C1") && note.contains("kept as read")));
+}
+
+#[test]
 fn a_needing_member_of_a_definition_that_cannot_activate_is_raw_and_its_sibling_is_legacy() {
     // B4: before stage 6 a definition cannot activate; the tilted CIRCLE is kept Raw, the LINE is read Legacy.
     let d = read(&fixture("b4_unreferenced_definition_with_needing_member"), raw_path());

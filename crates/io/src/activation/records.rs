@@ -345,8 +345,8 @@ impl RecordGraph {
             .filter(|(kind, _)| kind == "BLOCK_RECORD")
             .filter_map(|(_, groups)| Some((first(&groups, 5)?.to_ascii_uppercase(), first(&groups, 2)?.to_ascii_uppercase())))
             .collect();
-        // Every BLOCK first: its definition node, then its records.
-        if let Some(blocks) = section("BLOCKS") {
+        // Every BLOCKS section first; repeated definitions continue their existing container ordinals.
+        for blocks in sections.iter().filter(|section| section.name.eq_ignore_ascii_case("BLOCKS")) {
             let all = records(&blocks.tags);
             let mut at = 0;
             while at < all.len() {

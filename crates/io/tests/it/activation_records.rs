@@ -240,6 +240,30 @@ fn the_family_of_every_entity_type_with_a_reader_is_named() {
 }
 
 #[test]
+fn second_blocks_section_records_continue_ordinals_and_reach_the_graph() {
+    let mut secs = dxf("", &[block("Door", &[line("B1")])], &[]);
+    let later = dxf(
+        "",
+        &[block("DOOR", &[rec("ACME_PROXY", "5\nB2\n"), rec("CIRCLE", "5\nB3\n10\n0\n20\n0\n30\n5\n40\n1\n")]), block("Late", &[line("C1")])],
+        &[],
+    );
+    secs.extend(later.into_iter().filter(|section| section.name == "BLOCKS"));
+    let need = |view: &cadcraft_io::activation::records::RecordView| {
+        if view.family == Family::Circle { Need::Needs { readable: true } } else { Need::Plain }
+    };
+    let graph = RecordGraph::build(&secs, &need).unwrap();
+    assert!(graph.node(&key(Container::block("DOOR"), 0)).is_some());
+    assert!(graph.node(&key(Container::block("DOOR"), 1)).is_none(), "the proxy keeps ordinal 1");
+    let needing = graph.node(&key(Container::block("DOOR"), 2)).expect("the second BLOCKS section must have a graph node");
+    assert_eq!(graph.graph().nodes()[needing.0 as usize].need, Need::Needs { readable: true });
+    assert_eq!(graph.handle(needing), Some("B3"));
+    let definition = graph.node(&NodeKey::definition("DOOR")).unwrap();
+    assert!(edges_of(&graph).contains(&Edge::Contains { definition, member: needing }));
+    assert!(graph.node(&NodeKey::definition("LATE")).is_some());
+    assert!(graph.node(&key(Container::block("LATE"), 0)).is_some());
+}
+
+#[test]
 fn a_repeated_container_continues_its_count_so_that_two_records_never_share_a_key() {
     // A damaged file with two ENTITIES sections, and two blocks of one name: the second continues the first.
     let secs = {
