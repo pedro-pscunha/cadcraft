@@ -1134,8 +1134,10 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             w.i(280, i64::from(explodable));
             w.i(281, i64::from(scale_uniformly));
         }
-        // Before 2007 the units are ACAD xdata, and only a block that has some has it.
-        if let Some(b) = blk.filter(|b| version < Version::R2007 && !dwg_bridge && b.units != 0) {
+        // Before 2007 the units are ACAD xdata, and only a block that has some has it; a block that had the xdata beside its group 70 keeps it.
+        if let Some(b) = blk.filter(|b| {
+            !dwg_bridge && b.units != 0 && (version < Version::R2007 || d.source_symbols.design_center_blocks.contains(&name.to_ascii_uppercase()))
+        }) {
             w.s(1001, "ACAD");
             w.s(1000, "DesignCenter Data");
             w.s(1002, "{");
@@ -1327,6 +1329,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     mark_xrefs(&mut w.t, d);
     crate::dxf_raw::order_subclass_groups(&mut w.t, d);
     crate::dxf_raw::order_reactors(&mut w.t, d);
+    crate::dxf_raw::order_image_definition_reactors(&mut w.t);
     let restored = crate::dxf_raw::restore_source_handles(&mut w.t, d);
     references.restore(&restored);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.

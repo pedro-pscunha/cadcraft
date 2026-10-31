@@ -359,7 +359,8 @@ pub(super) fn page_setup(t: &T) -> PageSetup {
     } else if t.i(73).is_some() {
         p.landscape = rotated;
     }
-    if let Some(name) = t.s(4).filter(|n| !n.is_empty()) {
+    // The paper size name as the file gave it; a layout of no named size has none.
+    if let Some(name) = t.s(4) {
         p.paper = name.replace('_', " ");
     }
     if let Some(dev) = t.s(2).map(|s| s.trim().to_string()) {

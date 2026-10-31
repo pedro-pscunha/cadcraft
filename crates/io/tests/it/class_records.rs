@@ -64,3 +64,27 @@ fn a_kept_class_without_objects_in_the_file_keeps_its_count() {
     assert_eq!(val(&class("AEC_VARS_DWG_SETUP"), 91), "7");
     assert_eq!(val(&class("NPOCOLLECTION"), 91), "0");
 }
+
+/// The proxy flags (90) and the application (3) of a class the file has reach its DWG: the DWG class table does not use its own values.
+#[test]
+fn the_proxy_flags_of_a_class_of_the_file_reach_the_dwg() {
+    let source = dxf(&[
+        (0, "SECTION"),
+        (2, "CLASSES"),
+        (0, "CLASS"),
+        (1, "TABLESTYLE"),
+        (2, "AcDbTableStyle"),
+        (3, "ObjectDBX Classes"),
+        (90, "4095"),
+        (91, "1"),
+        (280, "0"),
+        (281, "0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ]);
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let text = super::foreign_passthrough::saved_twice(&d).into_iter().nth(1).unwrap();
+    let classes = section(&text, "CLASSES");
+    let (_, class) = classes.iter().find(|(k, t)| k == "CLASS" && val(t, 1) == "TABLESTYLE").expect("TABLESTYLE");
+    assert_eq!(val(class, 90), "4095", "{text}");
+}

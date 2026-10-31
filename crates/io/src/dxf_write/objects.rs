@@ -18,6 +18,8 @@ pub(super) fn table_style_obj(
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbTableStyle");
+    // The version of the object (0), as AutoCAD writes it first.
+    w.i(280, 0);
     w.s(3, &s.description);
     w.i(70, i64::from(s.flow_up));
     // The flags word as read; its suppression bits (1 title, 2 header) follow the style's switches, which are all a style made
