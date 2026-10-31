@@ -82,6 +82,7 @@ mod header_pointers;
 #[cfg(not(target_arch = "wasm32"))]
 mod heavy_polyline;
 mod helix_roundtrip;
+mod image_vars_absent_in_source;
 mod insert_seqend_props;
 mod layer_transparency_alpha;
 mod layout_canonical;

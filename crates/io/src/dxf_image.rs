@@ -295,7 +295,8 @@ pub(crate) fn plan<'a>(d: &Drawing, entities: impl Iterator<Item = &'a cadcraft_
     }
     if !p.defs.is_empty() {
         p.dict = next();
-        if !d.foreign.dictionary.iter().any(|(key, _)| key.eq_ignore_ascii_case("ACAD_IMAGE_VARS")) {
+        // A file that listed its definitions without raster variables keeps saving without them, as AutoCAD does.
+        if d.image_definitions.is_empty() && !d.foreign.dictionary.iter().any(|(key, _)| key.eq_ignore_ascii_case("ACAD_IMAGE_VARS")) {
             p.vars = next();
         }
     }

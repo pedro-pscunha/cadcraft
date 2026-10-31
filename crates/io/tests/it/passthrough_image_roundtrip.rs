@@ -147,7 +147,7 @@ fn image_and_its_definition_survive_save_and_reopen() {
     let find = |kind: &str| objs.iter().filter(|(k, _)| k == kind).map(|(_, t)| t.clone()).collect::<Vec<_>>();
     let [def] = find("IMAGEDEF").try_into().unwrap();
     let [reactor] = find("IMAGEDEF_REACTOR").try_into().unwrap();
-    assert_eq!(find("RASTERVARIABLES").len(), 1);
+    assert_eq!(find("RASTERVARIABLES").len(), 0, "the file had none and AutoCAD's own save adds none");
     assert_eq!(val(it, 340), val(&def, 5));
     assert_eq!(val(it, 360), val(&reactor, 5));
     assert_eq!(val(&reactor, 330), val(it, 5));
@@ -157,7 +157,7 @@ fn image_and_its_definition_survive_save_and_reopen() {
     assert!(dicts.iter().any(|t| t.iter().any(|g| g.code == 3 && g.str() == "ACAD_IMAGE_DICT")));
     assert!(dicts.iter().any(|t| t.iter().any(|g| g.code == 3 && g.str() == "logo") && t.iter().any(|g| g.code == 350 && g.str() == val(&def, 5))));
     let classes = section(&saved, "CLASSES");
-    for c in ["IMAGE", "IMAGEDEF", "IMAGEDEF_REACTOR", "RASTERVARIABLES"] {
+    for c in ["IMAGE", "IMAGEDEF", "IMAGEDEF_REACTOR"] {
         assert!(classes.iter().any(|(_, t)| val(t, 1) == c), "CLASS {c}");
     }
     // Saving again is stable.

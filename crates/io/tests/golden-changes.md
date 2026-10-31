@@ -187,3 +187,16 @@ Seven fixes move 74 of the 126 outputs. The records that differ from the golden,
 | OBJECTS/IMAGEDEF | the reactors in the order the file listed them | keep the order of the reactors of an IMAGEDEF | dxf | 3 | 6 |
 | TABLES/TABLE | groups 71 and 340 of the DIMSTYLE table header | list the DIMSTYLE records the file listed | dxf | 13 | 13 |
 | CLASSES/CLASS | group 280: the file's zombie flag | pin acadrust 35bc458 (flags_from_file) | dwg | 24 | 757 |
+
+# Golden refresh for the raster variables
+
+A file that listed image definitions but no RASTERVARIABLES object now saves without one (AutoCAD's own SAVEAS adds none), and the CLASS record of RASTERVARIABLES is no longer made for it. 15 of 126 outputs changed.
+Compared record by record (the DWG as the DXF rendition of `cadcraft_dwg`) against the outputs before the change, the records that differ are only these causes; no other record changed.
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| CLASSES/CLASS | the file's own RASTERVARIABLES class stays where the file had it, at the end, instead of the generated one at the front; every CLASS record after it changes its position (the record key is the position) | dxf | 13 (Citycon 3 files 15, Even 18, Planeta 2 files 20 and 17, Toledo 6, Skr-Ayya 24, `skr-property` 243, `cyrela-field` pair 243, Cyrela 62, Firenze 63) | 1 to 243 each |
+| OBJECTS/ACAD_PROXY_OBJECT | group 91 (the class number of the proxy) follows the class order | dxf | Skr-Ayya, `skr-property` | 1 each |
+| OBJECTS/RASTERVARIABLES, DICTIONARY (root), XRECORD, TABLES/APPID, CLASSES/CLASS | the object is no longer written: one handle fewer is allocated, so the XRECORD and the APPID written after it take the previous handle, and the root dictionary loses its ACAD_IMAGE_VARS entry | dxf, dwg | Cyrela-Aura_Moema, Firenze | 1 RASTERVARIABLES, 1 DICTIONARY, 3 XRECORD, 2 APPID, 1 CLASS |
+
+The DWG of the other drawings is unchanged. The golden directory was written again at this commit.
