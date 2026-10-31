@@ -804,6 +804,10 @@ impl Sink<'_> {
             }
             None => {
                 let g = cadcraft_render::dimension_in(d, dm);
+                // The dimension line stops at the base of a filled arrowhead: its tip is the corner of the arrowhead (a SOLID in the *D block).
+                if self.osmode & mode::END != 0 {
+                    self.cands.extend(g.fills.iter().flatten().map(|corner| (mode::END, *corner)));
+                }
                 for line in &g.lines {
                     let (Some(a), Some(b)) = (line.first(), line.last()) else { continue };
                     if self.osmode & mode::END != 0 {
