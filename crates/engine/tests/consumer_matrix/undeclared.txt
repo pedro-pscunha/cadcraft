@@ -18,12 +18,9 @@ annovisible.all
 annovisible.current
 annovisible.toggle
 appload
-arc
-arc.csa
 arc.cse
 arc.csl
 arc.sca
-arc.sce
 arc.scl
 arc.sea
 arc.sed
@@ -144,7 +141,6 @@ dimtedit.center
 dimtedit.home
 dimtedit.left
 dimtedit.right
-dist
 divide
 document.bytes
 document.switch
@@ -300,7 +296,6 @@ plot
 plotstyle
 plottermanager
 plotwindow
-point
 point.multiple
 polar
 polygon
@@ -316,7 +311,6 @@ qselect
 qselect.info
 quickcalc.pick
 radius.measure
-ray
 recover
 rectang
 redo

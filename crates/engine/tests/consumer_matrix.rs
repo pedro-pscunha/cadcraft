@@ -170,6 +170,18 @@ fn number(value: &Value, key: &str) -> Result<f64, String> {
     value[key].as_f64().ok_or_else(|| format!("{key} missing in {value}"))
 }
 
+fn z_is_0(v: &Value) -> Result<(), String> {
+    near(number(v, "z")?, 0.0)
+}
+
+fn z_is_3(v: &Value) -> Result<(), String> {
+    near(number(v, "z")?, 3.0)
+}
+
+fn z_is_5(v: &Value) -> Result<(), String> {
+    near(number(v, "z")?, 5.0)
+}
+
 fn near(value: f64, want: f64) -> Result<(), String> {
     if (value - want).abs() < 1e-6 { Ok(()) } else { Err(format!("{value} instead of {want}")) }
 }
@@ -445,31 +457,207 @@ fn erased(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
     if d.entity(ops[0]).is_none() { Ok(()) } else { Err("the circle is still there".into()) }
 }
 
+/// A flat LINE (0,0)-(3,0). Made canonical in a lifted plane it sits at that elevation.
+fn flat_line() -> Fixture {
+    let mut s = Session::new();
+    let line = create(&mut s, "line", json!({"points": [[0, 0], [3, 0]]}));
+    Fixture { drawing: model_of(&s), params: json!({"at": [1.5, 0.0]}), operands: vec![line], view: None }
+}
+
+/// A circle far from the pick, and ELEVATION 3: the pick finds nothing, so the point is at the current elevation.
+fn id_in_empty_space() -> Fixture {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 3})).unwrap();
+    let circle = create(&mut s, "circle", json!({"center": [100, 100], "radius": 2}));
+    Fixture { drawing: model_of(&s), params: json!({"at": [1.5, 0.0]}), operands: vec![circle], view: None }
+}
+
+/// A solid fill over a closed polyline and ELEVATION 3: the interior of a fill is not under the pick.
+fn id_in_fill_interior() -> Fixture {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "ELEVATION", "value": 3})).unwrap();
+    let vertices =
+        json!([{"p": [0.0, 0.0], "bulge": 0.0}, {"p": [10.0, 0.0], "bulge": 0.0}, {"p": [10.0, 5.0], "bulge": 0.0}, {"p": [0.0, 5.0], "bulge": 0.0}]);
+    let polyline = create(&mut s, "pline", json!({"vertices": vertices, "closed": true}));
+    let hatch = create(&mut s, "hatch", json!({"handles": [polyline.hex()], "pattern": "SOLID"}));
+    Fixture { drawing: model_of(&s), params: json!({"at": [5.0, 2.5]}), operands: vec![hatch], view: None }
+}
+
+/// DIST from (0,0) to (3,0) over the spatial line (0,0,0)-(3,0,4): the picks take the Z of the line under them.
+fn dist_on_spatial_line() -> Fixture {
+    let mut f = id_on_spatial_line();
+    f.params = json!({"p1": [0.0, 0.0], "p2": [3.0, 0.0]});
+    f
+}
+
+fn dist_on_text() -> Fixture {
+    let mut f = id_on_text();
+    f.params = json!({"p1": [2.3, 1.4], "p2": [5.0, 5.0]});
+    f
+}
+
+fn circle_at_elevation() -> Fixture {
+    circle()
+}
+
+/// A point-based creation command over a spatial line: the new object is a legacy one on the plan view, at the current elevation, whatever is under the picks.
+fn creation(params: Value) -> Fixture {
+    let mut f = id_on_spatial_line();
+    f.params = params;
+    f
+}
+
+fn point_fixture() -> Fixture {
+    creation(json!({"at": [1.5, 0.0]}))
+}
+
+fn ray_fixture() -> Fixture {
+    creation(json!({"base": [1.5, 0.0], "through": [2.0, 5.0]}))
+}
+
+fn xline_through_points() -> Fixture {
+    creation(json!({"base": [1.5, 0.0], "through": [2.0, 5.0]}))
+}
+
+fn xline_angle() -> Fixture {
+    creation(json!({"base": [1.5, 0.0], "angle": 30}))
+}
+
+fn xline_horizontal() -> Fixture {
+    creation(json!({"base": [1.5, 0.0], "hor": true}))
+}
+
+fn xline_bisector() -> Fixture {
+    creation(json!({"vertex": [1.5, 0.0], "start": [5.0, 0.0], "end": [1.5, 5.0]}))
+}
+
+fn arc_start_center_end() -> Fixture {
+    creation(json!({"start": [1.5, 0.0], "center": [1.5, 3.0], "end": [4.5, 3.0]}))
+}
+
+fn arc_center_start_angle() -> Fixture {
+    creation(json!({"center": [1.5, 0.0], "start": [1.5, 3.0], "angle": 90}))
+}
+
+fn arc_three_points() -> Fixture {
+    creation(json!({"p1": [1.5, 0.0], "p2": [3.0, 3.0], "p3": [4.5, 0.0]}))
+}
+
+/// The object a creation command made: the last one, new, legacy.
+fn made(d: &Drawing, ops: &[Handle]) -> Result<std::sync::Arc<cadcraft_doc::Entity>, String> {
+    let entity = d.model.iter().last().ok_or("empty model")?;
+    if entity.handle == ops[0] {
+        return Err("nothing was made".into());
+    }
+    if entity.geometry_revision != cadcraft_doc::GeometryRevision::LegacyProjectedV1 {
+        return Err(format!("made a {:?} object", entity.geometry_revision));
+    }
+    Ok(entity.clone())
+}
+
+fn point_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    match &made(d, ops)?.kind {
+        EntityKind::Point(p) => close3(arr(p.p), [1.5, 0.0, 0.0], "point"),
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+fn ray_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    // The direction (0.5, 5) of length sqrt(25.25).
+    let length = 25.25_f64.sqrt();
+    match &made(d, ops)?.kind {
+        EntityKind::Ray(r) => close3(arr(r.base), [1.5, 0.0, 0.0], "base").and(close3(arr(r.dir), [0.5 / length, 5.0 / length, 0.0], "direction")),
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+fn xline_made(want: V3) -> impl Fn(&Drawing, &[Handle]) -> Result<(), String> {
+    move |d, ops| match &made(d, ops)?.kind {
+        EntityKind::XLine(r) => close3(arr(r.base), [1.5, 0.0, 0.0], "base").and(close3(arr(r.dir), want, "direction")),
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+fn xline_through_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    let length = 25.25_f64.sqrt();
+    xline_made([0.5 / length, 5.0 / length, 0.0])(d, ops)
+}
+
+fn xline_angle_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    xline_made([30.0_f64.to_radians().cos(), 0.5, 0.0])(d, ops)
+}
+
+fn xline_horizontal_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    xline_made([1.0, 0.0, 0.0])(d, ops)
+}
+
+fn xline_bisector_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    // The unit directions to (5,0) and to (1.5,5) from the vertex (1.5,0) are (1,0) and (0,1): their sum is the bisector.
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    xline_made([h, h, 0.0])(d, ops)
+}
+
+fn arc_made(d: &Drawing, ops: &[Handle], center: V3, radius: f64, start: f64, end: f64) -> Result<(), String> {
+    match &made(d, ops)?.kind {
+        EntityKind::Arc(a) => {
+            close3(arr(a.center), center, "center")?;
+            near(a.radius, radius)?;
+            near(a.start, start)?;
+            near(a.end.rem_euclid(std::f64::consts::TAU), end)
+        }
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+fn arc_sce_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    // The start (1.5,0) is straight below the center (1.5,3): 270 degrees. The end (4.5,3) is at 0 degrees. The radius is 3.
+    arc_made(d, ops, [1.5, 3.0, 0.0], 3.0, 1.5 * std::f64::consts::PI, 0.0)
+}
+
+fn arc_csa_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    // The start (1.5,3) is straight above the center (1.5,0): 90 degrees, and the included angle 90 degrees counterclockwise.
+    arc_made(d, ops, [1.5, 0.0, 0.0], 3.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI)
+}
+
+fn arc_three_points_made(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    // The circle through (1.5,0), (3,3), (4.5,0): the center (3, y) with 2.25 + y^2 = (3 - y)^2, so y = 1.125 and the radius 1.875.
+    // The picks run clockwise, so the stored arc goes counterclockwise from the last pick (-36.87 degrees) to the first (216.87).
+    let first = (-1.125_f64).atan2(-1.5).rem_euclid(std::f64::consts::TAU);
+    let last = (-1.125_f64).atan2(1.5).rem_euclid(std::f64::consts::TAU);
+    arc_made(d, ops, [3.0, 1.125, 0.0], 1.875, last, first)
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Rows
 
 /// The commands the rows cover, with the roles each one's rows cover. The registry lint compares both with the rows and the registry.
 const DECLARED: &[(&str, &[Role])] = &[
     ("angle.measure", &[Role::Primary, Role::Secondary]),
+    ("arc", &[Role::PickedPoint]),
     ("area", &[Role::Primary]),
     ("arc.continue", &[Role::Boundary]),
+    ("arc.csa", &[Role::PickedPoint]),
+    ("arc.sce", &[Role::PickedPoint]),
     ("centerline", &[Role::Primary, Role::Secondary]),
     ("centermark", &[Role::Primary]),
     ("copy", &[Role::SelectionMember]),
     ("dimbreak", &[Role::Boundary]),
     ("dimjogged", &[Role::Primary]),
+    ("dist", &[Role::PickedPoint]),
     ("erase", &[Role::SelectionMember]),
     ("id", &[Role::PickedPoint]),
     ("list", &[Role::Primary]),
     ("mirror", &[Role::SelectionMember]),
     ("mleadercollect", &[Role::SelectionMember]),
     ("move", &[Role::SelectionMember]),
+    ("point", &[Role::PickedPoint]),
     ("properties", &[Role::Primary]),
+    ("ray", &[Role::PickedPoint]),
     ("revcloud", &[Role::Primary]),
     ("rotate", &[Role::SelectionMember]),
     ("scale", &[Role::SelectionMember]),
     ("wipeout", &[Role::Primary]),
-    ("xline", &[Role::Primary]),
+    ("xline", &[Role::Primary, Role::PickedPoint]),
 ];
 
 /// What the rows of one refusal case share.
@@ -801,6 +989,128 @@ fn live_rows() -> Vec<Row> {
         out.push(Row { plane, ..mirror(Canonical, Expect::Refuses("reflection")) });
     }
     out.push(mirror(Revision::Raw, Expect::Refuses("read-only")));
+    // The object under a picked point gives its Z back; the interior of a fill and empty space give the current elevation.
+    for (revision, plane, check) in [(Canonical, PlusZElevated, z_is_5 as Check), (Revision::Legacy, PlusZ, z_is_0)] {
+        out.push(Row {
+            command: "id",
+            role: Role::PickedPoint,
+            branch: "flat line (0,0)-(3,0) at its own elevation",
+            revision,
+            plane,
+            fixture: flat_line,
+            expect: Expect::Ok(check),
+        });
+    }
+    for revision in [Revision::Legacy, Canonical, Revision::Raw] {
+        out.push(Row {
+            command: "id",
+            role: Role::PickedPoint,
+            branch: "empty space: the current elevation",
+            revision,
+            plane: PlusZ,
+            fixture: id_in_empty_space,
+            expect: Expect::Ok(z_is_3),
+        });
+    }
+    for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
+        out.push(Row {
+            command: "id",
+            role: Role::PickedPoint,
+            branch: "fill interior: the current elevation",
+            revision,
+            plane,
+            fixture: id_in_fill_interior,
+            expect: Expect::Ok(z_is_3),
+        });
+    }
+    out.push(Row {
+        command: "id",
+        role: Role::PickedPoint,
+        branch: "spatial line, (0,0,0)-(3,0,4) at x 1.5",
+        revision: Revision::Raw,
+        plane: PlusZ,
+        fixture: id_on_spatial_line,
+        // A raw unit has no geometry to pick (the pick skips it): the point is at the current elevation, not on the line.
+        expect: Expect::Ok(z_is_0),
+    });
+    out.push(Row {
+        command: "dist",
+        role: Role::PickedPoint,
+        branch: "spatial line (0,0,0)-(3,0,4), from x 0 to x 3",
+        revision: Revision::Legacy,
+        plane: PlusZ,
+        fixture: dist_on_spatial_line,
+        // The picks take the Z of the line: (0,0,0) and (3,0,4), so 3-4-5.
+        expect: Expect::Ok(|v| near(number(v, "distance")?, 5.0).and(near(number(v, "dz")?, 4.0))),
+    });
+    out.push(Row {
+        command: "dist",
+        role: Role::PickedPoint,
+        branch: "spatial line (0,0,0)-(3,0,4), from x 0 to x 3",
+        revision: Canonical,
+        plane: PlusZ,
+        fixture: dist_on_spatial_line,
+        expect: Expect::Ok(|v| near(number(v, "distance")?, 5.0).and(near(number(v, "dz")?, 4.0))),
+    });
+    out.push(Row {
+        command: "dist",
+        role: Role::PickedPoint,
+        branch: "spatial line (0,0,0)-(3,0,4), from x 0 to x 3",
+        revision: Revision::Raw,
+        plane: PlusZ,
+        fixture: dist_on_spatial_line,
+        // The same: the picks are at the current elevation, so the distance is the plan distance.
+        expect: Expect::Ok(|v| near(number(v, "distance")?, 3.0).and(near(number(v, "dz")?, 0.0))),
+    });
+    out.push(Row {
+        command: "dist",
+        role: Role::PickedPoint,
+        branch: "text, no single Z",
+        revision: Canonical,
+        plane: PlusZ,
+        fixture: dist_on_text,
+        expect: Expect::Refuses("no single Z"),
+    });
+    // The lifted plane: LIST reads the Z of the center, AREA does not depend on it.
+    out.push(Row {
+        command: "list",
+        role: Role::Primary,
+        branch: "circle at (10,5), elevation 5",
+        revision: Canonical,
+        plane: PlusZElevated,
+        fixture: list_circle,
+        expect: Expect::Ok(|v| {
+            let text = v["message"].as_str().ok_or("no message")?;
+            if text.contains("X=10.0000  Y=5.0000  Z=5.0000") { Ok(()) } else { Err(text.to_string()) }
+        }),
+    });
+    out.push(Row {
+        command: "area",
+        role: Role::Primary,
+        branch: "circle r2 at elevation 5",
+        revision: Canonical,
+        plane: PlusZElevated,
+        fixture: circle_at_elevation,
+        expect: Expect::Ok(|v| near(number(v, "area")?, 4.0 * std::f64::consts::PI)),
+    });
+    // Point-based creation: nothing under the picks changes the new object, in any revision of the operand.
+    let creations: [(&str, &str, fn() -> Fixture, Expect); 9] = [
+        ("point", "at", point_fixture, Expect::Edits(point_made)),
+        ("ray", "base and through", ray_fixture, Expect::Edits(ray_made)),
+        ("xline", "base and through", xline_through_points, Expect::Edits(xline_through_made)),
+        ("xline", "base and angle", xline_angle, Expect::Edits(xline_angle_made)),
+        ("xline", "base, horizontal", xline_horizontal, Expect::Edits(xline_horizontal_made)),
+        ("xline", "bisector", xline_bisector, Expect::Edits(xline_bisector_made)),
+        ("arc.sce", "start, center, end", arc_start_center_end, Expect::Edits(arc_sce_made)),
+        ("arc.csa", "center, start, angle", arc_center_start_angle, Expect::Edits(arc_csa_made)),
+        ("arc", "three points", arc_three_points, Expect::Edits(arc_three_points_made)),
+    ];
+    for (command, branch, fixture, expect) in creations {
+        let Expect::Edits(check) = expect else { unreachable!() };
+        for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
+            out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
+        }
+    }
     rows
 }
 
