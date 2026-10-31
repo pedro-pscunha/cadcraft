@@ -338,17 +338,16 @@ impl RecordGraph {
             references: Vec::new(),
             ordinals: Ordinals::default(),
         };
-        let section = |name: &str| sections.iter().find(|s| s.name.eq_ignore_ascii_case(name));
-        // Block record handle (upper case) → block name (upper case).
-        let block_names: HashMap<String, String> = section("TABLES")
-            .map(|s| records(&s.tags))
-            .unwrap_or_default()
-            .into_iter()
+        // Block record handle (upper case) → block name (upper case), across every TABLES section.
+        let block_names: HashMap<String, String> = sections
+            .iter()
+            .filter(|section| section.name.eq_ignore_ascii_case("TABLES"))
+            .flat_map(|section| records(&section.tags))
             .filter(|(kind, _)| kind == "BLOCK_RECORD")
             .filter_map(|(_, groups)| Some((first(&groups, 5)?.to_ascii_uppercase(), first(&groups, 2)?.to_ascii_uppercase())))
             .collect();
-        // Every BLOCK first: its definition node, then its records.
-        if let Some(blocks) = section("BLOCKS") {
+        // Every BLOCKS section first; repeated definitions continue their existing container ordinals.
+        for blocks in sections.iter().filter(|section| section.name.eq_ignore_ascii_case("BLOCKS")) {
             let all = records(&blocks.tags);
             let mut at = 0;
             while at < all.len() {

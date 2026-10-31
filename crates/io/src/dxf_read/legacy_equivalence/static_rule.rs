@@ -129,7 +129,12 @@ fn hatch(tags: &[Tag]) -> bool {
             return false;
         };
         if (flags as i64) & 2 != 0 {
-            if !count_matches(body, 93, 10) || count(body, 10) != count(body, 20) || !flag(body, 72, 1) || !flag(body, 73, 1) {
+            if !count_matches(body, 93, 10)
+                || count(body, 10) != count(body, 20)
+                || !flag(body, 72, 1)
+                || !flag(body, 73, 1)
+                || scalar(body, 73, 0.0) != Some(1.0)
+            {
                 return false;
             }
         } else {
