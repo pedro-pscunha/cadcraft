@@ -1359,9 +1359,10 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     mark_xrefs(&mut w.t, d);
     crate::dxf_raw::order_subclass_groups(&mut w.t, d);
     crate::dxf_raw::order_reactors(&mut w.t, d);
-    crate::dxf_raw::order_image_definition_reactors(&mut w.t);
     let restored = crate::dxf_raw::restore_source_handles(&mut w.t, d);
     references.restore(&restored);
+    // After the handles are the file's: the file's order of the reactors names them by those handles.
+    crate::dxf_raw::order_image_definition_reactors(&mut w.t, d);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     (w.t, references)
