@@ -163,3 +163,13 @@ An ACAD_TABLE's `*T` graphics block is now kept as the file had it (name, record
 | OBJECTS/DICTIONARY, DICTIONARYVAR, MLEADERSTYLE | an object that took a new handle after the rebuilt block (apartment: the dictionary 2253 is now 223E, and the references to it follow) | apartment (dxf: 3 + 1, dwg: 5 + 14 + 1) | as listed |
 
 The six `dim1` drawings are `dim1-mattrib-2018.dwg`, `dim1-table90-2018.dwg`, `dim1-mattrib-2018.dxf`, `dim1-table90-2007.dxf`, `dim1-table90-2018.dxf` and `dim1-vp68-2018.dxf`.
+
+# Golden refresh for the apartment sample's table style
+
+`examples/apartment.dxf` was written by the old writer (a5991373), which put the cell styles of its TABLESTYLE in the order Data, Header, Title. AutoCAD, and the reader and
+writer of today (5d67f225), use Data, Title, Header, so a read took the headings for the title and a regenerated table drew "ROOM SCHEDULE" at 160 and "Room" at 224
+(the file draws them at 224 and 160). The sample now has the second and third cell-style blocks swapped (two lines: the text heights 140). Only the TABLESTYLE record moves:
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| OBJECTS/TABLESTYLE (1150) | the cell-style blocks of the sample in AutoCAD's order | dxf, dwg | examples/apartment.dxf | 1 each |
