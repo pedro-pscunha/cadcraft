@@ -1046,6 +1046,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // Extras of entities, tables, table records, blocks and attributes. An entity keeps the reactors
     // that name kept objects or other entities of the file (a hatch that lists its boundary).
     let reactor_targets: HashSet<String> = kept.iter().cloned().chain(ents.keys().cloned()).collect();
+    let raw_handles = raw_handles(d);
     let mut xdata_of: HashMap<Handle, Vec<RawTag>> = HashMap::new();
     for (kind, _, t) in blocks.iter().chain(&entities) {
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
@@ -1053,6 +1054,10 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
         let Some(h) = head(t).handle else { continue };
         let Some(&unknown) = ents.get(&h) else { continue };
+        // A raw unit keeps its reactors, extension dictionary and xdata in its own records, verbatim.
+        if raw_handles.contains(&h) {
+            continue;
+        }
         let mut x = extra(kind, t, true, unknown, &reactor_targets);
         let Some(hh) = handle(&h) else { continue };
         // Child instances own their extras by Handle; top-level entities carry xdata in Common.
@@ -1103,6 +1108,14 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for e in all_entities(d) {
         if let EntityKind::Unknown(u) = &e.kind {
             note(&u.tags);
+        }
+    }
+    // What the records of a raw unit name (the layout block that owns it, a layer, a style) is a target the save writes itself.
+    for e in all_entities(d) {
+        if let EntityKind::Raw(raw) = &e.kind {
+            for record in raw.records() {
+                note(record.tags());
+            }
         }
     }
     for r in &refs {

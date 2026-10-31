@@ -21,13 +21,18 @@ pub(super) fn parse_entities(
         let paper = t.i(67) == Some(1);
         // The place of a top-level record, counted as the activation adapter counts it (followers are not records of their own).
         let place = (!matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND")).then(|| rx.ordinals.next(container));
+        let mut unraw_reason: Option<String> = None;
         if let Some(reason) = place.and_then(|place| rx.raw_reason(container, place)) {
             let end = unit_end(recs, i);
-            if let Some(unit) = raw_unit(&recs[i..end], &reason, d, rx) {
-                d.bump_handseed(unit.handle);
-                out.push((owner, paper, unit));
-                i = end;
-                continue;
+            match raw_unit(&recs[i..end], &reason, d, rx) {
+                Ok(unit) => {
+                    d.bump_handseed(unit.handle);
+                    out.push((owner, paper, unit));
+                    i = end;
+                    continue;
+                }
+                // Read Legacy below; the entity's handle is not known yet.
+                Err(unraw) => unraw_reason = Some(unraw),
             }
         }
         if kind == "VIEWPORT"
@@ -70,6 +75,9 @@ pub(super) fn parse_entities(
             };
             let geometry_revision = cadcraft_doc::GeometryRevision::LegacyProjectedV1;
             entity_extras(kind, tags, h, &mut k, rx, geometry_revision);
+            if let Some(reason) = unraw_reason {
+                std::sync::Arc::make_mut(&mut d.source_symbols).legacy_needs.insert(h, format!("{kind} {}: {reason}", h.hex()));
+            }
             out.push((owner, paper, Entity { geometry_revision, handle: h, common: c, kind: k }));
         } else if kind == "HATCH" {
             // Without boundary data. The other records `entity` returns nothing for are read
@@ -431,8 +439,8 @@ fn raw_record(kind: &str, tags: &[Tag], d: &mut Drawing) -> Option<cadcraft_doc:
 
 /// The records of one unit as the raw entity that keeps them verbatim and read-only; `None`, with a read note, when the records
 /// cannot be kept raw (no closing SEQEND, a repeated identity): the unit is then read Legacy.
-fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx) -> Option<Entity> {
-    let (kind, tags) = unit.first()?;
+fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx) -> Result<Entity, String> {
+    let (kind, tags) = unit.first().ok_or_else(|| reason.to_string())?;
     let parent = raw_record(kind, tags, d);
     let followers: Option<Vec<_>> = unit[1..].iter().map(|(kind, tags)| raw_record(kind, tags, d)).collect();
     let mut source = super::common::common(&T(tags));
@@ -445,11 +453,11 @@ fn raw_unit(unit: &[(String, Vec<Tag>)], reason: &str, d: &mut Drawing, rx: &Rx)
         Some(compound) => {
             let handle = compound.parent().handle();
             d.read_notes.push(format!("{kind} {} is kept as read and cannot be edited: {reason}", handle.hex()));
-            Some(Entity::from_raw(compound))
+            Ok(Entity::from_raw(compound))
         }
         None => {
             d.read_notes.push(format!("{kind} needs a canonical reading and cannot be kept raw (its records have no usable identity or closing SEQEND): {reason} It is read Legacy."));
-            None
+            Err(reason.to_string())
         }
     }
 }

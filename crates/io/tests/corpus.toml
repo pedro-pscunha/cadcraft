@@ -309,3 +309,8 @@ families = ["Circle", "Line"]
 path = "crates/io/tests/data/activation/r4_raw_insert_edit_refusal_and_save.dxf"
 owner = "activation fixtures"
 families = ["Attrib", "Insert", "Line"]
+
+[[file]]
+path = "crates/io/tests/data/activation/r5_raw_insert_with_full_tables.dxf"
+owner = "activation fixtures"
+families = ["Attrib", "Insert", "Line"]

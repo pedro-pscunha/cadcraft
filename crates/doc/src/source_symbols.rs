@@ -33,6 +33,9 @@ pub struct SourceSymbols {
     /// The upper-case names of the blocks whose record held the `DesignCenter Data` xdata beside its group 70 (AutoCAD writes it in every
     /// version for the blocks that had it): a save keeps it for them, and before 2007 for every block with units.
     pub design_center_blocks: BTreeSet<String>,
+    /// The records that needed a canonical reading and were read Legacy because they could not be kept raw (no closing SEQEND, a
+    /// repeated identity), with the type and the reason: every save of the drawing says so while the record is in it.
+    pub legacy_needs: BTreeMap<Handle, String>,
 }
 
 impl SourceSymbols {
