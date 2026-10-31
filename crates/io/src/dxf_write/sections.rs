@@ -1165,10 +1165,10 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             w.i(280, i64::from(explodable));
             w.i(281, i64::from(scale_uniformly));
         }
-        // Before 2007 the units are ACAD xdata, and only a block that has some has it; a block that had the xdata beside its group 70 keeps it.
-        if let Some(b) = blk.filter(|b| {
-            !dwg_bridge && b.units != 0 && (version < Version::R2007 || d.source_symbols.design_center_blocks.contains(&name.to_ascii_uppercase()))
-        }) {
+        // Before 2007 the units are ACAD xdata, and only a block that has some has it; a block that had the xdata beside its group 70 keeps it,
+        // also through the DWG bridge (which gives the DWG writer the xdata, and makes the units of the others itself).
+        let kept = d.source_symbols.design_center_blocks.contains(&name.to_ascii_uppercase());
+        if let Some(b) = blk.filter(|b| b.units != 0 && (if dwg_bridge { kept } else { version < Version::R2007 || kept })) {
             w.s(1001, "ACAD");
             w.s(1000, "DesignCenter Data");
             w.s(1002, "{");
