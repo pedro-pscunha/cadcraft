@@ -54,6 +54,17 @@ impl Ellipse {
         if !valid || length <= 0.0 || self.major.dot(unit).abs() > 1e-9 * length {
             return Err(invalid("A canonical ellipse needs a major axis in its plane and a ratio in (0, 1]."));
         }
+        // AutoCAD keeps the parameter range and ratio under a reflected similarity.
+        if let Ok(similarity) = super::text_canonical::Similarity::including_reflection(m)
+            && similarity.reflected()
+        {
+            let normal = -similarity.direction(normal);
+            let moved = Ellipse { center: similarity.point(self.center), major: m.apply_vec(self.major), normal, ..self.clone() };
+            if !crate::has_finite_numbers(&moved) {
+                return Err(invalid("An ellipse cannot be placed with finite coordinates."));
+            }
+            return Ok((moved, normal));
+        }
         // Two conjugate radii (here perpendicular): the major axis and the minor axis, `normal x major` scaled by the ratio.
         let minor = unit.cross(self.major) * self.ratio;
         let (u, v) = (m.apply_vec(self.major), m.apply_vec(minor));

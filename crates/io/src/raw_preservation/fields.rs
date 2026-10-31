@@ -87,7 +87,7 @@ fn scalar(code: i32, text: &str, source_text: bool) -> Result<Value, String> {
                 return Err("the binary field has an incomplete byte".into());
             }
             let mut decoded = Vec::with_capacity(bytes.len() / 2);
-            for pair in bytes.chunks_exact(2) {
+            for pair in bytes.as_chunks::<2>().0 {
                 let digit = |value: u8| char::from(value).to_digit(16).and_then(|value| u8::try_from(value).ok());
                 let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else { return Err("the binary field is not hexadecimal".into()) };
                 decoded.push(high * 16 + low);

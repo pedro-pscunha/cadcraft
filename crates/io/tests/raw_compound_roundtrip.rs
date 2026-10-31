@@ -70,7 +70,7 @@ fn literal_record(bytes: &[u8], handle: Handle) -> (String, Vec<RawTag>) {
     let lines: Vec<_> = text.lines().collect();
     let mut kind = String::new();
     let mut body: Vec<RawTag> = Vec::new();
-    for pair in lines.chunks_exact(2) {
+    for pair in lines.as_chunks::<2>().0 {
         let code = pair[0].trim().parse().unwrap();
         if code == 0 {
             if body.iter().any(|tag| tag.code == 5 && Handle::parse_hex(&tag.value) == Some(handle)) {

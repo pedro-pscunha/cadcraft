@@ -77,12 +77,18 @@ fn a_quadrant_of_a_tilted_circle_changes_its_radius_in_its_own_plane() {
 }
 
 #[test]
-fn a_mirror_of_a_circle_grip_refuses_typed_and_changes_nothing() {
+fn a_mirror_of_a_circle_grip_keeps_the_center_and_reflects_the_plane() {
     let (mut session, h) = tilted_circle();
-    let before = session.doc().unwrap().model.clone();
-    let error = session.grip_edit(h, 0, Vec2::new(0.0, 9.0), GripMode::Mirror).unwrap_err();
-    assert!(!error.to_string().is_empty());
-    assert_eq!(session.doc().unwrap().model, before);
+    let center = Vec3::new(-1.0, 1.4, 5.2);
+    let cursor = Vec2::new(0.0, 9.0);
+    let matrix = cadcraft_geom::Mat4::from_mat3(&cadcraft_geom::Mat3::mirror(center.xy(), cursor));
+    session.grip_edit(h, 0, cursor, GripMode::Mirror).unwrap();
+    let entity = session.doc().unwrap().entity(h).unwrap();
+    let EntityKind::Circle(circle) = &entity.kind else { panic!("circle") };
+    assert_eq!(entity.geometry_revision, GeometryRevision::CanonicalV2);
+    assert!(near(entity.common.extrusion, matrix.apply_vec(Vec3::new(0.0, 3.0, 4.0))));
+    assert!(near(circle.world_center(entity.common.extrusion).unwrap(), center));
+    assert!((circle.radius - 4.0).abs() < 1e-12);
 }
 
 #[test]

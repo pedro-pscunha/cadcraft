@@ -4,6 +4,7 @@ use cadcraft_doc::{DimKind, Dimension, EntityKind, GeometryRevision, Handle};
 use cadcraft_geom::{OcsFrame, Vec3};
 
 use super::common::T;
+use super::dimension_blocks::DimensionBlockShift;
 use super::{Rx, Tag};
 
 pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx, revision: GeometryRevision) {
@@ -80,12 +81,14 @@ fn apply_geometry(kind: &str, tags: &[Tag], k: &mut EntityKind, rx: &mut Rx, rev
             dm.marks = crate::dxf_ext::read_marks(tags);
             let t = T(tags);
             let normal = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
-            if revision == GeometryRevision::LegacyProjectedV1 {
-                // Only the Legacy path normalizes graphics blocks through the existing XY shift.
-                let shift = super::common::ocs_n(normal, t.p(12)).xy();
-                if let Some(name) = dm.block.as_ref().filter(|_| shift.is_finite() && (shift.x != 0.0 || shift.y != 0.0)) {
-                    rx.dim_block_shifts.push((name.to_ascii_uppercase(), shift));
+            match revision {
+                GeometryRevision::LegacyProjectedV1 => {
+                    let shift = super::common::ocs_n(normal, t.p(12)).xy();
+                    if let Some(name) = dm.block.as_ref().filter(|_| shift.is_finite() && (shift.x != 0.0 || shift.y != 0.0)) {
+                        rx.dim_block_shifts.push(DimensionBlockShift { block: name.to_ascii_uppercase(), offset: shift });
+                    }
                 }
+                GeometryRevision::CanonicalV2 | GeometryRevision::RawSource => {}
             }
             dimension_oblique(dm, &t, normal, revision);
         }

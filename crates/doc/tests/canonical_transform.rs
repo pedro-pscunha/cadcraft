@@ -577,10 +577,12 @@ fn a_mirror_refuses_with_the_entity_unchanged_where_the_family_is_a_similarity()
         let before = e.clone();
         let mut candidate = e.clone();
         let result = candidate.try_transform(&mirror());
-        // These are exact under any invertible affine map (a frame, a B-spline, an ellipse, WCS positions, a line's extrusion vector).
+        // Affine families and the measured circle/arc reflection keep their canonical payloads.
         if matches!(
             e.kind,
-            EntityKind::Wipeout(_)
+            EntityKind::Circle(_)
+                | EntityKind::Arc(_)
+                | EntityKind::Wipeout(_)
                 | EntityKind::Spline(_)
                 | EntityKind::Ellipse(_)
                 | EntityKind::Line(_)

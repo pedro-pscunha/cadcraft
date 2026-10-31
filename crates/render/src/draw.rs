@@ -356,7 +356,7 @@ pub(crate) fn draw_dimension(
     ltscale: f64,
 ) -> cadcraft_doc::Result<()> {
     let local = dm.localized_for_revision(e.common.extrusion, e.geometry_revision)?;
-    let plane = ctx.world.mul(&cadcraft_geom::Mat4::ocs(e.common.extrusion));
+    let plane = super::world_geometry::dimension_picture_transform(e, dm, &ctx.world)?;
     let picture = plane.mul(&super::world_roles::translation(cadcraft_geom::Vec3::new(0.0, 0.0, local.local_picture_elevation())));
     if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))
         && ctx.depth < cadcraft_doc::MAX_BLOCK_DEPTH

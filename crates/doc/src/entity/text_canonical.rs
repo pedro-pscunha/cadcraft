@@ -6,16 +6,16 @@
 //! source normal keeps its magnitude. Nothing is projected, mirrored or swapped on import.
 //!
 //! Edits are exact only for what a similarity does to a plane: a translation, a rotation about any axis and a
-//! uniform positive scale. A reflection, a shear and a non-uniform scale have no measured text convention, so
-//! they refuse atomically (the text is not flipped, sheared or fitted to a nearby one).
+//! uniform positive scale. Generic transforms refuse reflections, shear and non-uniform scale. The explicit MIRROR
+//! operation supports measured left-baseline TEXT without generation flags, with a separate MIRRTEXT policy.
 
-use cadcraft_geom::{Mat4, OcsFrame, Vec2, Vec3};
+use cadcraft_geom::{Bounds2, Mat4, OcsFrame, Vec2, Vec3};
 
 use super::block::{Attrib, MultilineAttrib};
 use super::text::{MText, Text};
 use crate::{DocError, Result};
 
-/// A world-space affine map that keeps shapes: rotation, uniform positive scale and translation.
+/// A finite uniform orthogonal map and translation. Reflections require the explicit opt-in constructor.
 #[derive(Clone, Copy, Debug)]
 pub struct Similarity {
     transform: Mat4,
@@ -26,6 +26,17 @@ pub struct Similarity {
 impl Similarity {
     /// Refuse a map that is not a similarity: perspective, shear, non-uniform scale, reflection, collapse.
     pub fn from_mat4(transform: &Mat4) -> Result<Self> {
+        let similarity = Self::including_reflection(transform)?;
+        if similarity.reflected() {
+            return Err(DocError::Invalid(
+                "Canonical geometry has no measured convention for a reflection; it can be moved, rotated and scaled uniformly.".into(),
+            ));
+        }
+        Ok(similarity)
+    }
+
+    /// A finite uniform similarity, including a reflection for families with a measured convention.
+    pub fn including_reflection(transform: &Mat4) -> Result<Self> {
         let refuse = || DocError::Invalid("Canonical geometry can be moved, rotated and scaled uniformly; this transform has another effect.".into());
         let m = &transform.m;
         if m[3] != [0.0, 0.0, 0.0, 1.0] || !m.iter().flatten().all(|v| v.is_finite()) {
@@ -47,13 +58,12 @@ impl Similarity {
         {
             return Err(refuse());
         }
-        // A reflection makes the basis left-handed.
-        if x.cross(y).dot(z) <= 0.0 {
-            return Err(DocError::Invalid(
-                "Canonical geometry has no measured convention for a reflection; it can be moved, rotated and scaled uniformly.".into(),
-            ));
-        }
         Ok(Self { transform: *transform, scale })
+    }
+
+    /// A reflection makes the basis left-handed.
+    pub fn reflected(&self) -> bool {
+        self.direction(Vec3::new(1.0, 0.0, 0.0)).cross(self.direction(Vec3::new(0.0, 1.0, 0.0))).dot(self.direction(Vec3::Z)) < 0.0
     }
 
     pub fn point(&self, p: Vec3) -> Vec3 {
@@ -69,6 +79,13 @@ impl Similarity {
 
 fn frame(normal: Vec3) -> Result<OcsFrame> {
     OcsFrame::new(normal).ok_or_else(|| DocError::Invalid("Canonical text needs a plane with a finite, non-zero normal.".into()))
+}
+
+/// The MIRRTEXT policy. Readable text needs its unsheared, unrotated local ink box.
+#[derive(Clone, Copy, Debug)]
+pub enum TextMirror {
+    Reflected,
+    Readable { bounds: Bounds2 },
 }
 
 /// The WCS frame of a text: its insertion point, the directions of its baseline and of its height, and its plane.
@@ -97,6 +114,52 @@ impl Text {
     pub fn world_align(&self, normal: Vec3) -> Result<Option<Vec3>> {
         let f = frame(normal)?;
         Ok(self.align_pt.map(|p| f.to_world(p)))
+    }
+
+    /// Mirror the measured left-baseline, unreflected TEXT case without a projected-coordinate fallback.
+    pub fn mirrored_canonical(&self, normal: Vec3, transform: &Mat4, policy: TextMirror) -> Result<(Text, Vec3)> {
+        if self.halign != super::text::HAlign::Left || self.valign != super::text::VAlign::Baseline {
+            return Err(DocError::Invalid("Canonical TEXT MIRROR lacks a measurement for this justification.".into()));
+        }
+        if self.backward || self.upside_down || self.width_factor <= 0.0 || self.height <= 0.0 {
+            return Err(DocError::Invalid("Canonical TEXT MIRROR lacks a measurement for pre-mirrored flags or signed text dimensions.".into()));
+        }
+        let sim = Similarity::including_reflection(transform)?;
+        if !sim.reflected() {
+            return Err(DocError::Invalid("Canonical TEXT MIRROR needs a reflected uniform similarity.".into()));
+        }
+        let from = frame(normal)?;
+        let new_normal = sim.direction(normal);
+        let to = frame(new_normal)?;
+        let (s, c) = self.rotation.sin_cos();
+        let baseline = to.to_ocs(sim.direction(from.to_world(Vec3::new(c, s, 0.0))));
+        let mut text = self.clone();
+        text.insert = to.to_ocs(sim.point(from.to_world(self.insert)));
+        text.align_pt = None;
+        text.height *= sim.scale;
+        let reflected_angle = baseline.xy().angle();
+        match policy {
+            TextMirror::Reflected => {
+                text.rotation = cadcraft_geom::norm_angle(reflected_angle + std::f64::consts::PI);
+                text.backward = true;
+            }
+            TextMirror::Readable { bounds } => {
+                if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
+                    return Err(DocError::Invalid("Canonical TEXT MIRROR needs finite measured text bounds.".into()));
+                }
+                let x = to.to_ocs(sim.direction(from.to_world(Vec3::new(1.0, 0.0, 0.0))));
+                if x.y.abs() > 1e-9 || x.z.abs() > 1e-9 {
+                    return Err(DocError::Invalid("Canonical TEXT MIRROR lacks a measurement for mixed OCS reflection axes with MIRRTEXT=0.".into()));
+                }
+                let flip_x = x.x < 0.0;
+                text.rotation = cadcraft_geom::norm_angle(reflected_angle + if flip_x { std::f64::consts::PI } else { 0.0 });
+                let (s, c) = text.rotation.sin_cos();
+                let offset =
+                    if flip_x { Vec3::new(c, s, 0.0) * (bounds.min.x + bounds.max.x) } else { Vec3::new(-s, c, 0.0) * (bounds.min.y + bounds.max.y) };
+                text.insert = text.insert - offset * sim.scale;
+            }
+        }
+        Ok((text, new_normal))
     }
 
     /// This text, whose OCS fields lie in the plane of `normal`, after the similarity `transform`; and the normal of

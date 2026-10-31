@@ -86,6 +86,52 @@ fn mirror_drag_keeps_the_text_entity_properties() {
     assert_eq!(text.geometry_revision, GeometryRevision::LegacyProjectedV1);
     assert_eq!(text.common, common);
 }
+#[test]
+fn canonical_mirror_text_preview_and_drag_follow_the_committed_metric_policy() {
+    for mode in [0, 1] {
+        let mut session = Session::new();
+        let handle = session.doc_mut().unwrap().new_handle();
+        let mut entity = Entity::new(
+            handle,
+            EntityKind::Text(cadcraft_doc::Text {
+                insert: Vec3::new(4.0, 5.0, 6.0),
+                align_pt: None,
+                height: 2.0,
+                value: "A".into(),
+                rotation: 30_f64.to_radians(),
+                width_factor: 0.8,
+                oblique: 15_f64.to_radians(),
+                style: "Standard".into(),
+                halign: Default::default(),
+                valign: Default::default(),
+                backward: false,
+                upside_down: false,
+            }),
+        );
+        entity.geometry_revision = GeometryRevision::CanonicalV2;
+        entity.common = Common { extrusion: Vec3::new(0.0, 0.6, 0.8), thickness: 2.0, ..Default::default() };
+        session.doc_mut().unwrap().header.set_i64("MIRRTEXT", mode);
+        session.doc_mut().unwrap().model.push(entity);
+        let mut committed = Session::new();
+        committed.open_drawing(session.doc().unwrap().clone(), "mirror control", None);
+        let result = committed.execute("mirror", &serde_json::json!({"handles": [handle.hex()], "p1": [0, 0], "p2": [0, 10], "erase": true}));
+        session.cmdline("MIRROR ALL  0,0").unwrap();
+        let preview = session.preview(Vec2::new(0.0, 10.0));
+        let (_, extra) = session.drag(Vec2::new(0.0, 10.0)).unwrap();
+        if mode == 0 {
+            assert!(matches!(result, Err(cadcraft_engine::EngineError::TextMirrorMetricsUnavailable { .. })));
+            assert!(!preview.iter().any(|entity| entity.handle == handle));
+            assert!(!extra.iter().any(|entity| entity.handle == handle));
+            assert_eq!(committed.doc().unwrap().model, session.doc().unwrap().model);
+        } else {
+            result.unwrap();
+            let expected = committed.doc().unwrap().entity(handle).unwrap();
+            assert_eq!(preview.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
+            assert_eq!(extra.iter().find(|entity| entity.handle == handle).unwrap(), expected.as_ref());
+        }
+    }
+}
+
 fn dimension_fixture(canonical: bool) -> (Session, Entity) {
     let mut s = Session::new();
     s.script("dimlinear 0,0 10,0 5,3\n").unwrap();

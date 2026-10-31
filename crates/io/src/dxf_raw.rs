@@ -1491,6 +1491,8 @@ struct Map<'a> {
     entities: HashSet<String>,
     /// Parent and follower records that belong to opaque source units.
     raw: HashSet<String>,
+    /// Canonical entities cannot replay a source clone offset after regenerating its picture.
+    canonical: HashSet<String>,
     /// The snapshots of the source geometry that are written back, by entity or attribute handle.
     geometry: HashMap<Handle, Arc<cadcraft_doc::GeometrySnapshot>>,
     /// The file's `$ACADVER` as a number (1015 for AC1015), 0 when unknown.
@@ -2157,8 +2159,26 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let version = declared_version(tags, dwg_bridge);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
-    let map =
-        Map { f, alive, objects: objs, owners, roles, entities, raw: opaque, geometry, version, target, pages, block_attributes, table_aliases };
+    let canonical = all_entities(d)
+        .filter(|entity| entity.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2)
+        .map(|entity| entity.handle.hex())
+        .collect();
+    let map = Map {
+        f,
+        alive,
+        objects: objs,
+        owners,
+        roles,
+        entities,
+        raw: opaque,
+        canonical,
+        geometry,
+        version,
+        target,
+        pages,
+        block_attributes,
+        table_aliases,
+    };
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().chain(&f.table_records).map(|o| o.tags.len() + 1).sum::<usize>());
     let mut table = String::new();
     // The heavy polyline whose VERTEX records are being written, and how many it has had.
@@ -2371,6 +2391,7 @@ fn record(
     let boundary = matches!(r.kind.as_str(), "BLOCK" | "ENDBLK");
     let attributes = (r.kind == "BLOCK").then(|| val(b, 2).and_then(|name| map.block_attributes.get(&up(&name)).copied())).flatten();
     let replaces_gradient = r.kind == "HATCH" && (map.target < cadcraft_dxf::Version::R2004 || b.iter().any(|t| t.code == 450 && t.i64() != 0));
+    let regenerated_dimension = r.kind == "DIMENSION" && geometry.is_none() && h.handle.as_ref().is_some_and(|handle| map.canonical.contains(handle));
     let replay = |p: &RawTag| {
         let dimension_field_supported = r.kind != "DIMENSION"
             || match p.code {
@@ -2379,6 +2400,7 @@ fn record(
                 _ => true,
             };
         dimension_field_supported
+            && (!regenerated_dimension || !matches!(p.code, 12 | 22 | 32))
             && (!replaces_gradient || !matches!(p.code, 450..=470 | 63 | 421))
             && (!boundary || p.code != 8)
             && (flag_mask == 0 || p.code != 70)

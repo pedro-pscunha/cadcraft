@@ -9,7 +9,8 @@
 //! A similarity (translation, rotation about any axis, uniform positive scale) is exact: the OCS of the rotated plane is
 //! rebuilt and every point is placed in it, the arc angles turn with the OCS X axis (a full circle keeps its sweep), and
 //! lengths grow with the scale. The caller grows `Common.thickness` by `Similarity::scale` and stores the returned
-//! normal. A non-uniform scale would make a circle an ellipse and a reflection reverses an arc, so they refuse.
+//! normal. A non-uniform scale would make a circle an ellipse and refuses. Reflected circles keep the reflected normal;
+//! reflected arcs also reverse their endpoints and retain their sweep. Other families retain their reflection refusal.
 
 use cadcraft_geom::{Mat4, OcsFrame, PolyVertex, Vec2, Vec3};
 
@@ -30,8 +31,7 @@ struct Plane {
 }
 
 impl Plane {
-    fn new(normal: Vec3, transform: &Mat4) -> Result<Plane> {
-        let sim = Similarity::from_mat4(transform)?;
+    fn new(normal: Vec3, sim: Similarity) -> Result<Plane> {
         let new_normal = sim.direction(normal);
         Ok(Plane { from: frame(normal)?, to: frame(new_normal)?, sim, normal: new_normal })
     }
@@ -58,7 +58,7 @@ impl Circle {
 
     /// This circle, in the plane of `normal`, after the similarity `transform`; and the new normal.
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Circle, Vec3)> {
-        let plane = Plane::new(normal, transform)?;
+        let plane = Plane::new(normal, Similarity::including_reflection(transform)?)?;
         Ok((Circle { center: plane.point(self.center), radius: self.radius * plane.sim.scale }, plane.normal))
     }
 }
@@ -78,9 +78,16 @@ impl Arc {
 
     /// This arc, in the plane of `normal`, after the similarity `transform`; and the new normal.
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Arc, Vec3)> {
-        let plane = Plane::new(normal, transform)?;
+        let plane = Plane::new(normal, Similarity::including_reflection(transform)?)?;
         let turn = plane.turn();
-        let moved = Arc { center: plane.point(self.center), radius: self.radius * plane.sim.scale, start: self.start + turn, end: self.end + turn };
+        let (start, end) = if plane.sim.reflected() {
+            let start = cadcraft_geom::norm_angle(turn - self.end);
+            let sweep = cadcraft_geom::Arc { center: self.center.xy(), radius: self.radius, start: self.start, end: self.end }.sweep();
+            (start, start + sweep)
+        } else {
+            (self.start + turn, self.end + turn)
+        };
+        let moved = Arc { center: plane.point(self.center), radius: self.radius * plane.sim.scale, start, end };
         Ok((moved, plane.normal))
     }
 }
@@ -94,7 +101,7 @@ impl Solid {
 
     /// This solid or trace, in the plane of `normal`, after the similarity `transform`; and the new normal.
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(Solid, Vec3)> {
-        let plane = Plane::new(normal, transform)?;
+        let plane = Plane::new(normal, Similarity::from_mat4(transform)?)?;
         Ok((Solid { corners: self.corners.map(|c| plane.point(c)) }, plane.normal))
     }
 }
@@ -109,7 +116,7 @@ impl LwPolyline {
     /// This polyline, in the plane of `normal`, after the similarity `transform`; and the new normal. The vertices, the
     /// widths, the elevation, the fit data (with the plane it keeps) and its display copy move together.
     pub fn transformed_canonical(&self, normal: Vec3, transform: &Mat4) -> Result<(LwPolyline, Vec3)> {
-        let plane = Plane::new(normal, transform)?;
+        let plane = Plane::new(normal, Similarity::from_mat4(transform)?)?;
         let (k, turn) = (plane.sim.scale, plane.turn());
         let place =
             |v: &PolyVertex| PolyVertex { p: plane.point2(v.p, self.elevation), start_width: v.start_width * k, end_width: v.end_width * k, ..*v };
@@ -193,14 +200,21 @@ mod tests {
     }
 
     #[test]
-    fn a_scale_grows_the_radius_and_a_mirror_or_shear_refuses() {
+    fn a_scale_grows_the_radius_and_a_mirror_reverses_the_arc_but_a_shear_refuses() {
         let arc = Arc { center: Vec3::new(1.0, 0.0, 2.0), radius: 2.0, start: 0.0, end: 1.0 };
         let (moved, _) = arc.transformed_canonical(Vec3::Z, &scale(3.0)).unwrap();
         assert_eq!((moved.center, moved.radius, moved.start, moved.end), (Vec3::new(3.0, 0.0, 6.0), 6.0, 0.0, 1.0));
         let squash = Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
         assert!(Circle { center: Vec3::ZERO, radius: 1.0 }.transformed_canonical(Vec3::Z, &squash).is_err());
         let mirror = Mat4 { m: [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] };
-        assert!(arc.transformed_canonical(Vec3::Z, &mirror).is_err());
+        let (reflected, normal) = arc.transformed_canonical(Vec3::Z, &mirror).unwrap();
+        let (old_start, old_end) = arc.world_endpoints(Vec3::Z).unwrap();
+        let (new_start, new_end) = reflected.world_endpoints(normal).unwrap();
+        assert!(near(new_start, mirror.apply(old_end)) && near(new_end, mirror.apply(old_start)));
+        assert!((reflected.end - reflected.start - 1.0).abs() < 1e-12);
+        let full = Arc { start: 0.0, end: std::f64::consts::TAU, ..arc };
+        let (reflected, _) = full.transformed_canonical(Vec3::Z, &mirror).unwrap();
+        assert!((reflected.end - reflected.start - std::f64::consts::TAU).abs() < 1e-12);
         assert!(arc.transformed_canonical(Vec3::ZERO, &scale(1.0)).is_err());
     }
 

@@ -485,8 +485,8 @@ fn texts_as_read(d: &Drawing) -> HashMap<Handle, TextAsRead> {
 }
 
 /// The dimensions of the drawing as they were read.
-fn dimensions_as_read(d: &Drawing) -> HashMap<Handle, DimensionAsRead> {
-    all_entities(d).filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some((e.handle, DimensionAsRead::of(dm))) } else { None }).collect()
+fn dimensions_as_read(d: &Drawing) -> HashMap<Handle, &cadcraft_doc::Dimension> {
+    all_entities(d).filter_map(|e| if let EntityKind::Dimension(dm) = &e.kind { Some((e.handle, dm)) } else { None }).collect()
 }
 
 /// Every entity of the drawing (model space, layouts, blocks).
@@ -530,7 +530,15 @@ pub(crate) fn capture_all<'a>(d: &mut Drawing, records: impl Iterator<Item = (&'
                     records: parts,
                     model: model.clone(),
                     text: texts.get(h).copied(),
-                    dimension: dimensions.get(h).copied(),
+                    dimension: dimensions.get(h).map(|dimension| {
+                        let coordinate =
+                            |code, default| tags.iter().take_while(|tag| tag.code < 1000).find(|tag| tag.code == code).map_or(default, Tag::f64);
+                        // ODA common DIMENSION data supplies the missing ECS Z from its elevation (group 11).
+                        DimensionAsRead::of(
+                            dimension,
+                            cadcraft_geom::Vec3::new(coordinate(12, 0.0), coordinate(22, 0.0), coordinate(32, dimension.text_mid.z)),
+                        )
+                    }),
                 }),
             );
         }

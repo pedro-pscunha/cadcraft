@@ -5,7 +5,7 @@ use super::ctx::{AssocObj, Ctx};
 use super::entity::{entity, hatch_reactors};
 use super::header::{code_page, header_vars};
 use super::layout::{in_handle_order, paper_views, record_head, sheet_first, table_head, vport_table};
-use super::objects::{StyleRefs, cadcraft_fonts_name, group_obj, mleader_style_obj, scale_list, table_style_obj};
+use super::objects::{StyleRefs, group_obj, mleader_style_obj, scale_list, table_style_obj};
 use super::{
     Block, Color, DimStyle, DimVal, Drawing, Entity, EntityKind, EntityStore, Group, HVal, Handle, HashMap, Layout, MLeaderStyle, PageSetup,
     TableStyle, Tag, Vec2, Vec3, Version, W, dxf_ext,
@@ -91,7 +91,7 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(42, 0.2);
         // The built-in font goes out as `txt`, which every reader has; CADCraft's own name
         // travels in `CADCRAFT` xdata (`1000 FONT`, name) so the style reopens with it.
-        let file = if s.font == cadcraft_fonts_name() { "txt" } else { s.font.as_str() };
+        let file = s.dxf_font_name();
         w.s(3, file);
         w.s(4, &s.big_font);
         if s.annotative {
@@ -785,6 +785,12 @@ fn dimension_block_definitions(
                 // Imported block dimensions keep their source geometry; edited/new ones need
                 // a fresh anonymous block just like model/paper-space dimensions.
                 if d.entity(e.handle).is_none() && dm.block.is_some() {
+                    continue;
+                }
+                if e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2
+                    && let Some(name) = dm.block.as_ref().filter(|name| d.block(name).is_some())
+                {
+                    cx.dim_blocks.insert(e.handle, name.clone());
                     continue;
                 }
                 let reused = dim_plan.reuse.get(&e.handle);

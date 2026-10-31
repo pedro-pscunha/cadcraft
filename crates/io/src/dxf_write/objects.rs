@@ -171,7 +171,3 @@ pub(super) fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)
         w.i(290, i64::from(s.is_unit_scale()));
     }
 }
-
-pub(super) fn cadcraft_fonts_name() -> &'static str {
-    "CADCraft Stroke"
-}

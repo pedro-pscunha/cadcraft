@@ -95,10 +95,11 @@ fn edited_tilted_dimension_blocks_use_local_ocs_in_dxf_and_dwg() {
                         })
                         .flatten()
                         .collect();
-                    for point in local_points {
+                    for point in expected(kind) {
                         assert!(has(points.iter().copied(), point), "{name} {revision:?} {kind:?}: block lacks local {point:?}: {points:?}");
                     }
-                    assert!(points.iter().all(|p| (p.z - elevation).abs() < 1e-10));
+                    assert!(points.iter().all(|point| point.z.abs() < 1e-10));
+                    assert!((dm.text_mid.z - elevation).abs() < 1e-10);
                     assert_eq!(reopened.entity(Handle(0x200)).unwrap().common.extrusion, Vec3::new(0.0, 3.0, 4.0));
                     canvas_contains(&reopened, &local_points.map(world));
                 }

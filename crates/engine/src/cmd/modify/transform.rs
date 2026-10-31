@@ -18,6 +18,9 @@ pub(crate) fn world_map(entity: &cadcraft_doc::Entity, m: &Mat3) -> cadcraft_geo
 }
 
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
+    if m.det() < 0.0 {
+        return super::mirror::apply(s, hs, m, copy);
+    }
     if copy {
         return copy_transformed(s, hs, std::iter::once(*m));
     }
