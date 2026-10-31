@@ -39,6 +39,7 @@ pub(super) enum MetadataIdentity {
 
 pub(super) struct RecordIndex {
     metadata: BTreeMap<Handle, Vec<MetadataIdentity>>,
+    named_counts: BTreeMap<(String, String), usize>,
     definitions: BTreeMap<String, usize>,
     records: Vec<Record>,
     positions: BTreeMap<Position, usize>,
@@ -50,6 +51,7 @@ impl RecordIndex {
         let tags = cadcraft_dxf::parse(bytes).unwrap();
         let mut index = Self {
             metadata: BTreeMap::new(),
+            named_counts: BTreeMap::new(),
             definitions: BTreeMap::new(),
             records: Vec::new(),
             positions: BTreeMap::new(),
@@ -61,9 +63,14 @@ impl RecordIndex {
                     continue;
                 };
                 let identity = match groups.iter().find(|tag| tag.code == 2) {
-                    Some(name) => MetadataIdentity::Named { kind, name: name.str().trim().to_ascii_uppercase() },
-                    None => MetadataIdentity::Handle { kind, handle },
+                    Some(name) if section.name == "TABLES" && kind != "TABLE" => {
+                        MetadataIdentity::Named { kind, name: name.str().trim().to_ascii_uppercase() }
+                    }
+                    _ => MetadataIdentity::Handle { kind, handle },
                 };
+                if let MetadataIdentity::Named { kind, name } = &identity {
+                    *index.named_counts.entry((kind.clone(), name.clone())).or_default() += 1;
+                }
                 index.metadata.entry(handle).or_default().push(identity);
             }
         }
@@ -101,19 +108,25 @@ impl RecordIndex {
     }
 
     pub fn named_target(&self, kind: &str, name: &str) -> bool {
+        let named = self.named_counts.get(&(kind.to_string(), name.to_string())).copied().unwrap_or(0);
+        if named > 1 {
+            return false;
+        }
         if kind == "BLOCK_RECORD" {
             let count = self.definition_count(name);
             return count == 1 || count == 0 && matches!(name, "*MODEL_SPACE" | "*PAPER_SPACE");
         }
-        if matches!((kind, name), ("LAYER", "0") | ("LTYPE", "BYLAYER" | "BYBLOCK" | "CONTINUOUS") | ("STYLE", "STANDARD")) {
-            return true;
-        }
-        self.metadata.values().flatten().filter(|identity| matches!(identity, MetadataIdentity::Named { kind: target_kind, name: target_name } if target_kind == kind && target_name == name)).count() == 1
+        matches!((kind, name), ("LAYER", "0") | ("LTYPE", "BYLAYER" | "BYBLOCK" | "CONTINUOUS") | ("STYLE", "STANDARD")) || named == 1
     }
 
     pub fn metadata(&self, handle: Handle) -> Option<&MetadataIdentity> {
-        let candidates = self.metadata.get(&handle)?;
-        (candidates.len() == 1).then(|| &candidates[0])
+        let [identity] = self.metadata.get(&handle)?.as_slice() else { return None };
+        if let MetadataIdentity::Named { kind, name } = identity
+            && self.named_counts.get(&(kind.clone(), name.clone())) != Some(&1)
+        {
+            return None;
+        }
+        Some(identity)
     }
 
     pub fn all(&self) -> &[Record] {
@@ -173,6 +186,16 @@ mod tests {
                 assert_eq!(target.corresponding(&source, record).unwrap().handle, Some(handle));
             }
         }
+    }
+
+    #[test]
+    fn duplicate_named_metadata_cannot_resolve_a_reference() {
+        let source = RecordIndex::new(
+            b"0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n0\nLAYER\n5\nD1\n2\nSAME\n0\nLAYER\n5\nD2\n2\nSAME\n0\nENDTAB\n0\nENDSEC\n0\nEOF\n",
+        );
+        assert!(source.metadata(Handle(0xD1)).is_none());
+        assert!(source.metadata(Handle(0xD2)).is_none());
+        assert!(!source.named_target("LAYER", "SAME"));
     }
 
     #[test]
