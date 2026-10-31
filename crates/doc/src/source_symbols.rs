@@ -28,7 +28,8 @@ pub struct SourceSymbols {
     /// since) gets a new handle.
     pub handles: BTreeMap<ForeignKey, Handle>,
     /// The references to each block (the `{BLKREFS` list of its record) in the order the file listed them, by upper-case block
-    /// name. AutoCAD lists them in the order they were made, which a handle does not say.
+    /// name. AutoCAD can list INSERTs of sibling dynamic representations here; membership is not the inverse of block names.
+    /// The file's order is authoritative and cannot be recovered from handle order.
     pub block_refs: BTreeMap<String, Vec<Handle>>,
     /// The DIMSTYLE records the header of the DIMSTYLE table listed (groups 71 and 340), in the file's order.
     pub dim_style_listing: Vec<Handle>,
