@@ -69,6 +69,8 @@ pub(super) struct StyleRefs {
     pub arrow: Option<String>,
     pub line_type: Option<String>,
     pub block: Option<String>,
+    /// Whether the file's release has group 298 (AutoCAD 2013 and later, and the DWG bridge).
+    pub flag_298: bool,
 }
 
 /// A MLEADERSTYLE object (DXF Reference, OBJECTS: MLEADERSTYLE): every field the model has, the ones a file gave as it gave
@@ -113,6 +115,9 @@ pub(super) fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str
     w.f(45, s.text_height);
     w.i(292, i64::from(s.text_frame));
     w.i(297, i64::from(s.text_always_left));
+    if refs.flag_298 {
+        w.i(298, i64::from(s.unknown_298));
+    }
     w.f(46, s.align_space);
     if let Some(b) = &refs.block {
         w.s(343, b);

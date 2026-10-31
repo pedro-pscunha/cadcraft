@@ -670,6 +670,7 @@ fn write_style_objects(w: &mut W, plan: &ObjectWritePlan<'_>, mleader_dict: &str
             // The style's own linetype, else ByBlock.
             line_type: ltype_handles.get(&s.line_type.trim().to_ascii_uppercase()).cloned().or_else(|| byblock_ltype.clone()),
             block: (!s.block.is_empty()).then(|| cx.block_records.get(&s.block.to_ascii_uppercase()).cloned()).flatten(),
+            flag_298: cx.dwg_bridge || cx.target >= Version::R2013,
         };
         mleader_style_obj(w, s, h, mleader_dict, &refs);
     }

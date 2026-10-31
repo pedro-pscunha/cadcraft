@@ -225,6 +225,7 @@ fn full_style() -> MLeaderStyle {
         text_color: (0xC300_0005u32) as i32 as i64,
         text_frame: true,
         text_always_left: true,
+        unknown_298: false,
         align_space: 3.5,
         block: "B".into(),
         block_color: true_color(0x708090),

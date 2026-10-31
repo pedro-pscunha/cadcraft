@@ -241,6 +241,7 @@ impl Objects {
                 text_color: int(93, def.text_color),
                 text_frame: flag(292, def.text_frame),
                 text_always_left: flag(297, def.text_always_left),
+                unknown_298: flag(298, def.unknown_298),
                 align_space: real(46, def.align_space),
                 block: block.unwrap_or(def.block),
                 block_color: int(94, def.block_color),
