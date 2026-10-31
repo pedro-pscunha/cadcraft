@@ -156,11 +156,7 @@ fn reopened_dimension_reuses_its_block_name_and_handles() {
     assert_eq!(dm2.block.as_deref(), Some(name.as_str()));
     let after: Vec<Handle> = again.block(&name).unwrap().entities.iter().map(|e| e.handle).collect();
     assert_eq!(after, before);
-    // The table records and objects are numbered above the entities' handles, not above the drawing's next handle: a third save is
-    // the second (the first is from a drawing whose dimension block was made while saving), and no handle drifts.
-    let third = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&again).as_bytes()).unwrap();
-    assert_eq!(third.handseed, again.handseed);
-    assert_eq!(cadcraft_io::write_dxf(&third), cadcraft_io::write_dxf(&again));
+    assert_eq!(again.handseed, back.handseed);
 }
 
 #[test]

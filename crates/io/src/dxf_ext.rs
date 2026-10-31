@@ -379,6 +379,64 @@ pub(crate) fn transparency_from_dxf(v: i64) -> Option<u8> {
     u8::try_from(100u32.saturating_sub(opaque).min(90)).ok()
 }
 
+/// The application AutoCAD keeps a hatch's background colour under: `1001`, `1071` (the packed colour of [`pack_color`]), then
+/// two empty `1000` strings.
+pub(crate) const HATCH_BACKGROUND_APP: &str = "HATCHBACKGROUNDCOLOR";
+
+/// The `1071` value of AutoCAD's "no colour" (method byte 0xC8).
+const PACKED_NO_COLOR: i64 = 0xC800_0000_u32 as i32 as i64;
+
+/// AutoCAD's packed colour (an int32): the method in the high byte (0xC0 ByLayer, 0xC1 ByBlock, 0xC2 RGB, 0xC3 index), the value below.
+fn pack_color(c: Color) -> i64 {
+    let packed: u32 = match c {
+        Color::ByLayer => 0xC000_0000,
+        Color::ByBlock => 0xC100_0000,
+        Color::True(Rgb(r, g, b)) => 0xC200_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
+        Color::Index(i) => 0xC300_0000 | u32::from(i),
+    };
+    i64::from(packed as i32)
+}
+
+/// The colour of a packed value; `None` for "no colour" and for a value that is not a colour.
+fn unpack_color(v: i64) -> Option<Color> {
+    let packed = u32::try_from(v).ok().or_else(|| i32::try_from(v).ok().map(|n| n as u32))?;
+    let low = packed & 0x00FF_FFFF;
+    match packed >> 24 {
+        0xC0 if low == 0 => Some(Color::ByLayer),
+        0xC1 if low == 0 => Some(Color::ByBlock),
+        0xC2 => Some(Color::True(Rgb((low >> 16) as u8, (low >> 8) as u8, low as u8))),
+        0xC3 => u8::try_from(low).ok().filter(|i| *i >= 1).map(Color::Index),
+        _ => None,
+    }
+}
+
+/// The background colour of a hatch's `HATCHBACKGROUNDCOLOR` xdata among the groups of an entity.
+pub(crate) fn hatch_background(tags: &[Tag]) -> Option<Color> {
+    xdata(tags, HATCH_BACKGROUND_APP).iter().find(|t| t.code == 1071).and_then(|t| unpack_color(t.i64()))
+}
+
+/// The `HATCHBACKGROUNDCOLOR` application of kept (foreign) xdata: `None` when the hatch has none, else its colour (`None` inside
+/// for "no colour").
+fn kept_hatch_background(kept: &[cadcraft_doc::RawTag]) -> Option<Option<Color>> {
+    let at = kept.iter().position(|t| t.code == 1001 && t.value.trim().eq_ignore_ascii_case(HATCH_BACKGROUND_APP))?;
+    let run = kept.get(at + 1..).unwrap_or(&[]);
+    let run = run.get(..run.iter().position(|t| t.code == 1001).unwrap_or(run.len())).unwrap_or(&[]);
+    let packed = run.iter().find(|t| t.code == 1071).and_then(|t| t.value.trim().parse::<i64>().ok());
+    Some(packed.and_then(unpack_color))
+}
+
+/// What a save writes for a hatch's background colour: AutoCAD's `HATCHBACKGROUNDCOLOR` xdata, only when the xdata the hatch kept
+/// from its file (which a save writes as read) does not already say it.
+pub(crate) fn hatch_background_xdata(background: Option<Color>, kept: &[cadcraft_doc::RawTag]) -> Vec<Tag> {
+    let packed = match (background, kept_hatch_background(kept)) {
+        (Some(c), None) => pack_color(c),
+        (Some(c), Some(was)) if was != Some(c) => pack_color(c),
+        (None, Some(Some(_))) => PACKED_NO_COLOR,
+        _ => return Vec::new(),
+    };
+    vec![Tag::s(1001, HATCH_BACKGROUND_APP), Tag::i(1071, packed), Tag::s(1000, ""), Tag::s(1000, "")]
+}
+
 /// An xdata string cut to the 255 bytes a `1000` group may hold, at a character boundary.
 pub(crate) fn xdata_str(s: &str) -> &str {
     let mut end = s.len().min(255);

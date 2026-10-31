@@ -2692,7 +2692,7 @@ fn seed(tags: &[Tag]) -> u64 {
 }
 
 /// The largest handle of a record (groups 5 and 105).
-fn max_handle(tags: &[Tag]) -> u64 {
+pub(crate) fn max_handle(tags: &[Tag]) -> u64 {
     tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| Handle::parse_hex(&t.str())).map(|h| h.0).max().unwrap_or(0)
 }
 

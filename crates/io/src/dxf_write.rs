@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use cadcraft_color::Color;
 use cadcraft_doc::{
     AssocSnap, Attrib, Block, Common, DimAssoc, DimKind, DimStyle, Dimension, Drawing, Entity, EntityKind, EntityStore, Gradient, Group, HAlign,
-    HVal, Handle, Hatch, Insert, Layout, Line, Lineweight, LwPolyline, MLeaderStyle, MText, PageSetup, Point, Solid, Table, TableStyle, Text,
+    HVal, Handle, Insert, Layout, Line, Lineweight, LwPolyline, MLeaderStyle, MText, PageSetup, Point, Solid, Table, TableStyle, Text,
     Transparency, VAlign, VportConfig, VportTile,
 };
 use cadcraft_dxf::{Tag, Version};
@@ -63,6 +63,7 @@ struct W {
 
 impl W {
     fn new(d: &Drawing) -> Self {
+        let first = d.handseed.max(0x100).checked_add(0x1000).unwrap_or(0x100);
         let used: HashSet<_> = std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
             .chain(d.blocks.values().map(|b| &b.entities))
@@ -72,15 +73,6 @@ impl W {
                 std::iter::once(e.handle).chain(followers.into_iter().flatten().map(|record| record.handle()))
             })
             .collect();
-        // The table records and objects are numbered above the entities' handles, whatever the drawing's own next handle is: a
-        // file read back (its $HANDSEED is above them) gets the same numbers again, and a save of a save is the same file.
-        let child_handles = std::iter::once(&d.model)
-            .chain(d.layouts.iter().map(|l| &l.entities))
-            .chain(d.blocks.values().map(|b| &b.entities))
-            .flat_map(|s| s.iter())
-            .flat_map(|e| e.kind.attributes().iter().filter_map(|a| a.handle).chain(e.kind.polyline_records().filter_map(|r| r.handle)));
-        let top = used.iter().copied().chain(child_handles).map(|h| h.0).max().unwrap_or(0);
-        let first = top.max(0xFF).checked_add(0x1001).unwrap_or(0x100);
         let mut reactor_omissions = HashSet::new();
         for (hatch, boundaries) in &d.source_symbols.hatch_sources {
             for boundary in boundaries {

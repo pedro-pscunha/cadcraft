@@ -2,7 +2,7 @@ use super::blocks::table_size;
 use super::common::{attrib_common, common, common_x, dim_xdata, layer_and_props, multiline_tags, oblique_52, plot_style, text_tags};
 use super::ctx::Ctx;
 use super::layout::paper_view;
-use super::{Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Hatch, Point, Vec2, Vec3, Version, W, dxf_ext};
+use super::{Bounds2, Color, DimKind, Drawing, Entity, EntityKind, Gradient, Handle, HashMap, Point, Vec2, Vec3, Version, W, dxf_ext};
 
 /// The persistent reactors of boundary objects: each source object of an associative hatch in
 /// the same space or block → the hatches it bounds (AutoCAD links the two both ways; without the
@@ -981,15 +981,13 @@ fn write_hatch_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bo
         // and the fill stays in CADCraft's xdata below. The DWG bridge carries the groups to the DWG writer
         // at any release (it stores them from R2004).
         let native = cx.target >= Version::R2004;
-        let mut app_open = false;
         if let Some(g) = &h.gradient {
             gradient(w, g, cx.dwg_bridge || native);
             if !native {
                 gradient_xdata(w, g);
-                app_open = true;
             }
         }
-        hatch_xdata(w, h, app_open);
+        w.t.extend(dxf_ext::hatch_background_xdata(h.background, &e.common.xdata));
     }
 }
 
@@ -1235,18 +1233,4 @@ fn thickness(w: &mut W, e: &Entity) {
     if e.common.thickness != 0.0 {
         w.f(39, e.common.thickness);
     }
-}
-
-/// The hatch background colour as `CADCRAFT` xdata: `1000 HATCH`, the origin (`1011`, always zero: the
-/// origin is already in the pattern lines' base points, 43/44, which is where AutoCAD keeps it) and the
-/// background colour name (`1000`). The DXF Reference has no HATCH group for the background colour.
-/// Appended to the gradient's `CADCRAFT` xdata when `app_open`.
-fn hatch_xdata(w: &mut W, h: &Hatch, app_open: bool) {
-    let Some(background) = h.background else { return };
-    if !app_open {
-        w.s(1001, dxf_ext::APP);
-    }
-    w.s(1000, "HATCH");
-    w.p(1011, Vec3::ZERO);
-    w.s(1000, background.name());
 }

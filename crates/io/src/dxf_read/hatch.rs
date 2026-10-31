@@ -3,7 +3,8 @@ use super::{Color, EntityKind, Gradient, Handle, Hatch, HatchLoop, PolyVertex, R
 use cadcraft_doc::{HatchEdge, HatchSpline};
 
 pub(super) fn hatch(tags: &[Tag], t: &T) -> Option<EntityKind> {
-    let (origin, background) = hatch_xdata(tags);
+    let (origin, old_background) = hatch_xdata(tags);
+    let background = crate::dxf_ext::hatch_background(tags).or(old_background);
     let pattern = t.s(2).unwrap_or_else(|| "SOLID".into());
     let solid = t.i(70).unwrap_or(0) == 1;
     let n_loops = t.i(91).unwrap_or(0).clamp(0, 100_000) as usize;
@@ -438,7 +439,7 @@ fn pattern_definition(tags: &[Tag], scale: f64, angle: f64, origin: Vec2) -> Vec
         .collect()
 }
 
-/// Hatch origin and background colour from `CADCRAFT` xdata: `1000 HATCH`, `1011` origin,
+/// Hatch origin and background colour from the `CADCRAFT` xdata an older CADCraft wrote: `1000 HATCH`, `1011` origin,
 /// `1000` background colour name (empty for none). Defaults when absent.
 fn hatch_xdata(tags: &[Tag]) -> (Vec2, Option<Color>) {
     let x = crate::dxf_ext::xdata(tags, crate::dxf_ext::APP);

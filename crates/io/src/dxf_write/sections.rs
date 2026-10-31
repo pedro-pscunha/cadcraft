@@ -1358,9 +1358,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     }
     super::sortents::attach(&mut w, &sortents);
     super::dictionary_order::sort(&mut w.t);
-    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
-        *tag = Tag::s(5, format!("{:X}", w.next));
-    }
     // Group 91 of a CLASS exists from AutoCAD 2004 on (AutoCAD 2000 expects the next group, 280, after 90);
     // the DWG bridge keeps it for acadrust.
     if version >= Version::R2004 || dwg_bridge {
@@ -1378,6 +1375,16 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::list_dim_styles(&mut w.t, d);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
+    // The next handle is above every handle written and the drawing's own next handle: a record that kept its file's
+    // handle does not move it, so a save of a save writes the same seed. The DWG writer takes a handle of its own from the
+    // seed it is given, so the bridge gives it only the handles written (else each save of a DWG would move it by one).
+    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
+        *tag = Tag::s(5, "0");
+    }
+    let seed = crate::dxf_raw::max_handle(&w.t).saturating_add(1).max(if dwg_bridge { 0 } else { d.handseed });
+    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
+        *tag = Tag::s(5, format!("{seed:X}"));
+    }
     (w.t, references)
 }
 

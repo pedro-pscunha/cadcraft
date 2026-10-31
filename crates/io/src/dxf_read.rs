@@ -290,11 +290,11 @@ fn read_core(
     let mut layout_objs: Vec<LayoutDef> = Vec::new();
     let mut entities = Vec::new();
     let mut objs = Objects::default();
-    // Every handle the file's entities use is taken before anything gets a new one: its $HANDSEED can be
-    // lower than its handles, and entities made while reading (the faces of a polyface mesh) would
-    // otherwise get handles that records further on still have. The drawing's next handle follows its
-    // entities only: its table records and objects are rebuilt and numbered again on save, so
-    // following $HANDSEED, which is above them, would move every save's numbers.
+    // Every handle another program's file already uses is taken before anything gets a new one:
+    // its $HANDSEED can be lower than its handles, and entities made while reading (the faces of
+    // a polyface mesh) would otherwise get handles that records further on still have. A file
+    // CADCraft wrote keeps its table records' and objects' handles (`source_symbols.handles`), and a
+    // new handle is above the file's `$HANDSEED`.
     reserve_instance_handles(&mut secs, &mut d);
     let mut skipped = BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
@@ -326,6 +326,11 @@ fn read_core(
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
+    // Keep handles unique against the header's seed.
+    let seed = d.header.str("HANDSEED", "");
+    if let Some(h) = Handle::parse_hex(&seed) {
+        d.bump_handseed(Handle(h.0.saturating_sub(1)));
+    }
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
@@ -381,10 +386,7 @@ fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing) {
             } else if !kind.is_empty() && !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") && matches!(t.code, 5 | 105) && !seen {
                 if let Some(h) = Handle::parse_hex(&t.str()) {
                     used.insert(h);
-                    // The entities' handles only (not the table records, objects or block records the save numbers again).
-                    if matches!(section.name.as_str(), "ENTITIES" | "BLOCKS") && !matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
-                        d.bump_handseed(h);
-                    }
+                    d.bump_handseed(h);
                 }
                 seen = true;
             }

@@ -262,7 +262,8 @@ fn legacy_clone_normalization_keeps_the_frozen_output() {
     let bytes = crate::write(&drawing, "legacy-clone.dxf").unwrap();
     let hash = format!("{:x}", Sha256::digest(&bytes));
     // Measured independently on the clean accepted 75c982ad base; re-measured when an MLEADERSTYLE began to keep its group 298, and
-    // when a save stopped writing the private copies of what the file holds natively (see `growing_extents`).
-    assert_eq!(hash, "0f7b1cd227b2c329d1637c060da989149243c91df0b99ec84b06f5c18d111503");
+    // when a save stopped writing the private copies of what the file holds natively, and when `$HANDSEED` became the next handle above
+    // the handles written (see `growing_extents`).
+    assert_eq!(hash, "9406578cc61d89a6207f2e3c162076a9ee3567a115f48a34e2dd5c0142133820");
     assert_eq!(bytes.len(), 17336);
 }
