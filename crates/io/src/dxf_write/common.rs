@@ -1,7 +1,7 @@
 use super::ctx::{AssocObj, Ctx};
 use super::{
-    Attrib, Color, Common, DimKind, DimStyle, Dimension, Drawing, Entity, EntityKind, HAlign, Insert, Lineweight, Text, Transparency, VAlign, Vec3,
-    Version, W, dxf_ext,
+    Attrib, Color, Common, DimKind, DimStyle, Dimension, Drawing, Entity, EntityKind, HAlign, Handle, Insert, Lineweight, Text, Transparency, VAlign,
+    Vec3, Version, W, dxf_ext,
 };
 
 /// `AcadAnnotative` xdata marking an annotative style.
@@ -103,7 +103,14 @@ pub(super) fn common(w: &mut W, e: &Entity, owner: &str, paper: bool, subclass: 
 pub(super) fn common_x(w: &mut W, e: &Entity, owner: &str, paper: bool, subclass: &str, assoc: Option<&AssocObj>) {
     w.s(5, e.handle.hex());
     let mut reactors: Vec<String> = assoc.map(|a| a.handle.clone()).into_iter().collect();
-    reactors.extend(w.reactors.get(&e.handle).into_iter().flatten().cloned());
+    reactors.extend(
+        w.reactors
+            .get(&e.handle)
+            .into_iter()
+            .flatten()
+            .filter(|reactor| Handle::parse_hex(reactor).is_none_or(|reactor| !w.reactor_omissions.contains(&(e.handle, reactor))))
+            .cloned(),
+    );
     if !reactors.is_empty() {
         let rs: Vec<&str> = reactors.iter().map(String::as_str).collect();
         w.group("ACAD_REACTORS", 330, &rs);

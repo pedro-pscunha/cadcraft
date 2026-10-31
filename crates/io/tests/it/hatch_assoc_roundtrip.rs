@@ -48,6 +48,53 @@ fn hatches(d: &Drawing) -> Vec<Hatch> {
 }
 
 #[test]
+fn an_imported_forward_hatch_link_does_not_invent_a_missing_reverse_reactor() {
+    let mut drawing = Drawing::new_metric();
+    let boundary = poly(&mut drawing, square(0.0, 10.0));
+    let loops = vec![HatchLoop { vertices: square(0.0, 10.0), outer: true, sources: vec![boundary], ..Default::default() }];
+    let first = drawing.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops.clone(), true))).unwrap();
+    let second = drawing.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops.clone(), true))).unwrap();
+    let mut tags = cadcraft_dxf::parse(write_dxf(&drawing).as_bytes()).unwrap();
+    let at = tags.iter().position(|tag| tag.code == 5 && tag.str() == boundary.hex()).unwrap();
+    let end = at + tags[at..].iter().position(|tag| tag.code == 0).unwrap();
+    let removed = (at..end).find(|index| tags[*index].code == 330 && tags[*index].str() == second.hex()).unwrap();
+    tags.remove(removed);
+    let source = cadcraft_dxf::write_ascii(&tags);
+    let imported = read_dxf(source.as_bytes()).unwrap();
+    let reactors = |text: &str, handle: Handle| {
+        let tags = cadcraft_dxf::parse(text.as_bytes()).unwrap();
+        let body = cadcraft_dxf::sections(&tags)
+            .into_iter()
+            .filter(|section| section.name == "ENTITIES")
+            .flat_map(|section| cadcraft_dxf::records(&section.tags))
+            .find(|(_, tags)| tags.iter().any(|tag| tag.code == 5 && tag.str() == handle.hex()))
+            .unwrap()
+            .1;
+        let Some(open) = body.iter().position(|tag| tag.code == 102 && tag.str() == "{ACAD_REACTORS") else { return Vec::new() };
+        body[open + 1..].iter().take_while(|tag| tag.code != 102).filter(|tag| tag.code == 330).map(cadcraft_dxf::Tag::str).collect::<Vec<_>>()
+    };
+    let mut edited = imported.clone();
+    let added = edited.add(&Space::Model, Common::default(), EntityKind::Hatch(hatch(loops, true))).unwrap();
+    let saved = write_dxf(&edited);
+    assert_eq!(reactors(&saved, boundary), vec![first.hex(), added.hex()]);
+    let other = poly(&mut edited, square(20.0, 10.0));
+    edited
+        .modify_entity(second, |entity| {
+            let EntityKind::Hatch(hatch) = &mut entity.kind else { panic!("HATCH") };
+            hatch.loops[0].sources = vec![other];
+        })
+        .unwrap();
+    assert_eq!(reactors(&write_dxf(&edited), other), vec![second.hex()], "a changed forward link gets its new reverse link");
+    eprintln!("CAD_ASSOCIATION_CONTROLS=pass");
+    for (what, text) in ["DXF", "DWG"].into_iter().zip(super::foreign_passthrough::saved_twice(&imported)) {
+        assert_eq!(reactors(&text, boundary), vec![first.hex()], "{what}: preserve the source's asymmetric relationship");
+        let reopened = read_dxf(text.as_bytes()).unwrap();
+        let EntityKind::Hatch(second_hatch) = &reopened.entity(second).unwrap().kind else { panic!("HATCH") };
+        assert_eq!(second_hatch.loops[0].sources, vec![boundary], "the forward reference must remain");
+    }
+}
+
+#[test]
 fn source_boundary_objects_roundtrip() {
     let mut d = Drawing::new_imperial();
     let outer = poly(&mut d, square(0.0, 20.0));

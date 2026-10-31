@@ -41,6 +41,8 @@ pub struct SourceSymbols {
     /// The persistent reactors of each entity that had two or more, in the order the file listed them (AutoCAD notifies them in
     /// that order, and its own save keeps it).
     pub reactor_order: BTreeMap<Handle, Vec<Handle>>,
+    /// Original forward links of imported associative hatches. A save keeps a missing reverse reactor missing.
+    pub hatch_sources: BTreeMap<Handle, BTreeSet<Handle>>,
     /// The upper-case names of the blocks whose record held the `DesignCenter Data` xdata beside its group 70 (AutoCAD writes it in every
     /// version for the blocks that had it): a save keeps it for them, and before 2007 for every block with units.
     pub design_center_blocks: BTreeSet<String>,

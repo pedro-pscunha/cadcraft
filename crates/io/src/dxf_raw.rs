@@ -1029,6 +1029,13 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities, &objects);
+    let hatch_sources = all_entities(d)
+        .filter_map(|entity| {
+            let EntityKind::Hatch(hatch) = &entity.kind else { return None };
+            hatch.associative.then(|| (entity.handle, hatch.loops.iter().flat_map(|boundary| boundary.sources.iter().copied()).collect()))
+        })
+        .collect();
+    Arc::make_mut(&mut d.source_symbols).hatch_sources = hatch_sources;
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")
