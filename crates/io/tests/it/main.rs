@@ -162,6 +162,7 @@ mod table_cell_fields;
 mod table_cellstyle_roundtrip;
 mod table_codes;
 mod table_counts;
+mod mtext_text_chunks;
 mod table_graphics_block;
 mod table_style_cells;
 mod table_style_codes;

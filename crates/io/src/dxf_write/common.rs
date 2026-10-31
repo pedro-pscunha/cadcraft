@@ -199,8 +199,7 @@ pub(super) fn multiline_tags(w: &mut W, a: &Attrib, attdef: bool) {
     w.f(46, a.multiline.as_ref().and_then(|ml| ml.embedded_46).unwrap_or(0.0));
     w.i(71, i64::from(m.attach));
     w.i(72, m.drawing_direction.map_or(5, i64::from));
-    let chars: Vec<char> = crate::dxf_read::mtext_dxf::encode_contents(&m.contents).chars().collect();
-    let chunks: Vec<String> = chars.chunks(250).map(|c| c.iter().collect()).collect();
+    let chunks = crate::dxf_read::mtext_dxf::encoded_chunks(&m.contents);
     let n = chunks.len();
     for (i, c) in chunks.iter().enumerate() {
         w.s(if i + 1 == n { 1 } else { 3 }, c.clone());
