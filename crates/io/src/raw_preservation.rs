@@ -364,7 +364,8 @@ impl<'a> RawSaveCheck<'a> {
             }
             raw.push(RawTag { code: tag.code, value: tag.str() });
         }
-        let mut decoded = fields::parse(&raw, false).map_err(|error| failure(unit, kind, handle, error.field, error.reason))?;
+        let decoded = fields::parse(&raw, false).map_err(|error| failure(unit, kind, handle, error.field, error.reason))?;
+        let mut decoded = fields::for_release(decoded, kind, self.target);
         records.check_names(unit, &source, &decoded, &inspection.handles)?;
         if parent {
             self.plot_style(unit, &decoded, inspection)?;
@@ -407,7 +408,7 @@ impl<'a> RawSaveCheck<'a> {
                 }
             }
         }
-        compare_fields(unit, kind, handle, &expected, &decoded, self.target)
+        compare_fields(unit, kind, handle, &expected, &decoded)
     }
 
     fn plot_style(&self, unit: &Unit<'_>, actual: &Fields, inspection: &OutputInventory) -> Result<()> {
@@ -471,16 +472,16 @@ impl<'a> RawSaveCheck<'a> {
     }
 }
 
-fn compare_fields(unit: &Unit<'_>, kind: &str, handle: Handle, expected: &Fields, actual: &Fields, target: Version) -> Result<()> {
+fn compare_fields(unit: &Unit<'_>, kind: &str, handle: Handle, expected: &Fields, actual: &Fields) -> Result<()> {
     for (field, value) in expected {
         match actual.get(field) {
             Some(actual) if actual == value => {}
-            None if fields::default_value(kind, field, expected, target).as_ref() == Some(value) => {}
+            None if fields::default_value(kind, field, expected).as_ref() == Some(value) => {}
             _ => return Err(failure(unit, kind, handle, field.label(), "a required value is missing or differs")),
         }
     }
     for (field, value) in actual {
-        if !expected.contains_key(field) && fields::default_value(kind, field, expected, target).as_ref() != Some(value) {
+        if !expected.contains_key(field) && fields::default_value(kind, field, expected).as_ref() != Some(value) {
             return Err(failure(unit, kind, handle, field.label(), "the decode adds a field without a documented wire equivalence"));
         }
     }
