@@ -186,7 +186,14 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "LTYPE" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() || d.linetype(&name).is_some() || d.linetypes.len() >= MAX_OBJECTS {
+                if !name.is_empty() && d.linetype(&name).is_some() {
+                    // A linetype every drawing has (Continuous, ByLayer, ByBlock) keeps the description the file gave it, empty included.
+                    if let Some(builtin) = d.linetypes.iter_mut().find(|l| l.pattern.is_empty() && l.name.eq_ignore_ascii_case(&name)) {
+                        builtin.description = t.s(3).unwrap_or_default();
+                    }
+                    continue;
+                }
+                if name.is_empty() || d.linetypes.len() >= MAX_OBJECTS {
                     continue;
                 }
                 let pattern = ltype_pattern(&tg, &ltype_styles);

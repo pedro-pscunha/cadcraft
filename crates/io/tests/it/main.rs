@@ -89,6 +89,7 @@ mod leader_links;
 mod leader_links_roundtrip;
 #[cfg(not(target_arch = "wasm32"))]
 mod legacy_text_flags;
+mod linetype_description;
 mod low_handseed;
 mod minsert_subclass;
 mod mleader_canonical;
