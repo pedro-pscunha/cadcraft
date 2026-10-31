@@ -43,7 +43,7 @@ fn outcomes(secs: &[Section], policy: &Policy) -> Outcomes {
     };
     let records = (0..graph.graph().nodes().len() as u32).map(NodeId).map(|n| (name(n), activation.outcome(n).expect("an outcome"))).collect();
     let mut components: Vec<String> =
-        activation.components.iter().map(|c| format!("{:?} {} {:?}", c.outcome, c.nodes.len(), kinds(&c.failures))).collect();
+        activation.components().iter().map(|c| format!("{:?} {} {:?}", c.outcome, c.nodes.len(), kinds(&c.failures))).collect();
     components.sort();
     Outcomes { records, components }
 }
@@ -296,7 +296,7 @@ fn a10_parsed_plain_cycle_stays_legacy_when_no_record_needs_activation() {
     // This is the graph's all-Plain control. Conservative classification of unproved INSERTs remains separate.
     let graph = RecordGraph::build(&secs, &|_| Need::Plain).unwrap();
     let activation = activate(graph.graph(), &open());
-    assert!(activation.outcomes.iter().all(|outcome| *outcome == Outcome::Legacy));
+    assert!(activation.outcomes().iter().all(|outcome| *outcome == Outcome::Legacy));
     let calls = std::cell::Cell::new(0);
     let plain = |_: &cadcraft_io::activation::records::RecordView<'_>| {
         calls.set(calls.get() + 1);
@@ -327,7 +327,7 @@ fn i3_a_drawing_with_no_needing_record_activates_nothing_and_reads_as_the_legacy
         let activation = activate(graph.graph(), &open());
         assert_eq!(activation.activated(), 0, "{name}");
         assert!((0..graph.graph().nodes().len() as u32).all(|i| activation.outcome(NodeId(i)) == Some(Outcome::Legacy)), "{name}");
-        assert!(activation.components.iter().all(|c| c.outcome == ComponentOutcome::Legacy), "{name}");
+        assert!(activation.components().iter().all(|c| c.outcome == ComponentOutcome::Legacy), "{name}");
         // The read in every mode is the Legacy read, field for field.
         let legacy = cadcraft_io::read_with_policy(bytes, name, ReaderPolicy::new(ReaderMode::Off, ACTIVE_FAMILIES)).unwrap();
         for mode in [ReaderMode::Safe, ReaderMode::All] {

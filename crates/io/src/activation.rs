@@ -11,6 +11,9 @@
 //! Legacy. A Raw unit is an exception to revision agreement: it is neither Legacy nor Canonical.
 
 pub mod records;
+#[cfg(test)]
+#[path = "activation_work_tests.rs"]
+mod work_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -325,19 +328,32 @@ pub struct Component {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activation {
     /// The outcome of every node, by node index.
-    pub outcomes: Vec<Outcome>,
+    outcomes: Vec<Outcome>,
     /// The components, by their lowest node.
-    pub components: Vec<Component>,
+    components: Vec<Component>,
+    component_by_node: Vec<usize>,
 }
 
 impl Activation {
     /// Why the component of `node` could not activate, as one sentence; `None` when it did not need to.
     pub fn reason_for(&self, node: NodeId) -> Option<String> {
-        let component = self.components.iter().find(|c| c.nodes.contains(&node))?;
+        #[cfg(test)]
+        work_tests::REASON_PROBES.with(|count| count.set(count.get() + 1));
+        let component = self.components.get(*self.component_by_node.get(node.index())?)?;
         if component.failures.is_empty() {
             return None;
         }
         Some(component.failures.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+    }
+
+    /// The outcome of every node, in node order.
+    pub fn outcomes(&self) -> &[Outcome] {
+        &self.outcomes
+    }
+
+    /// The components, in lowest-node order. They remain immutable so their node index stays valid.
+    pub fn components(&self) -> &[Component] {
+        &self.components
     }
 
     pub fn outcome(&self, id: NodeId) -> Option<Outcome> {
@@ -355,11 +371,17 @@ impl Activation {
 pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
     let n = graph.nodes.len();
     let mut sets = Sets::new(n);
+    let mut owned: BTreeMap<NodeId, Vec<NodeId>> = BTreeMap::new();
     for edge in &graph.edges {
+        #[cfg(test)]
+        work_tests::OWNERSHIP_PROBES.with(|count| count.set(count.get() + 1));
         let (a, b) = match *edge {
             Edge::Contains { definition, member } => (definition, member),
             Edge::Refers { user, definition } => (user, definition),
-            Edge::Owns { insert, attrib } => (insert, attrib),
+            Edge::Owns { insert, attrib } => {
+                owned.entry(insert).or_default().push(attrib);
+                (insert, attrib)
+            }
         };
         sets.union(a.index(), b.index());
     }
@@ -384,14 +406,20 @@ pub fn activate(graph: &Graph, policy: &Policy) -> Activation {
             }
             components.push(Component { nodes, outcome: ComponentOutcome::Canonical, failures });
         } else {
-            for id in raw_units(graph, &nodes) {
+            for id in raw_units(graph, &nodes, &owned) {
                 outcomes[id.index()] = Outcome::Raw;
             }
             components.push(Component { nodes, outcome: ComponentOutcome::Raw, failures });
         }
     }
     components.sort_by_key(|c| c.nodes.first().copied());
-    Activation { outcomes, components }
+    let mut component_by_node = vec![0; n];
+    for (index, component) in components.iter().enumerate() {
+        for node in &component.nodes {
+            component_by_node[node.index()] = index;
+        }
+    }
+    Activation { outcomes, components, component_by_node }
 }
 
 fn is_record(graph: &Graph, id: NodeId) -> bool {
@@ -433,21 +461,14 @@ fn failures(graph: &Graph, policy: &Policy, nesting: &Nesting, nodes: &[NodeId])
 
 /// The nodes of a component that cannot activate and that become Raw: each `needs` record, and an INSERT with all its ATTRIBs when the
 /// INSERT or one of its ATTRIBs needs Canonical (an ATTRIB cannot exist without its INSERT, and the unit keeps the record sequence).
-fn raw_units(graph: &Graph, nodes: &[NodeId]) -> BTreeSet<NodeId> {
-    let in_component: BTreeSet<NodeId> = nodes.iter().copied().collect();
+fn raw_units(graph: &Graph, nodes: &[NodeId], owned: &BTreeMap<NodeId, Vec<NodeId>>) -> BTreeSet<NodeId> {
     let needs = |id: NodeId| is_record(graph, id) && matches!(graph.nodes[id.index()].need, Need::Needs { .. });
     let mut raw: BTreeSet<NodeId> = nodes.iter().copied().filter(|id| needs(*id)).collect();
-    let mut owned: BTreeMap<NodeId, Vec<NodeId>> = BTreeMap::new();
-    for edge in &graph.edges {
-        if let Edge::Owns { insert, attrib } = *edge
-            && in_component.contains(&insert)
+    for insert in nodes {
+        if let Some(attribs) = owned.get(insert)
+            && (raw.contains(insert) || attribs.iter().any(|a| raw.contains(a)))
         {
-            owned.entry(insert).or_default().push(attrib);
-        }
-    }
-    for (insert, attribs) in owned {
-        if raw.contains(&insert) || attribs.iter().any(|a| raw.contains(a)) {
-            raw.insert(insert);
+            raw.insert(*insert);
             raw.extend(attribs);
         }
     }

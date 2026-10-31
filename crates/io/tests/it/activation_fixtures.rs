@@ -371,7 +371,7 @@ fn check(name: &str) {
     check_invariants(&case, &graph, &outcomes);
     if !case.failures.is_empty() {
         let first = graph.node(&case.expect[0].1).unwrap();
-        let component = activation.components.iter().find(|c| c.nodes.contains(&first)).expect("its component");
+        let component = activation.components().iter().find(|c| c.nodes.contains(&first)).expect("its component");
         for kind in &case.failures {
             assert!(component.failures.iter().any(|f| matches_failure(*kind, f)), "{name}: {kind:?} in {:?}", component.failures);
         }
