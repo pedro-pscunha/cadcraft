@@ -65,6 +65,8 @@ pub struct RecordView<'a> {
 pub struct RecordGraph {
     graph: Graph,
     keys: Vec<NodeKey>,
+    /// The handle (group 5) of each node's record, for naming it in a report; a definition has none.
+    handles: Vec<Option<String>>,
     by_key: HashMap<NodeKey, NodeId>,
 }
 
@@ -155,6 +157,7 @@ struct Builder<'a> {
     need: &'a dyn Fn(&RecordView) -> Need,
     nodes: Vec<Node>,
     keys: Vec<NodeKey>,
+    handles: Vec<Option<String>>,
     by_key: HashMap<NodeKey, NodeId>,
     edges: Vec<Edge>,
     /// Upper-case block name → its definition node (the first of a repeated name).
@@ -163,9 +166,10 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
-    fn add(&mut self, key: NodeKey, node: Node) -> NodeId {
+    fn add(&mut self, key: NodeKey, node: Node, handle: Option<String>) -> NodeId {
         let id = NodeId(u32::try_from(self.nodes.len()).unwrap_or(u32::MAX));
         self.nodes.push(node);
+        self.handles.push(handle);
         self.keys.push(key.clone());
         self.by_key.insert(key, id);
         id
@@ -184,7 +188,7 @@ impl Builder<'_> {
                     *count += 1;
                     let key = NodeKey::record(container.clone(), ordinal.saturating_sub(1), Some(place));
                     let need = (self.need)(&RecordView { key: &key, kind, family: Family::Attrib, groups });
-                    let attrib = self.add(key, Node::record(Family::Attrib, need));
+                    let attrib = self.add(key, Node::record(Family::Attrib, need), first(groups, 5));
                     self.edges.push(Edge::Owns { insert: parent, attrib });
                 }
                 continue;
@@ -202,7 +206,7 @@ impl Builder<'_> {
             let Some(family) = family_of_kind(kind) else { continue };
             let key = NodeKey::record(container.clone(), place, None);
             let need = (self.need)(&RecordView { key: &key, kind, family, groups });
-            let id = self.add(key, Node::record(family, need));
+            let id = self.add(key, Node::record(family, need), first(groups, 5));
             if let Some(definition) = definition {
                 self.edges.push(Edge::Contains { definition, member: id });
             }
@@ -238,6 +242,7 @@ impl RecordGraph {
             need,
             nodes: Vec::new(),
             keys: Vec::new(),
+            handles: Vec::new(),
             by_key: HashMap::new(),
             edges: Vec::new(),
             definitions: HashMap::new(),
@@ -266,7 +271,7 @@ impl RecordGraph {
                 let definition = (!is_layout_block(&name)).then(|| match b.definitions.get(&name) {
                     Some(id) => *id,
                     None => {
-                        let id = b.add(NodeKey::definition(&name), Node::definition());
+                        let id = b.add(NodeKey::definition(&name), Node::definition(), None);
                         b.definitions.insert(name.clone(), id);
                         id
                     }
@@ -288,7 +293,7 @@ impl RecordGraph {
             }
         }
         let graph = Graph::new(b.nodes, b.edges)?;
-        Ok(RecordGraph { graph, keys: b.keys, by_key: b.by_key })
+        Ok(RecordGraph { graph, keys: b.keys, handles: b.handles, by_key: b.by_key })
     }
 
     pub fn graph(&self) -> &Graph {
@@ -298,6 +303,11 @@ impl RecordGraph {
     /// The node of a record: the one answer to "which node is this record".
     pub fn node(&self, key: &NodeKey) -> Option<NodeId> {
         self.by_key.get(key).copied()
+    }
+
+    /// The handle of a node's record, as the file wrote it (`None` for a definition, or a record without one).
+    pub fn handle(&self, node: NodeId) -> Option<&str> {
+        self.handles.get(node.0 as usize)?.as_deref()
     }
 
     /// The key of a node.

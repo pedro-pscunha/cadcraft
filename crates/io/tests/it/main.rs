@@ -3,6 +3,7 @@ mod acad_interop;
 mod acis_data_store;
 mod activation_fixtures;
 mod activation_graph;
+mod activation_invariants;
 mod activation_records;
 mod angle_header;
 mod annotative_roundtrip;

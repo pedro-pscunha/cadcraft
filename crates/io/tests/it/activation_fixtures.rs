@@ -60,10 +60,10 @@ fn file(tables: &str, blocks: &[String], entities: &[String]) -> String {
 }
 
 /// One fixture: its name, its text, the policy of the stage it is read at, and what it must come to.
-struct Case {
-    name: &'static str,
-    text: String,
-    policy: Policy,
+pub(crate) struct Case {
+    pub(crate) name: &'static str,
+    pub(crate) text: String,
+    pub(crate) policy: Policy,
     /// (what the record is called, its key, the expected outcome)
     expect: Vec<(&'static str, NodeKey, Outcome)>,
     /// Typed reasons that the component of the first record must carry.
@@ -109,7 +109,7 @@ fn def(name: &str) -> NodeKey {
     NodeKey::definition(name)
 }
 
-fn cases() -> Vec<Case> {
+pub(crate) fn cases() -> Vec<Case> {
     use Outcome::{Canonical, Legacy, Raw};
     let nothing = Vec::new;
     let all_canonical = |keys: Vec<(&'static str, NodeKey)>| keys.into_iter().map(|(n, k)| (n, k, Canonical)).collect::<Vec<_>>();
