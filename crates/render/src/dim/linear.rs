@@ -11,6 +11,8 @@ struct LinearDimState {
     measurement: f64,
     text_width: f64,
     text_height: f64,
+    /// The height of the ink of the text: the offset of text above the line counts it.
+    ink_height: f64,
     has_text: bool,
     tick_like: bool,
     arrow_width: f64,
@@ -68,6 +70,7 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
     let u = if dimension_axis == Vec2::ZERO || !dimension_axis.is_finite() { direction } else { dimension_axis };
     let n = u.perp();
     let (text_width, text_height) = config.measure(&g.mtext);
+    let ink_height = config.ink_height(&g.mtext);
     let has_text = text_width > 0.0;
     let tick_like = config.ticks || (config.first_arrow.is_tick() && config.second_arrow.is_tick());
     let arrow_width = if tick_like { 0.0 } else { config.arrow_size };
@@ -115,6 +118,7 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
         measurement,
         text_width,
         text_height,
+        ink_height,
         has_text,
         tick_like,
         arrow_width,
@@ -158,8 +162,7 @@ fn position_linear_text(config: &DimConfig<'_>, state: &mut LinearDimState) {
     state.side_out = if (config.dimension.defpt.xy() - state.p1).dot(state.n) >= 0.0 { state.n } else { -state.n };
     state.text_axis = Vec2::from_angle(state.angle);
     let off_along = |axis: Vec2| {
-        let glyph_extent = state.text_width * state.text_axis.dot(axis).abs() / 2.0
-            + state.text_height * state.text_axis.perp().dot(axis).abs() * if st.text_above == 1 { 0.6 } else { 0.5 };
+        let glyph_extent = state.text_width * state.text_axis.dot(axis).abs() / 2.0 + state.ink_height * state.text_axis.perp().dot(axis).abs() * 0.5;
         config.gap + glyph_extent
     };
     let above = if state.angle.abs() < 1e-12 && state.n.y.abs() > 1e-9 {

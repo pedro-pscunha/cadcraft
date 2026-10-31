@@ -83,7 +83,8 @@ fn draw_radial_beside(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_ou
     let meas = if radius { r } else { 2.0 * r };
     g.mtext = linear_text(meas, d, st, if radius { "R" } else { "%%c" });
     g.measurement = meas;
-    let (tw, tht) = config.measure(&g.mtext);
+    let (tw, _) = config.measure(&g.mtext);
+    let tht = config.ink_height(&g.mtext);
     let u = (b - center).normalized();
     let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
     let tip = center + u * r;
@@ -102,7 +103,7 @@ fn draw_radial_beside(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_ou
     let angle = readable(u.angle());
     let axis = Vec2::from_angle(angle);
     *text_angle_out = angle;
-    *text_mid_out = base + u * (asz + gap + along / 2.0) + axis.perp() * (gap + tht * 0.6);
+    *text_mid_out = base + u * (asz + gap + along / 2.0) + axis.perp() * (gap + tht * 0.5);
 }
 
 pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {

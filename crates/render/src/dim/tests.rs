@@ -166,7 +166,7 @@ fn text_above_and_centred() {
     // Centred text breaks the dimension line in two.
     assert_eq!(centred.lines_of(LineRole::Dim).count(), 2);
     let above = dimension_geometry(&d, &st_with(|s| s.text_above = 1), 1.0);
-    assert!((above.text_pos.y - (5.0 + 0.09 + 0.18 * 0.6)).abs() < 1e-6, "{}", above.text_pos.y);
+    assert!((above.text_pos.y - (5.0 + 0.09 + 0.18 * 0.5)).abs() < 1e-6, "{}", above.text_pos.y);
     assert_eq!(above.lines_of(LineRole::Dim).count(), 1);
     let below = dimension_geometry(&d, &st_with(|s| s.text_above = 4), 1.0);
     assert!(below.text_pos.y < 5.0);
@@ -204,10 +204,11 @@ fn dimtad_one_uses_autocad_text_clearance() {
         s.decimals = 2;
     });
     let g = dimension_geometry(&d, &st, 50.0);
-    // Half the text height (0.0625) plus DIMGAP (0.04) put the centre at 0.1025;
-    // AutoCAD 2026 recomputes it at about 0.115 from the line (#2004).
+    // Half the text height (0.0625) plus DIMGAP (0.04) put the centre at 0.1025: AutoCAD LT 2025 puts the bottom of the text box a gap
+    // from the line (offset = gap + box height / 2, box height 1.0 for digits in SHX and 1.02 in Arial, 1.33 and 1.29 with a
+    // descender; /tmp/cad/elev-oracle12, 16 dimensions, DIMREGEN changes nothing). An earlier reading of AutoCAD 2026 gave 0.115 (#2004).
     assert!(
-        (0.30 - g.text_pos.x - 0.115).abs() < 0.001,
+        (0.30 - g.text_pos.x - 0.1025).abs() < 0.001,
         "text x={} offset={} angle={} text={}",
         g.text_pos.x,
         0.30 - g.text_pos.x,
@@ -447,4 +448,24 @@ fn mtext_contents_write_the_diameter_sign_as_a_code() {
         assert_eq!(decode_value(&g.mtext_contents()), value, "{value:?} reads back");
         assert!(!g.mtext_contents().contains('⌀'));
     }
+}
+
+#[test]
+fn text_above_the_line_sits_a_gap_above_its_own_box() {
+    // AutoCAD LT 2025: the centre of the text is a gap plus half the height of the text's box from the line, so a string with a
+    // descender sits higher than digits (/tmp/cad/elev-oracle12: 0.5 and 0.667 of the text height in SHX).
+    let st = st_with(|s| s.text_above = 1);
+    let mut offsets = Vec::new();
+    for text in ["10", "Agy"] {
+        let mut d = lin((0.0, 0.0), (10.0, 0.0), (0.0, 5.0), 0.0);
+        d.text = text.into();
+        let g = dimension_geometry(&d, &st, 1.0);
+        let params = cadcraft_fonts::MTextParams { attach: 5, ..cadcraft_fonts::MTextParams::new(Vec2::ZERO, 0.18) };
+        let ink = cadcraft_fonts::layout_mtext_with(text, &params).strokes.concat();
+        let box_height = ink.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max) - ink.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let offset = g.text_pos.y - 5.0;
+        assert!((offset - (0.09 + box_height / 2.0)).abs() < 1e-6, "{text}: offset {offset}, box {box_height}");
+        offsets.push(offset);
+    }
+    assert!(offsets[1] > offsets[0], "a descender raises the text: {offsets:?}");
 }
