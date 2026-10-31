@@ -1327,7 +1327,8 @@ fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
                 break false;
             }
             if root.as_deref() == Some(owner.as_str()) {
-                break root_key(&handle).is_some_and(|key| !modelled_key(key));
+                // An image dictionary with no definition is not modelled (there is nothing to write from): it is kept, as AutoCAD keeps it.
+                break root_key(&handle).is_some_and(|key| !modelled_key(key) || (up(key) == "ACAD_IMAGE_DICT" && entries(tags).is_empty()));
             }
             if is_xdict(current) {
                 // An extension dictionary with no entry at all is kept (AutoCAD keeps them on the objects that had one); one whose

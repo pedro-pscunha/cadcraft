@@ -200,3 +200,13 @@ Compared record by record (the DWG as the DXF rendition of `cadcraft_dwg`) again
 | OBJECTS/RASTERVARIABLES, DICTIONARY (root), XRECORD, TABLES/APPID, CLASSES/CLASS | the object is no longer written: one handle fewer is allocated, so the XRECORD and the APPID written after it take the previous handle, and the root dictionary loses its ACAD_IMAGE_VARS entry | dxf, dwg | Cyrela-Aura_Moema, Firenze | 1 RASTERVARIABLES, 1 DICTIONARY, 3 XRECORD, 2 APPID, 1 CLASS |
 
 The DWG of the other drawings is unchanged. The golden directory was written again at this commit.
+
+# Golden refresh for the empty image dictionary
+
+An ACAD_IMAGE_DICT with no image definition is kept (AutoCAD's own save keeps it). 10 of 126 outputs changed: the DXF and the DWG of five drawings that have such a dictionary (Rocontec-Vila_Einstein, Tear_Incorporadora-Alvorada, and `tear-autocad-saved`, `tear-native` and `tear-raw` of rc2).
+Compared record by record (the DWG as the DXF rendition of `cadcraft_dwg`) against the outputs before the change, the records that differ are only these; no other record changed.
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| OBJECTS/DICTIONARY (root, handle C) | the named object dictionary lists ACAD_IMAGE_DICT again | dxf, dwg | 5 | 1 each |
+| OBJECTS/DICTIONARY (the empty image dictionary: 3FB209 in Rocontec, 4E6B in the four tear files) | the dictionary of the file comes back, with its handle | dxf, dwg | 5 | 1 each |
