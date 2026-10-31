@@ -95,11 +95,39 @@ pub(super) fn emit(w: &mut W, entity: &Entity, raw: &RawCompound, owner: &str, p
         parent.insert(at, Tag::s(330, owner));
     }
     if !changed.is_empty() {
-        let start = parent.iter().position(|tag| tag.code == 100 && tag.str() == "AcDbEntity").map_or(1, |at| at + 1);
-        let end = start + parent.iter().skip(start).take_while(|tag| tag.code != 100 && tag.code < 1000).count();
-        let mut properties: Vec<Tag> =
-            parent.get(start..end).unwrap_or_default().iter().filter(|tag| !changed.contains(&tag.code)).cloned().collect();
-        properties.extend(replacement);
+        let mut depth = 0usize;
+        let start = parent
+            .iter()
+            .position(|tag| {
+                if tag.code == 102 {
+                    if tag.str().trim().starts_with('{') {
+                        depth += 1;
+                    } else if tag.str().trim() == "}" {
+                        depth -= 1;
+                    }
+                }
+                depth == 0 && tag.code == 100 && tag.str() == "AcDbEntity"
+            })
+            .map_or(1, |at| at + 1);
+        let mut end = start;
+        // Put the actual properties before opaque lookalikes, without changing any application group.
+        let mut properties = replacement;
+        for tag in parent.iter().skip(start) {
+            if depth == 0 && (tag.code == 100 || tag.code >= 1000) {
+                break;
+            }
+            if tag.code == 102 {
+                if tag.str().trim().starts_with('{') {
+                    depth += 1;
+                } else if tag.str().trim() == "}" {
+                    depth -= 1;
+                }
+            }
+            if depth != 0 || tag.code == 102 || !changed.contains(&tag.code) {
+                properties.push(tag.clone());
+            }
+            end += 1;
+        }
         parent.splice(start..end, properties);
     }
     w.t.extend(parent);
