@@ -130,7 +130,7 @@ fn source() -> String {
 #[test]
 fn a_spline_fit_polyline_read_from_a_file_survives_two_saves_in_both_formats() {
     let read = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
-    assert!(read.with_unique_handles().is_none(), "the vertex records of the fit data are not repeated handles");
+    assert!(read.with_unique_handles().unwrap().is_none(), "the vertex records of the fit data are not repeated handles");
     let first = polyline(&read);
     assert_eq!(first.points.len(), 3, "the drawn points are the generated curve");
     assert_eq!(flags(&first), [48, 48, 48, 40, 40, 40]);

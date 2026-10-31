@@ -170,6 +170,10 @@ impl Drawing {
     }
 }
 
+/// No handle above the ones in use is left to repair a repeated handle with (see [`Drawing::with_unique_handles`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandlesExhausted;
+
 /// A handle two objects held, and the fresh one the later object got (see [`Drawing::with_unique_handles`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HandleRepair {
@@ -193,8 +197,9 @@ impl Drawing {
     /// This drawing with no handle held twice, and what changed. A file names each object by its handle, so two entities with
     /// one handle (for example a block's entity and a model entity) make one of them unreadable: the DWG conversion drops it.
     /// The first holder in file order (model space, then the layouts, then the blocks) keeps the handle; every later holder gets a
-    /// fresh one. `None` when no handle is held twice. A reference to a repeated handle names the first holder.
-    pub fn with_unique_handles(&self) -> Option<(Drawing, Vec<HandleRepair>)> {
+    /// fresh one. `None` when no handle is held twice. A reference to a repeated handle names the first holder. A drawing with no
+    /// handle above the ones it uses (the repair needs one per later holder) is `Err`: no handle is given twice, and none wraps.
+    pub fn with_unique_handles(&self) -> Result<Option<(Drawing, Vec<HandleRepair>)>, HandlesExhausted> {
         let stores = || {
             std::iter::once(("model space".to_string(), &self.model))
                 .chain(self.layouts.iter().map(|l| (format!("layout {}", l.name), &l.entities)))
@@ -209,24 +214,26 @@ impl Drawing {
             }
         }
         if !repeated {
-            return None;
+            return Ok(None);
         }
         let mut out = self.clone();
-        let mut next = all.iter().map(|h| h.0).max().unwrap_or(0).max(self.handseed).saturating_add(1);
+        let mut next = all.iter().map(|h| h.0).max().unwrap_or(0).max(self.handseed);
         let mut owners: std::collections::HashMap<Handle, String> = std::collections::HashMap::new();
         let mut repairs = Vec::new();
         let rebuild = |name: &str,
                        store: &EntityStore,
                        owners: &mut std::collections::HashMap<Handle, String>,
                        next: &mut u64,
-                       repairs: &mut Vec<HandleRepair>| {
+                       repairs: &mut Vec<HandleRepair>|
+         -> Result<EntityStore, HandlesExhausted> {
             let mut rebuilt = EntityStore::new();
             for e in store.iter() {
                 let mut e = e.as_ref().clone();
                 for h in object_handles(&mut e) {
                     if let Some(kept_in) = owners.get(h).cloned() {
+                        // The largest handle is never given: no seed could be above it.
+                        *next = next.checked_add(1).filter(|n| *n < u64::MAX).ok_or(HandlesExhausted)?;
                         let new = Handle(*next);
-                        *next += 1;
                         repairs.push(HandleRepair { old: *h, new, kept_in, moved_in: name.to_string() });
                         *h = new;
                     }
@@ -234,20 +241,20 @@ impl Drawing {
                 }
                 rebuilt.push(e);
             }
-            rebuilt
+            Ok(rebuilt)
         };
-        out.model = rebuild("model space", &self.model, &mut owners, &mut next, &mut repairs);
+        out.model = rebuild("model space", &self.model, &mut owners, &mut next, &mut repairs)?;
         for (i, layout) in self.layouts.iter().enumerate() {
             if let Some(l) = out.layouts.get_mut(i) {
-                l.entities = rebuild(&format!("layout {}", layout.name), &layout.entities, &mut owners, &mut next, &mut repairs);
+                l.entities = rebuild(&format!("layout {}", layout.name), &layout.entities, &mut owners, &mut next, &mut repairs)?;
             }
         }
         for (name, block) in &self.blocks {
             if let Some(b) = out.blocks.get_mut(name) {
-                std::sync::Arc::make_mut(b).entities = rebuild(&format!("block {name}"), &block.entities, &mut owners, &mut next, &mut repairs);
+                std::sync::Arc::make_mut(b).entities = rebuild(&format!("block {name}"), &block.entities, &mut owners, &mut next, &mut repairs)?;
             }
         }
-        out.handseed = out.handseed.max(next);
-        Some((out, repairs))
+        out.handseed = out.handseed.max(next.saturating_add(1));
+        Ok(Some((out, repairs)))
     }
 }

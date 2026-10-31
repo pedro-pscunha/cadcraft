@@ -289,6 +289,8 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
         .committed()
         .with_unique_handles()
+        .ok()
+        .flatten()
         .map(|(_, repairs)| repairs)
         .unwrap_or_default()
         .into_iter()

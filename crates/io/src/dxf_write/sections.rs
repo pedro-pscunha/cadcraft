@@ -977,16 +977,20 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
 
 /// The drawing as a save writes it: an in-place block edit in progress is not written (the drawing as before it), and a handle
 /// two objects hold would make one of them unreadable (the DWG conversion drops it), so the later holder gets a new one.
-fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
+fn written_drawing(d: &Drawing) -> (std::borrow::Cow<'_, Drawing>, bool) {
     let mut committed = d.committed();
     let stale = committed.stale_raw_dimassocs();
     if !stale.is_empty() {
         committed.to_mut().retire_raw_dimassocs(&stale);
     }
-    if let Some((unique, _)) = committed.with_unique_handles() {
+    // A drawing with no handle above its own cannot be repaired (the repair needs a new handle per later holder): it is written as it
+    // is and flagged, and the save fails (see `dxf_write::require_handle_room`).
+    let repaired = if committed.has_handle_room() { committed.with_unique_handles().ok() } else { None };
+    let unrepairable = repaired.is_none();
+    if let Some(Some((unique, _))) = repaired {
         *committed.to_mut() = unique;
     }
-    committed
+    (committed, unrepairable)
 }
 
 /// Source BLKREFS can include INSERTs of sibling dynamic representations, not only the exact block name.
@@ -1053,7 +1057,7 @@ fn block_slots(
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
 pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> (Vec<Tag>, crate::dxf_raw::WrittenReferences) {
-    let committed = written_drawing(d);
+    let (committed, unrepairable) = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
     let mut w = W { reactors: hatch_reactors(d), dwg_bridge, ..W::new(d) };
@@ -1410,7 +1414,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         *tag = Tag::s(5, "0");
     }
     let next = crate::dxf_raw::max_handle(&w.t).checked_add(1).map(|above| above.max(d.handseed));
-    references.handles_exhausted = w.exhausted || next.is_none() || !d.has_handle_room();
+    references.handles_exhausted = unrepairable || w.exhausted || next.is_none() || !d.has_handle_room();
     if let Some(tag) = w.t.get_mut(seed_pos + 1) {
         *tag = Tag::s(5, format!("{:X}", next.unwrap_or(u64::MAX)));
     }

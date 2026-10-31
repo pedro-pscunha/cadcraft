@@ -805,3 +805,74 @@ fn a_native_hatch_background_wins_over_an_old_private_colour() {
         }
     }
 }
+
+/// A repeated handle is repaired with a new one before the save, and with no handle left above the ones in use the save fails (DXF
+/// ASCII, DXF binary, DWG) instead of wrapping to a low handle or panicking: two entities at the largest handle, and two at one handle
+/// in a drawing whose next handle is the largest.
+#[test]
+fn a_repeated_handle_with_no_handle_left_fails_the_save() {
+    let line = |handle: u64| Entity::new(Handle(handle), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) }));
+    // One store keeps one entity per handle: the repeat is a block's entity and a model entity.
+    let held_twice = |handle: u64| {
+        let mut d = Drawing::new_metric();
+        let mut b = Block::new("B");
+        b.entities.push(line(handle));
+        d.blocks.insert("B".into(), std::sync::Arc::new(b));
+        d.model.push(line(handle));
+        d
+    };
+    let at_top = held_twice(u64::MAX);
+    let mut seed_at_top = held_twice(0x100);
+    seed_at_top.handseed = u64::MAX;
+    for (what, d) in [("two at the largest handle", &at_top), ("a repeat with the largest seed", &seed_at_top)] {
+        for (name, binary) in [("x.dxf", false), ("x.dxf", true), ("x.dwg", false)] {
+            let options = SaveOptions { version: Some(Version::R2018), binary };
+            assert!(cadcraft_io::write_with(d, name, &options).is_err(), "{what}: {name} binary {binary}");
+        }
+        // The notes of a save that cannot be made do not panic either.
+        assert!(cadcraft_io::write_with_noted(d, "x.dxf", &SaveOptions { version: Some(Version::R2018), binary: false }).is_err(), "{what}");
+    }
+}
+
+/// A DXF of an attributed INSERT and a heavy 2D POLYLINE, every child with its own handle, and a `$HANDSEED` far above them.
+fn heavy_source(seed: &str) -> String {
+    format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n{seed}\n0\nENDSEC\n\
+         0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n200\n330\n201\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nK\n70\n0\n10\n0\n20\n0\n30\n0\n3\nK\n1\n\n\
+         0\nATTDEF\n5\n202\n330\n201\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n1\n1\nv\n100\nAcDbAttributeDefinition\n3\np\n2\nA\n70\n0\n\
+         0\nENDBLK\n5\n203\n330\n201\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n\
+         0\nSECTION\n2\nENTITIES\n\
+         0\nINSERT\n5\n100\n330\n1F\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockReference\n66\n1\n2\nK\n10\n5\n20\n5\n30\n0\n\
+         0\nATTRIB\n5\n101\n330\n100\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n5\n20\n5\n30\n0\n40\n1\n1\none\n100\nAcDbAttribute\n2\nA\n70\n0\n\
+         0\nATTRIB\n5\n102\n330\n100\n100\nAcDbEntity\n8\n0\n100\nAcDbText\n10\n5\n20\n6\n30\n0\n40\n1\n1\ntwo\n100\nAcDbAttribute\n2\nB\n70\n0\n\
+         0\nSEQEND\n5\n103\n330\n100\n100\nAcDbEntity\n8\n0\n\
+         0\nPOLYLINE\n5\n110\n330\n1F\n100\nAcDbEntity\n8\n0\n100\nAcDb2dPolyline\n66\n1\n10\n0\n20\n0\n30\n0\n70\n0\n\
+         0\nVERTEX\n5\n111\n330\n110\n100\nAcDbEntity\n8\n0\n100\nAcDbVertex\n100\nAcDb2dVertex\n10\n0\n20\n0\n30\n0\n70\n0\n\
+         0\nVERTEX\n5\n112\n330\n110\n100\nAcDbEntity\n8\n0\n100\nAcDbVertex\n100\nAcDb2dVertex\n10\n4\n20\n0\n30\n0\n70\n0\n\
+         0\nVERTEX\n5\n113\n330\n110\n100\nAcDbEntity\n8\n0\n100\nAcDbVertex\n100\nAcDb2dVertex\n10\n4\n20\n4\n30\n0\n70\n0\n\
+         0\nSEQEND\n5\n114\n330\n110\n100\nAcDbEntity\n8\n0\n\
+         0\nENDSEC\n0\nEOF\n"
+    )
+}
+
+/// The DWG's own next handle, read with acadrust and not through the DXF form CADCraft reads a DWG by.
+fn native_dwg_seed(dwg: &[u8]) -> u64 {
+    acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().expect("the DWG reads").header.handle_seed
+}
+
+/// An unedited DWG save of a file with an attributed INSERT and a heavy polyline (every child with a handle) keeps the DWG's own seed
+/// at the source's, save after save: the DXF form of a DWG counts a handle for a SEQEND or a vertex only when it has none to give.
+#[test]
+fn an_attributed_insert_and_a_heavy_polyline_keep_the_dwg_seed() {
+    let source = heavy_source("500000");
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    assert_eq!(d.model.iter().count(), 2, "an INSERT and a POLYLINE");
+    let options = SaveOptions { version: Some(Version::R2018), binary: false };
+    let once = cadcraft_io::write_with(&d, "x.dwg", &options).unwrap();
+    let seed = native_dwg_seed(&once);
+    assert!(seed >= 0x500000, "the DWG's own seed is {seed:X}");
+    let twice = cadcraft_io::write_with(&cadcraft_io::read(&once, "x.dwg").unwrap(), "x.dwg", &options).unwrap();
+    let thrice = cadcraft_io::write_with(&cadcraft_io::read(&twice, "x.dwg").unwrap(), "x.dwg", &options).unwrap();
+    assert_eq!((native_dwg_seed(&twice), native_dwg_seed(&thrice)), (seed, seed), "the DWG's own seed moves with each save");
+    assert!(twice == thrice, "the second save differs from the third");
+}

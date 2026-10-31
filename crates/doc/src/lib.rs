@@ -16,7 +16,7 @@ mod format;
 mod gdt;
 mod header;
 mod identity;
-pub use identity::HandleRepair;
+pub use identity::{HandleRepair, HandlesExhausted};
 mod family;
 pub mod library;
 mod plotstyle;
