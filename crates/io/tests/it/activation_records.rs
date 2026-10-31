@@ -160,6 +160,18 @@ fn mleader_aliases_keep_both_content_reference_forms_and_ignore_the_linetype_han
 }
 
 #[test]
+fn second_tables_section_block_handles_keep_multileader_reference_edges() {
+    let leader = rec("MULTILEADER", "5\nA1\n8\n0\n344\nBR1\n");
+    let mut secs = dxf("0\nBLOCK_RECORD\n5\nBR0\n2\nOTHER\n", &[block("MLB", &[line("B1")])], &[leader]);
+    let later = dxf("0\nBLOCK_RECORD\n5\nBR1\n2\nMLB\n", &[], &[]);
+    secs.extend(later.into_iter().filter(|section| section.name == "TABLES"));
+    let graph = RecordGraph::build(&secs, &plain).unwrap();
+    let user = graph.node(&key(Container::Entities, 0)).unwrap();
+    let definition = graph.node(&NodeKey::definition("MLB")).unwrap();
+    assert!(edges_of(&graph).contains(&Edge::Refers { user, definition }));
+}
+
+#[test]
 fn a_multileader_refers_to_its_block_content_by_either_handle_group() {
     // The block record handle of the content: group 344 of the entity, or group 341 of a context that has block contents (296 = 1).
     let outer = rec("MULTILEADER", "5\nA1\n8\n0\n300\nCONTEXT_DATA{\n290\n0\n296\n1\n341\nBR1\n301\n}\n344\nBR1\n");
