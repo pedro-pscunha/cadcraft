@@ -31,7 +31,7 @@ pub(super) fn collect_source_block_references(kind: &str, tags: &[Tag], raw: boo
     if raw {
         rx.raw_block_handles.extend(
             tags.iter()
-                .filter(|tag| crate::dxf_write::raw_reference(tag.code))
+                .filter(|tag| cadcraft_doc::foreign::is_pointer(tag.code))
                 .filter_map(|tag| Handle::parse_hex(&tag.str()))
                 .filter(|handle| handle.0 != 0),
         );
