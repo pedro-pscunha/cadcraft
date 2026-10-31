@@ -59,6 +59,7 @@ mod dwt_template;
 mod dxf_version_gates;
 mod dxf_versions;
 mod dynblock_read;
+mod empty_image_dict_kept;
 mod empty_xdictionary;
 mod entity_normals;
 mod entity_plane_manifest;
