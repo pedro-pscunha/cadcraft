@@ -50,6 +50,19 @@ fn source() -> String {
 #[test]
 fn cell_data_types_are_kept_per_source_cell_style() {
     let mut tags = cadcraft_dxf::parse(source().replace("3\n\n70\n", "3\nSOURCE_DATA_FORMAT\n70\n").as_bytes()).unwrap();
+    let control = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    let private_payload = |text: &str| {
+        section(text, "OBJECTS")
+            .into_iter()
+            .find(|(kind, tags)| kind == "TABLESTYLE" && tags.iter().any(|tag| tag.code == 3 && tag.str() == "SOURCE_DATA_FORMAT"))
+            .unwrap()
+            .1
+            .into_iter()
+            .filter(|tag| tag.code >= 1000)
+            .map(|tag| (tag.code, tag.str()))
+            .collect::<Vec<_>>()
+    };
+    let expected_private = private_payload(&cadcraft_io::write_dxf(&control));
     for (tag, value) in tags.iter_mut().filter(|tag| tag.code == 90).zip([4, 512, 4]) {
         *tag = cadcraft_dxf::Tag::i(90, value);
     }
@@ -60,12 +73,23 @@ fn cell_data_types_are_kept_per_source_cell_style() {
     assert!(style.cell_style("Title").data_format.is_none(), "the implicit general format must stay implicit");
     assert_eq!(style.cell_style("Header").data_format.unwrap().data_type, 4);
     for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&drawing)) {
+        assert_eq!(private_payload(&text), expected_private, "{what}: native value formats must not expand private xdata");
         let style = section(&text, "OBJECTS")
             .into_iter()
             .find(|(kind, tags)| kind == "TABLESTYLE" && tags.iter().any(|tag| tag.code == 3 && tag.str() == "SOURCE_DATA_FORMAT"))
             .unwrap()
             .1;
         assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 512, 4], "{what}");
+        assert_eq!(
+            style.iter().filter(|tag| tag.code == 91).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(),
+            vec![0, 0, 0],
+            "{what}: native unit types"
+        );
+        assert_eq!(
+            style.iter().filter(|tag| tag.code == 1).map(cadcraft_dxf::Tag::str).collect::<Vec<_>>(),
+            vec!["", "", ""],
+            "{what}: native format strings"
+        );
         let reopened = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
         let saved = cadcraft_io::write_dxf(&reopened);
         let style = section(&saved, "OBJECTS")
@@ -74,6 +98,33 @@ fn cell_data_types_are_kept_per_source_cell_style() {
             .unwrap()
             .1;
         assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 512, 4], "{what} reopened");
+    }
+}
+
+#[test]
+fn native_cell_value_formats_do_not_create_private_cell_styles() {
+    let source = cadcraft_io::write_dxf(&cadcraft_doc::Drawing::new_metric());
+    let mut tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+    let mut table_style = false;
+    let mut count = 0;
+    for tag in &mut tags {
+        if tag.code == 0 {
+            table_style = tag.str() == "TABLESTYLE";
+        } else if table_style && tag.code == 90 {
+            *tag = cadcraft_dxf::Tag::i(90, 4);
+            count += 1;
+        }
+    }
+    assert!(count > 0);
+    let drawing = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
+    let dwg = cadcraft_io::write(&drawing, "value-formats.dwg").unwrap();
+    let native = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
+    let reopened = cadcraft_io::write_dxf(&cadcraft_io::read(&dwg, "value-formats.dwg").unwrap());
+    for (what, saved) in [("DXF", cadcraft_io::write_dxf(&drawing)), ("DWG native", native), ("DWG reopened", reopened)] {
+        for (_, style) in section(&saved, "OBJECTS").into_iter().filter(|(kind, _)| kind == "TABLESTYLE") {
+            assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 4, 4], "{what}");
+            assert!(!style.iter().any(|tag| tag.code == 1000 && tag.str() == "CELLSTYLES"), "{what}: native formats need no private payload");
+        }
     }
 }
 

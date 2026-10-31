@@ -68,10 +68,18 @@ struct CellStylesPayload {
 
 /// The xdata strings of a table style's cell styles (marker first), or nothing for a plain style.
 pub(crate) fn cell_styles_xdata(s: &TableStyle) -> Vec<String> {
-    if s.cell_styles.is_empty() {
+    let styles: Vec<_> = s
+        .cell_styles
+        .iter()
+        .filter_map(|style| {
+            let style = CellStyle { data_format: None, ..style.clone() };
+            (!s.base_cell_style(&style.name).is_some_and(|base| base == style)).then_some(style)
+        })
+        .collect();
+    if styles.is_empty() {
         return Vec::new();
     }
-    let Ok(json) = serde_json::to_string(&CellStylesPayload { v: 1, styles: s.cell_styles.clone() }) else { return Vec::new() };
+    let Ok(json) = serde_json::to_string(&CellStylesPayload { v: 1, styles }) else { return Vec::new() };
     std::iter::once(CELLSTYLES.to_string()).chain(chunks(&json)).collect()
 }
 
@@ -183,9 +191,10 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
     }
     // Our own complete cell styles replace what the groups could say.
     if let Some(p) = payload(tags, CELLSTYLES).and_then(|j| serde_json::from_str::<CellStylesPayload>(&j).ok()).filter(|p| p.v == 1) {
-        st.cell_styles.clear();
-        for cs in p.styles.into_iter().take(MAX_CELL_STYLES) {
+        let native = std::mem::take(&mut st.cell_styles);
+        for mut cs in p.styles.into_iter().take(MAX_CELL_STYLES) {
             if !cs.name.trim().is_empty() {
+                cs.data_format = native.iter().find(|style| style.name.eq_ignore_ascii_case(&cs.name)).and_then(|style| style.data_format.clone());
                 st.set_cell_style(cs);
             }
         }
