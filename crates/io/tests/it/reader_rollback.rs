@@ -34,19 +34,6 @@ fn assert_raw(drawing: &Drawing) {
     }
 }
 
-fn assert_second_dwg_save_refuses_unproved_attribute_default(drawing: &Drawing) {
-    let before = drawing.clone();
-    match cadcraft_io::write(drawing, "rollback.dwg") {
-        Err(cadcraft_io::IoError::RawPreservation { unit, record, handle, field, reason }) => {
-            assert_eq!((unit, record.as_str(), handle), (Handle(0x200), "ATTRIB", Handle(0x201)));
-            assert_eq!(field, "AcDbAttribute///0 group 280[0]");
-            assert_eq!(reason, "the decode adds a field without a documented wire equivalence");
-        }
-        result => panic!("expected the exact fail-closed attribute-default refusal: {result:?}"),
-    }
-    assert_eq!(drawing, &before);
-}
-
 #[test]
 fn stage0_explicit_raw_policy_survives_on_off_and_off_on_reopens_in_both_formats() {
     let source = include_bytes!("../data/activation/r5_raw_insert_with_full_tables.dxf");
@@ -77,21 +64,14 @@ fn stage0_explicit_raw_policy_survives_on_off_and_off_on_reopens_in_both_formats
                 Err(cadcraft_doc::DocError::RawReadOnly { .. })
             ));
             assert_eq!(reopened, before);
-            if name.ends_with("dwg") {
-                assert_second_dwg_save_refuses_unproved_attribute_default(&reopened);
-                assert_second_dwg_save_refuses_unproved_attribute_default(&control);
-                reopened.transform_entity(Handle(0x90), &move_line).unwrap();
-                assert_second_dwg_save_refuses_unproved_attribute_default(&reopened);
-            } else {
-                assert_eq!(
-                    cadcraft_io::write(&reopened, name).unwrap(),
-                    cadcraft_io::write(&control, name).unwrap(),
-                    "{name}: the mode cannot change save bytes"
-                );
-                reopened.transform_entity(Handle(0x90), &move_line).unwrap();
-                let saved_again = cadcraft_io::write(&reopened, name).unwrap();
-                assert_raw(&read_raw_policy(&saved_again, name, from));
-            }
+            let second_save = cadcraft_io::write(&reopened, name).expect("a checked Raw unit must remain saveable after reopening");
+            assert_eq!(second_save, cadcraft_io::write(&control, name).unwrap(), "{name}: the mode cannot change save bytes");
+            let second_reopen = read_raw_policy(&second_save, name, from);
+            assert_raw(&second_reopen);
+            assert_eq!(second_reopen, read_raw_policy(&second_save, name, to));
+            reopened.transform_entity(Handle(0x90), &move_line).unwrap();
+            let saved_again = cadcraft_io::write(&reopened, name).unwrap();
+            assert_raw(&read_raw_policy(&saved_again, name, from));
         }
     }
 }
