@@ -472,9 +472,10 @@ fn keep_insert_seqends(f: &mut Foreign, blocks: &Recs, entities: &Recs) {
 }
 
 /// Remember the order of the persistent reactors of the entities that have more than one.
-fn keep_reactor_order(d: &mut Drawing, blocks: &Recs, entities: &Recs) {
+fn keep_reactor_order(d: &mut Drawing, blocks: &Recs, entities: &Recs, objects: &Recs) {
     let source = Arc::make_mut(&mut d.source_symbols);
-    for (_, _, t) in blocks.iter().chain(entities).filter(|(kind, _, _)| !matches!(kind.as_str(), "BLOCK" | "ENDBLK")) {
+    let image_definitions = objects.iter().filter(|(kind, _, _)| kind == "IMAGEDEF");
+    for (_, _, t) in blocks.iter().chain(entities).filter(|(kind, _, _)| !matches!(kind.as_str(), "BLOCK" | "ENDBLK")).chain(image_definitions) {
         let h = head(t);
         let order: Vec<Handle> = h.reactors.iter().filter_map(|r| handle(r)).collect();
         if let (Some(own), true) = (h.handle.as_deref().and_then(handle), order.len() >= 2) {
@@ -517,9 +518,9 @@ pub(crate) fn order_reactors(tags: &mut [Tag], d: &Drawing) {
     }
 }
 
-/// Put the reactors of every IMAGEDEF in the order AutoCAD lists them: its owner first, then the IMAGEDEF_REACTOR of each image by handle (the
-/// order they were made in).
-pub(crate) fn order_image_definition_reactors(tags: &mut [Tag]) {
+/// Put the reactors of every IMAGEDEF in the order AutoCAD lists them: its owner first, then the IMAGEDEF_REACTOR of each image in the order the
+/// file listed them (the order they were made in, which a handle does not say), the ones it did not have after them by handle.
+pub(crate) fn order_image_definition_reactors(tags: &mut [Tag], d: &Drawing) {
     let mut i = 0;
     while i + 2 < tags.len() {
         if tags[i].code == 0
@@ -531,8 +532,17 @@ pub(crate) fn order_image_definition_reactors(tags: &mut [Tag]) {
         {
             let from = i + open + 2;
             let len = tags[from.min(tags.len())..].iter().take_while(|g| g.code == 330).count();
+            let source = tags[i..]
+                .iter()
+                .take_while(|t| t.code != 0 || t.str() == "IMAGEDEF")
+                .find(|t| t.code == 5)
+                .and_then(|t| handle(&t.str()))
+                .and_then(|h| d.source_symbols.reactor_order.get(&h));
             if let Some(reactors) = tags.get_mut(from..from + len) {
-                reactors.sort_by_key(|g| handle(&g.str()));
+                reactors.sort_by_key(|g| {
+                    let h = handle(&g.str());
+                    (h.and_then(|h| source.and_then(|s| s.iter().position(|r| *r == h))).unwrap_or(usize::MAX), h)
+                });
             }
         }
         i += 1;
@@ -550,8 +560,40 @@ fn keep_classes(d: &mut Drawing, classes: &Recs) {
     }
 }
 
+/// A style record that lists the entities that use it among its persistent reactors.
+fn lists_users(kind: &str) -> bool {
+    matches!(kind, "DIMSTYLE" | "MLEADERSTYLE")
+}
+
+/// Remember the DIMSTYLE records that the header of the DIMSTYLE table listed.
+fn keep_dim_style_listing(d: &mut Drawing, tables: &Recs) {
+    let source = Arc::make_mut(&mut d.source_symbols);
+    if let Some((_, _, t)) = tables.iter().find(|(kind, _, t)| kind == "TABLE" && val(t, 2).is_some_and(|name| name.eq_ignore_ascii_case("DIMSTYLE")))
+    {
+        source.dim_style_listing = t.iter().filter(|g| g.code == 340).filter_map(|g| handle(&g.str())).collect();
+    }
+}
+
+/// List the DIMSTYLE records the file listed in the header of the DIMSTYLE table, those of them the save holds.
+pub(crate) fn list_dim_styles(tags: &mut Vec<Tag>, d: &Drawing) {
+    if d.source_symbols.dim_style_listing.is_empty() {
+        return;
+    }
+    let Some(table) = tags.windows(2).position(|w| w[0].code == 0 && w[0].str() == "TABLE" && w[1].code == 2 && w[1].str() == "DIMSTYLE") else {
+        return;
+    };
+    let end = tags[table + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |n| table + 1 + n);
+    let Some(count) = tags[table..end].iter().position(|t| t.code == 71).map(|n| table + n) else { return };
+    let written: HashSet<Handle> =
+        tags[end..].iter().take_while(|t| !(t.code == 0 && t.str() == "ENDTAB")).filter(|t| t.code == 105).filter_map(|t| handle(&t.str())).collect();
+    let listed: Vec<Tag> = d.source_symbols.dim_style_listing.iter().filter(|h| written.contains(h)).map(|h| Tag::s(340, h.hex())).collect();
+    tags[count] = Tag::i(71, listed.len() as i64);
+    tags.splice(count + 1..end, listed);
+}
+
 /// Remember the order of the `{BLKREFS` list of each BLOCK_RECORD.
 fn keep_block_references(d: &mut Drawing, tables: &Recs) {
+    keep_dim_style_listing(d, tables);
     let source = Arc::make_mut(&mut d.source_symbols);
     for (_, _, t) in tables.iter().filter(|(kind, _, _)| kind == "BLOCK_RECORD") {
         if let Some(name) = val(t, 2).filter(|_| val(t, 70).is_some() && crate::dxf_ext::block_record_units(t).is_some()) {
@@ -986,7 +1028,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     keep_source_handles(d, &ids.iter().map(|(h, k)| (h.clone(), k.clone())).chain(owned_roles(&tables, &entities, &blocks, &objects)).collect());
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
-    keep_reactor_order(d, &blocks, &entities);
+    keep_reactor_order(d, &blocks, &entities, &objects);
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")
@@ -1081,8 +1123,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let modelled_objects = objects.iter().filter(|(k, _, _)| MODELLED_OBJECTS.contains(&k.as_str()) || is_dictionary(k));
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| matches!(k.as_str(), "BLOCK" | "ENDBLK"))).chain(modelled_objects) {
         let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
-        // A DIMSTYLE lists the dimensions that use it among its persistent reactors, so a record's reactors may name entities too.
-        let mut x = extra(kind, t, kind == "BLOCK", false, if kind == "DIMSTYLE" { &reactor_targets } else { &kept });
+        // A DIMSTYLE lists the dimensions that use it, and an MLEADERSTYLE the multileaders, among its persistent reactors, so a record's
+        // reactors may name entities too.
+        let mut x = extra(kind, t, kind == "BLOCK", false, if lists_users(kind) { &reactor_targets } else { &kept });
         x.block_attributes = (kind == "BLOCK").then(|| block_attributes.get(&key.1).copied()).flatten();
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
@@ -2643,25 +2686,33 @@ fn max_handle(tags: &[Tag]) -> u64 {
 mod tests {
     use super::*;
 
+    fn reactors_of(tags: &[Tag]) -> Vec<String> {
+        tags.iter().filter(|t| t.code == 330).take(4).map(Tag::str).collect()
+    }
+
+    fn definition(reactors: [&str; 4]) -> Vec<Tag> {
+        let mut tags: Vec<Tag> = [(0, "IMAGEDEF"), (5, "40"), (102, "{ACAD_REACTORS")].iter().map(|(c, v)| Tag::s(*c, *v)).collect();
+        tags.extend(reactors.iter().map(|r| Tag::s(330, *r)));
+        tags.extend([Tag::s(102, "}"), Tag::s(330, "41")]);
+        tags
+    }
+
     #[test]
-    fn the_reactors_of_an_image_definition_follow_the_handles_of_their_images() {
-        let mut tags: Vec<Tag> = [
-            (0, "IMAGEDEF"),
-            (5, "40"),
-            (102, "{ACAD_REACTORS"),
-            (330, "9999999"),
-            (330, "59292"),
-            (330, "59204"),
-            (330, "5937D"),
-            (102, "}"),
-            (330, "41"),
-        ]
-        .iter()
-        .map(|(c, v)| Tag::s(*c, *v))
-        .collect();
-        order_image_definition_reactors(&mut tags);
-        let reactors: Vec<String> = tags.iter().filter(|t| t.code == 330).take(4).map(Tag::str).collect();
-        assert_eq!(reactors, ["9999999", "59204", "59292", "5937D"]);
+    fn the_reactors_of_an_image_definition_without_a_source_order_follow_the_handles_of_their_images() {
+        let mut tags = definition(["9999999", "59292", "59204", "5937D"]);
+        order_image_definition_reactors(&mut tags, &Drawing::new_metric());
+        assert_eq!(reactors_of(&tags), ["9999999", "59204", "59292", "5937D"]);
+    }
+
+    #[test]
+    fn the_reactors_of_an_image_definition_follow_the_order_the_file_listed_them_in() {
+        let mut d = Drawing::new_metric();
+        // The images of the file were made out of the order of their handles.
+        let listed = ["9999999", "B29DF", "B2A13", "B29AB"].map(|h| handle(h).unwrap());
+        Arc::make_mut(&mut d.source_symbols).reactor_order.insert(handle("40").unwrap(), listed.to_vec());
+        let mut tags = definition(["9999999", "B29AB", "B29DF", "B2A13"]);
+        order_image_definition_reactors(&mut tags, &d);
+        assert_eq!(reactors_of(&tags), ["9999999", "B29DF", "B2A13", "B29AB"]);
     }
 
     #[test]

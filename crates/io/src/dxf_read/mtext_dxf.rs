@@ -55,6 +55,13 @@ pub(crate) fn encode_contents(s: &str) -> String {
     out
 }
 
+/// The contents in the chunks of a DXF MTEXT: AutoCAD cuts 250 characters of the text, then codes each chunk (a tab is one character,
+/// although it is written `^I`).
+pub(crate) fn encoded_chunks(contents: &str) -> Vec<String> {
+    let chars: Vec<char> = contents.chars().collect();
+    chars.chunks(250).map(|chunk| encode_contents(&chunk.iter().collect::<String>())).collect()
+}
+
 /// The MTEXT's own tags: up to an embedded object (group 101), whose groups reuse MTEXT's codes.
 fn own(tags: &[Tag]) -> &[Tag] {
     let end = tags.iter().position(|t| t.code == 101).unwrap_or(tags.len());
