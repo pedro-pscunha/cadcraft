@@ -1,7 +1,9 @@
 //! Test-only differential definition. Neither branch uses the static classification decision.
 mod identity;
+mod units;
 pub(super) use identity::RecordIdentity;
 use identity::{Placement, Record, RecordIndex};
+use units::{Relations, UnitIndex};
 
 use super::{LegacyDisposition, classify_legacy_unit, family_of_kind, policy};
 use cadcraft_doc::{Drawing, EntityStore, Handle};
@@ -84,6 +86,20 @@ fn transform(drawing: &mut Drawing, operation: Operation) -> BTreeSet<Handle> {
 }
 
 fn fields(kind: &str, tags: &[Tag], version: Version) -> BTreeMap<(i32, usize), String> {
+    if kind == "VERTEX" {
+        let mut counts = BTreeMap::new();
+        return tags
+            .iter()
+            .take_while(|tag| tag.code < 1000)
+            .filter(|tag| matches!(tag.code, 10 | 20 | 30 | 40 | 41 | 42 | 50 | 70 | 71 | 72 | 73 | 74 | 91))
+            .map(|tag| {
+                let n = counts.entry(tag.code).or_insert(0);
+                let key = (tag.code, *n);
+                *n += 1;
+                (key, tag.str())
+            })
+            .collect();
+    }
     let Some(family) = family_of_kind(kind) else { return BTreeMap::new() };
     let policy = policy::policy(family, version);
     let mut owned = None;
@@ -176,7 +192,9 @@ fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BT
 
 fn fields_contained(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>, input_scale: f64) -> bool {
     expected.iter().all(|(key, expected)| {
-        let default = family_of_kind(kind).and_then(|family| policy::omitted_default(family, key.0));
+        let default = family_of_kind(kind)
+            .and_then(|family| policy::omitted_default(family, key.0))
+            .or_else(|| (kind == "VERTEX" && matches!(key.0, 30 | 40 | 41 | 42 | 70)).then_some(("0", "DXF VERTEX zero defaults.")));
         actual.get(key).map(String::as_str).or_else(|| default.map(|(value, _)| value)).is_some_and(|actual| {
             if expected == actual {
                 return true;
@@ -224,8 +242,13 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
     drop(native);
     let expected = RecordIndex::new(&bytes);
     drop(bytes);
+    let source_units = UnitIndex::new(&original);
+    let actual_units = UnitIndex::new(&actual);
+    let expected_units = UnitIndex::new(&expected);
+    let relations = Relations::new(&source_units, &actual_units);
     let mut reported = BTreeSet::new();
-    original.iter().map(|record| {
+    source_units.iter().map(|unit| {
+        let record = unit.parent();
         let identity = original.identity(record);
         let kind = &record.kind;
         let source_tags = &record.groups;
@@ -233,13 +256,15 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
         let input_scale = source_fields.iter().filter(|((code, _), _)| (10..=49).contains(code))
             .filter_map(|(_, value)| value.parse::<f64>().ok()).filter(|value| value.is_finite())
             .map(f64::abs).fold(32.0, f64::max) * 2.0;
-        let actual_record = actual.corresponding(&original, record);
-        let expected_record = expected.corresponding(&original, record);
+        let actual_unit = actual_units.corresponding(&source_units, unit);
+        let expected_unit = expected_units.corresponding(&source_units, unit);
+        let actual_record = actual_unit.map(|unit| unit.parent());
+        let expected_record = expected_unit.map(|unit| unit.parent());
         let was_refused = actual_record.and_then(|record| record.handle).is_some_and(|handle| refused.contains(&handle));
-        let good = !was_refused && actual_record.zip(expected_record).is_some_and(|(actual, expected)| {
-            actual.kind == *kind && expected.kind == *kind
-                && equivalent(kind, &reference_fields(kind, source_tags, &expected.groups, version, operation), &fields(kind, &actual.groups, version), input_scale)
-                && (!matches!(operation, Operation::Identity) || equivalent(kind, &source_fields, &fields(kind, &actual.groups, version), input_scale))
+        let good = !was_refused && actual_unit.zip(expected_unit).is_some_and(|(actual_unit, expected_unit)| {
+            relations.conserved(&source_units, &actual_units, unit, actual_unit)
+                && expected_units.same_shape(&source_units, unit, expected_unit)
+                && units::geometry_conserved(unit, actual_unit, expected_unit, version, operation)
         });
         if !good && classify_legacy_unit(&[(kind.clone(), source_tags.clone())], version)
             .is_some_and(|classification| classification.disposition == LegacyDisposition::Plain)
@@ -303,11 +328,13 @@ fn run_corpus(owner: Option<&str>) {
         let parsed = cadcraft_dxf::parse(&source).unwrap();
         let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), version);
         drop(parsed);
+        let source_units = UnitIndex::new(&original);
         for operation in Operation::ALL {
             let measured = measure_with_origin(&source, operation, from_dwg);
             let mut counts: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
             let mut derived: BTreeMap<String, usize> = BTreeMap::new();
-            for record in original.iter() {
+            for unit in source_units.iter() {
+                let record = unit.parent();
                 let identity = original.identity(record);
                 let kind = &record.kind;
                 let tags = &record.groups;

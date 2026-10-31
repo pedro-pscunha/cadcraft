@@ -2,7 +2,7 @@
 use crate::activation::records::Container;
 use cadcraft_doc::Handle;
 use cadcraft_dxf::{Tag, records, sections};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::dxf_read::legacy_equivalence) enum Placement {
@@ -31,7 +31,15 @@ pub(super) struct Record {
     pub groups: Vec<Tag>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum MetadataIdentity {
+    Named { kind: String, name: String },
+    Handle { kind: String, handle: Handle },
+}
+
 pub(super) struct RecordIndex {
+    metadata: BTreeMap<Handle, Vec<MetadataIdentity>>,
+    definitions: BTreeSet<String>,
     records: Vec<Record>,
     positions: BTreeMap<Position, usize>,
     handles: BTreeMap<Handle, Vec<usize>>,
@@ -40,13 +48,32 @@ pub(super) struct RecordIndex {
 impl RecordIndex {
     pub fn new(bytes: &[u8]) -> Self {
         let tags = cadcraft_dxf::parse(bytes).unwrap();
-        let mut index = Self { records: Vec::new(), positions: BTreeMap::new(), handles: BTreeMap::new() };
+        let mut index = Self {
+            metadata: BTreeMap::new(),
+            definitions: BTreeSet::new(),
+            records: Vec::new(),
+            positions: BTreeMap::new(),
+            handles: BTreeMap::new(),
+        };
+        for section in sections(&tags).into_iter().filter(|section| !matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
+            for (kind, groups) in records(&section.tags) {
+                let Some(handle) = groups.iter().find(|tag| matches!(tag.code, 5 | 105)).and_then(|tag| Handle::parse_hex(&tag.str())) else {
+                    continue;
+                };
+                let identity = match groups.iter().find(|tag| tag.code == 2) {
+                    Some(name) => MetadataIdentity::Named { kind, name: name.str().trim().to_ascii_uppercase() },
+                    None => MetadataIdentity::Handle { kind, handle },
+                };
+                index.metadata.entry(handle).or_default().push(identity);
+            }
+        }
         let mut ordinals: BTreeMap<Placement, u32> = BTreeMap::new();
         for section in sections(&tags).into_iter().filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
             let mut placement = if section.name == "ENTITIES" { Placement::Container(Container::Entities) } else { Placement::UnscopedBlocks };
             for (kind, groups) in records(&section.tags) {
                 if kind == "BLOCK" {
                     let name = groups.iter().find(|tag| tag.code == 2).map(Tag::str).unwrap_or_default();
+                    index.definitions.insert(name.trim().to_ascii_uppercase());
                     placement = Placement::Container(Container::block(&name));
                     continue;
                 }
@@ -67,6 +94,29 @@ impl RecordIndex {
             }
         }
         index
+    }
+
+    pub fn named_target(&self, kind: &str, name: &str) -> bool {
+        if kind == "BLOCK_RECORD" {
+            return self.definitions.contains(name) || matches!(name, "*MODEL_SPACE" | "*PAPER_SPACE");
+        }
+        if matches!((kind, name), ("LAYER", "0") | ("LTYPE", "BYLAYER" | "BYBLOCK" | "CONTINUOUS") | ("STYLE", "STANDARD")) {
+            return true;
+        }
+        self.metadata.values().flatten().filter(|identity| matches!(identity, MetadataIdentity::Named { kind: target_kind, name: target_name } if target_kind == kind && target_name == name)).count() == 1
+    }
+
+    pub fn metadata(&self, handle: Handle) -> Option<&MetadataIdentity> {
+        let candidates = self.metadata.get(&handle)?;
+        (candidates.len() == 1).then(|| &candidates[0])
+    }
+
+    pub fn all(&self) -> &[Record] {
+        &self.records
+    }
+
+    pub fn handle_count(&self, handle: Handle) -> usize {
+        self.handles.get(&handle).map_or(0, Vec::len)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Record> {

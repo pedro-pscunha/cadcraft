@@ -9,7 +9,7 @@ use cadcraft_dxf::{Tag, Value as TagValue};
 use crate::dxf_raw::WrittenReferences;
 use crate::{IoError, Result};
 
-mod fields;
+pub(crate) mod fields;
 use fields::{Field, FieldError, Fields, Value};
 
 const MAX_FIELDS: usize = 1_000_000;
