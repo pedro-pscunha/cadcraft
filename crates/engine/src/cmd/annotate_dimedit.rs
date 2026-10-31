@@ -287,7 +287,16 @@ fn jogged_kind(s: &Session, c: Vec2, r: f64, center: Vec2, at: Vec2, jog: Option
     if let EntityKind::Dimension(dm) = &mut k {
         dm.marks.jogged = Some(JoggedRadius { center: v3(center), jog: v3(jog) });
         if at.dist(c) > r + 1e-9 {
-            dm.text_mid = v3(at);
+            // The location is where the dimension line runs; with the text above the line AutoCAD puts the centre of the text a gap and
+            // half its height above that point, measured perpendicular to the line, on the side the text reads from (LT 2025, ISO-25).
+            let above = s.doc().ok().and_then(|d| {
+                d.dim_style(&super::common::style(s)).filter(|st| st.text_above != 0).map(|st| {
+                    let scale = st.effective_scale(d.header.f64("DIMSCALE", 1.0));
+                    Vec2::from_angle(dir.angle()).perp() * (st.text_gap.abs() * scale + 0.5 * st.text_height * scale)
+                })
+            });
+            let (above, flip) = (above.unwrap_or(Vec2::ZERO), dir.x < -1e-12);
+            dm.text_mid = v3(at + if flip { -above } else { above });
             dm.user_text_pos = true;
         }
     }

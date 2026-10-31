@@ -1656,7 +1656,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 27] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 31] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1669,6 +1669,10 @@ fn live_rows() -> Vec<Row> {
         ("dimaligned", "DIMASSOC 0, two points", explode_dimaligned, exploded_linear),
         ("dimradius", "DIMASSOC 0, circle", explode_dimradius, exploded_radius),
         ("dimdiameter", "DIMASSOC 0, circle", explode_dimdiameter, exploded_diameter),
+        ("dimjogged", "DIMASSOC 0, circle", explode_dimjogged, exploded_jogged),
+        ("dimangular", "DIMASSOC 0, two lines", explode_dimangular_lines, exploded_angular_lines),
+        ("dimangular", "DIMASSOC 0, vertex", explode_dimangular_vertex, exploded_angular_vertex),
+        ("dimarc", "DIMASSOC 0, arc", explode_dimarc, exploded_arc_length),
         ("dimordinate", "DIMASSOC 0, feature and leader", explode_dimordinate, exploded_ordinate),
         ("dimlinear", "DIMASSOC 0, object", explode_dimlinear_object, exploded_linear),
         ("dimangular", "arc at Z 7", dimangular_on_arc, angular_on_arc_made),
@@ -1706,66 +1710,12 @@ struct Pending {
 }
 
 fn pending() -> Vec<Pending> {
-    vec![
-        Pending {
-            finding: "MLINE-ELEVATION",
-            what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
+    vec![Pending {
+        finding: "MLINE-ELEVATION",
+        what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
                    measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
-            row: None,
-        },
-        Pending {
-            finding: "DIMASSOC0-JOGGED",
-            what: "DIMJOGGED at DIMASSOC 0 makes 4 LINEs, AutoCAD 3 (the leader and the jog are three lines).",
-            row: Some(Row {
-                command: "dimjogged",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, circle",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimjogged,
-                expect: Expect::Edits(exploded_jogged),
-            }),
-        },
-        Pending {
-            finding: "DIMASSOC0-ANGULAR-LINES",
-            what: "DIMANGULAR on two lines at DIMASSOC 0 makes 1 ARC, AutoCAD 2 ARCs and 1 LINE (the arc is broken around the text, a leader runs to it).",
-            row: Some(Row {
-                command: "dimangular",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, two lines",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimangular_lines,
-                expect: Expect::Edits(exploded_angular_lines),
-            }),
-        },
-        Pending {
-            finding: "DIMASSOC0-ANGULAR-VERTEX",
-            what: "DIMANGULAR with a vertex at DIMASSOC 0 makes 1 ARC, AutoCAD 2 ARCs and 3 LINEs (two extension lines and a leader).",
-            row: Some(Row {
-                command: "dimangular",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, vertex",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimangular_vertex,
-                expect: Expect::Edits(exploded_angular_vertex),
-            }),
-        },
-        Pending {
-            finding: "DIMASSOC0-ARC-LENGTH",
-            what: "DIMARC at DIMASSOC 0 makes 1 ARC and 2 LINEs, AutoCAD 3 ARCs and 3 LINEs (the arc is broken around the text and carries the arc symbol).",
-            row: Some(Row {
-                command: "dimarc",
-                role: Role::PickedPoint,
-                branch: "DIMASSOC 0, arc",
-                revision: Revision::Legacy,
-                plane: Plane::PlusZ,
-                fixture: explode_dimarc,
-                expect: Expect::Edits(exploded_arc_length),
-            }),
-        },
-    ]
+        row: None,
+    }]
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -1793,11 +1743,7 @@ fn a_pending_row_still_fails_and_is_removed_when_its_fix_lands() {
 #[test]
 fn the_pending_rows_are_exactly_the_open_findings() {
     let findings: Vec<&str> = pending().iter().map(|p| p.finding).collect();
-    assert_eq!(
-        findings,
-        vec!["MLINE-ELEVATION", "DIMASSOC0-JOGGED", "DIMASSOC0-ANGULAR-LINES", "DIMASSOC0-ANGULAR-VERTEX", "DIMASSOC0-ARC-LENGTH"],
-        "F3 is closed (5774fbf8): a new finding gets its entry here"
-    );
+    assert_eq!(findings, vec!["MLINE-ELEVATION"], "F3 is closed (5774fbf8): a new finding gets its entry here");
     assert!(pending().iter().all(|p| !p.what.is_empty()));
 }
 
