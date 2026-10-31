@@ -44,6 +44,7 @@ mod draworder;
 mod dyn_input;
 mod dynamic_block_data;
 mod dynamic_grips;
+mod elevation_dimension_chain;
 mod fillet_chamfer;
 mod fix_holds_grips;
 mod followups_626;

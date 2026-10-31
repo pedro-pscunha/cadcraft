@@ -217,7 +217,7 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => ix.auto_assoc(&[("p13", dm.p13.xy()), ("p14", dm.p14.xy())]),
             };
         }
-        let h = s.add_entity(k)?;
+        let h = s.draw(k)?;
         s.last_dim = Some(h);
         out.push(h.hex());
     }

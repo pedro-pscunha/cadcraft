@@ -53,7 +53,7 @@ pub(super) fn run_wipeout(s: &mut Session, p: &Value) -> Result<Value> {
     if pts.len() < 3 || pts.len() > MAX_GEN || shoelace(&pts).abs() < 1e-12 {
         return Err(bad("wipeout", "need 3+ points enclosing an area"));
     }
-    added(s.add_entity(EntityKind::Wipeout(Wipeout { boundary: pts, display: Default::default(), frame: None, image: None }))?)
+    added(s.draw(EntityKind::Wipeout(Wipeout { boundary: pts, display: Default::default(), frame: None, image: None }))?)
 }
 
 #[derive(Default)]
@@ -129,7 +129,7 @@ impl Interactive for WipeoutM {
                 if self.pts.len() < 3 || shoelace(&self.pts).abs() < 1e-12 {
                     return Err(other("A wipeout needs three or more points enclosing an area."));
                 }
-                s.add_entity(EntityKind::Wipeout(Wipeout { boundary: self.pts.clone(), display: Default::default(), frame: None, image: None }))?;
+                s.draw(EntityKind::Wipeout(Wipeout { boundary: self.pts.clone(), display: Default::default(), frame: None, image: None }))?;
                 Ok(Step::Done)
             }
             (_, Input::Enter) => Ok(Step::Cancel),

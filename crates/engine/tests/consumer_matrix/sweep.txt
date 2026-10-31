@@ -46,15 +46,12 @@ dcradius	template=91	legacy=works	canonical=refused: object 100 has canonical ge
 dcvertical	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
 delconstraint	template=0	legacy=works	canonical=works	raw=works
 dimconstraint	template=91	legacy=works	canonical=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...	raw=refused: object 100 has canonical geometry, which the constraint solver does not read yet. Nothing was ch...
-dimdiameter	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 dimdisassociate	template=0	legacy=works	canonical=works	raw=works
 dimedit	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimedit`: select dimensions
 dimedit.oblique	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimedit`: select dimensions
 diminspect	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `diminspect`: select dimensions
 dimjogline	template=10	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimjogline`: `handle` of a linear or aligned dimension is required
-dimlinear	template=116	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
 dimoverride	template=45	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
-dimradius	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 dimreassociate	template=0	legacy=works	canonical=works	raw=works
 dimspace	template=54	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: invalid parameters for `dimspace`: `base` is not a dimension
 dimstyle.override	template=45	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
@@ -137,7 +134,6 @@ reverse	template=0	legacy=works	canonical=refused: This canonical geometry paylo
 select	template=0	legacy=works	canonical=works	raw=works
 selectsimilar	template=0	legacy=works	canonical=works	raw=works
 shapes	template=0	legacy=works	canonical=refused: Extent query refused object 106: A canonical spline needs its Z values.; object 10C: The legacy ...	raw=works
-spline	template=117	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Object 105 not converted: it is not a polyline.
 splinedit	template=81	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw SPLINE object 106 is read-only: The source has no exact geometry adapter.
 stretch	template=112	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
 table.break	template=21	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
@@ -172,7 +168,6 @@ blocks.reference.grip	unprobed
 blocks.reference.set	unprobed
 dataextraction	unprobed
 datalink	unprobed
-dimarc	unprobed
 eattext	unprobed
 erase.selection	unprobed
 exportpdf	unprobed

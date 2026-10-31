@@ -17,6 +17,10 @@ fn z_of(kind: &EntityKind) -> Option<f64> {
         EntityKind::Helix(h) => h.center.z,
         EntityKind::Table(t) => t.insert.z,
         EntityKind::LwPolyline(p) => p.elevation,
+        EntityKind::Dimension(d) => d.text_mid.z,
+        EntityKind::MLeader(m) => m.roots.first()?.landing.z,
+        EntityKind::Spline(sp) => sp.space.as_ref().map_or(0.0, |s| s.control.first().copied().unwrap_or(0.0)),
+        EntityKind::Wipeout(w) => w.image.as_ref().map_or(0.0, |f| f.origin.z),
         _ => return None,
     })
 }
@@ -35,6 +39,11 @@ const COMMANDS: &[(&str, &str, (f64, f64), &[&str])] = &[
     ("MTEXT", "MTEXT 1,1", (3.0, 2.0), &[]),
     ("HELIX", "HELIX 0,0 1", (3.0, 1.0), &["1", "2"]),
     ("REVCLOUD", "REVCLOUD 0,0", (3.0, 3.0), &[]),
+    ("DIMLINEAR", "DIMLINEAR 0,0 10,0", (5.0, 3.0), &["5,3"]),
+    ("DIMALIGNED", "DIMALIGNED 0,0 10,5", (5.0, 7.0), &["5,7"]),
+    ("MLEADER", "MLEADER 1,1", (4.0, 4.0), &[]),
+    ("SPLINE", "SPLINE 0,0 2,2", (4.0, 0.0), &[]),
+    ("WIPEOUT", "WIPEOUT 0,0 4,0", (4.0, 4.0), &[]),
 ];
 
 fn session() -> Session {

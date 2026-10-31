@@ -49,7 +49,7 @@ pub(super) fn add_dim(s: &mut Session, k: EntityKind) -> Result<Handle> {
     {
         dm.assoc = crate::assoc::reassociate(s.doc()?, &s.space(), dm);
     }
-    let h = s.add_entity(k)?;
+    let h = s.draw(k)?;
     s.last_dim = Some(h);
     Ok(h)
 }

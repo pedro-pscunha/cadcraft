@@ -1,7 +1,7 @@
 use super::common::{DimText, add_dim, assoc_enabled, circle_of, dim, linear_kind, pick_at};
 use super::{
     Accept, DimKind, Dimension, EngineError, EntityKind, Handle, Input, Interactive, Prim, Prompt, Result, Segment, Session, Step, Value, Vec2, bad,
-    json, point_req, points_param, str_param, v3,
+    json, point_req, points_param, str_param,
 };
 
 pub(super) fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
@@ -62,7 +62,8 @@ fn chained(s: &Session, prev: &Dimension, next: Vec2, baseline: bool) -> EntityK
         DimKind::Linear { rotation } => Vec2::from_angle(rotation),
         _ => (prev.p14.xy() - prev.p13.xy()).normalized(),
     };
-    let first = if baseline { prev.p13.xy() } else { prev.p14.xy() };
+    // The chain keeps the Z of the dimension it continues: the previous point and line, and the new point at the Z of the last one.
+    let first = if baseline { prev.p13 } else { prev.p14 };
     let mut defpt = prev.defpt.xy();
     if baseline {
         // Offset the dimension line away from the measured points.
@@ -71,9 +72,9 @@ fn chained(s: &Session, prev: &Dimension, next: Vec2, baseline: bool) -> EntityK
         defpt += n * (spacing * side);
     }
     EntityKind::Dimension(Dimension {
-        p13: v3(first),
-        p14: v3(next),
-        defpt: v3(defpt),
+        p13: first,
+        p14: cadcraft_geom::Vec3::new(next.x, next.y, prev.p14.z),
+        defpt: cadcraft_geom::Vec3::new(defpt.x, defpt.y, prev.defpt.z),
         text: String::new(),
         block: None,
         assoc: Vec::new(),

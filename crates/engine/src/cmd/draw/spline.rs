@@ -22,7 +22,7 @@ pub(super) fn run_spline(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         return Err(bad("spline", "`fit` or `control` points are required"));
     };
-    added(s.add_entity(EntityKind::Spline(sp))?)
+    added(s.draw(EntityKind::Spline(sp))?)
 }
 
 #[derive(Default)]
@@ -86,7 +86,7 @@ impl Interactive for SplineM {
                 Outcome::Finish => {
                     self.ask = None;
                     if self.pts.len() >= 2 {
-                        s.add_entity(EntityKind::Spline(self.make(false)))?;
+                        s.draw(EntityKind::Spline(self.make(false)))?;
                     }
                     Ok(Step::Done)
                 }
@@ -122,7 +122,7 @@ impl Interactive for SplineM {
             }
             Input::Keyword(k) if k == "Close" => {
                 // A smooth closed (periodic) curve, not a repeat of the first point.
-                s.add_entity(EntityKind::Spline(self.make(true)))?;
+                s.draw(EntityKind::Spline(self.make(true)))?;
                 Ok(Step::Done)
             }
             Input::Keyword(k) if k == "Method" => {
@@ -139,7 +139,7 @@ impl Interactive for SplineM {
             }
             Input::Enter => {
                 if self.pts.len() >= 2 {
-                    s.add_entity(EntityKind::Spline(self.make(false)))?;
+                    s.draw(EntityKind::Spline(self.make(false)))?;
                 }
                 Ok(Step::Done)
             }

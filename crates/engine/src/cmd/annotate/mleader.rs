@@ -46,7 +46,7 @@ pub(super) fn run_mleader(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let k = mleader_kind(s, &pts, str_param(p, "text").unwrap_or(""), true).ok_or_else(|| bad("mleader", "bad points"))?;
     let k = crate::cmd::mleader_content::apply(s, k, &content)?;
-    Ok(json!({ "handle": s.add_entity(k)?.hex() }))
+    Ok(json!({ "handle": s.draw(k)?.hex() }))
 }
 
 pub(super) fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
@@ -206,7 +206,7 @@ impl MLeaderM {
         let text = self.text.clone().unwrap_or_default();
         let k = mleader_kind(s, &self.leader(None), &text, self.landing).ok_or_else(|| EngineError::Other("bad leader".into()))?;
         let k = crate::cmd::mleader_content::apply(s, k, &self.content_spec())?;
-        s.add_entity(k)?;
+        s.draw(k)?;
         Ok(Step::Done)
     }
     fn option_prompt(o: LeaderOpt) -> Prompt {

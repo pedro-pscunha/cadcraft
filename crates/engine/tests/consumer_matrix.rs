@@ -668,6 +668,130 @@ elevated_fixture!(table_at_3, json!({"at": [0, 0], "rows": 1, "cols": 1}));
 elevated_fixture!(leader_at_3, json!({"points": [[0, 0], [3, 3]], "text": "a"}));
 elevated_fixture!(revcloud_at_3, json!({"p1": [0, 0], "p2": [4, 4], "arcLength": 1}));
 
+elevated_fixture!(dimlinear_at_3, json!({"p1": [0, 10], "p2": [10, 10], "at": [5, 13]}));
+elevated_fixture!(dimaligned_at_3, json!({"p1": [0, 20], "p2": [10, 25], "at": [5, 28]}));
+elevated_fixture!(dimangular_at_3, json!({"vertex": [100, 0], "p1": [105, 0], "p2": [100, 5], "at": [103, 3]}));
+elevated_fixture!(dimradius_at_3, json!({"center": [30, 0], "point": [32, 0]}));
+elevated_fixture!(dimdiameter_at_3, json!({"center": [30, 0], "point": [32, 0]}));
+elevated_fixture!(dimordinate_at_3, json!({"feature": [80, 0], "leader": [80, 5]}));
+elevated_fixture!(mleader_at_3, json!({"points": [[90, 0], [95, 5]], "text": "ML"}));
+elevated_fixture!(spline_at_3, json!({"fit": [[120, 0], [125, 5], [130, 0]]}));
+elevated_fixture!(wipeout_at_3, json!({"points": [[150, 0], [155, 0], [155, 5]]}));
+
+/// DIMJOGGED over the circle that the fixture draws at the elevation.
+fn dimjogged_at_3() -> Fixture {
+    let mut f = at_elevation(json!({}));
+    let mut s = session_of(&f.drawing);
+    let circle = create(&mut s, "circle", json!({"center": [110, 110], "radius": 2}));
+    f.drawing = model_of(&s);
+    f.params = json!({"handle": circle.hex(), "centerOverride": [95, 105], "at": [104, 104], "jog": [100, 102]});
+    f
+}
+
+/// DIMARC over an arc that the fixture draws at the elevation.
+fn dimarc_at_3() -> Fixture {
+    let mut f = at_elevation(json!({}));
+    let mut s = session_of(&f.drawing);
+    let arc = create(&mut s, "arc", json!({"p1": [70, 0], "p2": [72, 2], "p3": [74, 0]}));
+    f.drawing = model_of(&s);
+    f.params = json!({"handle": arc.hex(), "at": [72, 4]});
+    f
+}
+
+/// The Z of each definition point that AutoCAD gives a dimension drawn at ELEVATION 3 from 2D picks (DXFOUT of accoreconsole, LT 2025,
+/// 31/10/2026, `/tmp/cad/elev-oracle`): linear and aligned 10, 11, 13, 14; radial and diametric 10, 11, 15; jogged 10, 11, 13, 14, 15; two-line angular
+/// 10, 11, 13, 14, 15, 16; three-point angular 10, 11, 13, 14, 15; arc length 10, 11, 13, 14, 15, 16; ordinate 11, 13, 14, with group 10,
+/// the origin of the UCS, at Z 0.
+fn dimension_points_at_3(dm: &cadcraft_doc::Dimension) -> Result<(), String> {
+    use cadcraft_doc::DimKind::*;
+    let all = [("defpt", dm.defpt), ("text_mid", dm.text_mid), ("p13", dm.p13), ("p14", dm.p14), ("p15", dm.p15), ("p16", dm.p16)];
+    let (at_3, at_0): (&[&str], &[&str]) = match dm.kind {
+        Linear { .. } | Aligned => (&["defpt", "text_mid", "p13", "p14"], &["p15", "p16"]),
+        Radius | Diameter => (&["defpt", "text_mid", "p15"], &["p13", "p14", "p16"]),
+        Angular => (&["defpt", "text_mid", "p13", "p14", "p15", "p16"], &[]),
+        Angular3P => (&["defpt", "text_mid", "p13", "p14", "p15"], &["p16"]),
+        ArcLength => (&["defpt", "text_mid", "p13", "p14", "p15", "p16"], &[]),
+        Ordinate { .. } => (&["text_mid", "p13"], &["defpt"]),
+    };
+    for (name, point) in all {
+        if at_3.contains(&name) {
+            near(point.z, 3.0).map_err(|e| format!("{name}: {e}"))?;
+        } else if at_0.contains(&name) {
+            near(point.z, 0.0).map_err(|e| format!("{name}: {e}"))?;
+        }
+    }
+    if let Some(jogged) = &dm.marks.jogged {
+        near(jogged.center.z, 3.0).map_err(|e| format!("jog center: {e}"))?;
+    }
+    Ok(())
+}
+
+fn made_dimension_at_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    match &made(d, ops)?.kind {
+        EntityKind::Dimension(dm) => dimension_points_at_3(dm),
+        other => Err(format!("made {other:?}")),
+    }
+}
+
+/// MULTILEADER: the content base, the text location and every leader point are at Z 3 (groups 10, 12, 110 of the context, 10 of the
+/// leader and of its line).
+fn made_mleader_at_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    let entity = made(d, ops)?;
+    let EntityKind::MLeader(m) = &entity.kind else { return Err(format!("made {:?}", entity.kind)) };
+    for root in &m.roots {
+        near(root.landing.z, 3.0).map_err(|e| format!("landing: {e}"))?;
+        for branch in &root.branches {
+            for v in &branch.vertices {
+                near(v.z, 3.0).map_err(|e| format!("leader line: {e}"))?;
+            }
+        }
+    }
+    near(m.text.as_ref().ok_or("no text")?.insert.z, 3.0).map_err(|e| format!("text: {e}"))?;
+    near(m.context.origin.z, 3.0).map_err(|e| format!("context origin: {e}"))
+}
+
+/// SPLINE through 2D picks: every control and fit point is at Z 3 (groups 10 and 11).
+fn made_spline_at_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    let entity = made(d, ops)?;
+    let EntityKind::Spline(sp) = &entity.kind else { return Err(format!("made {:?}", entity.kind)) };
+    let space = sp.space.as_ref().ok_or("the spline has no Z values")?;
+    if !sp.space_is_consistent() {
+        return Err("the Z values do not match the points".into());
+    }
+    for z in space.control.iter().chain(&space.fit) {
+        near(*z, 3.0)?;
+    }
+    Ok(())
+}
+
+/// WIPEOUT: the insertion point of the image (group 10) is at Z 3 in the saved DXF.
+fn made_wipeout_at_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+    let entity = made(d, ops)?;
+    let EntityKind::Wipeout(w) = &entity.kind else { return Err(format!("made {:?}", entity.kind)) };
+    if w.source_image().is_none() {
+        return Err("the frame does not describe the boundary".into());
+    }
+    let bytes = cadcraft_io::write(d, "wipeout.dxf").map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let at = lines.windows(2).position(|w| w == ["100", "AcDbWipeout"]).ok_or("no wipeout record")?;
+    let z = (at..lines.len() - 1).find(|i| lines[*i] == "30").map(|i| lines[i + 1]).ok_or("no group 30")?;
+    near(z.parse::<f64>().map_err(|e| e.to_string())?, 3.0)?;
+    // And it reads back with the same outline at the same Z.
+    let back = cadcraft_io::read(&bytes, "wipeout.dxf").map_err(|e| e.to_string())?;
+    let read = back
+        .model
+        .iter()
+        .find_map(|e| if let EntityKind::Wipeout(r) = &e.kind { Some(r.clone()) } else { None })
+        .ok_or("the wipeout is not read back")?;
+    near(read.image.as_ref().ok_or("no frame after the read")?.origin.z, 3.0)?;
+    if read.boundary.len() == w.boundary.len() {
+        Ok(())
+    } else {
+        Err(format!("{} vertices after the read, {} before", read.boundary.len(), w.boundary.len()))
+    }
+}
+
 /// The Z that a drawn object sits at: the elevation of a polyline, the Z of the center, base or insertion point of the others.
 fn elevation_of(kind: &EntityKind) -> Option<f64> {
     Some(match kind {
@@ -697,6 +821,15 @@ fn made_at_elevation_3(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), Stri
 
 /// The commands the rows cover, with the roles each one's rows cover. The registry lint compares both with the rows and the registry.
 const DECLARED: &[(&str, &[Role])] = &[
+    ("dimlinear", &[Role::PickedPoint]),
+    ("dimaligned", &[Role::PickedPoint]),
+    ("dimangular", &[Role::PickedPoint]),
+    ("dimradius", &[Role::PickedPoint]),
+    ("dimdiameter", &[Role::PickedPoint]),
+    ("dimordinate", &[Role::PickedPoint]),
+    ("dimarc", &[Role::PickedPoint]),
+    ("mleader", &[Role::PickedPoint]),
+    ("spline", &[Role::PickedPoint]),
     ("circle", &[Role::PickedPoint]),
     ("circle.2p", &[Role::PickedPoint]),
     ("circle.3p", &[Role::PickedPoint]),
@@ -721,7 +854,7 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("centermark", &[Role::Primary]),
     ("copy", &[Role::SelectionMember]),
     ("dimbreak", &[Role::Boundary]),
-    ("dimjogged", &[Role::Primary]),
+    ("dimjogged", &[Role::Primary, Role::PickedPoint]),
     ("dist", &[Role::PickedPoint]),
     ("erase", &[Role::SelectionMember]),
     ("id", &[Role::PickedPoint]),
@@ -735,7 +868,7 @@ const DECLARED: &[(&str, &[Role])] = &[
     ("revcloud", &[Role::Primary, Role::PickedPoint]),
     ("rotate", &[Role::SelectionMember]),
     ("scale", &[Role::SelectionMember]),
-    ("wipeout", &[Role::Primary]),
+    ("wipeout", &[Role::Primary, Role::PickedPoint]),
     ("xline", &[Role::Primary, Role::PickedPoint]),
 ];
 
@@ -1236,6 +1369,25 @@ fn live_rows() -> Vec<Row> {
     for (command, branch, fixture) in drawn {
         for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
             out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(made_at_elevation_3) });
+        }
+    }
+    // The same for the annotation and curve commands that carry Z in more than one field, with the Z of each field from the oracle.
+    let annotated: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 11] = [
+        ("dimlinear", "two points and a location", dimlinear_at_3, made_dimension_at_3),
+        ("dimaligned", "two points and a location", dimaligned_at_3, made_dimension_at_3),
+        ("dimangular", "vertex and two points", dimangular_at_3, made_dimension_at_3),
+        ("dimradius", "center and point", dimradius_at_3, made_dimension_at_3),
+        ("dimdiameter", "center and point", dimdiameter_at_3, made_dimension_at_3),
+        ("dimordinate", "feature and leader", dimordinate_at_3, made_dimension_at_3),
+        ("dimjogged", "circle, override, location, jog", dimjogged_at_3, made_dimension_at_3),
+        ("dimarc", "arc and location", dimarc_at_3, made_dimension_at_3),
+        ("mleader", "arrow and landing", mleader_at_3, made_mleader_at_3),
+        ("spline", "fit points", spline_at_3, made_spline_at_3),
+        ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
+    ];
+    for (command, branch, fixture, check) in annotated {
+        for (revision, plane) in [(Revision::Legacy, PlusZ), (Canonical, Tilted), (Revision::Raw, PlusZ)] {
+            out.push(Row { command, role: Role::PickedPoint, branch, revision, plane, fixture, expect: Expect::Edits(check) });
         }
     }
     rows
