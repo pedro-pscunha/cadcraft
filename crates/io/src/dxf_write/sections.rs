@@ -353,6 +353,8 @@ fn write_classes(w: &mut W, d: &Drawing, cx: &Ctx, every: &[&Entity]) {
         classes.push(("IMAGE", "AcDbRasterImage", 127, true));
         classes.push(("IMAGEDEF", "AcDbRasterImageDef", 0, false));
         classes.push(("IMAGEDEF_REACTOR", "AcDbRasterImageDefReactor", 1, false));
+    }
+    if !cx.images.vars.is_empty() {
         classes.push(("RASTERVARIABLES", "AcDbRasterVariables", 0, false));
     }
     classes.push(("SCALE", "AcDbScale", 0, false));
