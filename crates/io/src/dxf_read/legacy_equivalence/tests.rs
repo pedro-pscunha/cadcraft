@@ -73,6 +73,17 @@ fn unsupported_owned_fields_and_disabled_gradient_data_need_activation() {
 }
 
 #[test]
+fn repeated_or_incorrect_subclass_paths_need_activation() {
+    for source in [
+        "0\nLINE\n100\nAcDbEntity\n10\n1\n20\n2\n100\nAcDbLine\n11\n3\n21\n4\n",
+        "0\nLINE\n100\nAcDbLine\n10\n1\n20\n2\n100\nAcDbLine\n11\n3\n21\n4\n",
+        "0\nARC\n100\nAcDbCircle\n10\n1\n20\n2\n40\n3\n50\n20\n51\n120\n100\nAcDbArc\n",
+    ] {
+        assert_eq!(disposition(source), LegacyDisposition::Needs, "{source}");
+    }
+}
+
+#[test]
 fn annotative_hatch_needs_the_unsupported_annotation_path() {
     let source = format!("{ELLIPSE_HATCH}1001\nAcadAnnotative\n1000\nAnnotativeData\n1002\n{{\n1070\n1\n1070\n1\n1002\n}}\n");
     assert_eq!(disposition(&source), LegacyDisposition::Needs);
