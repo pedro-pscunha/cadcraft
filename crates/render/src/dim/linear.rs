@@ -95,7 +95,8 @@ fn prepare_linear(config: &DimConfig<'_>, g: &mut DimGeometry, text_mid: Vec2) -
     let (text_inside, arrows_inside) = if d.user_text_pos || !has_text || just >= 3 {
         (true, arrows_fit)
     } else if fits {
-        (true, true)
+        // Text above or below the line is centred between the extension lines whenever it fits there, and the arrowheads follow their own rule.
+        (true, arrows_fit || !beside)
     } else if st.text_inside {
         (true, false)
     } else {
