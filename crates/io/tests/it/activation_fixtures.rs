@@ -6,10 +6,12 @@
 //! The files are generated from the text below (`cargo test -p cadcraft-io --test it write_activation_fixtures -- --ignored`) and a test
 //! checks that the files on disk are the generated ones.
 
-use std::path::{Path, PathBuf};
+#[path = "../support/read_fixtures.rs"]
+pub(crate) mod read_fixtures;
+pub(crate) use read_fixtures::{dir, predicate, source_predicate};
 
-use cadcraft_dxf::{Section, Tag, Version, parse, sections};
-use cadcraft_io::activation::records::{Container, NodeKey, RecordGraph, RecordView};
+use cadcraft_dxf::{parse, sections};
+use cadcraft_io::activation::records::{Container, NodeKey, RecordGraph};
 use cadcraft_io::activation::{Edge, Failure, Family, FamilySet, Need, NodeId, NodeKind, Outcome, Policy, activate};
 
 // ---- the DXF text of the fixtures ----
@@ -323,41 +325,7 @@ pub(crate) fn cases() -> Vec<Case> {
     ]
 }
 
-// ---- static Legacy classification, separate from fixture readability ----
-
-fn group(groups: &[Tag], code: i32) -> Option<f64> {
-    groups.iter().find(|t| t.code == code).map(Tag::f64)
-}
-
-pub(crate) fn predicate(sections: &[Section]) -> impl Fn(&RecordView<'_>) -> Need + use<> {
-    use cadcraft_io::{LegacyClassifier, LegacyDisposition, LegacyRecordClassification};
-    let classifier = LegacyClassifier::new(sections, Version::R2013);
-    move |view| {
-        match classifier.record(view) {
-            LegacyRecordClassification::OwnerDerived(_) => return Need::Plain,
-            LegacyRecordClassification::Authored(classification) if classification.disposition == LegacyDisposition::Plain => {
-                return Need::Plain;
-            }
-            LegacyRecordClassification::Authored(_) => {}
-        }
-        // Readability is independent of Legacy losslessness. These fixtures inject a failure
-        // or an inconsistent SPLINE count without calling a canonical reader in the predicate.
-        let forced = view.groups.iter().any(|t| t.code == 1000 && t.str() == "UNREADABLE");
-        let readable = !forced
-            && (view.kind != "SPLINE" || group(view.groups, 73).is_some_and(|n| n as usize == view.groups.iter().filter(|t| t.code == 10).count()));
-        Need::Needs { readable }
-    }
-}
-
-pub(crate) fn source_predicate(bytes: &[u8]) -> impl Fn(&RecordView<'_>) -> Need + use<> {
-    predicate(&sections(&parse(bytes).unwrap()))
-}
-
 // ---- the files ----
-
-pub(crate) fn dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/activation")
-}
 
 fn read_case(case: &Case) -> RecordGraph {
     let text = std::fs::read_to_string(dir().join(format!("{}.dxf", case.name))).unwrap_or_else(|e| panic!("{}: {e}", case.name));
