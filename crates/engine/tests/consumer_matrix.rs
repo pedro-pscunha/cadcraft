@@ -1102,6 +1102,17 @@ fn live_rows() -> Vec<Row> {
         fixture: area_ellipse,
         expect: Expect::Refuses("raw"),
     });
+    for (role, branch) in [(Role::Primary, "two spatial lines, legacy control"), (Role::Secondary, "two spatial lines, both canonical")] {
+        out.push(Row {
+            command: "angle.measure",
+            role,
+            branch,
+            revision: Revision::Raw,
+            plane: PlusZ,
+            fixture: angle_between_spatial_lines,
+            expect: Expect::Refuses("raw"),
+        });
+    }
     // Point-based creation: nothing under the picks changes the new object, in any revision of the operand.
     let creations: [(&str, &str, fn() -> Fixture, Expect); 9] = [
         ("point", "at", point_fixture, Expect::Edits(point_made)),
