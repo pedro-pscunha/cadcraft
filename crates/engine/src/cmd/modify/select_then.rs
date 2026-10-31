@@ -475,7 +475,7 @@ impl Interactive for SelectThen {
         };
         let Ok(d) = s.doc() else { return Vec::new() };
         let mut out: Vec<Entity> =
-            self.objs.iter().take(500).filter_map(|h| d.entity(*h)).filter_map(|e| e.transformed(&cadcraft_geom::Mat4::from_mat3(&m)).ok()).collect();
+            self.objs.iter().take(500).filter_map(|h| d.entity(*h)).filter_map(|e| e.transformed(&super::world_map(e, &m)).ok()).collect();
         out.push(s.preview_entity(line(base, c)));
         out
     }

@@ -26,7 +26,7 @@ pub struct Similarity {
 impl Similarity {
     /// Refuse a map that is not a similarity: perspective, shear, non-uniform scale, reflection, collapse.
     pub fn from_mat4(transform: &Mat4) -> Result<Self> {
-        let refuse = || DocError::Invalid("Canonical text can be moved, rotated and scaled uniformly; this transform has another effect.".into());
+        let refuse = || DocError::Invalid("Canonical geometry can be moved, rotated and scaled uniformly; this transform has another effect.".into());
         let m = &transform.m;
         if m[3] != [0.0, 0.0, 0.0, 1.0] || !m.iter().flatten().all(|v| v.is_finite()) {
             return Err(refuse());
@@ -49,7 +49,9 @@ impl Similarity {
         }
         // A reflection makes the basis left-handed.
         if x.cross(y).dot(z) <= 0.0 {
-            return Err(refuse());
+            return Err(DocError::Invalid(
+                "Canonical geometry has no measured convention for a reflection; it can be moved, rotated and scaled uniformly.".into(),
+            ));
         }
         Ok(Self { transform: *transform, scale })
     }

@@ -592,6 +592,7 @@ pub(super) fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
             total
         }
         EntityKind::Region(r) => (r.area(), r.perimeter()),
+        EntityKind::Raw(_) => return Err(bad("area", "a raw object is kept as read and its geometry is not read")),
         _ => return Err(bad("area", "object has no area")),
     })
 }
