@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use cadcraft_color::{Color, Rgb};
-use cadcraft_doc::{CellBorder, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle};
+use cadcraft_doc::{CellBorder, CellDataFormat, CellStyle, DataLink, Lineweight, MAX_CELL_STYLES, MAX_TABLE_PARTS, Table, TableBreak, TableStyle};
 use cadcraft_dxf::Tag;
 use serde::{Deserialize, Serialize};
 
@@ -68,10 +68,18 @@ struct CellStylesPayload {
 
 /// The xdata strings of a table style's cell styles (marker first), or nothing for a plain style.
 pub(crate) fn cell_styles_xdata(s: &TableStyle) -> Vec<String> {
-    if s.cell_styles.is_empty() {
+    let styles: Vec<_> = s
+        .cell_styles
+        .iter()
+        .filter_map(|style| {
+            let style = CellStyle { data_format: None, ..style.clone() };
+            (!s.base_cell_style(&style.name).is_some_and(|base| base == style)).then_some(style)
+        })
+        .collect();
+    if styles.is_empty() {
         return Vec::new();
     }
-    let Ok(json) = serde_json::to_string(&CellStylesPayload { v: 1, styles: s.cell_styles.clone() }) else { return Vec::new() };
+    let Ok(json) = serde_json::to_string(&CellStylesPayload { v: 1, styles }) else { return Vec::new() };
     std::iter::once(CELLSTYLES.to_string()).chain(chunks(&json)).collect()
 }
 
@@ -122,6 +130,14 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
     for (kind, block) in CELL_TYPES.iter().zip(&blocks) {
         let Some(base) = st.base_cell_style(kind) else { continue };
         let mut cs = base.clone();
+        let data_format = CellDataFormat {
+            data_type: block.iter().find(|tag| tag.code == 90).and_then(|tag| i32::try_from(tag.i64()).ok()).unwrap_or(512),
+            unit_type: block.iter().find(|tag| tag.code == 91).and_then(|tag| i32::try_from(tag.i64()).ok()).unwrap_or(0),
+            format_string: block.iter().find(|tag| tag.code == 1).map(Tag::str).unwrap_or_default(),
+        };
+        if data_format != CellDataFormat::default() {
+            cs.data_format = Some(data_format);
+        }
         if let Some(v) = margin_v {
             cs.margin_v = v;
         }
@@ -175,9 +191,10 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
     }
     // Our own complete cell styles replace what the groups could say.
     if let Some(p) = payload(tags, CELLSTYLES).and_then(|j| serde_json::from_str::<CellStylesPayload>(&j).ok()).filter(|p| p.v == 1) {
-        st.cell_styles.clear();
-        for cs in p.styles.into_iter().take(MAX_CELL_STYLES) {
+        let native = std::mem::take(&mut st.cell_styles);
+        for mut cs in p.styles.into_iter().take(MAX_CELL_STYLES) {
             if !cs.name.trim().is_empty() {
+                cs.data_format = native.iter().find(|style| style.name.eq_ignore_ascii_case(&cs.name)).and_then(|style| style.data_format.clone());
                 st.set_cell_style(cs);
             }
         }
@@ -198,9 +215,9 @@ pub(crate) fn cell_type_tags(cs: &CellStyle, text_style: &str, ltypes: Option<&H
         Tag::i(63, i64::from(cs.fill.unwrap_or(Color::Index(7)).to_aci())),
         Tag::i(283, i64::from(cs.fill.is_some())),
     ];
-    // The cell data type (512, general), its unit type and its format string, as AutoCAD writes them for a cell of no special format.
     if cs.format == cadcraft_doc::CellFormat::General {
-        out.extend([Tag::i(90, 512), Tag::i(91, 0), Tag::s(1, "")]);
+        let format = cs.data_format.clone().unwrap_or_default();
+        out.extend([Tag::i(90, i64::from(format.data_type)), Tag::i(91, i64::from(format.unit_type)), Tag::s(1, format.format_string)]);
     }
     let b: [&CellBorder; 6] = cs.borders.as_array();
     // Each border's lineweight, visibility and colour together, in AutoCAD's order.

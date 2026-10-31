@@ -601,9 +601,7 @@ fn keep_block_references(d: &mut Drawing, tables: &Recs) {
         }
         let (Some(name), Some(open)) = (val(t, 2), t.iter().position(|g| g.code == 102 && g.str().trim() == "{BLKREFS")) else { continue };
         let refs: Vec<Handle> = t[open + 1..].iter().take_while(|g| g.code == 331).filter_map(|g| handle(&g.str())).collect();
-        if !refs.is_empty() {
-            source.block_refs.entry(up(&name)).or_insert(refs);
-        }
+        source.block_refs.entry(up(&name)).or_insert(refs);
     }
 }
 
@@ -1029,6 +1027,13 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     keep_block_references(d, &tables);
     keep_classes(d, &classes);
     keep_reactor_order(d, &blocks, &entities, &objects);
+    let hatch_sources = all_entities(d)
+        .filter_map(|entity| {
+            let EntityKind::Hatch(hatch) = &entity.kind else { return None };
+            hatch.associative.then(|| (entity.handle, hatch.loops.iter().flat_map(|boundary| boundary.sources.iter().copied()).collect()))
+        })
+        .collect();
+    Arc::make_mut(&mut d.source_symbols).hatch_sources = hatch_sources;
     let modelled_assoc: HashSet<String> = objects
         .iter()
         .filter(|(kind, _, _)| kind == "DIMASSOC")

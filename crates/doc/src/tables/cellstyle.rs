@@ -85,6 +85,23 @@ pub enum CellFormat {
     Text,
 }
 
+/// The TABLESTYLE value format, independent of CADCraft's formula display format.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CellDataFormat {
+    /// DXF group 90: the source data-type flags (4 string, 512 general).
+    pub data_type: i32,
+    /// DXF group 91: the source unit-type flags.
+    pub unit_type: i32,
+    pub format_string: String,
+}
+
+impl Default for CellDataFormat {
+    fn default() -> Self {
+        Self { data_type: 512, unit_type: 0, format_string: String::new() }
+    }
+}
+
 /// A cell style.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -103,6 +120,9 @@ pub struct CellStyle {
     pub margin_v: f64,
     pub borders: CellBorders,
     pub format: CellFormat,
+    /// The file's value format; `None` is the implicit general/zero/empty format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<CellDataFormat>,
     /// Decimal places for numbers (0..=8).
     pub precision: u8,
     /// New rows in this style merge across the table (titles).
@@ -122,6 +142,7 @@ impl Default for CellStyle {
             margin_v: 0.06,
             borders: CellBorders::default(),
             format: CellFormat::General,
+            data_format: None,
             precision: 2,
             merge: false,
         }

@@ -17,6 +17,36 @@ fn saved_dxf(drawing: &cadcraft_doc::Drawing, name: &str) -> Vec<u8> {
 }
 
 #[test]
+fn zero_entity_linetype_scale_survives_geometry_edits_and_saves() {
+    let cases = [
+        ("LINE", "100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n10\n21\n0\n31\n0\n"),
+        (
+            "HATCH",
+            "100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n2\nSOLID\n70\n1\n71\n0\n91\n1\n92\n2\n72\n0\n73\n1\n93\n3\n10\n0\n20\n0\n10\n10\n20\n0\n10\n0\n20\n10\n97\n0\n75\n0\n76\n1\n98\n0\n",
+        ),
+    ];
+    for (kind, geometry) in cases {
+        let source = format!(
+            "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\n{kind}\n5\n200\n100\nAcDbEntity\n8\n0\n48\n0.0\n{geometry}0\nENDSEC\n0\nEOF\n"
+        );
+        for name in ["zero.dxf", "zero.dwg"] {
+            let mut drawing = cadcraft_io::read(source.as_bytes(), "source.dxf").unwrap();
+            assert_eq!(drawing.entity(cadcraft_doc::Handle(0x200)).unwrap().common.ltscale, 0.0);
+            let mut matrix = cadcraft_geom::Mat4::IDENTITY;
+            matrix.m[0][3] = 3.0;
+            drawing.modify_entity(cadcraft_doc::Handle(0x200), |entity| entity.try_transform(&matrix).unwrap()).unwrap();
+            for _ in 0..2 {
+                let saved = saved_dxf(&drawing, name);
+                let record = entity_record(&saved, kind);
+                assert_eq!(record.iter().filter(|tag| tag.code == 48).map(Tag::f64).collect::<Vec<_>>(), vec![0.0], "{kind} {name}");
+                drawing = cadcraft_io::read(&saved, "saved.dxf").unwrap();
+                assert_eq!(drawing.entity(cadcraft_doc::Handle(0x200)).unwrap().common.ltscale, 0.0);
+            }
+        }
+    }
+}
+
+#[test]
 fn solid_hatches_keep_inactive_gradient_data_without_becoming_gradients() {
     let source = b"0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nHATCH\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\nSOLID\n70\n1\n71\n0\n91\n1\n92\n2\n72\n0\n73\n1\n93\n4\n10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n97\n0\n75\n0\n76\n1\n98\n0\n450\n0\n451\n0\n460\n0.25\n461\n0.75\n452\n1\n462\n0.6\n453\n2\n463\n0\n63\n3\n421\n66051\n463\n1\n63\n5\n421\n263430\n470\nSPHERICAL\n0\nENDSEC\n0\nEOF\n";
     let gradient_codes = [450, 451, 460, 461, 452, 462, 453, 463, 63, 421, 470];

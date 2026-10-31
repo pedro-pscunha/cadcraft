@@ -972,19 +972,31 @@ fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
     committed
 }
 
-/// The INSERTs of each block, by upper-case block name: the `{BLKREFS` list AutoCAD keeps in a block's record. The ones the file listed
-/// come first in its order, the others follow in handle order (the order they were made in).
+/// Source BLKREFS can include INSERTs of sibling dynamic representations, not only the exact block name.
+/// Keep live source-listed members in their order, then append current INSERTs that the list did not contain.
 fn block_references(d: &Drawing, every: &[&Entity]) -> HashMap<String, Vec<Handle>> {
     let mut refs: HashMap<String, Vec<Handle>> = HashMap::new();
+    let live: std::collections::HashSet<_> = every.iter().map(|entity| entity.handle).collect();
     for e in every {
-        if let EntityKind::Insert(i) = &e.kind {
-            refs.entry(i.block.to_ascii_uppercase()).or_default().push(e.handle);
+        let name = match &e.kind {
+            EntityKind::Insert(insert) => Some(insert.block.as_str()),
+            EntityKind::Raw(raw) if raw.parent().kind().eq_ignore_ascii_case("INSERT") => {
+                raw.parent().tags().iter().find(|tag| tag.code == 2).map(|tag| tag.value.as_str())
+            }
+            _ => None,
+        };
+        if let Some(name) = name {
+            refs.entry(name.to_ascii_uppercase()).or_default().push(e.handle);
         }
     }
-    for (name, hs) in &mut refs {
-        let listed: &[Handle] = d.source_symbols.block_refs.get(name).map_or(&[], Vec::as_slice);
-        let rank = |h: &Handle| listed.iter().position(|l| l == h).unwrap_or(usize::MAX);
-        hs.sort_by_key(|h| (rank(h), *h));
+    for handles in refs.values_mut() {
+        handles.sort_unstable();
+    }
+    for (name, listed) in &d.source_symbols.block_refs {
+        let current = refs.remove(name).unwrap_or_default();
+        let mut kept: Vec<_> = listed.iter().filter(|handle| live.contains(handle)).copied().collect();
+        kept.extend(current.into_iter().filter(|handle| !listed.contains(handle)));
+        refs.insert(name.clone(), kept);
     }
     refs
 }

@@ -57,6 +57,8 @@ struct W {
     /// Persistent reactors of boundary objects: each source object of an associative hatch →
     /// the hatches (groups `{ACAD_REACTORS 330 …}`), from [`hatch_reactors`].
     reactors: HashMap<Handle, Vec<String>>,
+    /// Imported forward HATCH links whose reverse reactors were absent in the source.
+    reactor_omissions: HashSet<(Handle, Handle)>,
 }
 
 impl W {
@@ -71,6 +73,14 @@ impl W {
                 std::iter::once(e.handle).chain(followers.into_iter().flatten().map(|record| record.handle()))
             })
             .collect();
+        let mut reactor_omissions = HashSet::new();
+        for (hatch, boundaries) in &d.source_symbols.hatch_sources {
+            for boundary in boundaries {
+                if !d.foreign.entities.get(boundary).is_some_and(|extra| extra.reactors.contains(hatch)) {
+                    reactor_omissions.insert((*boundary, *hatch));
+                }
+            }
+        }
         #[cfg(test)]
         tests::SCANNED.with(|count| count.set(count.get().saturating_add(used.len())));
         Self {
@@ -83,6 +93,7 @@ impl W {
             pstyles: HashMap::new(),
             layers: HashMap::new(),
             reactors: HashMap::new(),
+            reactor_omissions,
         }
     }
 

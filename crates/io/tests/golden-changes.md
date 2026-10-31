@@ -243,3 +243,52 @@ The measurement was made on a head that also merged raw280-zero-default (a659db0
 | record | cause | pin | format | drawings | records |
 |---|---|---|---|---|---|
 | CLASSES/CLASS | group 280: a class that objects use keeps the zombie flag its file gave it (the flag was reset to 0 for every used class) | acadrust 1494e57 | dwg | 17 (15 `dim1` files, Even-Manuel_de_Nobrega, rt7/Planeta-Toulouse and Planeta-Toulouse-acad) | 1 to 12 per output, 146 in all |
+
+# Golden refresh for source-field fidelity (8730f4b1)
+
+19 of 126 outputs differ from the frozen baseline of 5925c2fb. The comparison checks every changed record against that baseline and its source.
+The isolated reference matches all 126 baseline hashes. All 91 changed records belong to the causes below. No record is lost or added.
+
+| item | record | cause | formats | outputs | changed records |
+|---|---|---|---|---|---|
+| 12 | BLOCKS/HATCH, ENTITIES/LWPOLYLINE | Source group 48 remains zero instead of becoming the implicit scale of one. Rendering keeps its separate safe scale. | dxf, dwg | 6 | 12 |
+| 25 | OBJECTS/TABLESTYLE | Native group 90 keeps source data type 4 instead of 512 for each cell style. Groups 91 and 1 remain unchanged. | dxf, dwg | 8 | 59 |
+| 28 | TABLES/BLOCK_RECORD | Source BLKREFS membership survives across dynamic siblings and includes live ACAD_TABLE entities. Source order remains authoritative. | dxf, dwg | 10 | 10 |
+| 28 | TABLES/BLOCK_RECORD | Four explicit Cyrela BLKREFS wrappers remain empty after stale members are removed, as AutoCAD SAVEAS keeps them. | dxf | 1 | 4 |
+| 31 | ENTITIES/LWPOLYLINE | Imported HATCH forward links do not create reverse reactors that the source omits. | dxf, dwg | 6 | 6 |
+
+TABLESTYLE private xdata remains byte-equal to the baseline. No new private payload or XRECORD carries the value format.
+DXF and DWG reopen tests read type 4 from native groups without CADCRAFT xdata. R2007, R2010, and R2018 keep that type.
+R2000/R2004 DWG has no per-cell value-format fields, so the R2004 regression expects type 512.
+
+DPInc BLOCK_RECORD 474307 (`*U2008`) keeps all 53 source members, including 33 INSERTs of sibling `*U1934`.
+Its LWPOLYLINE 50C0AB keeps reactor 50C0AA without the invented 50C0AC. Even's LWPOLYLINE 48BC0B no longer gains reactor 496141.
+The six `dim1` changes restore the live ACAD_TABLE 138E in BLOCK_RECORD 138F (`*T11`), not an empty wrapper.
+
+## Per entry
+
+The external paths below have the prefix `/tmp/cad/`. Each count names changed records, not changed fields.
+
+| drawing | format | item counts |
+|---|---|---|
+| rt7/Cyrela-Aura_Moema.dwg | dxf | 25: 26; 28 empty wrapper: 4 |
+| rt7/Cyrela-Aura_Moema.dwg | dwg | 25: 26 |
+| rt7/DPInc.dwg | dxf | 12: 1; 28 members: 1; 31: 1 |
+| rt7/DPInc.dwg | dwg | 12: 1; 28 members: 1; 31: 1 |
+| rt7/Even-Manuel_de_Nobrega.dwg | dxf | 12: 4; 25: 2; 31: 1 |
+| rt7/Even-Manuel_de_Nobrega.dwg | dwg | 12: 4; 31: 1 |
+| rt7/Planeta-Toulouse.dwg | dxf | 25: 1 |
+| rt7/Planeta-Toulouse.dwg | dwg | 25: 1 |
+| rt7/Skr-Ayya.dwg | dxf | 25: 1 |
+| rt7/Skr-Ayya.dwg | dwg | 25: 1 |
+| mc/DPInc-2018.dxf | dxf | 12: 1; 28 members: 1; 31: 1 |
+| mc/DPInc-2018.dxf | dwg | 12: 1; 28 members: 1; 31: 1 |
+| acad2/Planeta-Toulouse-acad.dxf | dxf | 25: 1 |
+| dim1/dim1-mattrib-2018.dwg | dxf | 28 members: 1 |
+| dim1/dim1-table90-2018.dwg | dxf | 28 members: 1 |
+| dim1/dim1-mattrib-2018.dxf | dxf | 28 members: 1 |
+| dim1/dim1-table90-2007.dxf | dxf | 28 members: 1 |
+| dim1/dim1-table90-2018.dxf | dxf | 28 members: 1 |
+| dim1/dim1-vp68-2018.dxf | dxf | 28 members: 1 |
+
+Strict G1 passes with `-- --ignored match`: 63 drawings and four repository drawings checked, no missing inputs, and both tests pass.

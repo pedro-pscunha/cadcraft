@@ -28,7 +28,8 @@ pub struct SourceSymbols {
     /// since) gets a new handle.
     pub handles: BTreeMap<ForeignKey, Handle>,
     /// The references to each block (the `{BLKREFS` list of its record) in the order the file listed them, by upper-case block
-    /// name. AutoCAD lists them in the order they were made, which a handle does not say.
+    /// name. AutoCAD can list INSERTs of sibling dynamic representations here; membership is not the inverse of block names.
+    /// ACAD_TABLE can also be a member. An empty entry keeps the source wrapper. The file's order is authoritative.
     pub block_refs: BTreeMap<String, Vec<Handle>>,
     /// The DIMSTYLE records the header of the DIMSTYLE table listed (groups 71 and 340), in the file's order.
     pub dim_style_listing: Vec<Handle>,
@@ -40,6 +41,8 @@ pub struct SourceSymbols {
     /// The persistent reactors of each entity that had two or more, in the order the file listed them (AutoCAD notifies them in
     /// that order, and its own save keeps it).
     pub reactor_order: BTreeMap<Handle, Vec<Handle>>,
+    /// Original forward links of imported associative hatches. A save keeps a missing reverse reactor missing.
+    pub hatch_sources: BTreeMap<Handle, BTreeSet<Handle>>,
     /// The upper-case names of the blocks whose record held the `DesignCenter Data` xdata beside its group 70 (AutoCAD writes it in every
     /// version for the blocks that had it): a save keeps it for them, and before 2007 for every block with units.
     pub design_center_blocks: BTreeSet<String>,
