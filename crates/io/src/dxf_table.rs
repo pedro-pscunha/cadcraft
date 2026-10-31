@@ -66,14 +66,37 @@ struct CellStylesPayload {
     styles: Vec<CellStyle>,
 }
 
-/// The xdata strings of a table style's cell styles (marker first), or nothing for a plain style.
+/// The cell style the native groups of `style` give back on a read: the implied style of its name with the fields the groups hold (height,
+/// alignment, colours, fill, borders' lineweight, visibility and colour, value format) taken from `style`, as `read_table_style` reads them.
+/// `None` for a name with no implied style.
+fn native_reading(s: &TableStyle, style: &CellStyle) -> Option<CellStyle> {
+    let base = s.base_cell_style(&style.name)?;
+    let data_margin_v = s.cell_style(CELL_TYPES[0]).margin_v;
+    let mut read = CellStyle { margin_v: data_margin_v, ..base.clone() };
+    if (style.text_height - base.text_height).abs() > 1e-9 * base.text_height.max(1.0) {
+        read.text_height = style.text_height;
+    }
+    read.align = style.align.clamp(1, 9);
+    read.text_color = Color::from_aci(style.text_color.to_aci());
+    read.fill = style.fill.map(|c| Color::from_aci(c.to_aci()));
+    let (from, to) = (style.borders.as_array(), read.borders.as_array_mut());
+    for (from, to) in from.into_iter().zip(to) {
+        to.lineweight = Lineweight::from_dxf(from.lineweight.to_dxf());
+        to.visible = from.visible;
+        to.color = Color::from_aci(from.color.to_aci());
+    }
+    Some(read)
+}
+
+/// The xdata strings of a table style's cell styles (marker first), or nothing when the native groups store every one of them: only a
+/// cell style that a read of its native groups would not give back is private.
 pub(crate) fn cell_styles_xdata(s: &TableStyle) -> Vec<String> {
     let styles: Vec<_> = s
         .cell_styles
         .iter()
         .filter_map(|style| {
             let style = CellStyle { data_format: None, ..style.clone() };
-            (!s.base_cell_style(&style.name).is_some_and(|base| base == style)).then_some(style)
+            (!native_reading(s, &style).is_some_and(|read| read == style)).then_some(style)
         })
         .collect();
     if styles.is_empty() {
@@ -189,9 +212,14 @@ pub(crate) fn read_table_style(name: &str, tags: &[Tag], ltypes: &HashMap<String
         }
         st.set_cell_style(cs);
     }
-    // Our own complete cell styles replace what the groups could say.
+    // Our own private cell styles replace what the groups could say of the styles they name.
     if let Some(p) = payload(tags, CELLSTYLES).and_then(|j| serde_json::from_str::<CellStylesPayload>(&j).ok()).filter(|p| p.v == 1) {
         let native = std::mem::take(&mut st.cell_styles);
+        // The private styles are the ones the native groups cannot store: the others stay as the groups read them.
+        let private: Vec<&str> = p.styles.iter().map(|cs| cs.name.as_str()).collect();
+        for style in native.iter().filter(|style| !private.iter().any(|name| name.eq_ignore_ascii_case(&style.name))) {
+            st.set_cell_style(style.clone());
+        }
         for mut cs in p.styles.into_iter().take(MAX_CELL_STYLES) {
             if !cs.name.trim().is_empty() {
                 cs.data_format = native.iter().find(|style| style.name.eq_ignore_ascii_case(&cs.name)).and_then(|style| style.data_format.clone());

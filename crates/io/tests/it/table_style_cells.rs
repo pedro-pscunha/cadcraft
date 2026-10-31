@@ -157,3 +157,61 @@ fn a_table_style_is_written_in_autocads_form() {
         assert_eq!(after(cell)[..15], [7, 140, 170, 62, 63, 283, 90, 91, 1, 274, 284, 64, 275, 285, 65], "{what}");
     }
 }
+
+/// AutoCAD's own Standard table style (DPInc, handle 93): Data 4.5 aligned 2, Title 6.0 and Header 4.5 aligned 5, margins 1.5.
+fn autocad_standard_style() -> String {
+    let mut g: Vec<(i32, &str)> = vec![
+        (0, "SECTION"),
+        (2, "OBJECTS"),
+        (0, "DICTIONARY"),
+        (5, "C"),
+        (330, "0"),
+        (100, "AcDbDictionary"),
+        (3, "ACAD_TABLESTYLE"),
+        (350, "22"),
+        (0, "DICTIONARY"),
+        (5, "22"),
+        (330, "C"),
+        (100, "AcDbDictionary"),
+        (3, "Standard"),
+        (350, "93"),
+        (0, "TABLESTYLE"),
+        (5, "93"),
+        (330, "22"),
+        (100, "AcDbTableStyle"),
+        (3, "Standard"),
+        (70, "0"),
+        (71, "0"),
+        (40, "1.5"),
+        (41, "1.5"),
+        (280, "0"),
+        (281, "0"),
+    ];
+    for (height, align) in [("4.5", "2"), ("6.0", "5"), ("4.5", "5")] {
+        g.extend([(7, "Standard"), (140, height), (170, align), (62, "0"), (63, "7"), (283, "0"), (90, "512"), (91, "0"), (1, "")]);
+        for k in 0..6 {
+            let (lw, vis, col) = (
+                ["274", "275", "276", "277", "278", "279"][k],
+                ["284", "285", "286", "287", "288", "289"][k],
+                ["64", "65", "66", "67", "68", "69"][k],
+            );
+            g.extend([(lw.parse().unwrap(), "-2"), (vis.parse().unwrap(), "1"), (col.parse().unwrap(), "0")]);
+        }
+    }
+    g.extend([(0, "ENDSEC"), (0, "EOF")]);
+    dxf(&g)
+}
+
+#[test]
+fn an_unedited_style_that_the_native_groups_store_writes_no_private_xdata() {
+    let drawing = cadcraft_io::read_dxf(autocad_standard_style().as_bytes()).unwrap();
+    for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&drawing)) {
+        let style = section(&text, "OBJECTS")
+            .into_iter()
+            .find(|(kind, tags)| kind == "TABLESTYLE" && tags.iter().any(|t| t.code == 3 && t.str() == "Standard"));
+        let (_, style) = style.unwrap_or_else(|| panic!("{what}: the style"));
+        assert!(!style.iter().any(|tag| tag.code == 1001 && tag.str() == "CADCRAFT"), "{what}: no private xdata for a native style");
+        let heights: Vec<_> = style.iter().filter(|t| t.code == 140).map(cadcraft_dxf::Tag::f64).collect();
+        assert_eq!(heights, [4.5, 6.0, 4.5], "{what}: the native heights stay");
+    }
+}
