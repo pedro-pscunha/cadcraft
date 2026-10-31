@@ -4,8 +4,10 @@ use cadcraft_dxf::{Tag, Version};
 
 #[cfg(test)]
 mod oracle;
+mod ownership;
 mod policy;
 mod static_rule;
+pub use ownership::{DerivedOwner, LegacyClassifier, LegacyRecordClassification};
 #[cfg(test)]
 mod tests;
 
@@ -69,12 +71,16 @@ pub fn family_from_dxf(kind: &str) -> Option<Family> {
 pub fn classify_legacy_unit(unit: &[(String, Vec<Tag>)], version: Version) -> Option<LegacyClassification> {
     let (kind, tags) = unit.first()?;
     let family = family_from_dxf(kind)?;
+    Some(classify_groups(family, tags, unit.len() > 1, version))
+}
+
+fn classify_groups(family: Family, tags: &[Tag], has_followers: bool, version: Version) -> LegacyClassification {
     let policy = policy::policy(family, version);
-    let plain = policy.accepts(tags) && static_rule::plain(family, tags, unit.len() > 1);
-    Some(LegacyClassification {
+    let plain = policy.accepts(tags) && static_rule::plain(family, tags, has_followers);
+    LegacyClassification {
         family,
         disposition: if plain { LegacyDisposition::Plain } else { LegacyDisposition::Needs },
         policy_revision: policy.revision,
         policy_reason: policy.reason,
-    })
+    }
 }

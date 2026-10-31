@@ -151,7 +151,7 @@ fn reference_fields(kind: &str, source: &[Tag], expected: &[Tag], version: Versi
     result
 }
 
-fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>) -> bool {
+fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BTreeMap<(i32, usize), String>, input_scale: f64) -> bool {
     expected.iter().all(|(key, expected)| {
         let default = family_from_dxf(kind).and_then(|family| policy::omitted_default(family, key.0));
         actual.get(key).map(String::as_str).or_else(|| default.map(|(value, _)| value)).is_some_and(|actual| {
@@ -167,7 +167,7 @@ fn equivalent(kind: &str, expected: &BTreeMap<(i32, usize), String>, actual: &BT
                         let distance = (a - b).rem_euclid(period);
                         distance.min(period - distance)
                     });
-                    delta <= 16.0 * f64::EPSILON * a.abs().max(b.abs()).max(1.0)
+                    delta <= 16.0 * f64::EPSILON * a.abs().max(b.abs()).max(input_scale)
                 }
                 _ => false,
             }
@@ -181,8 +181,12 @@ pub(super) fn measure(source: &[u8], operation: Operation) -> BTreeMap<Handle, b
 
 fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> BTreeMap<Handle, bool> {
     let policy = crate::activation::ReaderPolicy::resolve(Some("off")).unwrap();
-    let mut legacy =
-        if from_dwg { crate::dxf_read::read_from_dwg(source, policy) } else { crate::dxf_read::read_with_policy(source, policy) }.unwrap();
+    let mut legacy = if from_dwg {
+        crate::dxf_read::read_from_dwg(source, policy, &|_| crate::activation::Need::Plain)
+    } else {
+        crate::dxf_read::read_with_policy(source, policy)
+    }
+    .unwrap();
     let version = crate::save_version(&legacy);
     let refused = transform(&mut legacy, operation);
     let actual = records(crate::write_dxf(&legacy).as_bytes());
@@ -199,6 +203,15 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
         .filter(|(_, (kind, _))| family_from_dxf(kind).is_some())
         .map(|(handle, (kind, source_tags))| {
             let source_fields = fields(&kind, &source_tags, version);
+            // Bound roundoff by input magnitude too: rotation can cancel a large coordinate to zero.
+            let input_scale = source_fields
+                .iter()
+                .filter(|((code, _), _)| (10..=49).contains(code))
+                .filter_map(|(_, value)| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite())
+                .map(f64::abs)
+                .fold(32.0, f64::max)
+                * 2.0;
             let good = !refused.contains(&handle)
                 && actual.get(&handle).zip(expected.get(&handle)).is_some_and(|((actual_kind, actual_tags), (expected_kind, expected_tags))| {
                     actual_kind == &kind
@@ -207,12 +220,51 @@ fn measure_with_origin(source: &[u8], operation: Operation, from_dwg: bool) -> B
                             &kind,
                             &reference_fields(&kind, &source_tags, expected_tags, version, operation),
                             &fields(&kind, actual_tags, version),
+                            input_scale,
                         )
-                        && (!matches!(operation, Operation::Identity) || equivalent(&kind, &source_fields, &fields(&kind, actual_tags, version)))
+                        && (!matches!(operation, Operation::Identity)
+                            || equivalent(&kind, &source_fields, &fields(&kind, actual_tags, version), input_scale))
                 });
             (handle, good)
         })
         .collect()
+}
+
+fn containers(source: &[u8]) -> BTreeMap<Handle, crate::activation::records::Container> {
+    use crate::activation::records::Container;
+    let tags = cadcraft_dxf::parse(source).unwrap();
+    let mut result = BTreeMap::new();
+    for section in cadcraft_dxf::sections(&tags).into_iter().filter(|section| matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
+        let mut container = Container::Entities;
+        for (kind, groups) in cadcraft_dxf::records(&section.tags) {
+            if kind == "BLOCK"
+                && let Some(name) = groups.iter().find(|tag| tag.code == 2)
+            {
+                container = Container::block(&name.str());
+            }
+            if let Some(handle) = groups.iter().find(|tag| tag.code == 5).and_then(|tag| Handle::parse_hex(&tag.str())) {
+                result.insert(handle, container.clone());
+            }
+            if kind == "ENDBLK" {
+                container = Container::Entities;
+            }
+        }
+    }
+    result
+}
+
+fn isolate_line(source: &[u8], record: &(String, Vec<Tag>)) -> Vec<u8> {
+    let parsed = cadcraft_dxf::parse(source).unwrap();
+    let mut tags = Vec::new();
+    for section in cadcraft_dxf::sections(&parsed).into_iter().filter(|section| !matches!(section.name.as_str(), "ENTITIES" | "BLOCKS")) {
+        tags.extend([Tag::s(0, "SECTION"), Tag::s(2, &section.name)]);
+        tags.extend(section.tags);
+        tags.push(Tag::s(0, "ENDSEC"));
+    }
+    tags.extend([Tag::s(0, "SECTION"), Tag::s(2, "ENTITIES"), Tag::s(0, &record.0)]);
+    tags.extend(record.1.iter().map(|tag| if tag.code == 330 { Tag::s(330, "0") } else { tag.clone() }));
+    tags.extend([Tag::s(0, "ENDSEC"), Tag::s(0, "EOF")]);
+    cadcraft_dxf::write_ascii(&tags).into_bytes()
 }
 
 #[derive(serde::Deserialize)]
@@ -240,10 +292,18 @@ fn run_corpus(external: bool) {
         let original = records(&source);
         let drawing = crate::dxf_read::read_with_policy(&source, crate::activation::ReaderPolicy::resolve(Some("off")).unwrap()).unwrap();
         let version = crate::save_version(&drawing);
+        let parsed = cadcraft_dxf::parse(&source).unwrap();
+        let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), version);
+        let places = containers(&source);
         for operation in Operation::ALL {
             let measured = measure_with_origin(&source, operation, from_dwg);
             let mut counts: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
+            let mut derived: BTreeMap<String, usize> = BTreeMap::new();
             for (handle, (kind, tags)) in &original {
+                if let Some(owner) = places.get(handle).and_then(|place| classifier.derived_owner(place)) {
+                    *derived.entry(format!("{:?}", owner.family)).or_default() += 1;
+                    continue;
+                }
                 let Some(classification) = classify_legacy_unit(&[(kind.clone(), tags.clone())], version) else { continue };
                 let count = counts.entry(format!("{:?}", classification.family)).or_default();
                 let lossless = measured.get(handle) == Some(&true);
@@ -260,7 +320,7 @@ fn run_corpus(external: bool) {
                 }
             }
             eprintln!(
-                "LEGACY_ORACLE file={} version={version:?} operation={operation:?} declared={:?} counts(plain,false_plain,extra_needs,needs)={counts:?}",
+                "LEGACY_ORACLE file={} version={version:?} operation={operation:?} declared={:?} counts(plain,false_plain,extra_needs,needs)={counts:?} owner_derived={derived:?}",
                 entry.path, entry.families
             );
         }
@@ -271,12 +331,38 @@ fn run_corpus(external: bool) {
 }
 
 #[test]
+fn table_graphics_lines_are_measured_as_isolated_units_with_original_context() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/apartment.dxf");
+    let source = std::fs::read(path).unwrap();
+    let parsed = cadcraft_dxf::parse(&source).unwrap();
+    let classifier = super::LegacyClassifier::new(&cadcraft_dxf::sections(&parsed), Version::R2000);
+    let places = containers(&source);
+    let mut checked = 0;
+    for (handle, record) in records(&source) {
+        if record.0 != "LINE"
+            || places
+                .get(&handle)
+                .and_then(|place| classifier.derived_owner(place))
+                .is_none_or(|owner| owner.family != crate::activation::Family::Table)
+        {
+            continue;
+        }
+        let isolated = isolate_line(&source, &record);
+        for operation in Operation::ALL {
+            assert_eq!(measure(&isolated, operation).get(&handle), Some(&true), "isolated derived LINE {handle:?} {operation:?}");
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 29);
+}
+
+#[test]
 fn repository_corpus_has_no_false_plain() {
     run_corpus(false);
 }
 
 #[test]
-#[ignore = "external 42-drawing corpus: run explicitly and fail if any listed input is missing"]
+#[ignore = "external manifest corpus: run explicitly and fail if any listed input is missing"]
 fn external_corpus_has_no_false_plain() {
     run_corpus(true);
 }

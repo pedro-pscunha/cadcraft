@@ -32,9 +32,9 @@ use std::path::{Path, PathBuf};
 pub use cadcraft_doc::Format;
 pub use cadcraft_dxf::Version;
 pub use dxf_read::{
-    LegacyClassification, LegacyDisposition, Rx, canonical_attrib_from_groups, canonical_curve_from_groups, canonical_fill_from_groups,
-    canonical_layout_from_groups, canonical_mleader_from_groups, canonical_polyline_from_groups, canonical_text_from_groups, classify_legacy_unit,
-    entity_from_groups, family_from_dxf,
+    DerivedOwner, LegacyClassification, LegacyClassifier, LegacyDisposition, LegacyRecordClassification, Rx, canonical_attrib_from_groups,
+    canonical_curve_from_groups, canonical_fill_from_groups, canonical_layout_from_groups, canonical_mleader_from_groups,
+    canonical_polyline_from_groups, canonical_text_from_groups, classify_legacy_unit, entity_from_groups, family_from_dxf,
 };
 pub use dxf_write::entity_groups;
 pub use pdf::{PdfOptions, pdf, plot};
