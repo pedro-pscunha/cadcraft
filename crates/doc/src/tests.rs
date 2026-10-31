@@ -34,6 +34,24 @@ fn new_metric_drawing_has_metric_multileader_and_table_styles() {
 }
 
 #[test]
+fn legacy_point_display_angle_follows_rotation_and_mirror() {
+    let angle = std::f64::consts::FRAC_PI_6;
+    let mut rotation = cadcraft_geom::Mat4::IDENTITY;
+    rotation.m[0][0] = 0.0;
+    rotation.m[0][1] = -1.0;
+    rotation.m[1][0] = 1.0;
+    rotation.m[1][1] = 0.0;
+    let mirror = cadcraft_geom::Mat4::from_mat3(&Mat3::mirror(Vec2::ZERO, Vec2::Y));
+    for (matrix, expected) in [(rotation, angle + std::f64::consts::FRAC_PI_2), (mirror, std::f64::consts::PI - angle)] {
+        let mut entity = Entity::new(Handle(7), EntityKind::Point(Point { p: Vec3::new(1.0, 2.0, 0.0), angle }));
+        assert_eq!(entity.geometry_revision, GeometryRevision::LegacyProjectedV1);
+        entity.try_transform(&matrix).unwrap();
+        let EntityKind::Point(point) = entity.kind else { panic!("expected POINT") };
+        assert!((point.angle - expected).abs() < 1e-14, "{} != {expected}", point.angle);
+    }
+}
+
+#[test]
 fn transform_arc_mirror_keeps_shape() {
     let k = EntityKind::Arc(Arc { center: Vec3::ZERO, radius: 1.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 });
     let mut entity = Entity::new(Handle(0), k);

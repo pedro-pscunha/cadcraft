@@ -354,7 +354,11 @@ impl EntityKind {
                 t3(&mut l.a);
                 t3(&mut l.b);
             }
-            EntityKind::Point(p) => t3(&mut p.p),
+            EntityKind::Point(p) => {
+                t3(&mut p.p);
+                let direction = m.apply_vec(Vec2::from_angle(p.angle));
+                p.angle = cadcraft_geom::norm_angle(direction.y.atan2(direction.x));
+            }
             EntityKind::Circle(c) => {
                 t3(&mut c.center);
                 c.radius *= s;
