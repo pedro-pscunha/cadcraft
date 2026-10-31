@@ -322,7 +322,7 @@ fn read_core(
     rx.inserted.extend(raw_blocks);
     rx.xdata_blocks = xdata_blocks(&secs, &rx.brs);
     let (paper_block_for, first_layout) = setup_layouts(&mut d, &mut layout_objs, &rx);
-    place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout);
+    place_blocks(&mut d, blocks, &mut rx, &paper_block_for, &first_layout)?;
     shift_dimension_blocks(&mut d, &rx)?;
     place_entities(&mut d, entities, &rx, &paper_block_for, &first_layout);
     note_layouts_without_sheet(&mut d, &rx, &paper_block_for);

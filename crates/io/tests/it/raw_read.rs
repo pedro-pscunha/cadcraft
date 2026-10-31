@@ -149,3 +149,38 @@ fn a_unit_in_a_block_that_cannot_be_kept_raw_is_refused_too() {
     let error = cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", raw_path(), &source_predicate(text.as_bytes())).unwrap_err();
     assert!(matches!(error, cadcraft_io::IoError::NotKeptRaw { .. }), "{error:?}");
 }
+
+/// A file whose BLOCKS sections define `DUP` twice: `first` and `second` are the members of the two copies.
+fn repeated_definition(first: &[String], second: &[String]) -> String {
+    use crate::activation_fixtures::{block, file};
+    let again = format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n", block("DUP", 0, second));
+    file("", &[block("DUP", 0, first)], &[]).replace("0\nSECTION\n2\nENTITIES\n", &format!("{again}0\nSECTION\n2\nENTITIES\n"))
+}
+
+#[test]
+fn a_repeated_block_definition_with_a_raw_record_in_either_copy_is_refused_and_names_the_block() {
+    use crate::activation_fixtures::{circle, line};
+    for (name, first, second) in [
+        ("raw first", vec![circle("C1", true)], vec![line("B2")]),
+        ("raw second", vec![line("B2")], vec![circle("C1", true)]),
+        ("raw in both", vec![circle("C1", true)], vec![circle("C2", true)]),
+    ] {
+        let text = repeated_definition(&first, &second);
+        let error = match cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", raw_path(), &source_predicate(text.as_bytes())) {
+            Ok(d) => panic!("{name}: the read built a drawing with {} blocks", d.blocks.len()),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("DUP") && error.contains("more than once") && error.contains("raw path off"), "{name}: {error}");
+        // With the raw path off the file reads as before: the second copy replaces the first.
+        let plain = cadcraft_io::read(text.as_bytes(), "x.dxf").unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(plain.block("DUP").is_some(), "{name}");
+    }
+}
+
+#[test]
+fn a_repeated_block_definition_without_a_raw_record_reads_as_before() {
+    use crate::activation_fixtures::line;
+    let text = repeated_definition(&[line("B2")], &[line("B3")]);
+    let d = read(&text, raw_path());
+    assert!(d.block("DUP").is_some());
+}
