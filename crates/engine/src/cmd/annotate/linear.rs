@@ -1,11 +1,12 @@
-use super::common::{DimText, add_dim, assoc_enabled, circle_of, dim, linear_kind, pick_at};
+use super::common::{DimText, add_dim, add_dim_from, assoc_enabled, circle_of, dim, linear_kind, pick_at};
 use super::{
     Accept, DimKind, Dimension, EngineError, EntityKind, Handle, Input, Interactive, Prim, Prompt, Result, Segment, Session, Step, Value, Vec2, bad,
     json, point_req, points_param, str_param,
 };
 
 pub(super) fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
-    let (a, b) = match p.get("object").and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))) {
+    let object = p.get("object").and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)));
+    let (a, b) = match object {
         Some(h) => {
             super::common::require_legacy_source(s, h)?;
             object_extent(s, h).ok_or_else(|| bad("dimlinear", "`object` must be a line, arc, circle or polyline segment"))?
@@ -15,7 +16,7 @@ pub(super) fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
     let at = point_req("dimlinear", p, "at")?;
     let rot = p.get("rotation").and_then(Value::as_f64).map(f64::to_radians);
     let k = dim(s, linear_kind(a, b, at, rot, false), at, a, b, Vec2::ZERO, str_param(p, "text").unwrap_or(""));
-    Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+    Ok(json!({ "handle": add_dim_from(s, k, object)?.hex() }))
 }
 
 pub(super) fn run_aligned(s: &mut Session, p: &Value) -> Result<Value> {
@@ -140,13 +141,15 @@ pub(super) struct LinearM {
     rotation: Option<f64>,
     text: DimText,
     selecting: bool,
+    /// The object that was selected to dimension.
+    source: Option<Handle>,
     /// Asking for the dimension line angle (Rotated).
     rotating: bool,
 }
 
 impl LinearM {
     pub(super) fn new(aligned: bool) -> Self {
-        LinearM { aligned, pts: Vec::new(), rotation: None, text: DimText::default(), selecting: false, rotating: false }
+        LinearM { aligned, pts: Vec::new(), rotation: None, text: DimText::default(), selecting: false, source: None, rotating: false }
     }
 }
 
@@ -201,11 +204,13 @@ impl Interactive for LinearM {
                 match seg {
                     Some(sg @ Segment::Line(_)) | Some(sg @ Segment::Arc { .. }) => {
                         self.pts = vec![sg.start(), sg.end()];
+                        self.source = Some(h);
                         self.selecting = false;
                     }
                     None => {
                         if let Some((c, r)) = circle_of(s, h) {
                             self.pts = vec![c - Vec2::X * r, c + Vec2::X * r];
+                            self.source = Some(h);
                             self.selecting = false;
                         } else {
                             s.echo("Object cannot be dimensioned this way.");
@@ -227,7 +232,7 @@ impl Interactive for LinearM {
             (_, Input::Point(at)) => {
                 let (Some(&a), Some(&b)) = (self.pts.first(), self.pts.get(1)) else { return Ok(Step::Continue) };
                 let k = self.text.apply(dim(s, linear_kind(a, b, at, self.rotation, self.aligned), at, a, b, Vec2::ZERO, ""));
-                add_dim(s, k)?;
+                add_dim_from(s, k, self.source)?;
                 if let Some(EntityKind::Dimension(d)) = s.last_dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
                     let st = s.doc()?.dim_style(&d.style).cloned().unwrap_or_default();
                     let g = cadcraft_render::dimension_geometry(&d, &st, 1.0);

@@ -1,4 +1,4 @@
-use super::common::{DimText, add_dim, assoc_enabled, dim, hex_param, pick_at, segment_at, with_assoc};
+use super::common::{DimText, add_dim_from, assoc_enabled, dim, hex_param, pick_at, segment_at, with_assoc};
 use super::{
     Accept, AssocSnap, DimAssoc, DimKind, EntityKind, Handle, Input, Interactive, Prompt, Result, Segment, Session, Step, Value, Vec2, bad, json,
     point_req, targets, v3,
@@ -54,7 +54,7 @@ pub(super) fn run_angular(s: &mut Session, p: &Value) -> Result<Value> {
         let (Some(h1), Some(h2)) = (hs.first(), hs.get(1)) else { return Err(bad("dimangular", "`lines` needs two line handles")) };
         let at = point_req("dimangular", p, "at")?;
         let k = angular_from_lines(s, *h1, *h2, at)?.ok_or_else(|| bad("dimangular", "objects must be two non-parallel lines"))?;
-        return Ok(json!({ "handle": add_dim(s, k)?.hex() }));
+        return Ok(json!({ "handle": add_dim_from(s, k, Some(*h1))?.hex() }));
     }
     if let Some(h) = hex_param(p, "arc") {
         let at = point_req("dimangular", p, "at")?;
@@ -65,7 +65,7 @@ pub(super) fn run_angular(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let g = cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end);
         let k = dim(s, DimKind::Angular3P, at, g.start_point(), g.end_point(), g.center, "");
-        return Ok(json!({ "handle": add_dim(s, k)?.hex() }));
+        return Ok(json!({ "handle": add_dim_from(s, k, Some(h))?.hex() }));
     }
     let v = point_req("dimangular", p, "vertex")?;
     let a = point_req("dimangular", p, "p1")?;
@@ -75,7 +75,7 @@ pub(super) fn run_angular(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("dimangular", "`p1` and `p2` must differ from `vertex`"));
     }
     let k = dim(s, DimKind::Angular3P, at, a, b, v, "");
-    Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+    Ok(json!({ "handle": add_dim_from(s, k, None)?.hex() }))
 }
 
 pub(super) fn run_arclen(s: &mut Session, p: &Value) -> Result<Value> {
@@ -88,7 +88,7 @@ pub(super) fn run_arclen(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let ga = cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end);
     let k = dim(s, DimKind::ArcLength, at, ga.start_point(), ga.end_point(), ga.center, "");
-    Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+    Ok(json!({ "handle": add_dim_from(s, k, Some(h))?.hex() }))
 }
 
 #[derive(Default)]
@@ -99,6 +99,8 @@ pub(super) struct AngularM {
     vertex_mode: Vec<Vec2>,
     vertex: bool,
     arc: Option<(Vec2, Vec2, Vec2)>,
+    /// The arc that was picked.
+    arc_object: Option<Handle>,
     text: DimText,
     /// Quadrant: a point inside the angle to measure; the arc location then only sets the radius.
     quadrant: Option<Vec2>,
@@ -176,7 +178,11 @@ impl Interactive for AngularM {
                         _ => None,
                     };
                     let k = k.unwrap_or_else(|| dim(s, DimKind::Angular3P, at, a, b, v, ""));
-                    add_dim(s, self.text.apply(k))?;
+                    let source = match (self.handles.first(), self.arc_object) {
+                        (Some(h), None) => Some(*h),
+                        (_, object) => object,
+                    };
+                    add_dim_from(s, self.text.apply(k), source)?;
                     Ok(Step::Done)
                 }
                 Input::Keyword(k) => {
@@ -223,6 +229,7 @@ impl Interactive for AngularM {
                 match segment_at(s, h, p) {
                     Some(Segment::Arc { arc: g, .. }) if self.first.is_none() => {
                         self.arc = Some((g.center, g.start_point(), g.end_point()));
+                        self.arc_object = Some(h);
                     }
                     Some(Segment::Line(l)) => {
                         self.handles.push(h);
@@ -249,6 +256,8 @@ impl Interactive for AngularM {
 #[derive(Default)]
 pub(super) struct ArcLenM {
     arc: Option<cadcraft_geom::Arc>,
+    /// The object that was picked.
+    source: Option<Handle>,
     text: DimText,
     /// Partial: the points picked so far on the arc (`None` when not choosing a part).
     partial: Option<Vec<Vec2>>,
@@ -316,13 +325,14 @@ impl Interactive for ArcLenM {
                 }
                 if let Some(EntityKind::Arc(a)) = handle.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
                     self.arc = Some(cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end));
+                    self.source = handle;
                 } else {
                     s.echo("Select an arc.");
                 }
                 Ok(Step::Continue)
             }
             (Some(g), Input::Point(at)) => {
-                add_dim(s, self.text.apply(dim(s, DimKind::ArcLength, at, g.start_point(), g.end_point(), g.center, "")))?;
+                add_dim_from(s, self.text.apply(dim(s, DimKind::ArcLength, at, g.start_point(), g.end_point(), g.center, "")), self.source)?;
                 Ok(Step::Done)
             }
             (Some(_), Input::Keyword(k)) => {

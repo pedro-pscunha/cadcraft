@@ -1,13 +1,15 @@
-use super::common::{DimText, add_dim, circle_of, dim, pick_at, text_at};
-use super::{Accept, DimKind, EntityKind, Input, Interactive, Prompt, Result, Session, Step, Value, Vec2, bad, json, point_param, targets};
+use super::common::{DimText, add_dim_from, circle_of, dim, pick_at, text_at};
+use super::{Accept, DimKind, EntityKind, Handle, Input, Interactive, Prompt, Result, Session, Step, Value, Vec2, bad, json, point_param, targets};
 
 fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
     let id = if diameter { "dimdiameter" } else { "dimradius" };
+    let mut source = None;
     let (c, pt, at) = if let (Some(c), Some(pt)) = (point_param(p, "center"), point_param(p, "point")) {
         (c, pt, None)
     } else {
         let h = targets(s, p)?.first().copied().ok_or_else(|| bad(id, "`handle` of a circle/arc, or {center, point}"))?;
         super::common::require_legacy_source(s, h)?;
+        source = Some(h);
         let (c, r) = circle_of(s, h).ok_or_else(|| bad(id, "object is not a circle or arc"))?;
         let at = point_param(p, "at");
         let dir = at.unwrap_or(c + Vec2::from_angle(std::f64::consts::FRAC_PI_4));
@@ -25,7 +27,7 @@ fn radial(s: &mut Session, p: &Value, diameter: bool) -> Result<Value> {
         Some(at) => text_at(k, at),
         None => k,
     };
-    Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+    Ok(json!({ "handle": add_dim_from(s, k, source)?.hex() }))
 }
 
 pub(super) fn run_radius(s: &mut Session, p: &Value) -> Result<Value> {
@@ -39,12 +41,14 @@ pub(super) fn run_diameter(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) struct RadialM {
     diameter: bool,
     target: Option<(Vec2, f64)>,
+    /// The object that was picked.
+    source: Option<Handle>,
     text: DimText,
 }
 
 impl RadialM {
     pub(super) fn new(diameter: bool) -> Self {
-        RadialM { diameter, target: None, text: DimText::default() }
+        RadialM { diameter, target: None, source: None, text: DimText::default() }
     }
     fn kind(&self, s: &Session, c: Vec2, r: f64, at: Vec2) -> EntityKind {
         let pt = c + (at - c).normalized() * r;
@@ -81,14 +85,17 @@ impl Interactive for RadialM {
                     super::common::require_legacy_source(s, handle)?;
                 }
                 match handle.and_then(|h| circle_of(s, h)) {
-                    Some(t) => self.target = Some(t),
+                    Some(t) => {
+                        self.target = Some(t);
+                        self.source = handle;
+                    }
                     None => s.echo("Object selected is not a circle or arc."),
                 }
                 Ok(Step::Continue)
             }
             (Some((c, r)), Input::Point(at)) => {
                 let k = self.kind(s, c, r, at);
-                add_dim(s, k)?;
+                add_dim_from(s, k, self.source)?;
                 Ok(Step::Done)
             }
             (Some(_), Input::Keyword(k)) => {

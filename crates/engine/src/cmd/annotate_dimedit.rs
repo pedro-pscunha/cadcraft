@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use super::super::helpers::v3;
 use super::super::machines::{SelOutcome, SelectPhase};
 use super::super::{CommandSpec, bad, bool_or, point_param, point_req, size_param, str_param, targets};
-use super::{DimText, add_dim, circle_of, dim, dims_of, pick_at};
+use super::{DimText, add_dim_from, circle_of, dim, dims_of, pick_at};
 
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
@@ -302,12 +302,14 @@ fn run_jogged(s: &mut Session, p: &Value) -> Result<Value> {
     let at = point_req("dimjogged", p, "at")?;
     let k = jogged_kind(s, c, r, center, at, point_param(p, "jog"), str_param(p, "text").unwrap_or(""))
         .ok_or_else(|| bad("dimjogged", "`at` must differ from the centre"))?;
-    Ok(json!({ "handle": add_dim(s, k)?.hex() }))
+    Ok(json!({ "handle": add_dim_from(s, k, Some(h))?.hex() }))
 }
 
 #[derive(Default)]
 struct JoggedM {
     circle: Option<(Vec2, f64)>,
+    /// The object that was picked.
+    source: Option<Handle>,
     center: Option<Vec2>,
     at: Option<Vec2>,
     text: DimText,
@@ -339,7 +341,10 @@ impl Interactive for JoggedM {
                     super::common::require_legacy_source(s, h)?;
                 }
                 match picked.and_then(|h| circle_of(s, h)) {
-                    Some(t) => self.circle = Some(t),
+                    Some(t) => {
+                        self.circle = Some(t);
+                        self.source = picked;
+                    }
                     None => s.echo("Object selected is not a circle or arc."),
                 }
             }
@@ -350,7 +355,7 @@ impl Interactive for JoggedM {
             (Some(_), Some(_), None, Input::Point(p)) => self.at = Some(p),
             (Some((c, r)), Some(o), Some(at), Input::Point(j)) => {
                 if let Some(k) = jogged_kind(s, c, r, o, at, Some(j), "") {
-                    add_dim(s, self.text.apply(k))?;
+                    add_dim_from(s, self.text.apply(k), self.source)?;
                 }
                 return Ok(Step::Done);
             }

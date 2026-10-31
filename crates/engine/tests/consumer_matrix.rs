@@ -817,7 +817,14 @@ fn objects_at_7() -> Objects {
 }
 
 fn on_objects(params: fn(&Objects) -> Value) -> Fixture {
-    let o = objects_at_7();
+    on_objects_with(2, params)
+}
+
+/// The same with DIMASSOC `assoc`: 2 makes associative dimensions, 1 non-associative ones, 0 no association (AutoCAD explodes the dimension at 0; we
+/// keep the dimension object, and its Z follows the same rule).
+fn on_objects_with(assoc: i64, params: fn(&Objects) -> Value) -> Fixture {
+    let mut o = objects_at_7();
+    o.session.execute("setvar", &json!({"name": "DIMASSOC", "value": assoc})).unwrap();
     let params = params(&o);
     let neighbour = o.session.doc().unwrap().model.iter().last().unwrap().handle;
     Fixture { drawing: model_of(&o.session), params, operands: vec![neighbour], view: None }
@@ -845,6 +852,29 @@ fn dimarc_on_arc() -> Fixture {
 
 fn dimlinear_on_line() -> Fixture {
     on_objects(|o| json!({"object": o.line.hex(), "at": [5, 13]}))
+}
+
+macro_rules! object_fixtures {
+    ($($name:ident: $assoc:expr, $params:expr;)*) => {
+        $(fn $name() -> Fixture { on_objects_with($assoc, $params) })*
+    };
+}
+
+object_fixtures! {
+    dimradius_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "at": [33, 3]});
+    dimradius_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "at": [33, 3]});
+    dimdiameter_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "at": [27, -3]});
+    dimdiameter_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "at": [27, -3]});
+    dimjogged_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]});
+    dimjogged_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]});
+    dimangular_assoc_0: 0, |o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]});
+    dimangular_assoc_1: 1, |o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]});
+    dimangular_arc_assoc_0: 0, |o| json!({"arc": o.arc.hex(), "at": [72, 4]});
+    dimangular_arc_assoc_1: 1, |o| json!({"arc": o.arc.hex(), "at": [72, 4]});
+    dimarc_assoc_0: 0, |o| json!({"handle": o.arc.hex(), "at": [72, 4]});
+    dimarc_assoc_1: 1, |o| json!({"handle": o.arc.hex(), "at": [72, 4]});
+    dimlinear_assoc_0: 0, |o| json!({"object": o.line.hex(), "at": [5, 13]});
+    dimlinear_assoc_1: 1, |o| json!({"object": o.line.hex(), "at": [5, 13]});
 }
 
 elevated_fixture!(dim_at_3, json!({"p1": [0, 10], "p2": [10, 10], "at": [5, 13]}));
@@ -1577,7 +1607,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 14] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 28] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1587,6 +1617,20 @@ fn live_rows() -> Vec<Row> {
         ("dim", "two points and a location", dim_at_3, made_dimension_at_3),
         ("qdim", "two lines at the elevation", qdim_at_3, qdim_made),
         ("dimangular", "arc at Z 7", dimangular_on_arc, angular_on_arc_made),
+        ("dimradius", "dimradius at Z 7, DIMASSOC 0", dimradius_assoc_0, radius_on_circle_made),
+        ("dimradius", "dimradius at Z 7, DIMASSOC 1", dimradius_assoc_1, radius_on_circle_made),
+        ("dimdiameter", "dimdiameter at Z 7, DIMASSOC 0", dimdiameter_assoc_0, radius_on_circle_made),
+        ("dimdiameter", "dimdiameter at Z 7, DIMASSOC 1", dimdiameter_assoc_1, radius_on_circle_made),
+        ("dimjogged", "dimjogged at Z 7, DIMASSOC 0", dimjogged_assoc_0, jogged_on_circle_made),
+        ("dimjogged", "dimjogged at Z 7, DIMASSOC 1", dimjogged_assoc_1, jogged_on_circle_made),
+        ("dimangular", "dimangular at Z 7, DIMASSOC 0", dimangular_assoc_0, angular_on_lines_made),
+        ("dimangular", "dimangular at Z 7, DIMASSOC 1", dimangular_assoc_1, angular_on_lines_made),
+        ("dimangular", "dimangular arc at Z 7, DIMASSOC 0", dimangular_arc_assoc_0, angular_on_arc_made),
+        ("dimangular", "dimangular arc at Z 7, DIMASSOC 1", dimangular_arc_assoc_1, angular_on_arc_made),
+        ("dimarc", "dimarc at Z 7, DIMASSOC 0", dimarc_assoc_0, arc_on_arc_made),
+        ("dimarc", "dimarc at Z 7, DIMASSOC 1", dimarc_assoc_1, arc_on_arc_made),
+        ("dimlinear", "dimlinear at Z 7, DIMASSOC 0", dimlinear_assoc_0, linear_on_line_made),
+        ("dimlinear", "dimlinear at Z 7, DIMASSOC 1", dimlinear_assoc_1, linear_on_line_made),
         ("qdim", "radius mode, two circles", qdim_radius_at_3, qdim_radial_made),
         ("qdim", "diameter mode, two circles", qdim_diameter_at_3, qdim_radial_made),
         ("qdim", "ordinate mode, two lines", qdim_ordinate_at_3, qdim_ordinate_made),

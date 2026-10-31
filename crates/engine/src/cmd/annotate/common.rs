@@ -42,6 +42,11 @@ pub(super) fn linear_kind(p1: Vec2, p2: Vec2, at: Vec2, rotation: Option<f64>, a
 /// Add a dimension. With DIMASSOC on, definition points that sit on object endpoints,
 /// vertices or centres are attached to them (associative dimensions).
 pub(super) fn add_dim(s: &mut Session, k: EntityKind) -> Result<Handle> {
+    add_dim_from(s, k, None)
+}
+
+/// [`add_dim`] for a dimension made from the object `source`: the points that come from it take its Z (see `take_object_z`).
+pub(super) fn add_dim_from(s: &mut Session, k: EntityKind, source: Option<Handle>) -> Result<Handle> {
     let mut k = k;
     if let EntityKind::Dimension(dm) = &mut k
         && dm.assoc.is_empty()
@@ -50,7 +55,7 @@ pub(super) fn add_dim(s: &mut Session, k: EntityKind) -> Result<Handle> {
         dm.assoc = crate::assoc::reassociate(s.doc()?, &s.space(), dm);
     }
     if let EntityKind::Dimension(dm) = &mut k {
-        take_object_z(s, dm);
+        take_object_z(s, dm, source);
     }
     let h = s.draw(k)?;
     s.last_dim = Some(h);
@@ -70,17 +75,36 @@ fn object_z(s: &Session, object: Handle, snap: &AssocSnap) -> f64 {
     }
 }
 
-/// A dimension attached to an object takes the object's Z for the points that come from it, and the current elevation for the points
-/// that were picked (the location, the text), as AutoCAD does with an object at Z 7 and ELEVATION 3 (measured in LT 2025). `Session::draw`
-/// adds the elevation to every point after this, so the shift here is the difference. An arc length dimension also measures from the
-/// arc's centre and end (15, 16), and a jogged radius dimension puts its override centre and its jog on the circle's plane.
-fn take_object_z(s: &Session, dm: &mut Dimension) {
+/// A dimension made from an object takes the object's Z for the points that come from it, and the current elevation for the points
+/// that were picked (the location, the text), as AutoCAD does with an object at Z 7 and ELEVATION 3 (measured in LT 2025, the same for
+/// DIMASSOC 1 and 2; at 0 AutoCAD explodes the dimension). `source` is the object that the command was given, and the points it gives
+/// are those of the kind of dimension. Without one, the points that the association attaches to an object take that object's Z (a
+/// dimension made from snapped picks). `Session::draw` adds the elevation to every point after this, so the shift here is the
+/// difference. An arc length dimension also measures from the arc's centre and end (15, 16), and a jogged radius dimension puts its
+/// override centre and its jog on the circle's plane.
+fn take_object_z(s: &Session, dm: &mut Dimension, source: Option<Handle>) {
     let elevation = s.elevation();
-    let mut z: Vec<(&str, f64)> = dm.assoc.iter().map(|a| (a.point.as_str(), object_z(s, a.handle, &a.snap) - elevation)).collect();
-    let first = z.first().map(|(_, v)| *v);
-    if let (DimKind::ArcLength, Some(v)) = (dm.kind, first) {
-        z.extend([("p15", v), ("p16", v)]);
-    }
+    let z: Vec<(&str, f64)> = match source {
+        Some(object) => {
+            let shift = object_z(s, object, &AssocSnap::Start) - elevation;
+            let points: &[&str] = match dm.kind {
+                DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
+                DimKind::Radius | DimKind::Diameter => &["defpt", "p15"],
+                DimKind::Angular => &["defpt", "p13", "p14", "p15"],
+                DimKind::Angular3P => &["p13", "p14", "p15"],
+                DimKind::ArcLength => &["p13", "p14", "p15", "p16"],
+                DimKind::Ordinate { .. } => &[],
+            };
+            points.iter().map(|name| (*name, shift)).collect()
+        }
+        None => {
+            let mut z: Vec<(&str, f64)> = dm.assoc.iter().map(|a| (a.point.as_str(), object_z(s, a.handle, &a.snap) - elevation)).collect();
+            if let (DimKind::ArcLength, Some((_, v))) = (dm.kind, z.first().copied()) {
+                z.extend([("p15", v), ("p16", v)]);
+            }
+            z
+        }
+    };
     for (name, shift) in z {
         match name {
             "defpt" => dm.defpt.z += shift,
@@ -91,8 +115,9 @@ fn take_object_z(s: &Session, dm: &mut Dimension) {
             _ => {}
         }
     }
-    if let (Some(jogged), Some(attached)) = (&mut dm.marks.jogged, dm.assoc.iter().find(|a| a.point == "defpt")) {
-        let shift = object_z(s, attached.handle, &attached.snap) - elevation;
+    let jog_object = source.or_else(|| dm.assoc.iter().find(|a| a.point == "defpt").map(|a| a.handle));
+    if let (Some(jogged), Some(object)) = (&mut dm.marks.jogged, jog_object) {
+        let shift = object_z(s, object, &AssocSnap::Start) - elevation;
         jogged.center.z += shift;
         jogged.jog.z += shift;
     }
