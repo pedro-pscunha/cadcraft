@@ -27,7 +27,9 @@ pub(super) fn dim_block_plan(d: &Drawing) -> DimBlockPlan {
             used.insert(i.block.to_ascii_uppercase());
         }
         EntityKind::MLeader(m) => used.extend(m.block.as_ref().map(|b| b.block.to_ascii_uppercase())),
-        EntityKind::Dimension(dm) if dims => used.extend(dm.block.as_ref().map(|n| n.to_ascii_uppercase())),
+        EntityKind::Dimension(dm) if dims || e.geometry_revision == cadcraft_doc::GeometryRevision::CanonicalV2 => {
+            used.extend(dm.block.as_ref().map(|n| n.to_ascii_uppercase()));
+        }
         // An entity of a type CADCraft doesn't model is written back as read, so the block its
         // group 2 names (an ARC_DIMENSION's `*D` block) stays as read too.
         EntityKind::Unknown(u) => {
@@ -81,7 +83,8 @@ pub(super) fn reuse_handles(ents: &mut [Entity], old: &Block, taken: &mut std::c
 pub(super) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str, normal: Vec3, revision: cadcraft_doc::GeometryRevision) -> Vec<Entity> {
     let Ok(local) = dm.localized_for_revision(normal, revision) else { return Vec::new() };
     let drawn = &local;
-    let z = local.local_picture_elevation();
+    // The dimension supplies the plane elevation. Its graphics block stays at local Z 0.
+    let z = 0.0;
     let geometry_revision = Default::default();
     // The dimension as drawn: its overrides, DIMSCALE (0 = the drawing's) and text font.
     let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);

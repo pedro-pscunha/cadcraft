@@ -60,10 +60,14 @@ impl Dimension {
         Ok(local)
     }
 
-    /// The picture elevation of an already-localized dimension. A two-line angular dimension's
-    /// arc point sets its plane; `defpt` is a line endpoint and can have a different elevation.
+    /// The picture elevation of an already-localized dimension. A two-line angular dimension uses its arc point.
+    /// An ordinate dimension uses its text plane because its definition point is the UCS origin.
     pub fn local_picture_elevation(&self) -> f64 {
-        if matches!(self.kind, DimKind::Angular) { self.p16.z } else { self.defpt.z }
+        match self.kind {
+            DimKind::Angular => self.p16.z,
+            DimKind::Ordinate { .. } => self.text_mid.z,
+            _ => self.defpt.z,
+        }
     }
 
     /// This dimension, in the plane of `normal`, after the similarity `transform`; and the new normal.

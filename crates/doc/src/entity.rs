@@ -114,7 +114,7 @@ pub use mleader::{
 };
 pub use mline_canonical::MLineLayout;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
-pub use text_canonical::{Similarity, TextFrame};
+pub use text_canonical::{Similarity, TextFrame, TextMirror};
 /// Borrowed display limitation of an opaque source entity. The source unit owns its reason and tags.
 #[derive(Clone, Copy, Debug)]
 pub struct UnresolvedDisplay<'a> {

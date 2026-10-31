@@ -22,6 +22,23 @@ pub(crate) fn entity_world_geometry_visiting(
     geometry_in(drawing, entity, parent, 0, &mut remaining, visitor)
 }
 
+pub(crate) fn dimension_picture_transform(entity: &Entity, dimension: &cadcraft_doc::Dimension, parent: &Mat4) -> cadcraft_doc::Result<Mat4> {
+    let local = dimension.localized_for_revision(entity.common.extrusion, entity.geometry_revision)?;
+    let elevation = cadcraft_geom::Vec3::new(0.0, 0.0, local.text_mid.z);
+    let offset = if dimension.block.is_none() {
+        cadcraft_geom::Vec3::ZERO
+    } else if entity.geometry_revision == GeometryRevision::CanonicalV2 {
+        entity.common.geometry.as_ref().and_then(|snapshot| snapshot.dimension.as_ref()).map_or(elevation, |source| source.clone_point)
+    } else {
+        // Legacy XY clone offsets are already normalized into the block. Its plane elevation is separate.
+        elevation
+    };
+    if !offset.is_finite() {
+        return Err(DocError::NonFinite(entity.handle));
+    }
+    Ok(parent.mul(&Mat4::ocs(entity.common.extrusion)).mul(&crate::world_roles::translation(offset)))
+}
+
 fn geometry_in(
     drawing: &Drawing,
     entity: &Entity,
@@ -67,8 +84,15 @@ fn geometry_in(
             WorldGeometry::from_primitives(entity.handle, primitives)
         }
         EntityKind::Dimension(dimension) => {
-            let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
-            entity.world_geometry_with_layout(parent, Some(WorldLayout::Dimension(&layout)))
+            if let Some(block) = dimension.block.as_ref().and_then(|name| drawing.block(name)) {
+                let picture = dimension_picture_transform(entity, dimension, parent)?;
+                let mut primitives = Vec::new();
+                append_block_geometry(drawing, block, &picture, depth, remaining, &mut primitives, visitor)?;
+                WorldGeometry::from_primitives(entity.handle, primitives)
+            } else {
+                let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
+                entity.world_geometry_with_layout(parent, Some(WorldLayout::Dimension(&layout)))
+            }
         }
         EntityKind::Table(table) => {
             let layout = crate::table_layout(drawing, table);

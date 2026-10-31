@@ -528,3 +528,50 @@ fn a_moved_radial_text_inside_the_circle_has_the_leader_under_it() {
     let (before, after) = (default.lines[0][0].dist(default.lines[0][1]), moved.lines[0][0].dist(moved.lines[0][1]));
     assert!((after - before - 3.0).abs() < 1e-9, "{before} -> {after}: {:?} {:?}", default.lines, moved.lines);
 }
+
+#[test]
+fn a_jog_goes_where_autocad_puts_it_for_every_jog_location() {
+    // AutoCAD LT 2025 (/tmp/cad/elev-oracle16): circle of radius 10 at the origin, location towards 45 degrees, override centre (40,15). The
+    // jog is vertical at x = the number.
+    let cases = [
+        ((12.0, 12.0), 17.370),
+        ((15.0, 10.0), 18.422),
+        ((20.0, 12.0), 22.108),
+        ((25.0, 12.0), 24.748),
+        ((25.0, 20.0), 28.141),
+        ((30.0, 18.0), 30.247),
+        ((30.0, 10.0), 25.748),
+        ((35.0, 15.0), 30.480),
+        ((18.0, 18.0), 23.055),
+        ((8.0, 20.0), 16.759),
+    ];
+    let u = Vec2::from_angle(std::f64::consts::FRAC_PI_4);
+    let st = st_with(|s| {
+        s.text_above = 1;
+        s.text_height = 2.5;
+        s.arrow_size = 2.5;
+        s.text_gap = 0.625;
+    });
+    for ((jx, jy), x) in cases {
+        let mut d = lin((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0);
+        d.kind = DimKind::Radius;
+        d.p15 = Vec3::new(10.0 * u.x, 10.0 * u.y, 0.0);
+        d.user_text_pos = true;
+        d.text_mid = Vec3::new(16.0, 16.0, 0.0);
+        d.marks.jogged = Some(cadcraft_doc::JoggedRadius { center: Vec3::new(40.0, 15.0, 0.0), jog: Vec3::new(jx, jy, 0.0) });
+        let g = dimension_geometry(&d, &st, 1.0);
+        let path = &g.lines[0];
+        assert_eq!(path.len(), 4, "{path:?}");
+        assert!((path[1].x - x).abs() < 0.02 && (path[1].y - path[1].x).abs() < 1e-9, "jog at ({jx},{jy}): {:?} against x {x}", path[1]);
+    }
+    // Past Q the jog is in the middle: the centre of the radius and of the override centre.
+    let mut d = lin((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), 0.0);
+    d.kind = DimKind::Radius;
+    d.p15 = Vec3::new(10.0 * u.x, 10.0 * u.y, 0.0);
+    d.user_text_pos = true;
+    d.text_mid = Vec3::new(16.0, 16.0, 0.0);
+    d.marks.jogged = Some(cadcraft_doc::JoggedRadius { center: Vec3::new(40.0, 15.0, 0.0), jog: Vec3::new(60.0, 60.0, 0.0) });
+    let g = dimension_geometry(&d, &st, 1.0);
+    let default = (38.89087296526011 + 10.0) / 2.0 + 17.67766952966369 / 2.0;
+    assert!((g.lines[0][1].x * std::f64::consts::SQRT_2 - default).abs() < 0.02, "{:?}", g.lines[0]);
+}

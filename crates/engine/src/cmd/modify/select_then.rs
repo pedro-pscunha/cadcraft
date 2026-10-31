@@ -474,8 +474,16 @@ impl Interactive for SelectThen {
             _ => return Vec::new(),
         };
         let Ok(d) = s.doc() else { return Vec::new() };
-        let mut out: Vec<Entity> =
-            self.objs.iter().take(500).filter_map(|h| d.entity(*h)).filter_map(|e| e.transformed(&super::world_map(e, &m)).ok()).collect();
+        let mut out: Vec<Entity> = self
+            .objs
+            .iter()
+            .take(500)
+            .filter_map(|h| d.entity(*h))
+            .filter_map(|entity| {
+                let matrix = super::world_map(entity, &m);
+                if self.op == Op::Mirror { super::mirror::candidate(d, entity, &matrix).ok() } else { entity.transformed(&matrix).ok() }
+            })
+            .collect();
         out.push(s.preview_entity(line(base, c)));
         out
     }
@@ -507,7 +515,7 @@ impl Interactive for SelectThen {
                 handles.push(*h);
             } else if texts < MAX_MIRROR_TEXT_PREVIEW {
                 texts += 1;
-                if let Ok(entity) = e.transformed(&cadcraft_geom::Mat4::from_mat3(&matrix)) {
+                if let Ok(entity) = super::mirror::candidate(d, e, &cadcraft_geom::Mat4::from_mat3(&matrix)) {
                     extra.push(entity);
                 }
             }

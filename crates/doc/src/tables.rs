@@ -129,11 +129,20 @@ pub struct TextStyle {
     pub annotative: bool,
 }
 
+impl TextStyle {
+    const BUILTIN_FONT: &'static str = "CADCraft Stroke";
+
+    /// The font name written to DXF. The renderer's original stroke font uses the `txt` exchange alias.
+    pub fn dxf_font_name(&self) -> &str {
+        if self.font == Self::BUILTIN_FONT { "txt" } else { &self.font }
+    }
+}
+
 impl Default for TextStyle {
     fn default() -> Self {
         TextStyle {
             name: "Standard".into(),
-            font: "CADCraft Stroke".into(),
+            font: Self::BUILTIN_FONT.into(),
             big_font: String::new(),
             height: 0.0,
             width_factor: 1.0,

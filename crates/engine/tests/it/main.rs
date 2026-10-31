@@ -35,6 +35,7 @@ mod dim_explode_text;
 mod dim_properties;
 mod dim_radial_inside;
 mod dim_radial_outside;
+mod dim_text_inside;
 mod dim_vars;
 mod dimtedit_prompts;
 mod drafting_spacing;

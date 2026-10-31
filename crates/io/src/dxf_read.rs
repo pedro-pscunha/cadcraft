@@ -22,6 +22,9 @@ mod canonical_context_tests;
 mod common;
 mod curve_canonical;
 pub(crate) mod dimassoc;
+mod dimension_blocks;
+#[cfg(test)]
+mod displacement_tests;
 mod document;
 mod entities;
 mod extras;
@@ -51,9 +54,9 @@ pub use legacy_equivalence::{
 pub use mleader_canonical::canonical_mleader_from_groups;
 pub use text_canonical::{canonical_attrib_from_groups, canonical_layout_from_groups, canonical_text_from_groups};
 
+use dimension_blocks::{DimensionBlockShift, shift_dimension_blocks};
 use document::{
     apply_sortents, count_skipped, outside_sections, parse_entities, place_blocks, place_entities, read_blocks, read_objects, setup_layouts,
-    shift_dimension_blocks,
 };
 #[cfg(test)]
 use entities::acad_table;
@@ -116,7 +119,7 @@ pub struct Rx {
     /// LAYER record handle (upper case) → layer name (VIEWPORT group 331 frozen layers).
     layers: HashMap<String, String>,
     /// Upper-case `*D` block name → the shift AutoCAD draws it with: its dimension's group 12.
-    dim_block_shifts: Vec<(String, cadcraft_geom::Vec2)>,
+    dim_block_shifts: Vec<DimensionBlockShift>,
     /// Upper-case names of the layout blocks that hold a paper-space viewport CADCraft wrote (see `dxf_write::paper_view`).
     marked_sheets: HashSet<String>,
 }
