@@ -804,6 +804,9 @@ struct Objects {
 
 fn objects_at_7() -> Objects {
     let mut s = Session::new();
+    s.open_drawing(Drawing::new_metric(), "metric", None);
+    s.execute("layer", &json!({"option": "new", "name": "DIMS"})).unwrap();
+    s.execute("setvar", &json!({"name": "CLAYER", "value": "DIMS"})).unwrap();
     s.execute("setvar", &json!({"name": "ELEVATION", "value": 7})).unwrap();
     let circle = create(&mut s, "circle", json!({"center": [30, 0], "radius": 2}));
     let arc = create(&mut s, "arc", json!({"p1": [70, 0], "p2": [72, 2], "p3": [74, 0]}));
@@ -820,8 +823,7 @@ fn on_objects(params: fn(&Objects) -> Value) -> Fixture {
     on_objects_with(2, params)
 }
 
-/// The same with DIMASSOC `assoc`: 2 makes associative dimensions, 1 non-associative ones, 0 no association (AutoCAD explodes the dimension at 0; we
-/// keep the dimension object, and its Z follows the same rule).
+/// The same with DIMASSOC `assoc`: 2 makes associative dimensions, 1 non-associative ones, 0 no dimension at all (the pieces of one).
 fn on_objects_with(assoc: i64, params: fn(&Objects) -> Value) -> Fixture {
     let mut o = objects_at_7();
     o.session.execute("setvar", &json!({"name": "DIMASSOC", "value": assoc})).unwrap();
@@ -829,6 +831,47 @@ fn on_objects_with(assoc: i64, params: fn(&Objects) -> Value) -> Fixture {
     let neighbour = o.session.doc().unwrap().model.iter().last().unwrap().handle;
     Fixture { drawing: model_of(&o.session), params, operands: vec![neighbour], view: None }
 }
+
+/// DIMASSOC 0: AutoCAD makes no DIMENSION but its pieces, on the current layer (DIMS), all at the elevation, whatever the Z of the objects. The
+/// counts are those of the DXF of accoreconsole (ISO-25, `/tmp/cad/elev-oracle6`, LT 2025, 31/10/2026).
+fn exploded_as_autocad(d: &Drawing, ops: &[Handle], counts: &[(&str, usize)]) -> Result<(), String> {
+    let mut seen = std::collections::BTreeMap::<&str, usize>::new();
+    for e in d.model.iter().filter(|e| e.handle > ops[0]) {
+        let (name, zs): (&str, Vec<f64>) = match &e.kind {
+            EntityKind::Line(l) => ("LINE", vec![l.a.z, l.b.z]),
+            EntityKind::Arc(a) => ("ARC", vec![a.center.z]),
+            EntityKind::Solid(c) => ("SOLID", c.corners.iter().map(|p| p.z).collect()),
+            EntityKind::MText(t) => ("MTEXT", vec![t.insert.z]),
+            other => return Err(format!("made {other:?}")),
+        };
+        *seen.entry(name).or_default() += 1;
+        if e.common.layer != "DIMS" {
+            return Err(format!("{name} on layer {}", e.common.layer));
+        }
+        for z in zs {
+            near(z, 3.0).map_err(|m| format!("{name}: {m}"))?;
+        }
+    }
+    let want: std::collections::BTreeMap<&str, usize> = counts.iter().copied().collect();
+    if seen == want { Ok(()) } else { Err(format!("made {seen:?}, AutoCAD makes {want:?}")) }
+}
+
+macro_rules! exploded_check {
+    ($name:ident, $counts:expr) => {
+        fn $name(d: &Drawing, ops: &[Handle], _: Plane) -> Result<(), String> {
+            exploded_as_autocad(d, ops, $counts)
+        }
+    };
+}
+
+exploded_check!(exploded_linear, &[("LINE", 3), ("SOLID", 2), ("MTEXT", 1)]);
+exploded_check!(exploded_radius, &[("LINE", 2), ("SOLID", 1), ("MTEXT", 1)]);
+exploded_check!(exploded_diameter, &[("LINE", 3), ("SOLID", 2), ("MTEXT", 1)]);
+exploded_check!(exploded_jogged, &[("LINE", 3), ("SOLID", 1), ("MTEXT", 1)]);
+exploded_check!(exploded_angular_lines, &[("ARC", 2), ("LINE", 1), ("SOLID", 2), ("MTEXT", 1)]);
+exploded_check!(exploded_angular_vertex, &[("LINE", 3), ("ARC", 2), ("SOLID", 2), ("MTEXT", 1)]);
+exploded_check!(exploded_arc_length, &[("LINE", 3), ("ARC", 3), ("SOLID", 2), ("MTEXT", 1)]);
+exploded_check!(exploded_ordinate, &[("LINE", 1), ("MTEXT", 1)]);
 
 fn dimradius_on_circle() -> Fixture {
     on_objects(|o| json!({"handle": o.circle.hex(), "at": [33, 3]}))
@@ -861,20 +904,26 @@ macro_rules! object_fixtures {
 }
 
 object_fixtures! {
-    dimradius_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "at": [33, 3]});
     dimradius_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "at": [33, 3]});
-    dimdiameter_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "at": [27, -3]});
     dimdiameter_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "at": [27, -3]});
-    dimjogged_assoc_0: 0, |o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]});
     dimjogged_assoc_1: 1, |o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]});
-    dimangular_assoc_0: 0, |o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]});
     dimangular_assoc_1: 1, |o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]});
-    dimangular_arc_assoc_0: 0, |o| json!({"arc": o.arc.hex(), "at": [72, 4]});
     dimangular_arc_assoc_1: 1, |o| json!({"arc": o.arc.hex(), "at": [72, 4]});
-    dimarc_assoc_0: 0, |o| json!({"handle": o.arc.hex(), "at": [72, 4]});
     dimarc_assoc_1: 1, |o| json!({"handle": o.arc.hex(), "at": [72, 4]});
-    dimlinear_assoc_0: 0, |o| json!({"object": o.line.hex(), "at": [5, 13]});
     dimlinear_assoc_1: 1, |o| json!({"object": o.line.hex(), "at": [5, 13]});
+}
+
+object_fixtures! {
+    explode_dimlinear: 0, |_| json!({"p1": [0, 40], "p2": [10, 40], "at": [5, 43]});
+    explode_dimaligned: 0, |_| json!({"p1": [0, 20], "p2": [10, 25], "at": [5, 28]});
+    explode_dimradius: 0, |o| json!({"handle": o.circle.hex(), "at": [33, 3]});
+    explode_dimdiameter: 0, |o| json!({"handle": o.circle.hex(), "at": [27, -3]});
+    explode_dimjogged: 0, |o| json!({"handle": o.circle.hex(), "centerOverride": [40, 5], "at": [34, 4], "jog": [37, 5]});
+    explode_dimangular_lines: 0, |o| json!({"lines": [o.lines[0].hex(), o.lines[1].hex()], "at": [53, 4]});
+    explode_dimangular_vertex: 0, |_| json!({"vertex": [100, 0], "p1": [105, 0], "p2": [100, 5], "at": [103, 3]});
+    explode_dimarc: 0, |o| json!({"handle": o.arc.hex(), "at": [72, 4]});
+    explode_dimordinate: 0, |_| json!({"feature": [80, 0], "leader": [80, 5]});
+    explode_dimlinear_object: 0, |o| json!({"object": o.line.hex(), "at": [5, 13]});
 }
 
 elevated_fixture!(dim_at_3, json!({"p1": [0, 10], "p2": [10, 10], "at": [5, 13]}));
@@ -1607,7 +1656,7 @@ fn live_rows() -> Vec<Row> {
         ("spline", "fit points", spline_at_3, made_spline_at_3),
         ("wipeout", "points", wipeout_at_3, made_wipeout_at_3),
     ];
-    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 28] = [
+    let on_objects: [(&str, &str, fn() -> Fixture, fn(&Drawing, &[Handle], Plane) -> Result<(), String>); 25] = [
         ("dimradius", "by handle, circle at Z 7", dimradius_on_circle, radius_on_circle_made),
         ("dimdiameter", "by handle, circle at Z 7", dimdiameter_on_circle, radius_on_circle_made),
         ("dimjogged", "by handle, circle at Z 7", dimjogged_on_circle, jogged_on_circle_made),
@@ -1616,20 +1665,17 @@ fn live_rows() -> Vec<Row> {
         ("dimlinear", "by object, line at Z 7", dimlinear_on_line, linear_on_line_made),
         ("dim", "two points and a location", dim_at_3, made_dimension_at_3),
         ("qdim", "two lines at the elevation", qdim_at_3, qdim_made),
+        ("dimlinear", "DIMASSOC 0, two points", explode_dimlinear, exploded_linear),
+        ("dimradius", "DIMASSOC 0, circle", explode_dimradius, exploded_radius),
+        ("dimordinate", "DIMASSOC 0, feature and leader", explode_dimordinate, exploded_ordinate),
+        ("dimlinear", "DIMASSOC 0, object", explode_dimlinear_object, exploded_linear),
         ("dimangular", "arc at Z 7", dimangular_on_arc, angular_on_arc_made),
-        ("dimradius", "dimradius at Z 7, DIMASSOC 0", dimradius_assoc_0, radius_on_circle_made),
         ("dimradius", "dimradius at Z 7, DIMASSOC 1", dimradius_assoc_1, radius_on_circle_made),
-        ("dimdiameter", "dimdiameter at Z 7, DIMASSOC 0", dimdiameter_assoc_0, radius_on_circle_made),
         ("dimdiameter", "dimdiameter at Z 7, DIMASSOC 1", dimdiameter_assoc_1, radius_on_circle_made),
-        ("dimjogged", "dimjogged at Z 7, DIMASSOC 0", dimjogged_assoc_0, jogged_on_circle_made),
         ("dimjogged", "dimjogged at Z 7, DIMASSOC 1", dimjogged_assoc_1, jogged_on_circle_made),
-        ("dimangular", "dimangular at Z 7, DIMASSOC 0", dimangular_assoc_0, angular_on_lines_made),
         ("dimangular", "dimangular at Z 7, DIMASSOC 1", dimangular_assoc_1, angular_on_lines_made),
-        ("dimangular", "dimangular arc at Z 7, DIMASSOC 0", dimangular_arc_assoc_0, angular_on_arc_made),
         ("dimangular", "dimangular arc at Z 7, DIMASSOC 1", dimangular_arc_assoc_1, angular_on_arc_made),
-        ("dimarc", "dimarc at Z 7, DIMASSOC 0", dimarc_assoc_0, arc_on_arc_made),
         ("dimarc", "dimarc at Z 7, DIMASSOC 1", dimarc_assoc_1, arc_on_arc_made),
-        ("dimlinear", "dimlinear at Z 7, DIMASSOC 0", dimlinear_assoc_0, linear_on_line_made),
         ("dimlinear", "dimlinear at Z 7, DIMASSOC 1", dimlinear_assoc_1, linear_on_line_made),
         ("qdim", "radius mode, two circles", qdim_radius_at_3, qdim_radial_made),
         ("qdim", "diameter mode, two circles", qdim_diameter_at_3, qdim_radial_made),
@@ -1658,12 +1704,92 @@ struct Pending {
 }
 
 fn pending() -> Vec<Pending> {
-    vec![Pending {
-        finding: "MLINE-ELEVATION",
-        what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
-               measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
-        row: None,
-    }]
+    vec![
+        Pending {
+            finding: "MLINE-ELEVATION",
+            what: "MLINE draws at Z 0 whatever ELEVATION is. AutoCAD LT 2025 has no MLINE (\"Comando MLINE desconhecido\"), so the Z of its fields is not \
+                   measured, and celia-laptop, the other PC, did not answer SSH on 31/10/2026. The row comes with the first full AutoCAD measurement.",
+            row: None,
+        },
+        Pending {
+            finding: "DIMASSOC0-ALIGNED",
+            what: "DIMALIGNED at DIMASSOC 0 makes 4 LINEs, AutoCAD 3: our dimension line is split around a text that AutoCAD places beside it (the text position differs too, 16.2,36.0 against 1.96,28.58).",
+            row: Some(Row {
+                command: "dimaligned",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, two points",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimaligned,
+                expect: Expect::Edits(exploded_linear),
+            }),
+        },
+        Pending {
+            finding: "DIMASSOC0-DIAMETER",
+            what: "DIMDIAMETER at DIMASSOC 0 makes 2 LINEs, AutoCAD 3 (a second line from the text to the dimension line).",
+            row: Some(Row {
+                command: "dimdiameter",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, circle",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimdiameter,
+                expect: Expect::Edits(exploded_diameter),
+            }),
+        },
+        Pending {
+            finding: "DIMASSOC0-JOGGED",
+            what: "DIMJOGGED at DIMASSOC 0 makes 4 LINEs, AutoCAD 3 (the leader and the jog are three lines).",
+            row: Some(Row {
+                command: "dimjogged",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, circle",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimjogged,
+                expect: Expect::Edits(exploded_jogged),
+            }),
+        },
+        Pending {
+            finding: "DIMASSOC0-ANGULAR-LINES",
+            what: "DIMANGULAR on two lines at DIMASSOC 0 makes 1 ARC, AutoCAD 2 ARCs and 1 LINE (the arc is broken around the text, a leader runs to it).",
+            row: Some(Row {
+                command: "dimangular",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, two lines",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimangular_lines,
+                expect: Expect::Edits(exploded_angular_lines),
+            }),
+        },
+        Pending {
+            finding: "DIMASSOC0-ANGULAR-VERTEX",
+            what: "DIMANGULAR with a vertex at DIMASSOC 0 makes 1 ARC, AutoCAD 2 ARCs and 3 LINEs (two extension lines and a leader).",
+            row: Some(Row {
+                command: "dimangular",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, vertex",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimangular_vertex,
+                expect: Expect::Edits(exploded_angular_vertex),
+            }),
+        },
+        Pending {
+            finding: "DIMASSOC0-ARC-LENGTH",
+            what: "DIMARC at DIMASSOC 0 makes 1 ARC and 2 LINEs, AutoCAD 3 ARCs and 3 LINEs (the arc is broken around the text and carries the arc symbol).",
+            row: Some(Row {
+                command: "dimarc",
+                role: Role::PickedPoint,
+                branch: "DIMASSOC 0, arc",
+                revision: Revision::Legacy,
+                plane: Plane::PlusZ,
+                fixture: explode_dimarc,
+                expect: Expect::Edits(exploded_arc_length),
+            }),
+        },
+    ]
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -1691,7 +1817,19 @@ fn a_pending_row_still_fails_and_is_removed_when_its_fix_lands() {
 #[test]
 fn the_pending_rows_are_exactly_the_open_findings() {
     let findings: Vec<&str> = pending().iter().map(|p| p.finding).collect();
-    assert_eq!(findings, vec!["MLINE-ELEVATION"], "F3 is closed (5774fbf8): a new finding gets its entry here");
+    assert_eq!(
+        findings,
+        vec![
+            "MLINE-ELEVATION",
+            "DIMASSOC0-ALIGNED",
+            "DIMASSOC0-DIAMETER",
+            "DIMASSOC0-JOGGED",
+            "DIMASSOC0-ANGULAR-LINES",
+            "DIMASSOC0-ANGULAR-VERTEX",
+            "DIMASSOC0-ARC-LENGTH"
+        ],
+        "F3 is closed (5774fbf8): a new finding gets its entry here"
+    );
     assert!(pending().iter().all(|p| !p.what.is_empty()));
 }
 

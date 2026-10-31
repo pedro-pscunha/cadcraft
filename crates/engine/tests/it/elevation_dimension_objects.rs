@@ -10,6 +10,7 @@ const DIMENSIONS: &[(&str, &[&str])] = &[
     ("DIMJOGGED", &["DIMJOGGED", "32,0", "40,5", "34,4", "37,5"]),
     ("DIMARC", &["DIMARC", "72,2", "72,4"]),
     ("DIMANGULAR", &["DIMANGULAR", "55,0", "52.5,4", "53,4"]),
+    ("DIMANGULAR circle", &["DIMANGULAR", "32,0", "30,2", "34,4"]),
     ("DIMLINEAR", &["DIMLINEAR", "", "5,10", "5,13"]),
 ];
 
@@ -37,7 +38,7 @@ fn drawn_at(assoc: i64, steps: &[&str]) -> (f64, f64) {
 
 #[test]
 fn an_interactive_dimension_made_from_an_object_takes_the_objects_z_at_every_dimassoc() {
-    for assoc in [0, 1, 2] {
+    for assoc in [1, 2] {
         for (name, steps) in DIMENSIONS {
             let (from_object, text) = drawn_at(assoc, steps);
             assert_eq!(from_object, 7.0, "{name} at DIMASSOC {assoc}: the point from the object");

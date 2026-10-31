@@ -224,6 +224,7 @@ impl Interactive for AngularM {
                     // The center is the vertex and the pick the first endpoint; ask for the second.
                     self.vertex = true;
                     self.vertex_mode = vec![g.center, g.closest(p)];
+                    self.arc_object = Some(h);
                     return Ok(Step::Continue);
                 }
                 match segment_at(s, h, p) {

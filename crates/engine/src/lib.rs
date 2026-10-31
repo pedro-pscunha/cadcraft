@@ -193,6 +193,7 @@ pub(crate) fn raise_to(kind: &mut EntityKind, z: f64) {
             l.a.z += z;
             l.b.z += z;
         }
+        EntityKind::Solid(solid) => solid.corners.iter_mut().for_each(|corner| corner.z += z),
         EntityKind::Circle(c) => c.center.z += z,
         EntityKind::Arc(a) => a.center.z += z,
         EntityKind::Ellipse(e) => e.center.z += z,

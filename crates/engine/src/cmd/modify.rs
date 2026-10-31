@@ -18,6 +18,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 
 mod break_join;
 mod explode;
+pub(crate) use explode::explode_dimension;
 mod fillet;
 mod offset;
 mod select_then;

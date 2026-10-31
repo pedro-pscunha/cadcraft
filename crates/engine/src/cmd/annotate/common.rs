@@ -48,6 +48,11 @@ pub(super) fn add_dim(s: &mut Session, k: EntityKind) -> Result<Handle> {
 /// [`add_dim`] for a dimension made from the object `source`: the points that come from it take its Z (see `take_object_z`).
 pub(super) fn add_dim_from(s: &mut Session, k: EntityKind, source: Option<Handle>) -> Result<Handle> {
     let mut k = k;
+    if !assoc_enabled(s)
+        && let EntityKind::Dimension(dm) = &k
+    {
+        return add_exploded(s, dm);
+    }
     if let EntityKind::Dimension(dm) = &mut k
         && dm.assoc.is_empty()
         && assoc_enabled(s)
@@ -60,6 +65,29 @@ pub(super) fn add_dim_from(s: &mut Session, k: EntityKind, source: Option<Handle
     let h = s.draw(k)?;
     s.last_dim = Some(h);
     Ok(h)
+}
+
+/// DIMASSOC 0: AutoCAD makes no DIMENSION but its pieces (LINEs, ARCs, SOLID arrowheads and the MTEXT) on the current layer, all at the
+/// current elevation, whatever Z the objects have (measured in LT 2025). Returns the first piece; no dimension remains to continue.
+fn add_exploded(s: &mut Session, dm: &Dimension) -> Result<Handle> {
+    let whole = cadcraft_doc::Entity {
+        geometry_revision: Default::default(),
+        handle: Handle(0),
+        common: s.current_common(),
+        kind: EntityKind::Dimension(dm.clone()),
+    };
+    let pieces = crate::cmd::modify::explode_dimension(s.doc()?, &whole, dm);
+    let mut first = None;
+    for piece in pieces {
+        let h = s.draw(piece.kind)?;
+        // The pieces keep their own colour where the dimension gave one (the text background).
+        if s.doc()?.entity(h).is_some_and(|made| made.common != piece.common) {
+            s.doc_mut()?.modify_entity(h, |e| e.common = piece.common.clone())?;
+        }
+        first.get_or_insert(h);
+    }
+    s.last_dim = None;
+    first.ok_or_else(|| crate::EngineError::Other("the dimension has nothing to draw".into()))
 }
 
 /// The Z of the point of `object` that an associative definition point sits on.
