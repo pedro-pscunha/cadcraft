@@ -54,7 +54,7 @@ fn a_table_style_is_written_in_autocads_form() {
     for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&d)) {
         let (_, style) = section(&text, "OBJECTS")
             .into_iter()
-            .find(|(k, t)| k == "TABLESTYLE" && t.iter().any(|g| g.code == 5 && val(t, 3) == ""))
+            .find(|(k, t)| k == "TABLESTYLE" && t.iter().any(|g| g.code == 5 && val(t, 3).is_empty()))
             .unwrap_or_else(|| panic!("{what}: no style"));
         let after = |from: usize| style.iter().skip(from).take_while(|t| t.code < 1000).map(|t| t.code).collect::<Vec<_>>();
         let start = style.iter().position(|t| t.code == 100 && t.str() == "AcDbTableStyle").unwrap() + 1;
