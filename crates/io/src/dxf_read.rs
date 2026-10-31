@@ -92,8 +92,10 @@ pub struct Rx {
     ltypes: HashMap<String, String>,
     /// Upper-case block name → (insertion units, explodable, scale uniformly) from its BLOCK_RECORD.
     block_props: HashMap<String, (u8, bool, bool)>,
-    /// Upper-case names of anonymous `*T` blocks drawn by ACAD_TABLE entities.
-    table_blocks: std::collections::HashSet<String>,
+    /// Upper-case names of anonymous `*T` blocks drawn by ACAD_TABLE entities, and the table of each.
+    table_blocks: HashMap<String, Handle>,
+    /// Those blocks as the file had them, by upper-case name.
+    table_graphics: HashMap<String, std::sync::Arc<cadcraft_doc::Block>>,
     /// Upper-case block names used by INSERTs.
     inserted: std::collections::HashSet<String>,
     /// Upper-case names of blocks that xdata outside dimensions names (1005), such as a leader's
@@ -309,6 +311,7 @@ fn read_budgeted(
     d.remember_raw_dimassocs();
     d.skipped_records = skipped;
     keep_block_previews(&mut d, rx.block_previews);
+    keep_table_graphics(&mut d, &rx.table_blocks, rx.table_graphics);
     Ok(d)
 }
 
@@ -320,6 +323,16 @@ fn keep_block_previews(d: &mut Drawing, mut previews: HashMap<String, Vec<String
             let block = std::sync::Arc::make_mut(block);
             block.preview = Some(cadcraft_doc::BlockPreview { groups, key: block.content_key() });
         }
+    }
+}
+
+/// Remember the graphics block of each table as the file drew it, with the key of the table as it was read.
+fn keep_table_graphics(d: &mut Drawing, names: &HashMap<String, Handle>, mut graphics: HashMap<String, std::sync::Arc<cadcraft_doc::Block>>) {
+    for (name, handle) in names {
+        let (Some(block), Some(entity)) = (graphics.remove(name), d.entity(*handle)) else { continue };
+        let cadcraft_doc::EntityKind::Table(table) = &entity.kind else { continue };
+        let key = crate::dxf_write::table_graphics_key(d, table, &entity.common.layer);
+        std::sync::Arc::make_mut(&mut d.source_symbols).table_blocks.insert(*handle, cadcraft_doc::TableBlock { key, block });
     }
 }
 

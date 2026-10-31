@@ -43,7 +43,7 @@ pub use header::{HVal, Header};
 pub use plotstyle::*;
 pub use plotter::*;
 pub use refedit::{RefEdit, WorkItem};
-pub use source_symbols::SourceSymbols;
+pub use source_symbols::{SourceSymbols, TableBlock};
 pub use store::EntityStore;
 pub use tables::*;
 

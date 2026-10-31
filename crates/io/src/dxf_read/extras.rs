@@ -35,7 +35,7 @@ pub(super) fn resolve_references(kind: &str, tags: &[Tag], h: Handle, k: &mut En
             }
             let t = T(tags);
             if let Some(b) = t.s(2) {
-                rx.table_blocks.insert(b.to_ascii_uppercase());
+                rx.table_blocks.insert(b.to_ascii_uppercase(), h);
             }
             let ours = crate::dxf_ext::xdata(tags, crate::dxf_ext::APP).iter().any(|t| t.code == 1000 && t.str() == "TABLE");
             if !ours {

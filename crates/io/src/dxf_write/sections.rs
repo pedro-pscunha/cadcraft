@@ -879,27 +879,50 @@ fn arrow_block_definitions(
     arrow_defs
 }
 
-fn table_block_definitions(d: &Drawing, every: &[&Entity], w: &mut W, cx: &mut Ctx) -> Vec<(String, String, Vec<Entity>)> {
+/// The graphics blocks of the tables: the block the file drew a table with, as read, while the table (and what its drawing depends on)
+/// is as it was read, else a block drawn from the table. Also the file's block of each reused one, for its base and description.
+fn table_block_definitions(
+    d: &Drawing,
+    every: &[&Entity],
+    w: &mut W,
+    cx: &mut Ctx,
+) -> (Vec<(String, String, Vec<Entity>)>, HashMap<String, std::sync::Arc<Block>>) {
     let mut table_defs = Vec::new();
+    let mut sources = HashMap::new();
+    let kept = |e: &Entity, t: &cadcraft_doc::Table| {
+        d.source_symbols.table_blocks.get(&e.handle).filter(|s| s.key == super::blocks::table_graphics_key(d, t, &e.common.layer))
+    };
+    // The names of the blocks written as read are not given to another table.
+    let reserved: std::collections::HashSet<String> = every
+        .iter()
+        .filter_map(|e| if let EntityKind::Table(t) = &e.kind { kept(e, t).map(|s| s.block.name.to_ascii_uppercase()) } else { None })
+        .collect();
     let mut tn = 1;
     for e in every {
         if let EntityKind::Table(t) = &e.kind {
             if cx.tables.contains_key(&e.handle) {
                 continue;
             }
+            let brh = w.h();
+            if let Some(source) = kept(e, t) {
+                let name = source.block.name.clone();
+                cx.tables.insert(e.handle, (name.clone(), brh.clone()));
+                sources.insert(name.clone(), source.block.clone());
+                table_defs.push((name, brh, source.block.entities.iter().map(|x| x.as_ref().clone()).collect()));
+                continue;
+            }
             let mut name = format!("*T{tn}");
-            while d.block(&name).is_some() {
+            while d.block(&name).is_some() || reserved.contains(&name.to_ascii_uppercase()) {
                 tn += 1;
                 name = format!("*T{tn}");
             }
             tn += 1;
-            let brh = w.h();
             cx.tables.insert(e.handle, (name.clone(), brh.clone()));
             table_defs.push((name, brh, table_block_entities(d, t, &e.common.layer)));
         }
     }
 
-    table_defs
+    (table_defs, sources)
 }
 
 fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut W, cx: &mut Ctx) {
@@ -1029,7 +1052,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
         .chain(d.blocks.values().flat_map(|b| b.entities.iter().map(|e| e.as_ref())))
         .collect();
     let mut arrow_defs = arrow_block_definitions(d, &every, &user_blocks, &mut w, &mut cx);
-    let mut table_defs = table_block_definitions(d, &every, &mut w, &mut cx);
+    let (mut table_defs, table_sources) = table_block_definitions(d, &every, &mut w, &mut cx);
     // Image definitions (IMAGEDEF objects) of raster images anywhere in the drawing.
     cx.images = crate::dxf_image::plan(d, every.iter().copied(), || w.h());
     cx.mlines = crate::dxf_mline::plan(d, every.iter().copied(), || w.h());
@@ -1243,7 +1266,8 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             }
             BlockSlot::Table(i) => {
                 let (n, h, ents) = &table_defs[i];
-                block(&mut w, (n, ""), h, Vec3::ZERO, 1, &mut ents.iter(), false);
+                let (desc, base) = table_sources.get(n).map_or(("", Vec3::ZERO), |b| (b.description.as_str(), b.base));
+                block(&mut w, (n, desc), h, base, 1, &mut ents.iter(), false);
             }
         }
     }

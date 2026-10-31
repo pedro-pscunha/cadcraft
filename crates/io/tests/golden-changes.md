@@ -149,3 +149,17 @@ The DWG of seven drawings (the `cyrela-field` pair, the three `tear` files, `Cyr
 | crates/io/tests/data/activation/r4_raw_insert_edit_refusal_and_save.dxf | dwg | CLASSES/CLASS x2 |
 | crates/io/tests/data/activation/r5_raw_insert_with_full_tables.dxf | dxf | OBJECTS/TABLESTYLE x1 |
 | crates/io/tests/data/activation/r5_raw_insert_with_full_tables.dxf | dwg | CLASSES/CLASS x2 |
+
+# Golden refresh for the table graphics block
+
+An ACAD_TABLE's `*T` graphics block is now kept as the file had it (name, records, handles) while the table is not edited. Seven drawings have an unedited ACAD_TABLE with a `*T` block
+(`examples/apartment.dxf` and six `dim1` files); each of their DXF and DWG outputs changed (14 of 126). The records that differ, compared one by one, are only these; outside the `*T` block and the handles that follow it, no record is lost or added.
+
+| record | cause | drawings | records |
+|---|---|---|---|
+| BLOCKS/LINE, BLOCKS/MTEXT | the source `*T` records come back (apartment: 29 LINE and 11 MTEXT in place of 10 merged LINE and 11 MTEXT with new handles) | apartment (dxf, dwg), 6 `dim1` files | 39 + 22, and 19 per `dim1` output |
+| BLOCKS/BLOCK, BLOCKS/ENDBLK, TABLES/BLOCK_RECORD | the block, its end and its record keep the handle of the file | 6 `dim1` files (dxf, dwg) | 2 each |
+| ENTITIES/ACAD_TABLE | group 340 names the kept block record | 6 `dim1` files (dxf, dwg) | 1 each |
+| OBJECTS/DICTIONARY, DICTIONARYVAR, MLEADERSTYLE | an object that took a new handle after the rebuilt block (apartment: the dictionary 2253 is now 223E, and the references to it follow) | apartment (dxf: 3 + 1, dwg: 5 + 14 + 1) | as listed |
+
+The six `dim1` drawings are `dim1-mattrib-2018.dwg`, `dim1-table90-2018.dwg`, `dim1-mattrib-2018.dxf`, `dim1-table90-2007.dxf`, `dim1-table90-2018.dxf` and `dim1-vp68-2018.dxf`.
