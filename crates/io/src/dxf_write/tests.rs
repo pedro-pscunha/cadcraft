@@ -3,6 +3,132 @@ use cadcraft_doc::Space;
 use std::cell::Cell;
 std::thread_local! { pub(super) static SCANNED: Cell<usize> = const { Cell::new(0) }; }
 
+fn drawing_with_generated_open90() -> Drawing {
+    let mut drawing = Drawing::new_metric();
+    let mut arrow = Block::new("_OPEN90");
+    for mut entity in super::blocks::arrow_block_entities(cadcraft_render::Arrowhead::Open90) {
+        entity.handle = drawing.new_handle();
+        arrow.entities.push(entity);
+    }
+    drawing.blocks.insert("_OPEN90".into(), std::sync::Arc::new(arrow));
+    drawing
+}
+
+#[test]
+fn raw_insert_source_references_keep_standard_arrow_definitions_through_dxf_saves() {
+    use crate::activation::{Family, FamilySet, Need, ReaderMode, ReaderPolicy};
+    let insert = |name: &str| {
+        EntityKind::Insert(Insert {
+            block: name.into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        })
+    };
+    for nested in [false, true] {
+        let mut drawing = drawing_with_generated_open90();
+        let expected: Vec<_> = drawing.block("_OPEN90").unwrap().entities.iter().map(|entity| entity.kind.clone()).collect();
+        let name = if nested {
+            let mut wrapper = Block::new("WRAPPER");
+            wrapper.entities.push(Entity::new(drawing.new_handle(), insert("_OPEN90")));
+            drawing.blocks.insert("WRAPPER".into(), std::sync::Arc::new(wrapper));
+            "WRAPPER"
+        } else {
+            "_OPEN90"
+        };
+        drawing.add(&Space::Model, Common { extrusion: Vec3::new(0.0, 1.0, 1.0), ..Common::default() }, insert(name)).unwrap();
+        assert!(drawing.dim_styles.iter().all(|style| {
+            [&style.arrow_block, &style.arrow_block1, &style.arrow_block2, &style.leader_arrow_block]
+                .iter()
+                .all(|name| !name.eq_ignore_ascii_case("_OPEN90"))
+        }));
+        assert!(drawing.mleader_styles.iter().all(|style| !style.arrow_block.eq_ignore_ascii_case("_OPEN90")));
+        let need =
+            |view: &crate::activation::records::RecordView| if view.family == Family::Insert { Need::Needs { readable: true } } else { Need::Plain };
+        let policy = ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path();
+        let mut source = crate::write_dxf(&drawing);
+        for pass in 0..2 {
+            let read = crate::read_with_need(source.as_bytes(), "source.dxf", policy, &need).unwrap();
+            assert!(read.model.iter().any(|entity| matches!(entity.kind, EntityKind::Raw(_))));
+            let preserved = read.block("_OPEN90").expect("a Raw INSERT must keep its standard-arrow target");
+            assert_eq!(preserved.entities.iter().map(|entity| entity.kind.clone()).collect::<Vec<_>>(), expected, "nested={nested}, pass={pass}");
+            if nested {
+                assert!(read.block("WRAPPER").unwrap().entities.iter().any(|entity| matches!(entity.kind, EntityKind::Raw(_))));
+            }
+            source = crate::write_dxf(&read);
+            let tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+            assert!(
+                cadcraft_dxf::sections(&tags)
+                    .into_iter()
+                    .filter(|section| section.name == "BLOCKS")
+                    .flat_map(|section| cadcraft_dxf::records(&section.tags))
+                    .any(|(kind, tags)| kind == "BLOCK" && tags.iter().any(|tag| tag.code == 2 && tag.str() == "_OPEN90"))
+            );
+        }
+    }
+}
+
+#[test]
+fn raw_dimension_block_handles_resolve_after_later_source_tables() {
+    use crate::activation::{Family, FamilySet, Need, ReaderMode, ReaderPolicy};
+    let mut drawing = drawing_with_generated_open90();
+    let mut overrides = serde_json::Map::new();
+    overrides.insert("arrowBlock".into(), serde_json::Value::String("_OPEN90".into()));
+    let dimension = Dimension {
+        kind: DimKind::Linear { rotation: 0.0 },
+        defpt: Vec3::new(10.0, 5.0, 0.0),
+        text_mid: Vec3::new(5.0, 6.0, 0.0),
+        p13: Vec3::ZERO,
+        p14: Vec3::new(10.0, 0.0, 0.0),
+        p15: Vec3::ZERO,
+        p16: Vec3::ZERO,
+        text: String::new(),
+        style: "ISO-25".into(),
+        measurement: 10.0,
+        text_rotation: 0.0,
+        user_text_pos: false,
+        leader_length: 0.0,
+        block: None,
+        overrides,
+        assoc: Vec::new(),
+        marks: Default::default(),
+    };
+    drawing.add(&Space::Model, Common::default(), EntityKind::Dimension(dimension)).unwrap();
+    let source = crate::write_dxf(&drawing);
+    let tags = cadcraft_dxf::parse(source.as_bytes()).unwrap();
+    let sections = cadcraft_dxf::sections(&tags);
+    let dimension = sections
+        .iter()
+        .filter(|section| section.name == "ENTITIES")
+        .flat_map(|section| cadcraft_dxf::records(&section.tags))
+        .find(|(kind, _)| kind == "DIMENSION")
+        .unwrap()
+        .1;
+    assert!(dimension.iter().any(|tag| tag.code == 1005), "the Raw dimension must require a block by handle");
+    let mut reordered = Vec::new();
+    for section in sections.iter().filter(|section| section.name != "TABLES").chain(sections.iter().filter(|section| section.name == "TABLES")) {
+        reordered.extend([Tag::s(0, "SECTION"), Tag::s(2, &section.name)]);
+        reordered.extend(section.tags.iter().cloned());
+        reordered.push(Tag::s(0, "ENDSEC"));
+    }
+    reordered.push(Tag::s(0, "EOF"));
+    let source = cadcraft_dxf::write_ascii(&reordered);
+    let need =
+        |view: &crate::activation::records::RecordView| if view.family == Family::Dimension { Need::Needs { readable: true } } else { Need::Plain };
+    let policy = ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path();
+    let read = crate::read_with_need(source.as_bytes(), "late-tables.dxf", policy, &need).unwrap();
+    assert!(read.model.iter().any(|entity| matches!(entity.kind, EntityKind::Raw(_))));
+    assert!(read.block("_OPEN90").is_some(), "a Raw DSTYLE block reference must keep its source definition");
+    let saved = crate::write_dxf(&read);
+    let reopened = crate::read_with_need(saved.as_bytes(), "saved.dxf", policy, &need).unwrap();
+    assert!(reopened.block("_OPEN90").is_some());
+}
+
 #[test]
 fn inactive_gradient_replay_uses_the_dwg_target_not_the_bridge_declaration() {
     let drawing = crate::read_dxf(b"0\nSECTION\n2\nENTITIES\n0\nHATCH\n5\n200\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n2\nSOLID\n70\n1\n71\n0\n91\n0\n75\n0\n76\n1\n98\n0\n450\n0\n453\n2\n421\n66051\n421\n263430\n470\nSPHERICAL\n0\nENDSEC\n0\nEOF\n").unwrap();

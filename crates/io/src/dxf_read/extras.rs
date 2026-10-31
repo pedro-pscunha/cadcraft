@@ -15,6 +15,29 @@ pub(super) fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityK
     apply_geometry(kind, tags, k, rx, revision);
 }
 
+/// Keep definition dependencies from source tags before a Raw payload bypasses modeled reference resolution.
+pub(super) fn collect_source_block_references(kind: &str, tags: &[Tag], raw: bool, rx: &mut Rx) {
+    let names_block = kind.eq_ignore_ascii_case("INSERT")
+        || raw
+            && matches!(
+                crate::activation::records::family_of_kind(kind),
+                Some(crate::activation::Family::Table | crate::activation::Family::Dimension)
+            );
+    if names_block {
+        rx.inserted.extend(
+            tags.iter().filter(|tag| tag.code == 2).map(Tag::str).filter(|name| !name.trim().is_empty()).map(|name| name.to_ascii_uppercase()),
+        );
+    }
+    if raw {
+        rx.raw_block_handles.extend(
+            tags.iter()
+                .filter(|tag| crate::dxf_write::raw_reference(tag.code))
+                .filter_map(|tag| Handle::parse_hex(&tag.str()))
+                .filter(|handle| handle.0 != 0),
+        );
+    }
+}
+
 /// Resolve document names, properties and associations without reinterpreting coordinate frames.
 pub(super) fn resolve_references(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx) {
     match (kind, k) {
@@ -42,9 +65,6 @@ pub(super) fn resolve_references(kind: &str, tags: &[Tag], h: Handle, k: &mut En
             if !ours {
                 rx.table_style_fix.push((h, t.s(342).map(|sh| sh.trim().to_ascii_uppercase()).unwrap_or_default()));
             }
-        }
-        ("INSERT", EntityKind::Insert(ins)) => {
-            rx.inserted.insert(ins.block.to_ascii_uppercase());
         }
         ("MULTILEADER" | "MLEADER", EntityKind::MLeader(m)) => {
             let pending = crate::dxf_mleader::resolve(tags, m, &rx.styles, &rx.brs, &rx.ltypes);

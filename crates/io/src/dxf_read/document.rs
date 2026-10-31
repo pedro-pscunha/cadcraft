@@ -1,6 +1,6 @@
 use super::common::T;
 use super::entities::{entity_plot_style, entity_with_table_budget, insert_attribs, polyline_entity};
-use super::extras::entity_extras;
+use super::extras::{collect_source_block_references, entity_extras};
 use super::objects::{MAX_OBJECTS, Objects, SortentsTable, page_setup};
 use super::{BTreeMap, Block, BlockDef, Drawing, Entity, EntityKind, Handle, HashMap, Layout, LayoutDef, Rx, Tag, records};
 use crate::activation::records::Container;
@@ -21,8 +21,13 @@ pub(super) fn parse_entities(
         let paper = t.i(67) == Some(1);
         // The place of a top-level record, counted as the activation adapter counts it (followers are not records of their own).
         let place = (!matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND")).then(|| rx.ordinals.next(container));
-        if let Some(reason) = place.and_then(|place| rx.raw_reason(container, place)) {
+        let raw_reason = place.and_then(|place| rx.raw_reason(container, place));
+        collect_source_block_references(kind, tags, raw_reason.is_some(), rx);
+        if let Some(reason) = raw_reason {
             let end = unit_end(recs, i);
+            for (kind, tags) in recs.iter().take(end).skip(i + 1) {
+                collect_source_block_references(kind, tags, true, rx);
+            }
             match raw_unit(&recs[i..end], &reason, d, rx) {
                 Ok(unit) => {
                     d.bump_handseed(unit.handle);
