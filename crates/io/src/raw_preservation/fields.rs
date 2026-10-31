@@ -64,7 +64,7 @@ pub(crate) struct FieldError {
 
 pub(crate) type Fields = BTreeMap<Field, Value>;
 
-pub(crate) use crate::dxf_write::raw_reference as reference;
+pub(crate) use cadcraft_doc::foreign::is_pointer as reference;
 
 fn scalar(code: i32, text: &str, source_text: bool) -> Result<Value, String> {
     if code == 5 || reference(code) || (320..=329).contains(&code) {

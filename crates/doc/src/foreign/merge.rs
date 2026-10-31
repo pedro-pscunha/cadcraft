@@ -1,5 +1,5 @@
 //! Merge aliases apply to surviving references, independently of metadata inheritance.
-use super::{ForeignExtra, is_pointer, owned_indices, owner_index, remap_tags};
+use super::{ForeignExtra, is_pointer, owned_indices, owner_index, remap_data_store, remap_tags};
 use crate::{AssocSnap, Drawing, EntityKind, EntityStore, Handle, RawTag};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -89,7 +89,7 @@ impl Drawing {
             || self.foreign.objects.iter().any(|o| references(&o.tags, &map))
             || self.foreign.entities.values().chain(self.foreign.records.values()).any(|e| extra_references(e, &map))
             || self.foreign.dictionary.iter().any(|(_, h)| map.contains_key(h))
-            || references(&self.foreign.data_store, &map);
+            || self.foreign.data_store.iter().any(|t| t.code == 320 && Handle::parse_hex(&t.value).is_some_and(|h| map.contains_key(&h)));
         if !changes_foreign {
             return;
         }
@@ -115,7 +115,7 @@ impl Drawing {
             *h = map.get(h).copied().unwrap_or(*h);
         }
         foreign.dictionary.retain(|(_, h)| !removed.contains(h));
-        remap_tags(&mut foreign.data_store, &map);
+        remap_data_store(&mut foreign.data_store, &map);
         for snapshot in foreign.raw_dimassocs.values_mut() {
             *snapshot = snapshot.remapped(&map, &BTreeMap::new());
         }
