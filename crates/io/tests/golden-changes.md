@@ -292,3 +292,12 @@ The external paths below have the prefix `/tmp/cad/`. Each count names changed r
 | dim1/dim1-vp68-2018.dxf | dxf | 28 members: 1 |
 
 Strict G1 passes with `-- --ignored match`: 63 drawings and four repository drawings checked, no missing inputs, and both tests pass.
+
+# Golden refresh for the private cell styles of an unedited table style
+
+A table style whose cell styles the native groups store (height, alignment, colours, fill, border lineweight, visibility and colour, value format) wrote CADCRAFT `CELLSTYLES` xdata on save, because 0a686b6c compared each cell style to the implied style of its name and AutoCAD's own Standard style (Data 4.5 aligned 2, Title 6.0, Header 4.5, margins 1.5) differs from it in fields the groups hold. Only a cell style that a read of its native groups would not give back (a margin of its own, precision, merge, a format other than General, a border linetype, a text style other than Standard, a name with no implied style) is private now, and a read keeps the native styles the private ones do not name.
+48 of 126 outputs changed (the DXF and the DWG of 24 drawings: every file whose Standard table style carries AutoCAD's cell styles). Compared record by record (DPInc, Plaenge-Altier, `clockwise_arc_edge`, DXF), the only record that differs is the TABLESTYLE, by the xdata:
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| OBJECTS/TABLESTYLE | the CADCRAFT `CELLSTYLES` xdata of an unedited native style is not written | dxf, dwg | 24 | 1 each (2 where a file has two styles) |
