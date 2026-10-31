@@ -168,14 +168,11 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match Format::from_path(name) {
         Some(Format::Dxf) => {
-            if opts.binary {
-                raw_preservation::require_ascii(d)?;
-            }
-            let tags = dxf_write::tags(d, version);
             let bytes = if opts.binary {
-                cadcraft_dxf::write_binary(&tags, version.utf8())
+                raw_preservation::require_ascii(d)?;
+                cadcraft_dxf::write_binary(&dxf_write::tags(d, version), version.utf8())
             } else {
-                cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes()
+                dxf_write::checked_ascii(d, version)?
             };
             Ok((bytes, dxf_write::omitted_notes(d, version)))
         }
@@ -196,6 +193,7 @@ fn write_dwg_with(
     version: Version,
     encode: impl FnOnce(&[u8], Option<&str>) -> std::result::Result<(Vec<u8>, Vec<String>), String>,
 ) -> Result<(Vec<u8>, Vec<String>)> {
+    raw_preservation::preflight(drawing)?;
     let bridge = dxf_write::dwg_bridge(drawing, version);
     let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references)?;
     let page = drawing.header.str("DWGCODEPAGE", "ANSI_1252");
@@ -296,7 +294,9 @@ pub fn png_view(extents: &Bounds2, width: u32, height: u32, window: Option<Bound
 pub fn read_dxf(bytes: &[u8]) -> Result<Drawing> {
     dxf_read::read(bytes)
 }
-/// The drawing as R2000 ASCII DXF, whatever its own version ([`write_with`] chooses one).
+/// Unchecked R2000 ASCII serializer for test fixtures and diagnostics only.
+/// Production file output must use [`write`] or [`write_with`] for Raw integrity checks.
+/// This stays public because integration tests in the other workspace crates construct source fixtures with it.
 pub fn write_dxf(d: &Drawing) -> String {
     dxf_write::write(d)
 }
