@@ -52,6 +52,23 @@ fn legacy_point_display_angle_follows_rotation_and_mirror() {
 }
 
 #[test]
+fn legacy_arc_translation_keeps_angles_far_from_the_origin() {
+    let start = 0.3;
+    let end = 0.9;
+    let mut entity = Entity::new(
+        Handle(8),
+        EntityKind::Arc(Arc { center: Vec3::new(1e9, -2e9, 0.0), radius: 0.001, start, end }),
+    );
+    let mut translation = cadcraft_geom::Mat4::IDENTITY;
+    translation.m[0][3] = 17.0;
+    translation.m[1][3] = -23.0;
+    entity.try_transform(&translation).unwrap();
+    let EntityKind::Arc(arc) = entity.kind else { panic!("expected ARC") };
+    assert!((arc.start - start).abs() < 1e-14, "{} != {start}", arc.start);
+    assert!((arc.end - end).abs() < 1e-14, "{} != {end}", arc.end);
+}
+
+#[test]
 fn transform_arc_mirror_keeps_shape() {
     let k = EntityKind::Arc(Arc { center: Vec3::ZERO, radius: 1.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 });
     let mut entity = Entity::new(Handle(0), k);
