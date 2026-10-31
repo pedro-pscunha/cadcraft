@@ -1,51 +1,27 @@
-//! DIMRADIUS / DIMDIAMETER: a dimension line location picked inside the circle puts the text
-//! there, on the dimension line; outside, the text stays beyond the arrowhead.
-
+//! A radius or diameter made with its location inside the circle, as AutoCAD LT 2025 makes it (ISO-25, `/tmp/cad/elev-oracle11`, circles of
+//! radius 4 to 15): at DIMASSOC 0 one LINE (the leader, from the base of the arrowhead inward), one SOLID inside the circle and one MTEXT.
+use cadcraft_doc::{Drawing, EntityKind};
 use cadcraft_engine::Session;
-use cadcraft_engine::doc::{Dimension, EntityKind};
-use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::render::{DimGeometry, LineRole};
 use serde_json::json;
 
-fn last_dim(s: &Session) -> (Dimension, DimGeometry) {
-    let d = s.doc().unwrap();
-    match &d.model.last().unwrap().kind {
-        EntityKind::Dimension(dm) => (dm.clone(), cadcraft_engine::render::dimension_in(d, dm)),
-        other => panic!("not a dimension: {other:?}"),
-    }
-}
-
-/// Whether a dimension line passes over `p` (on the x axis).
-fn covers(g: &DimGeometry, x: f64) -> bool {
-    g.lines_of(LineRole::Dim)
-        .any(|l| l.windows(2).any(|w| w[0].y.abs() < 1e-9 && w[1].y.abs() < 1e-9 && w[0].x.min(w[1].x) < x && x < w[0].x.max(w[1].x)))
-}
-
 #[test]
-fn radial_text_goes_inside_when_the_location_is_inside() {
-    let mut s = Session::new();
-    s.execute("circle", &json!({"center": [0, 0], "radius": 10})).unwrap();
-
-    // Typed: pick the circle, then a location inside.
-    s.script("dimradius 10,0 4,0\n").unwrap();
-    assert!(s.running.is_none());
-    let (dm, g) = last_dim(&s);
-    assert!(dm.user_text_pos);
-    assert!(g.text_pos.dist(Vec2::new(4.0, 0.0)) < 1e-9, "{:?}", g.text_pos);
-    // The dimension line runs from beyond the text to the arrowhead and stays inside the circle.
-    assert!(covers(&g, 9.0) && !covers(&g, 4.0) && !covers(&g, 1.0));
-    assert!(g.lines_of(LineRole::Dim).flatten().all(|p| p.len() <= 10.0 + 1e-9));
-
-    // Outside: the text goes to the point too (dim_radial_outside.rs), beyond the arrowhead.
-    s.script("dimradius 0,10 0,15\n").unwrap();
-    assert!(s.running.is_none());
-    let (_, g) = last_dim(&s);
-    assert!(g.text_pos.y > 10.0, "{:?}", g.text_pos);
-
-    // JSON form, diameter: the line spans the circle, broken around the text.
-    let c = s.doc().unwrap().model.iter().next().unwrap().handle.hex();
-    s.execute("dimdiameter", &json!({"handle": c, "at": [-3, 0]})).unwrap();
-    let (_, g) = last_dim(&s);
-    assert!(g.text_pos.dist(Vec2::new(-3.0, 0.0)) < 1e-9, "{:?}", g.text_pos);
-    assert!(covers(&g, -9.5) && covers(&g, 9.5) && !covers(&g, -3.0));
+fn radius_and_diameter_with_the_location_inside_the_circle_make_one_line_one_arrowhead_and_the_text() {
+    for command in ["dimradius", "dimdiameter"] {
+        let mut s = Session::new();
+        s.open_drawing(Drawing::new_metric(), "metric", None);
+        s.execute("circle", &json!({"center": [0, 0], "radius": 8})).unwrap();
+        let circle = s.doc().unwrap().model.iter().last().unwrap().handle;
+        s.execute("setvar", &json!({"name": "DIMASSOC", "value": 0})).unwrap();
+        let before = s.doc().unwrap().model.len();
+        s.execute(command, &json!({"handle": circle.hex(), "at": [2.8, 2.8]})).unwrap();
+        let made: Vec<_> = s.doc().unwrap().model.iter().skip(before).collect();
+        let lines = made.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
+        let solids: Vec<_> = made.iter().filter_map(|e| if let EntityKind::Solid(c) = &e.kind { Some(c) } else { None }).collect();
+        let texts = made.iter().filter(|e| matches!(e.kind, EntityKind::MText(_))).count();
+        assert_eq!((lines, solids.len(), texts), (1, 1, 1), "{command}: {made:?}");
+        // The base of the arrowhead (the middle of its two other corners) is inside the circle.
+        let c = solids[0].corners;
+        let base = ((c[1].x + c[2].x) / 2.0, (c[1].y + c[2].y) / 2.0);
+        assert!(base.0.hypot(base.1) < 8.0, "{command}: the arrowhead points out of the circle: {c:?}");
+    }
 }

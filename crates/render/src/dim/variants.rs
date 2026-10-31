@@ -80,6 +80,39 @@ fn center_mark(g: &mut DimGeometry, st: &super::DimStyle, k: f64, center: Vec2, 
     }
 }
 
+/// A radius or diameter dimension made with its location inside the circle, text above the line (AutoCAD LT 2025, ISO-25, radii 4 to 15,
+/// `/tmp/cad/elev-oracle11`): one arrowhead inside the circle pointing out at the point on the circle, and a leader from its base inward,
+/// through the centre if it is long enough, for an arrowhead, a gap, the text and a gap, with the text above the leader one arrowhead and
+/// one gap from the base. There is no line across the circle and no second arrowhead, also for a diameter. The text is where the centre
+/// of the dimension puts it (`text_mid`, not finite when it is to be worked out); a text that was moved has the leader under it.
+fn draw_radial_inside(config: &DimConfig<'_>, g: &mut DimGeometry, text_angle_out: &mut f64, text_mid_out: &mut Vec2) {
+    let d = config.dimension;
+    let st = config.style;
+    let (asz, gap) = (config.arrow_size, config.gap);
+    let a = d.defpt.xy();
+    let b = d.p15.xy();
+    let radius = matches!(d.kind, DimKind::Radius);
+    let (center, r) = if radius { (a, a.dist(b)) } else { (a.mid(b), a.dist(b) / 2.0) };
+    let meas = if radius { r } else { 2.0 * r };
+    g.mtext = linear_text(meas, d, st, if radius { "R" } else { "%%c" });
+    g.measurement = meas;
+    let (tw, _) = config.measure(&g.mtext);
+    let ink = config.ink_height(&g.mtext);
+    let u = (b - center).normalized();
+    let u = if u == Vec2::ZERO || !u.is_finite() { Vec2::X } else { u };
+    let tip = center + u * r;
+    let base = tip - u * asz;
+    config.end(g, config.second_arrow, tip, u);
+    let angle = readable(u.angle());
+    let above = Vec2::from_angle(angle).perp();
+    let given = d.text_mid.xy();
+    let text = if given.is_finite() { given } else { base - u * (asz + gap + tw / 2.0) + above * (gap + 0.5 * ink) };
+    let reach = ((base - text).dot(u) + tw / 2.0 + gap).max(asz);
+    g.dim(vec![base, base - u * reach]);
+    *text_angle_out = angle;
+    *text_mid_out = text;
+}
+
 /// A radius or diameter dimension whose text is above the line (DIMTAD 1, 2, 4), unmoved, as AutoCAD lays it out (LT 2025, ISO-25, 30
 /// radii from 1 to 15, `/tmp/cad/elev-oracle11`): the arrowhead is outside the circle pointing in, a line runs across the circle (DIMTOFL),
 /// and a leader starts at the arrowhead base and runs out for an arrowhead, a gap, the text and a gap, with the text above the leader
@@ -134,6 +167,13 @@ pub(super) fn draw_radius_or_diameter(config: &DimConfig<'_>, g: &mut DimGeometr
 
     if st.text_above != 0 && !st.text_outside_horizontal && !d.user_text_pos {
         return draw_radial_beside(config, g, text_angle_out, text_mid_out);
+    }
+    if st.text_above != 0 && !st.text_inside_horizontal && d.user_text_pos {
+        let center = if matches!(d.kind, DimKind::Radius) { d.defpt.xy() } else { d.defpt.xy().mid(d.p15.xy()) };
+        let radius = center.dist(d.p15.xy());
+        if !text_mid.is_finite() || text_mid.dist(center) < radius {
+            return draw_radial_inside(config, g, text_angle_out, text_mid_out);
+        }
     }
     let a = d.defpt.xy();
     let b = d.p15.xy();

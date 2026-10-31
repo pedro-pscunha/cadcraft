@@ -191,6 +191,10 @@ pub(super) fn text_at(s: &Session, mut k: EntityKind, at: Vec2, center: Vec2, ra
     {
         d.text_mid = v3(at);
         d.user_text_pos = true;
+        // A location inside the circle only says that the leader runs inside: AutoCAD puts the text where its layout puts it.
+        if beside && let Some(here) = s.doc().ok().and_then(|doc| cadcraft_render::radial_inside_text(doc, d)) {
+            d.text_mid = v3(here);
+        }
     }
     k
 }
