@@ -87,7 +87,7 @@ pub struct RecordGraph {
 
 /// The activation family of a DXF entity type, `None` for a type without a canonical reader (proxy and unknown entities).
 pub fn family_of_kind(kind: &str) -> Option<Family> {
-    Some(match kind {
+    Some(match kind.to_ascii_uppercase().as_str() {
         "CIRCLE" => Family::Circle,
         "ARC" => Family::Arc,
         "ELLIPSE" => Family::Ellipse,
@@ -102,7 +102,7 @@ pub fn family_of_kind(kind: &str) -> Option<Family> {
         "3DFACE" => Family::Face3d,
         "SPLINE" => Family::Spline,
         "LEADER" => Family::Leader,
-        "DIMENSION" => Family::Dimension,
+        "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" => Family::Dimension,
         "TEXT" => Family::Text,
         "MTEXT" => Family::MText,
         "ATTDEF" => Family::AttDef,
@@ -115,7 +115,7 @@ pub fn family_of_kind(kind: &str) -> Option<Family> {
         "IMAGE" => Family::Image,
         "ACAD_TABLE" => Family::Table,
         "INSERT" => Family::Insert,
-        "MULTILEADER" => Family::MLeader,
+        "MULTILEADER" | "MLEADER" => Family::MLeader,
         "REGION" => Family::Region,
         "VIEWPORT" => Family::Viewport,
         _ => return None,

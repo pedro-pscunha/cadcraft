@@ -8,7 +8,7 @@ use cadcraft_dxf::{Section, Tag, parse, records, sections};
 use cadcraft_io::activation::records::RecordGraph;
 use cadcraft_io::activation::{ACTIVE_FAMILIES, ComponentOutcome, Failure, Need, NodeId, Outcome, Policy, ReaderMode, ReaderPolicy, activate};
 
-use crate::activation_fixtures::{cases, stand_in};
+use crate::activation_fixtures::{cases, predicate, source_predicate};
 
 /// Every record of the file by its name (the handle, or `*NAME` for a definition) and its outcome, and the outcome and reasons of
 /// each component without node ids (the ids follow the record order).
@@ -35,7 +35,7 @@ fn kinds(failures: &[Failure]) -> Vec<String> {
 }
 
 fn outcomes(secs: &[Section], policy: &Policy) -> Outcomes {
-    let graph = RecordGraph::build(secs, &stand_in).unwrap();
+    let graph = RecordGraph::build(secs, &predicate(secs)).unwrap();
     let activation = activate(graph.graph(), policy);
     let name = |node: NodeId| match graph.key(node) {
         Some(cadcraft_io::activation::records::NodeKey::Definition(name)) => format!("*{name}"),
@@ -200,11 +200,10 @@ fn i3_a_drawing_with_no_needing_record_activates_nothing_and_reads_as_the_legacy
 }
 
 #[test]
-fn i3_a_fixture_without_a_tilted_record_has_no_needing_node_and_stays_legacy() {
-    // A10: the plain cycle.
-    let case = cases().into_iter().find(|c| c.name == "a10_cycle_all_plain").unwrap();
-    let graph = RecordGraph::build(&sections_of(&case.text), &stand_in).unwrap();
+fn i3_a_fixture_of_proved_plain_records_has_no_needing_node_and_stays_legacy() {
+    let text = crate::activation_fixtures::file("", &[], &[crate::activation_fixtures::line("E1"), crate::activation_fixtures::circle("E2", false)]);
+    let graph = RecordGraph::build(&sections_of(&text), &source_predicate(text.as_bytes())).unwrap();
     assert!(!graph.graph().nodes().iter().any(|n| matches!(n.need, Need::Needs { .. })));
-    let activation = activate(graph.graph(), &case.policy);
+    let activation = activate(graph.graph(), &open());
     assert_eq!(activation.activated(), 0);
 }

@@ -1,5 +1,5 @@
 //! The read fixtures A1 to A11 and B1 to B5 of the activation plan (section 2.6) as real DXF files, in
-//! `tests/data/activation/`. Each file is read, its graph is built by the record adapter with a stand-in for the section 3 predicate,
+//! `tests/data/activation/`. Each file is read, its graph is built by the record adapter with the static section 3 predicate,
 //! and the activation of the graph is asserted: the outcome of every named record, the typed reason of every Raw one, and the
 //! invariants I1 (agreement among the non-Raw nodes) and I2 (a node that needs Canonical is never Legacy).
 //!
@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cadcraft_dxf::{Tag, parse, sections};
+use cadcraft_dxf::{Section, Tag, Version, parse, sections};
 use cadcraft_io::activation::records::{Container, NodeKey, RecordGraph, RecordView};
 use cadcraft_io::activation::{Edge, Failure, Family, FamilySet, Need, NodeId, NodeKind, Outcome, Policy, activate};
 
@@ -235,29 +235,30 @@ pub(crate) fn cases() -> Vec<Case> {
         },
         Case {
             name: "a10_cycle_all_plain",
+            // The filename predates section 3. Unproved INSERT and SPLINE records now need activation.
             text: cycle(false),
             policy: open(),
             expect: vec![
-                ("insert", entity(0), Legacy),
+                ("insert", entity(0), Raw),
                 ("a", def("A"), Legacy),
-                ("member", member("A", 0), Legacy),
-                ("a insert", member("A", 1), Legacy),
+                ("member", member("A", 0), Raw),
+                ("a insert", member("A", 1), Raw),
                 ("b", def("B"), Legacy),
-                ("b insert", member("B", 0), Legacy),
+                ("b insert", member("B", 0), Raw),
             ],
-            failures: nothing(),
+            failures: vec![FailureKind::Cycle],
         },
         Case {
             name: "a11_cycle_with_needs_seed",
             text: cycle(true),
             policy: open(),
             expect: vec![
-                ("insert", entity(0), Legacy),
+                ("insert", entity(0), Raw),
                 ("a", def("A"), Legacy),
                 ("seed", member("A", 0), Raw),
-                ("a insert", member("A", 1), Legacy),
+                ("a insert", member("A", 1), Raw),
                 ("b", def("B"), Legacy),
-                ("b insert", member("B", 0), Legacy),
+                ("b insert", member("B", 0), Raw),
             ],
             failures: vec![FailureKind::Cycle],
         },
@@ -267,7 +268,7 @@ pub(crate) fn cases() -> Vec<Case> {
             text: file("", &[block("DEF", 0, &[spline("B1", true, 5), line("B2"), circle("B3", false)])], &[insert("E1", "DEF", false)]),
             policy: open(),
             expect: vec![
-                ("insert", entity(0), Legacy),
+                ("insert", entity(0), Raw),
                 ("def", def("DEF"), Legacy),
                 ("bad spline", member("DEF", 0), Raw),
                 ("line", member("DEF", 1), Legacy),
@@ -294,7 +295,7 @@ pub(crate) fn cases() -> Vec<Case> {
             text: file("", &[block("DEF", 0, &[spline("B1", true, 2), line("B2")])], &[insert("E1", "DEF", false)]),
             policy: Policy { mask: FamilySet::ALL.without(Family::Spline), ..open() },
             expect: vec![
-                ("insert", entity(0), Legacy),
+                ("insert", entity(0), Raw),
                 ("def", def("DEF"), Legacy),
                 ("spline", member("DEF", 0), Raw),
                 ("line", member("DEF", 1), Legacy),
@@ -322,25 +323,34 @@ pub(crate) fn cases() -> Vec<Case> {
     ]
 }
 
-// ---- the stand-in for the section 3 predicate ----
+// ---- static Legacy classification, separate from fixture readability ----
 
 fn group(groups: &[Tag], code: i32) -> Option<f64> {
     groups.iter().find(|t| t.code == code).map(Tag::f64)
 }
 
-/// A record needs Canonical when its extrusion is not +Z or it holds a Z value. A SPLINE whose declared control count is not the number
-/// of its points cannot be read, and neither can a record that carries the xdata string `UNREADABLE` (a forced canonical-read
-/// failure). This is the stand-in for the section 3 predicate; the tests that use it say so.
-pub(crate) fn stand_in(view: &RecordView) -> Need {
-    let tilted = [group(view.groups, 210).unwrap_or(0.0), group(view.groups, 220).unwrap_or(0.0)].iter().any(|v| *v != 0.0);
-    let spatial = (30..=37).any(|code| view.groups.iter().filter(|t| t.code == code).any(|t| t.f64() != 0.0));
-    if !tilted && !spatial {
-        return Need::Plain;
+pub(crate) fn predicate(sections: &[Section]) -> impl Fn(&RecordView<'_>) -> Need + use<> {
+    use cadcraft_io::{LegacyClassifier, LegacyDisposition, LegacyRecordClassification};
+    let classifier = LegacyClassifier::new(sections, Version::R2013);
+    move |view| {
+        match classifier.record(view) {
+            LegacyRecordClassification::OwnerDerived(_) => return Need::Plain,
+            LegacyRecordClassification::Authored(classification) if classification.disposition == LegacyDisposition::Plain => {
+                return Need::Plain;
+            }
+            LegacyRecordClassification::Authored(_) => {}
+        }
+        // Readability is independent of Legacy losslessness. These fixtures inject a failure
+        // or an inconsistent SPLINE count without calling a canonical reader in the predicate.
+        let forced = view.groups.iter().any(|t| t.code == 1000 && t.str() == "UNREADABLE");
+        let readable = !forced
+            && (view.kind != "SPLINE" || group(view.groups, 73).is_some_and(|n| n as usize == view.groups.iter().filter(|t| t.code == 10).count()));
+        Need::Needs { readable }
     }
-    let forced = view.groups.iter().any(|t| t.code == 1000 && t.str() == "UNREADABLE");
-    let readable = !forced
-        && (view.kind != "SPLINE" || group(view.groups, 73).is_some_and(|n| n as usize == view.groups.iter().filter(|t| t.code == 10).count()));
-    Need::Needs { readable }
+}
+
+pub(crate) fn source_predicate(bytes: &[u8]) -> impl Fn(&RecordView<'_>) -> Need + use<> {
+    predicate(&sections(&parse(bytes).unwrap()))
 }
 
 // ---- the files ----
@@ -351,7 +361,7 @@ pub(crate) fn dir() -> PathBuf {
 
 fn read_case(case: &Case) -> RecordGraph {
     let text = std::fs::read_to_string(dir().join(format!("{}.dxf", case.name))).unwrap_or_else(|e| panic!("{}: {e}", case.name));
-    RecordGraph::build(&sections(&parse(text.as_bytes()).unwrap()), &stand_in).unwrap()
+    RecordGraph::build(&sections(&parse(text.as_bytes()).unwrap()), &source_predicate(text.as_bytes())).unwrap()
 }
 
 /// I1 and I2 over an activated graph.

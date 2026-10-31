@@ -1,10 +1,10 @@
 //! Plan v3, 4.1: the read turns every record of a Raw component into the raw entity of 4.2, and reads the others Legacy. The
-//! need of a record is the stand-in of `activation_fixtures` until the section 3 predicate exists.
+//! need of a record comes from the static Legacy classifier, independently of fixture readability.
 
 use cadcraft_doc::{Drawing, EntityKind, GeometryRevision, Handle};
 use cadcraft_io::activation::{FamilySet, ReaderMode, ReaderPolicy};
 
-use crate::activation_fixtures::{cases, stand_in};
+use crate::activation_fixtures::{cases, source_predicate};
 
 fn raw_path() -> ReaderPolicy {
     ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path()
@@ -15,7 +15,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn read(text: &str, policy: ReaderPolicy) -> Drawing {
-    cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", policy, &stand_in).unwrap()
+    cadcraft_io::read_with_need(text.as_bytes(), "x.dxf", policy, &source_predicate(text.as_bytes())).unwrap()
 }
 
 fn raw_kinds(d: &Drawing) -> Vec<(String, Vec<String>)> {
@@ -87,7 +87,7 @@ fn without_the_raw_path_every_record_is_read_legacy_as_before() {
         let text = fixture(name);
         let plain = cadcraft_io::read(text.as_bytes(), "x.dxf").unwrap();
         assert!(raw_kinds(&plain).is_empty(), "{name}");
-        // The stand-in alone changes nothing: the graph is not built.
+        // The predicate alone changes nothing: the graph is not built.
         let with_need = read(&text, ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE));
         assert_eq!(with_need, plain, "{name}");
     }
@@ -95,7 +95,7 @@ fn without_the_raw_path_every_record_is_read_legacy_as_before() {
 
 #[test]
 fn a_file_with_no_needing_record_reads_the_same_with_the_raw_path() {
-    let text = fixture("a10_cycle_all_plain");
+    let text = crate::activation_fixtures::file("", &[], &[crate::activation_fixtures::line("E1")]);
     assert_eq!(read(&text, raw_path()), read(&text, ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE)));
 }
 
@@ -126,7 +126,8 @@ fn a_needing_unit_read_legacy_because_it_cannot_be_raw_is_named_in_every_save() 
     let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
     assert!(!notes.iter().any(|n| n.contains("INSERT A1")), "{notes:?}");
     // A record that is Legacy because nothing needs more says nothing.
-    let plain = read(&fixture("a10_cycle_all_plain"), raw_path());
+    let text = crate::activation_fixtures::file("", &[], &[crate::activation_fixtures::line("E1")]);
+    let plain = read(&text, raw_path());
     let (_, notes) = cadcraft_io::write_with_noted(&plain, "x.dxf", &cadcraft_io::SaveOptions::default()).unwrap();
     assert!(!notes.iter().any(|n| n.contains("read Legacy")), "{notes:?}");
 }

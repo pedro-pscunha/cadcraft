@@ -5,13 +5,13 @@ use cadcraft_dxf::{parse, sections};
 use cadcraft_io::activation::records::RecordGraph;
 use cadcraft_io::activation::{ComponentOutcome, FamilySet, Outcome, ReaderMode, ReaderPolicy, activate};
 
-use crate::activation_fixtures::{cases, dir, stand_in};
+use crate::activation_fixtures::{cases, dir, predicate, source_predicate};
 
 #[test]
 fn i5_each_fixture_reports_the_records_each_component_activated() {
     for case in cases() {
         let secs = sections(&parse(case.text.as_bytes()).unwrap());
-        let graph = RecordGraph::build(&secs, &stand_in).unwrap();
+        let graph = RecordGraph::build(&secs, &predicate(&secs)).unwrap();
         let report = graph.report(&case.policy);
         let activation = activate(graph.graph(), &case.policy);
         // The components partition the nodes, and a component is activated whole or not at all.
@@ -42,21 +42,23 @@ fn i5_the_counts_of_two_fixtures() {
     let by_name = |name: &str| cases().into_iter().find(|c| c.name == name).unwrap();
     // A1: the tilted INSERT, its definition and the two members are one component of four, all activated.
     let a1 = by_name("a1_tilted_insert_over_plain_definition");
-    let report = RecordGraph::build(&sections(&parse(a1.text.as_bytes()).unwrap()), &stand_in).unwrap().report(&a1.policy);
+    let report =
+        RecordGraph::build(&sections(&parse(a1.text.as_bytes()).unwrap()), &source_predicate(a1.text.as_bytes())).unwrap().report(&a1.policy);
     assert_eq!(report.components.iter().map(|c| (c.nodes, c.activated)).collect::<Vec<_>>(), [(4, 4)]);
-    // B1: the definition, its INSERT and the two plain members stay Legacy; the spline B1 is the one Raw record.
+    // B1: the definition and its two plain members stay Legacy. The SPLINE and unproved INSERT stay Raw.
     let b1 = by_name("b1_needs_member_in_component_that_cannot_activate");
-    let report = RecordGraph::build(&sections(&parse(b1.text.as_bytes()).unwrap()), &stand_in).unwrap().report(&b1.policy);
+    let report =
+        RecordGraph::build(&sections(&parse(b1.text.as_bytes()).unwrap()), &source_predicate(b1.text.as_bytes())).unwrap().report(&b1.policy);
     assert_eq!(report.components.len(), 1);
     assert_eq!((report.components[0].nodes, report.components[0].activated), (5, 0));
-    assert_eq!(report.components[0].raw, ["B1"]);
+    assert_eq!(report.components[0].raw, ["B1", "E1"]);
 }
 
 #[test]
 fn the_read_report_of_a_file_comes_with_the_drawing() {
     let text = std::fs::read(dir().join("a1_tilted_insert_over_plain_definition.dxf")).unwrap();
     let policy = ReaderPolicy::new(ReaderMode::Safe, FamilySet::NONE);
-    let (drawing, report) = cadcraft_io::read_report_with(&text, "a1.dxf", policy, &stand_in).unwrap();
+    let (drawing, report) = cadcraft_io::read_report_with(&text, "a1.dxf", policy, &source_predicate(&text)).unwrap();
     // The reader is off: the same drawing as the plain read.
     assert_eq!(drawing, cadcraft_io::read_with_policy(&text, "a1.dxf", policy).unwrap());
     // Nothing is in the mask, so the record that needs Canonical is not activated but kept Raw in the report.
