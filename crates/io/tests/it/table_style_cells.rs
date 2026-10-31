@@ -117,14 +117,27 @@ fn native_cell_value_formats_do_not_create_private_cell_styles() {
     }
     assert!(count > 0);
     let drawing = cadcraft_io::read_dxf(cadcraft_dxf::write_ascii(&tags).as_bytes()).unwrap();
-    let dwg = cadcraft_io::write(&drawing, "value-formats.dwg").unwrap();
-    let native = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
-    let reopened = cadcraft_io::write_dxf(&cadcraft_io::read(&dwg, "value-formats.dwg").unwrap());
-    for (what, saved) in [("DXF", cadcraft_io::write_dxf(&drawing)), ("DWG native", native), ("DWG reopened", reopened)] {
-        for (_, style) in section(&saved, "OBJECTS").into_iter().filter(|(kind, _)| kind == "TABLESTYLE") {
-            assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![4, 4, 4], "{what}");
-            assert!(!style.iter().any(|tag| tag.code == 1000 && tag.str() == "CELLSTYLES"), "{what}: native formats need no private payload");
+    let check = |what: &str, saved: &str, expected: i64| {
+        let styles: Vec<_> = section(saved, "OBJECTS").into_iter().filter(|(kind, _)| kind == "TABLESTYLE").collect();
+        assert!(!styles.is_empty(), "{what}");
+        for (_, style) in styles {
+            assert_eq!(style.iter().filter(|tag| tag.code == 90).map(cadcraft_dxf::Tag::i64).collect::<Vec<_>>(), vec![expected; 3], "{what}");
+            assert!(!style.iter().any(|tag| tag.code == 1001 && tag.str() == "CADCRAFT"), "{what}: native formats need no private xdata");
         }
+    };
+    let dxf = cadcraft_io::write_dxf(&drawing);
+    check("DXF", &dxf, 4);
+    check("DXF reopened", &cadcraft_io::write_dxf(&cadcraft_io::read_dxf(dxf.as_bytes()).unwrap()), 4);
+    // R2000/R2004 DWG has no per-cell value-format fields. R2007 and later store them natively.
+    for (version, expected) in
+        [(cadcraft_io::Version::R2004, 512), (cadcraft_io::Version::R2007, 4), (cadcraft_io::Version::R2010, 4), (cadcraft_io::Version::R2018, 4)]
+    {
+        let options = cadcraft_io::SaveOptions { version: Some(version), binary: false };
+        let dwg = cadcraft_io::write_with(&drawing, "value-formats.dwg", &options).unwrap();
+        let native = String::from_utf8(cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
+        check(&format!("{version:?} native"), &native, expected);
+        let reopened = cadcraft_io::write_dxf(&cadcraft_io::read(&dwg, "value-formats.dwg").unwrap());
+        check(&format!("{version:?} reopened"), &reopened, expected);
     }
 }
 
