@@ -224,7 +224,19 @@ pub(super) fn place_blocks(d: &mut Drawing, blocks: Vec<BlockDef>, rx: &mut Rx, 
                 && !rx.xdata_blocks.contains(&up)
                 && crate::dxf_write::is_generated_arrow(&name, &own)
         };
-        if rx.table_blocks.contains(&up) || generated_arrow() {
+        if rx.table_blocks.contains_key(&up) {
+            // The block a table drew itself with: kept with the table, which writes it as read until it is edited.
+            let mut block = Block::new(&name);
+            block.base = base;
+            block.description = description;
+            for (_, paper, mut e) in ents {
+                e.common.paper_space = paper;
+                block.entities.push(e);
+            }
+            rx.table_graphics.insert(up, std::sync::Arc::new(block));
+            continue;
+        }
+        if generated_arrow() {
             continue;
         }
         let mut b = Block::new(&name);

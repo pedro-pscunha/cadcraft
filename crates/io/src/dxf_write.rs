@@ -33,9 +33,9 @@ mod tests;
 pub(crate) use assoc::dimassoc_reproducible;
 #[cfg(test)]
 pub(crate) use assoc::polyline_vertex_ref;
-pub(crate) use blocks::is_generated_arrow;
 #[cfg(test)]
 pub(crate) use blocks::table_block_entities;
+pub(crate) use blocks::{is_generated_arrow, table_graphics_key};
 use ctx::Ctx;
 use entity::entity;
 pub(crate) use raw::{changed_properties as raw_changed_properties, raw_reference, remap_raw_references};

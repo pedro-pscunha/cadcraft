@@ -169,6 +169,17 @@ pub(super) fn table_size(t: &Table) -> (usize, usize) {
     (t.row_heights.len().min(10_000), t.col_widths.len().min(10_000))
 }
 
+/// The key of what a table's graphics block is drawn from: the table, its layer, its table style and the text styles that style names.
+/// A table the file drew a block for keeps that block while the key is the one it had when it was read.
+pub(crate) fn table_graphics_key(d: &Drawing, t: &Table, layer: &str) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let style = d.table_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&t.style));
+    let texts: Vec<_> = style.iter().flat_map(|s| s.cell_style_names().into_iter().map(|n| d.text_style(&s.cell_style(&n).text_style))).collect();
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_string(&(t, layer, style, texts)).unwrap_or_default().hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The anonymous `*T` block of a table: cell fills, borders and texts as its cell styles draw
 /// them, for readers that only draw the block.
 ///

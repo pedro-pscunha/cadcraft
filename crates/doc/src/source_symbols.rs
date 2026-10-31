@@ -6,7 +6,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::foreign::ForeignKey;
-use crate::{Handle, RawTag};
+use crate::{Block, Handle, RawTag};
+
+/// The graphics block (`*T1`) an ACAD_TABLE of the file drew itself with, and the key of the table (and of what its drawing depends on)
+/// when it was read: a save writes the block as read while the key still matches, and draws it again once the table was edited.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableBlock {
+    pub key: u64,
+    pub block: std::sync::Arc<Block>,
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SourceSymbols {
@@ -36,6 +44,8 @@ pub struct SourceSymbols {
     /// The records that needed a canonical reading and were read Legacy because they could not be kept raw (no closing SEQEND, a
     /// repeated identity), with the type and the reason: every save of the drawing says so while the record is in it.
     pub legacy_needs: BTreeMap<Handle, String>,
+    /// The graphics block of each ACAD_TABLE of the file, by the table's handle.
+    pub table_blocks: BTreeMap<Handle, TableBlock>,
 }
 
 impl SourceSymbols {
