@@ -575,3 +575,25 @@ fn a_jog_goes_where_autocad_puts_it_for_every_jog_location() {
     let default = (38.89087296526011 + 10.0) / 2.0 + 17.67766952966369 / 2.0;
     assert!((g.lines[0][1].x * std::f64::consts::SQRT_2 - default).abs() < 0.02, "{:?}", g.lines[0]);
 }
+
+#[test]
+fn narrow_text_above_a_short_line_stays_between_the_extension_lines_with_the_arrowheads_outside() {
+    // AutoCAD LT 2025, ISO-25 sizes (arrow 2.5, gap 0.625, text 2.5), DIMTAD 1, span 4.9, text "10": the text stays centred between the
+    // extension lines (it fits with a gap on each side) and the arrowheads go outside, their bases at -2.5 and 7.4
+    // (/tmp/cad/elev-oracle10/dim1-elev10.dxf, *D26).
+    let st = st_with(|s| {
+        s.text_height = 2.5;
+        s.text_gap = 0.625;
+        s.arrow_size = 2.5;
+        s.text_above = 1;
+    });
+    let mut d = lin((0.0, 0.0), (4.9, 0.0), (0.0, 5.0), 0.0);
+    d.text = "10".into();
+    let g = dimension_geometry_with(&d, &st, 1.0, &DimText { width_factor: 0.5, ..Default::default() });
+    assert!((g.text_pos.x - 2.45).abs() < 1e-9, "the text stays centred: {:?}", g.text_pos);
+    assert_eq!(g.fills.len(), 2, "{:?}", g.fills);
+    for fill in &g.fills {
+        let (low, high) = fill.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+        assert!(high <= 1e-9 || low >= 4.9 - 1e-9, "an arrowhead lies outside the extension lines: x from {low} to {high}");
+    }
+}
