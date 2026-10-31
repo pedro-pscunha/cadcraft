@@ -147,7 +147,11 @@ fn tilted_native_text_retains_its_world_primitives_before_2007() {
     let d = drawing(&original);
     for version in [Version::R2000, Version::R2004] {
         let (tags, _, _) = native(&d, version);
-        let (_, EntityKind::MLeader(parsed)) = cadcraft_io::canonical_mleader_from_groups(&tags).unwrap() else { panic!("multileader") };
+        let (_, EntityKind::MLeader(parsed)) =
+            cadcraft_io::canonical_mleader_from_groups(&tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).unwrap()
+        else {
+            panic!("multileader")
+        };
         let arrow = LeaderArrowLayout::default();
         let matrix = Mat4::IDENTITY;
         let want = mleader_primitives(&original, BASE, &arrow, &matrix).unwrap();
@@ -165,7 +169,11 @@ fn native_old_target_block_content_keeps_non_uniform_scale_and_all_attributes() 
         let d = drawing(&original);
         for version in [Version::R2000, Version::R2004] {
             let (tags, back, notes) = native(&d, version);
-            let (_, EntityKind::MLeader(parsed)) = cadcraft_io::canonical_mleader_from_groups(&tags).unwrap() else { panic!("multileader") };
+            let (_, EntityKind::MLeader(parsed)) =
+                cadcraft_io::canonical_mleader_from_groups(&tags, &mut cadcraft_doc::Drawing::default(), &cadcraft_io::Rx::default()).unwrap()
+            else {
+                panic!("multileader")
+            };
             let actual = parsed.block_world_transform(BASE).unwrap().unwrap();
             let expected = original.block_world_transform(BASE).unwrap().unwrap();
             for (a, b) in actual.m.iter().zip(&expected.m) {

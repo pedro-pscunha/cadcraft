@@ -16,6 +16,8 @@ use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 use crate::activation::{ReaderPolicy, WIRED_FAMILIES};
 use crate::{IoError, Result};
 
+#[cfg(test)]
+mod canonical_context_tests;
 mod common;
 mod curve_canonical;
 pub(crate) mod dimassoc;
@@ -60,9 +62,9 @@ pub(crate) fn page_setup_from_groups(tags: &[Tag]) -> PageSetup {
     objects::page_setup(&common::T(tags))
 }
 
-/// Handle maps and references gathered while reading.
+/// Handle maps and references of one document read. Canonical helpers borrow the reader's context.
 #[derive(Default)]
-struct Rx {
+pub struct Rx {
     /// The DXF was made from a DWG file by the DWG reader.
     from_dwg: bool,
     /// STYLE record handle (upper case) → text style name.
