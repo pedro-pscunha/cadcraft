@@ -52,21 +52,9 @@ fn normalized(expected: &Entity, actual: &Entity) -> (Entity, Entity) {
                 }
             }
         }
-        (EntityKind::Wipeout(a), EntityKind::Wipeout(b)) => {
-            if a.image.is_none() {
-                b.image = None;
-            }
-        }
-        (EntityKind::Viewport(a), EntityKind::Viewport(b)) => {
-            if a.source_status.is_none() {
-                b.source_status = None;
-            }
-        }
-        (EntityKind::Spline(a), EntityKind::Spline(b)) => {
-            if a.source.is_none() {
-                b.source = None;
-            }
-        }
+        (EntityKind::Wipeout(a), EntityKind::Wipeout(b)) if a.image.is_none() => b.image = None,
+        (EntityKind::Viewport(a), EntityKind::Viewport(b)) if a.source_status.is_none() => b.source_status = None,
+        (EntityKind::Spline(a), EntityKind::Spline(b)) if a.source.is_none() => b.source = None,
         (EntityKind::MLine(a), EntityKind::MLine(b)) => {
             for (a, b) in a.vertices.iter().zip(&mut b.vertices) {
                 if a.vectors.is_none() {
@@ -108,12 +96,11 @@ fn normalized(expected: &Entity, actual: &Entity) -> (Entity, Entity) {
 }
 
 fn normalize_alpha(transparency: cadcraft_doc::Transparency, expected: Option<u8>, actual: &mut Option<u8>) {
-    if expected.is_none() {
-        if let cadcraft_doc::Transparency::Percent(percent) = transparency {
-            if *actual == Some(cadcraft_doc::Transparency::default_alpha(percent)) {
-                *actual = None;
-            }
-        }
+    if expected.is_none()
+        && let cadcraft_doc::Transparency::Percent(percent) = transparency
+        && *actual == Some(cadcraft_doc::Transparency::default_alpha(percent))
+    {
+        *actual = None;
     }
 }
 
@@ -129,10 +116,10 @@ pub(crate) fn normalized_columns(
     actual: &Option<cadcraft_doc::MTextColumns>,
 ) -> Option<cadcraft_doc::MTextColumns> {
     let mut actual = actual.clone();
-    if let (Some(a), Some(b)) = (expected, &mut actual) {
-        if a.extents.is_none() {
-            b.extents = None;
-        }
+    if let (Some(a), Some(b)) = (expected, &mut actual)
+        && a.extents.is_none()
+    {
+        b.extents = None;
     }
     actual
 }
