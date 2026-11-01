@@ -132,3 +132,22 @@ fn header_jog_angle_is_read_in_degrees_and_hostile_values_are_dropped() {
     assert_eq!((st.dim_linetype.as_str(), st.jog_angle, st.fit), ("", 45.0, 3), "{st:?}");
     assert_eq!(st.ext_linetype1, "CENTER");
 }
+
+/// A DWG keeps the newer variables in its DIMSTYLE object only from 2007 (Open Design Specification for .dwg files,
+/// DIMSTYLE: DIMFXL, DIMJOGANG, DIMTFILL, DIMTFILLCLR, DIMARCSYM, DIMFXLON and the linetypes from R2007, DIMTXTDIRECTION
+/// from R2010), although a 2004 DXF has most of them as groups: a 2000 or 2004 DWG save keeps them in the style's
+/// private xdata, so they survive.
+#[test]
+fn a_dwg_before_2007_keeps_the_newer_variables() {
+    for version in [cadcraft_io::Version::R2000, cadcraft_io::Version::R2004, cadcraft_io::Version::R2007] {
+        let opts = cadcraft_io::SaveOptions { version: Some(version), binary: false };
+        let bytes = cadcraft_io::write_with(&drawing(), "x.dwg", &opts).unwrap();
+        let back = cadcraft_io::read(&bytes, "x.dwg").unwrap();
+        let got = back.dim_styles.iter().find(|s| s.name == "Detail").unwrap();
+        let want = styled();
+        assert_eq!(got.fixed_ext_length, want.fixed_ext_length, "{version:?} DIMFXL");
+        assert!((got.jog_angle - want.jog_angle).abs() < 1e-9, "{version:?} DIMJOGANG {}", got.jog_angle);
+        assert_eq!(got.arc_symbol, want.arc_symbol, "{version:?} DIMARCSYM");
+        assert_eq!(got.dim_linetype, want.dim_linetype, "{version:?} DIMLTYPE");
+    }
+}

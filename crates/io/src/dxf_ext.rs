@@ -203,6 +203,16 @@ pub(crate) fn newer_since(code: i32) -> Version {
         _ => NEWER_SINCE,
     }
 }
+/// The first DWG version whose DIMSTYLE object has `code` (one of [`NEWER_CODES`]): R2010 for DIMTXTDIRECTION, else R2007
+/// (Open Design Specification for .dwg files, DIMSTYLE). A 2004 DXF has most of them as groups, a 2004 DWG none: the DWG
+/// bridge keeps them in the `DIMVARS` xdata below this version.
+pub(crate) fn dwg_newer_since(code: i32) -> Version {
+    match code {
+        294 => Version::R2010,
+        _ => Version::R2007,
+    }
+}
+
 /// Xdata list name of [`NEWER_CODES`] values.
 pub(crate) const DIMVARS_LIST: &str = "DIMVARS";
 

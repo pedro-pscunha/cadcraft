@@ -250,7 +250,8 @@ fn write_dimstyles(w: &mut W, d: &Drawing, cx: &mut Ctx) {
             let plain = if private {
                 cx.dwg_bridge && cx.target >= dxf_ext::bridge_since(*code)
             } else {
-                !dxf_ext::NEWER_CODES.contains(code) || cx.target >= dxf_ext::newer_since(*code)
+                let since = if cx.dwg_bridge { dxf_ext::dwg_newer_since(*code) } else { dxf_ext::newer_since(*code) };
+                !dxf_ext::NEWER_CODES.contains(code) || cx.target >= since
             };
             let kind = if plain { dxf_ext::table_kind(*kind) } else { *kind };
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(kind, x)) else { continue };
