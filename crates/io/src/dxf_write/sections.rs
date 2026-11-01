@@ -1408,6 +1408,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::list_dim_styles(&mut w.t, d);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
+    if !dwg_bridge {
+        super::block_names::anonymize_refused(&mut w.t);
+    }
     // The next handle is above every handle written and the drawing's own next handle (the file's `$HANDSEED`: the handles between
     // the highest in use and the seed are an erased object's, and are never given again, in a DWG too): a record that kept its
     // file's handle does not move it, so a save of a save writes the same seed.

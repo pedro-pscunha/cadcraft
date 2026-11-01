@@ -71,15 +71,17 @@ fn source_block(name: &str, flags: i64) -> Drawing {
     read_dxf(text.as_bytes()).unwrap()
 }
 
+/// A DWG keeps the name; a DXF writes the block as an anonymous `*U` block, as AutoCAD's DXFOUT does (its DXF reader refuses a `|`
+/// in a block that is not xref-dependent).
 #[test]
 fn nondependent_block_names_with_a_vertical_bar_keep_their_body_in_dxf_and_dwg() {
     for flags in [0, 32] {
         let source = source_block("A|B", flags);
         assert_eq!(source.block("A|B").unwrap().entities.len(), 1);
-        for format in ["saved.dxf", "saved.dwg"] {
+        for (format, name) in [("saved.dxf", "*U0"), ("saved.dwg", "A|B")] {
             let bytes = cadcraft_io::write(&source, format).unwrap();
             let restored = cadcraft_io::read(&bytes, format).unwrap();
-            let block = restored.block("A|B").unwrap_or_else(|| panic!("flags {flags} {format}: non-dependent block was purged"));
+            let block = restored.block(name).unwrap_or_else(|| panic!("flags {flags} {format}: non-dependent block was purged"));
             let entity = block.entities.iter().next().expect("block body retained");
             let EntityKind::Line(line) = &entity.kind else {
                 panic!("block line changed type");

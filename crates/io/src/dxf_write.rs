@@ -16,6 +16,7 @@ use cadcraft_geom::{Bounds2, Vec2, Vec3};
 use crate::dxf_ext::{self, DimVal, K};
 
 mod assoc;
+mod block_names;
 mod blocks;
 mod common;
 mod ctx;
