@@ -198,7 +198,9 @@ impl MLine {
             .iter()
             .map(|v| {
                 let s = v.vectors.filter(|s| s.p == v.p)?;
-                (s.dir.xy().len() > 1e-12 && s.miter.xy().len() > 1e-12).then(|| (s.dir.xy().normalized(), s.miter.xy().normalized()))
+                // A unit vector as read stays bit for bit: normalizing it again moves it by an ulp on every save.
+                let unit = |v: Vec2| if (v.len() - 1.0).abs() <= 4.0 * f64::EPSILON { v } else { v.normalized() };
+                (s.dir.xy().len() > 1e-12 && s.miter.xy().len() > 1e-12).then(|| (unit(s.dir.xy()), unit(s.miter.xy())))
             })
             .collect()
     }

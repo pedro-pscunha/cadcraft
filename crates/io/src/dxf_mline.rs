@@ -295,7 +295,8 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
     let n = pts.len();
     // The source directions and miters while they describe the multiline, else computed from the points. The miter vector is the
     // source unit miter scaled so that an element at distance d across the segment lies at d along it.
-    let (dirs, miters) = match m.source_vectors() {
+    // `units` are the miter directions written in 13: the source's as read, else the computed miters normalized.
+    let (dirs, units, miters): (Vec<Vec2>, Vec<Vec2>, Vec<Vec2>) = match m.source_vectors() {
         Some(source) => {
             let miters = source
                 .iter()
@@ -304,9 +305,12 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
                     *miter / if across > 1e-9 { across } else { 1.0 }
                 })
                 .collect();
-            (source.iter().map(|(dir, _)| *dir).collect(), miters)
+            (source.iter().map(|(dir, _)| *dir).collect(), source.iter().map(|(_, miter)| *miter).collect(), miters)
         }
-        None => (m.directions(), m.miters()),
+        None => {
+            let miters = m.miters();
+            (m.directions(), miters.iter().map(|mv| mv.normalized()).collect(), miters)
+        }
     };
     let offs = m.offsets();
     let nseg = m.segment_count();
@@ -316,7 +320,7 @@ pub(crate) fn entity_tags(m: &MLine, style_handle: &str, canonical_normal: Optio
         p(&mut t, 12, dir.to3(0.0));
         let mv = miters.get(k).copied().unwrap_or(Vec2::Y);
         let stretch = mv.len();
-        p(&mut t, 13, mv.normalized().to3(0.0));
+        p(&mut t, 13, units.get(k).copied().unwrap_or(Vec2::Y).to3(0.0));
         let has_seg = k < nseg;
         for (e, d) in offs.iter().enumerate() {
             let along = d * stretch;
