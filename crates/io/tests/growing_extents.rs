@@ -126,12 +126,16 @@ fn unsupported_canonical_bounds_keep_available_growth_and_name_every_refusal() {
 fn legacy_save_bytes_match_the_frozen_writer() {
     // Full ASCII DXF fingerprints: captured at e0f63fd2 before the extent dispatch changes, and recaptured when the writer
     // started to write a table style in AutoCAD's form (the version group 280, and the data type, unit type and format of each
-    // cell style: 83 bytes), and again when an MLEADERSTYLE began to write its group 298 (8 bytes), and when that group moved last (same length).
+    // cell style: 83 bytes), and again when an MLEADERSTYLE began to write its group 298 (8 bytes), and when that group moved last (same length), and again when a save stopped
+    // writing the private copies of what the file holds natively (the CADCRAFT_HANDSEED and CADCRAFT_MLEADERSTYLE XRECORDs and
+    // the CADCRAFT APPID, 431 bytes; the table records and objects are numbered above the entities' handles), and again when
+    // `$HANDSEED` became the next handle above the handles written (same length, the seed value), and again when a DXF header stopped
+    // writing `$CMLEADERSTYLE` (36 bytes: AutoCAD's DXF has none, the variable dictionary holds the style).
     for (case, expected, length) in [
-        ("unchanged", 0x150e_ef92_ea34_5e20_u64, 18142),
-        ("inward", 0xd4da_4246_5de0_b4e4, 18142),
-        ("far", 0x0a58_498b_ecd4_4f71, 18156),
-        ("added", 0x7611_0d4f_dde1_63be, 18289),
+        ("unchanged", 0x8113_2a0f_5355_1f81_u64, 17675),
+        ("inward", 0xdbd5_f979_f026_2645, 17675),
+        ("far", 0x44bb_a071_ed43_6cce, 17689),
+        ("added", 0xd041_cd39_f695_619b, 17822),
     ] {
         let mut drawing = source();
         match case {

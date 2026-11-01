@@ -89,18 +89,12 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(50, s.oblique.to_degrees());
         w.i(71, if s.backwards { 2 } else { 0 } | if s.upside_down { 4 } else { 0 });
         w.f(42, 0.2);
-        // The built-in font goes out as `txt`, which every reader has; CADCraft's own name
-        // travels in `CADCRAFT` xdata (`1000 FONT`, name) so the style reopens with it.
-        let file = s.dxf_font_name();
-        w.s(3, file);
+        // The built-in font goes out as `txt`, which every reader has, and AutoCAD's own default style
+        // holds: the reader takes `txt` for the built-in font again.
+        w.s(3, s.dxf_font_name());
         w.s(4, &s.big_font);
         if s.annotative {
             annotative_xdata(w);
-        }
-        if file != s.font {
-            w.s(1001, dxf_ext::APP);
-            w.s(1000, "FONT");
-            w.s(1000, dxf_ext::xdata_str(&s.font));
         }
     }
     let mut shape_handles: HashMap<String, String> = HashMap::new();
@@ -170,7 +164,7 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let mut apps = vec!["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    let mut apps = vec!["ACAD", "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
     if cx.target < Version::R2007
         && std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
@@ -524,6 +518,8 @@ struct ObjectWritePlan<'a> {
     ps_brs: &'a [(String, String, &'a Layout)],
     layout_handles: &'a [String],
     xrecords: &'a [(&'static str, String, Vec<String>)],
+    /// The variable dictionary of a drawing whose current multileader style is not Standard: (dictionary, variable, style).
+    variables: Option<&'a (String, String, String)>,
     scales: &'a [(&'a cadcraft_doc::AnnoScale, String)],
     pstyles: &'a [(String, String)],
     table_styles: &'a [TableStyle],
@@ -625,6 +621,10 @@ fn write_root_group_objects(
     for (key, h, _) in xrecords {
         w.s(3, *key);
         w.s(350, h);
+    }
+    if let Some((dictionary, _, _)) = plan.variables {
+        w.s(3, "AcDbVariableDictionary");
+        w.s(350, dictionary);
     }
     w.s(3, "ACAD_SCALELIST");
     w.s(350, scale_dict.clone());
@@ -730,6 +730,23 @@ fn write_named_objects(w: &mut W, plan: &ObjectWritePlan<'_>) {
         for c in chunks {
             w.s(1, c.clone());
         }
+    }
+    if let Some((dictionary, variable, style)) = plan.variables {
+        w.s(0, "DICTIONARY");
+        w.s(5, dictionary);
+        w.group("ACAD_REACTORS", 330, &[root_dict]);
+        w.s(330, root_dict.clone());
+        w.s(100, "AcDbDictionary");
+        w.i(281, 1);
+        w.s(3, "CMLEADERSTYLE");
+        w.s(350, variable);
+        w.s(0, "DICTIONARYVAR");
+        w.s(5, variable);
+        w.group("ACAD_REACTORS", 330, &[dictionary]);
+        w.s(330, dictionary.clone());
+        w.s(100, "DictionaryVariables");
+        w.i(280, 0);
+        w.s(1, style);
     }
     scale_list(w, scales, scale_dict, root_dict);
 }
@@ -960,16 +977,20 @@ fn plan_dimension_associations(d: &Drawing, all_spaces: &[&EntityStore], w: &mut
 
 /// The drawing as a save writes it: an in-place block edit in progress is not written (the drawing as before it), and a handle
 /// two objects hold would make one of them unreadable (the DWG conversion drops it), so the later holder gets a new one.
-fn written_drawing(d: &Drawing) -> std::borrow::Cow<'_, Drawing> {
+fn written_drawing(d: &Drawing) -> (std::borrow::Cow<'_, Drawing>, bool) {
     let mut committed = d.committed();
     let stale = committed.stale_raw_dimassocs();
     if !stale.is_empty() {
         committed.to_mut().retire_raw_dimassocs(&stale);
     }
-    if let Some((unique, _)) = committed.with_unique_handles() {
+    // A drawing with no handle above its own cannot be repaired (the repair needs a new handle per later holder): it is written as it
+    // is and flagged, and the save fails (see `dxf_write::require_handle_room`).
+    let repaired = if committed.has_handle_room() { committed.with_unique_handles().ok() } else { None };
+    let unrepairable = repaired.is_none();
+    if let Some(Some((unique, _))) = repaired {
         *committed.to_mut() = unique;
     }
-    committed
+    (committed, unrepairable)
 }
 
 /// Source BLKREFS can include INSERTs of sibling dynamic representations, not only the exact block name.
@@ -1036,7 +1057,7 @@ fn block_slots(
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
 pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> (Vec<Tag>, crate::dxf_raw::WrittenReferences) {
-    let committed = written_drawing(d);
+    let (committed, unrepairable) = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
     let mut w = W { reactors: hatch_reactors(d), dwg_bridge, ..W::new(d) };
@@ -1090,11 +1111,18 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     let table_style_dict = w.h();
     // CADCraft data in XRECORDs of the named object dictionary: (key, handle, text chunks).
     let mut xrecords: Vec<(&str, String, Vec<String>)> = Vec::new();
-    // The drawing's own next handle: table records and objects are numbered above it, so
-    // reading it back (instead of $HANDSEED) keeps their handles across saves (#495).
-    xrecords.push((dxf_ext::HANDSEED_KEY, w.h(), vec![format!("{:X}", d.handseed)]));
+    // The current multileader style is the variable CMLEADERSTYLE of the variable dictionary (AutoCAD's DXF has no $CMLEADERSTYLE, its
+    // DWG header no field for it) from R2004; `dxf_raw::finish` sets it in a variable dictionary the file kept, and this writes the
+    // dictionary of a drawing without one for a style other than Standard. Before R2004 it is an XRECORD. The handles are taken in
+    // every file, so that the numbers of the records after them do not depend on the release.
+    let mut variables = None;
     if let Some(name) = d.header.get("CMLEADERSTYLE").and_then(HVal::as_str) {
-        xrecords.push((dxf_ext::MLEADER_STYLE_KEY, w.h(), vec![name.to_string()]));
+        let (xrecord, dictionary, variable) = (w.h(), w.h(), w.h());
+        if target < Version::R2004 {
+            xrecords.push((dxf_ext::MLEADER_STYLE_KEY, xrecord, vec![name.to_string()]));
+        } else if !name.trim().eq_ignore_ascii_case("Standard") && !crate::dxf_raw::has_variable_dictionary(&d.foreign) {
+            variables = Some((dictionary, variable, name.trim().to_string()));
+        }
     }
     if let Some(chunks) = dxf_ext::constraint_chunks(&d.constraints, &d.parametric) {
         xrecords.push((dxf_ext::CONSTRAINTS_KEY, w.h(), chunks));
@@ -1312,6 +1340,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
             ps_brs: &ps_brs,
             layout_handles: &layout_handles,
             xrecords: &xrecords,
+            variables: variables.as_ref(),
             scales: &scales,
             pstyles: &pstyles,
             table_styles,
@@ -1361,9 +1390,6 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     }
     super::sortents::attach(&mut w, &sortents);
     super::dictionary_order::sort(&mut w.t);
-    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
-        *tag = Tag::s(5, format!("{:X}", w.next));
-    }
     // Group 91 of a CLASS exists from AutoCAD 2004 on (AutoCAD 2000 expects the next group, 280, after 90);
     // the DWG bridge keeps it for acadrust.
     if version >= Version::R2004 || dwg_bridge {
@@ -1381,6 +1407,17 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::list_dim_styles(&mut w.t, d);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
+    // The next handle is above every handle written and the drawing's own next handle (the file's `$HANDSEED`: the handles between
+    // the highest in use and the seed are an erased object's, and are never given again, in a DWG too): a record that kept its
+    // file's handle does not move it, so a save of a save writes the same seed.
+    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
+        *tag = Tag::s(5, "0");
+    }
+    let next = crate::dxf_raw::max_handle(&w.t).checked_add(1).map(|above| above.max(d.handseed));
+    references.handles_exhausted = unrepairable || w.exhausted || next.is_none() || !d.has_handle_room();
+    if let Some(tag) = w.t.get_mut(seed_pos + 1) {
+        *tag = Tag::s(5, format!("{:X}", next.unwrap_or(u64::MAX)));
+    }
     (w.t, references)
 }
 

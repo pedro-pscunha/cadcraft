@@ -215,7 +215,7 @@ fn modelled_dictionaries_are_not_kept_twice() {
         assert_eq!(records(&third, kind), records(&first, kind), "{kind} after two");
     }
     let l = lines(&again);
-    for key in ["ACAD_MLINESTYLE", "ACAD_SCALELIST", "ACAD_GROUP", "ACAD_MLEADERSTYLE", "ACAD_PLOTSTYLENAME", "CADCRAFT_HANDSEED"] {
+    for key in ["ACAD_MLINESTYLE", "ACAD_SCALELIST", "ACAD_GROUP", "ACAD_MLEADERSTYLE", "ACAD_PLOTSTYLENAME"] {
         assert_eq!(l.windows(2).filter(|w| *w == ["3", key]).count(), 1, "{key} once in the named object dictionary");
     }
 }

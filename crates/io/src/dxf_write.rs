@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use cadcraft_color::Color;
 use cadcraft_doc::{
     AssocSnap, Attrib, Block, Common, DimAssoc, DimKind, DimStyle, Dimension, Drawing, Entity, EntityKind, EntityStore, Gradient, Group, HAlign,
-    HVal, Handle, Hatch, Insert, Layout, Line, Lineweight, LwPolyline, MLeaderStyle, MText, PageSetup, Point, Solid, Table, TableStyle, Text,
-    Transparency, VAlign, VportConfig, VportTile,
+    HVal, Handle, Insert, Layout, Line, Lineweight, LwPolyline, MLeaderStyle, MText, PageSetup, Point, Solid, Table, TableStyle, Text, Transparency,
+    VAlign, VportConfig, VportTile,
 };
 use cadcraft_dxf::{Tag, Version};
 use cadcraft_geom::{Bounds2, Vec2, Vec3};
@@ -47,6 +47,8 @@ struct W {
     dwg_bridge: bool,
     next: u64,
     first: u64,
+    /// No handle above the ones given was left to give: the drawing cannot be saved (see [`require_handle_room`]).
+    exhausted: bool,
     used: HashSet<Handle>,
     /// Source entity → its emitted top-level records (not ATTRIB/VERTEX/SEQEND children).
     emitted: HashMap<Handle, Vec<Handle>>,
@@ -63,7 +65,10 @@ struct W {
 
 impl W {
     fn new(d: &Drawing) -> Self {
-        let first = d.handseed.max(0x100).checked_add(0x1000).unwrap_or(0x100);
+        let (first, exhausted) = match d.handseed.max(0x100).checked_add(0x1000) {
+            Some(first) => (first, false),
+            None => (u64::MAX, true),
+        };
         let used: HashSet<_> = std::iter::once(&d.model)
             .chain(d.layouts.iter().map(|l| &l.entities))
             .chain(d.blocks.values().map(|b| &b.entities))
@@ -88,6 +93,7 @@ impl W {
             dwg_bridge: false,
             next: first,
             first,
+            exhausted,
             used,
             emitted: HashMap::new(),
             pstyles: HashMap::new(),
@@ -127,13 +133,24 @@ impl W {
     fn h(&mut self) -> String {
         self.allocate_handle().hex()
     }
+    /// The next handle that is not in use. Past the largest handle there is none: the writer then flags the file as exhausted
+    /// (the save fails) and never starts again from a low handle.
     fn allocate_handle(&mut self) -> Handle {
         while self.used.contains(&Handle(self.next)) {
-            self.next = self.next.checked_add(1).unwrap_or(1);
+            match self.next.checked_add(1) {
+                Some(next) => self.next = next,
+                None => {
+                    self.exhausted = true;
+                    break;
+                }
+            }
         }
         let h = Handle(self.next);
         self.used.insert(h);
-        self.next = self.next.checked_add(1).unwrap_or(1);
+        match self.next.checked_add(1) {
+            Some(next) => self.next = next,
+            None => self.exhausted = true,
+        }
         h
     }
     /// A `102 {NAME` … `102 }` group of handles.
@@ -188,10 +205,28 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
     tags_for(d, version, version, false).0
 }
 
+/// [`tags`] for a save: it fails when the drawing has no handle left above the ones it uses.
+pub(crate) fn checked_tags(d: &Drawing, version: Version) -> crate::Result<Vec<Tag>> {
+    let (tags, references) = tags_for(d, version, version, false);
+    require_handle_room(&references)?;
+    Ok(tags)
+}
+
+/// A drawing whose handles leave no higher one (a record at the largest handle, or a next handle within [`cadcraft_doc::HANDLE_ROOM`] of
+/// it) is not saved: a handle is never written twice, and never starts again from a low one.
+pub(crate) fn require_handle_room(references: &crate::dxf_raw::WrittenReferences) -> crate::Result<()> {
+    if references.handles_exhausted {
+        Err(crate::IoError::Format("the drawing's handles reach the largest handle: there is no room above them for a save".into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// The save path checks Raw identities before repair and the final values and references after remapping.
 pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<u8>> {
     crate::raw_preservation::preflight(d)?;
     let (tags, references) = tags_for(d, version, version, false);
+    require_handle_room(&references)?;
     let bytes = cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes();
     crate::raw_preservation::RawSaveCheck::new(d, &references, crate::raw_preservation::DXF_TEXT)?.verify_dxf(&bytes)?;
     Ok(bytes)
@@ -254,6 +289,8 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
         .committed()
         .with_unique_handles()
+        .ok()
+        .flatten()
         .map(|(_, repairs)| repairs)
         .unwrap_or_default()
         .into_iter()

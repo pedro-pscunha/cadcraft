@@ -132,11 +132,12 @@ fn hatch_origin_background_and_elevation_roundtrip() {
         k => panic!("not a hatch: {k:?}"),
     };
     let a = hatch_of(patterned);
-    assert!(a.origin.near(Vec2::new(1.0, 2.0), 1e-12), "origin {:?}", a.origin);
+    // The origin is in the pattern lines' base points (43/44), where AutoCAD keeps it: it reads back as a zero origin.
+    assert_eq!(a.origin, Vec2::ZERO);
     assert_eq!(a.background, Some(Color::Index(2)));
     assert_eq!(a.elevation, 1.5);
     let b = hatch_of(graded);
-    assert!(b.origin.near(Vec2::new(1.0, 2.0), 1e-12));
+    assert_eq!(b.origin, Vec2::ZERO);
     assert_eq!(b.background, Some(Color::True(Rgb(1, 2, 3))));
     assert_eq!(b.gradient, Some(g), "gradient xdata still read next to the hatch xdata");
     let c = hatch_of(plain_h);
@@ -149,6 +150,12 @@ fn hatch_origin_background_and_elevation_roundtrip() {
     let first_43 = in_hatch.clone().find(|(c, _)| *c == 43).map(|(_, v)| v.parse::<f64>().expect("43 value"));
     let first_44 = in_hatch.clone().find(|(c, _)| *c == 44).map(|(_, v)| v.parse::<f64>().expect("44 value"));
     assert_eq!((first_43, first_44), (Some(1.0), Some(2.0)));
+    // And the reopened hatch writes the same base points.
+    let again = groups(&write_dxf(&r));
+    let in_again = again.iter().skip_while(|(c, v)| !(*c == 0 && v == "HATCH"));
+    let again_43 = in_again.clone().find(|(c, _)| *c == 43).map(|(_, v)| v.parse::<f64>().expect("43 value"));
+    let again_44 = in_again.clone().find(|(c, _)| *c == 44).map(|(_, v)| v.parse::<f64>().expect("44 value"));
+    assert_eq!((again_43, again_44), (first_43, first_44));
 }
 
 #[test]

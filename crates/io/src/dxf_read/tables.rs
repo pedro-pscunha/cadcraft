@@ -86,10 +86,10 @@ pub(super) fn annotative(tags: &[Tag]) -> bool {
     list.iter().filter(|t| t.code == 1070).nth(1).is_some_and(|t| t.i64() != 0)
 }
 
-/// A text style's font: CADCraft's own font name from `CADCRAFT` xdata (`1000 FONT`, name)
-/// while the font file is still the `txt` written for other readers; the TrueType family of the
-/// style's `ACAD` xdata (`1000` typeface) when it has no font file (how AutoCAD stores TrueType
-/// styles); otherwise the file.
+/// A text style's font: the TrueType family of the style's `ACAD` xdata (`1000` typeface) when it
+/// has no font file (how AutoCAD stores TrueType styles); the built-in font for the file `txt`
+/// (what the writer gives it, and AutoCAD's default style holds); CADCraft's own font name from
+/// the `CADCRAFT` xdata (`1000 FONT`, name) of a file saved before that; otherwise the file.
 fn style_font(tags: &[Tag], file: String) -> String {
     if file.trim().is_empty()
         && let Some(face) =
@@ -105,6 +105,7 @@ fn style_font(tags: &[Tag], file: String) -> String {
     let stem = file.trim().to_ascii_lowercase();
     match own {
         Some(name) if !name.trim().is_empty() && (stem == "txt" || stem == "txt.shx") => name,
+        _ if stem == "txt" => cadcraft_fonts::BUILTIN_FONT.into(),
         _ => file,
     }
 }
@@ -126,7 +127,8 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
         recs.iter()
             .filter(|(kind, _)| kind == "APPID")
             .filter_map(|(_, tags)| T(tags).s(2))
-            .filter(|name| !name.trim().is_empty())
+            // CADCRAFT is registered again when the file is written, and only if some xdata names it.
+            .filter(|name| !name.trim().is_empty() && !name.trim().eq_ignore_ascii_case(crate::dxf_ext::APP))
             .take(MAX_OBJECTS.saturating_sub(d.registered_apps.len())),
     );
     // Handle maps first: DIMSTYLE records refer to text styles and arrow blocks by handle.

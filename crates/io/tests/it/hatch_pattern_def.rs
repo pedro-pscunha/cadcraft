@@ -94,10 +94,15 @@ fn custom_pattern_lines_roundtrip_scaled_and_rotated() {
     assert!((num(4) - off.x).abs() < 1e-9 && (num(5) - off.y).abs() < 1e-9, "45/46 offset");
     assert_eq!(p[at + 6], (79, "4".into()));
     assert!((num(7) - 1.5).abs() < 1e-9, "49 dash scaled");
-    // Read back to the same definition, and saved again unchanged.
+    // Read back to the same definition, as AutoCAD keeps it: the hatch origin is in the lines' base points (43/44), so it reads
+    // back as a zero origin and base points moved by it. Saved again unchanged.
     let h = first_hatch(&text);
-    assert!(near(&h.pattern_lines, &custom_lines()), "{:?}", h.pattern_lines);
-    assert!(near(&first_hatch(&save(h)).pattern_lines, &custom_lines()));
+    assert_eq!(h.origin, Vec2::ZERO);
+    let moved = Vec2::new(1.0, 2.0).rotate(-angle) * (1.0 / 2.0);
+    let baked: Vec<PatternLine> =
+        custom_lines().into_iter().map(|l| PatternLine { origin: (l.origin.0 + moved.x, l.origin.1 + moved.y), ..l }).collect();
+    assert!(near(&h.pattern_lines, &baked), "{:?}", h.pattern_lines);
+    assert!(near(&first_hatch(&save(h)).pattern_lines, &baked));
 }
 
 #[test]

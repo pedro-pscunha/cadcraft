@@ -588,6 +588,7 @@ fn dxf_at(d: &Drawing, version: Version) -> String {
 #[test]
 fn viewport_frozen_layers_roundtrip() {
     let mut d = sample();
+    d.layers.push(Layer { name: "A B".into(), ..Layer::default() });
     let paper = Space::Paper("Layout1".into());
     let vp = |id: u32, frozen: Vec<String>| {
         EntityKind::Viewport(Viewport {
@@ -701,22 +702,16 @@ fn viewport_frozen_layers_written_as_331_handles() {
     let rec = &p[r];
     let h331: Vec<&str> = rec.iter().filter(|(c, _)| c == "331").map(|(_, v)| v.as_str()).collect();
     assert_eq!(h331, vec![layer_handle(&p, "Walls").as_str(), layer_handle(&p, "A B").as_str()]);
-    let last331 = rec.iter().rposition(|(c, _)| c == "331").unwrap();
-    let x = rec.iter().position(|(c, _)| c == "1001").expect("xdata");
-    assert!(last331 < x, "331 must precede the xdata");
+    assert!(!rec.iter().any(|(c, _)| c == "1001"), "the native list is the whole list: no CADCRAFT xdata copy");
 }
 
 #[test]
 fn viewport_frozen_layers_read_from_331_without_xdata() {
     let (_, p) = frozen_vp_dxf();
     let r = vp_record(&p, "2");
-    // Strip the CADCraft xdata, and add a 331 to a handle that names no layer.
-    let x = p[r.clone()].iter().position(|(c, _)| c == "1001").unwrap() + r.start;
-    let mut q: Vec<(String, String)> = p[..r.start].to_vec();
-    let mut head = p[r.start..x].to_vec();
-    head.push(("331".into(), "FFFFF".into()));
-    q.extend(head);
-    q.extend(p[r.end..].iter().cloned());
+    // Add a 331 to a handle that names no layer.
+    let mut q = p.clone();
+    q.insert(r.end, ("331".into(), "FFFFF".into()));
     let back = read_dxf(join(&q).as_bytes()).unwrap();
     assert_eq!(viewport_frozen(&back, 2), vec!["Walls".to_string(), "A B".to_string()]);
 }
@@ -725,14 +720,17 @@ fn viewport_frozen_layers_read_from_331_without_xdata() {
 fn viewport_frozen_xdata_wins_over_331() {
     let (_, p) = frozen_vp_dxf();
     let r = vp_record(&p, "2");
-    // Point every 331 at layer 0: the xdata list must still be what is read.
+    // A file saved before the native list was the whole list: its xdata list, with every 331 pointing at layer 0. The xdata is read.
     let zero = layer_handle(&p, "0");
     let mut q = p.clone();
-    for t in &mut q[r] {
+    for t in &mut q[r.clone()] {
         if t.0 == "331" {
             t.1 = zero.clone();
         }
     }
+    let xdata = crate::dxf_ext::frozen_xdata(&["Walls".to_string(), "A B".to_string()]);
+    let at = r.end;
+    q.splice(at..at, std::iter::once(("1001".to_string(), "CADCRAFT".to_string())).chain(xdata.iter().map(|t| (t.code.to_string(), t.str()))));
     let back = read_dxf(join(&q).as_bytes()).unwrap();
     assert_eq!(viewport_frozen(&back, 2), vec!["Walls".to_string(), "A B".to_string()]);
 }
@@ -1962,23 +1960,12 @@ fn a_dwg_keeps_the_gradient_natively_from_2004_and_by_xdata_before() {
 #[test]
 fn gradient_falls_back_to_xdata_and_native_groups_win() {
     let (d, gradients) = gradient_sample();
-    let text = dxf_at(&d, Version::R2004);
-    // Strip groups 450–470 and 63/421 (pairs of lines) from every entity.
-    let lines: Vec<&str> = text.lines().collect();
-    let mut stripped = String::new();
-    for pair in lines.chunks(2) {
-        let code = pair.first().map(|c| c.trim().parse::<i32>().unwrap_or(-1)).unwrap_or(-1);
-        if (450..=470).contains(&code) || code == 63 || code == 421 {
-            continue;
-        }
-        for l in pair {
-            stripped.push_str(l);
-            stripped.push('\n');
-        }
-    }
-    assert!(!stripped.lines().any(|l| l.trim() == "450"));
-    let back = read_dxf(stripped.as_bytes()).unwrap();
+    // A DXF before 2004 has no native groups, only the xdata copy.
+    let before_2004 = dxf_at(&d, Version::R2000);
+    assert!(!before_2004.lines().any(|l| l.trim() == "450"));
+    let back = read_dxf(before_2004.as_bytes()).unwrap();
     assert_eq!(hatches(&back).into_iter().map(|h| h.gradient).collect::<Vec<_>>(), gradients);
+    let text = dxf_at(&d, Version::R2004);
 
     // Native groups edited elsewhere (new angle, colour, name) take precedence over stale xdata.
     let edited = text.replacen("470\r\nLINEAR", "470\r\nSPHERICAL", 1).replacen("421\r\n16711680", "421\r\n65280", 1);
@@ -2037,7 +2024,7 @@ fn hostile_gradient_groups_never_panic() {
     }
 }
 
-/// The native 470 group keeps a long name whole; the xdata copy is cut to 255 bytes at a
+/// The native 470 group keeps a long name whole; the xdata copy (a DXF before 2004) is cut to 255 bytes at a
 /// character boundary.
 #[test]
 fn long_gradient_name_is_cut_only_in_xdata() {
@@ -2049,12 +2036,12 @@ fn long_gradient_name_is_cut_only_in_xdata() {
     }
     d.add(&Space::Model, Common::default(), EntityKind::Hatch(h)).unwrap();
     let text = dxf_at(&d, Version::R2004);
-    let lines: Vec<&str> = text.lines().collect();
     // Non-ASCII text is written as \U+ escapes (files before 2007 are ANSI).
-    assert!(lines.contains(&"\\U+00C4".repeat(200).as_str()));
-    assert!(lines.contains(&"\\U+00C4".repeat(127).as_str()));
+    assert!(text.lines().any(|l| l == "\\U+00C4".repeat(200)));
     let back = read_dxf(text.as_bytes()).unwrap();
     assert_eq!(hatches(&back).into_iter().next().and_then(|h| h.gradient).unwrap().name, name);
+    let before_2004 = dxf_at(&d, Version::R2000);
+    assert!(before_2004.lines().any(|l| l == "\\U+00C4".repeat(127)));
 }
 
 #[test]

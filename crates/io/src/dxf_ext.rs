@@ -6,8 +6,8 @@
 //!
 //! CADCraft's own data lives under the registered application `CADCRAFT` (xdata) and the
 //! named-object-dictionary entries `CADCRAFT_CONSTRAINTS`, `CADCRAFT_LAYERSTATES`,
-//! `CADCRAFT_PLOTSTYLES`, `CADCRAFT_HANDSEED` and `CADCRAFT_MLEADERSTYLE` (XRECORDs). Other
-//! readers keep or ignore them.
+//! `CADCRAFT_PLOTSTYLES`, `CADCRAFT_ANNOTATION` and, in a DXF before R2007 and in a DWG, `CADCRAFT_MLEADERSTYLE` (XRECORDs),
+//! each written only when the drawing has that data. Other readers keep or ignore them.
 
 use std::collections::HashMap;
 
@@ -31,9 +31,8 @@ pub(crate) const ANNOTATION_KEY: &str = "CADCRAFT_ANNOTATION";
 /// Named-object-dictionary key of the plot style names dictionary (DXF Reference): its entries
 /// name `ACDBPLACEHOLDER` objects, and layers and objects point at them with group 390.
 pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
-/// Named-object-dictionary key of the XRECORD holding the drawing's next entity handle (hex).
-pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
-/// Named-object-dictionary key of the XRECORD holding the current multileader style.
+/// Named-object-dictionary key of the XRECORD that holds the current multileader style in a DXF before R2007, which has
+/// no `$CMLEADERSTYLE`, and in a DWG, whose header handle for it the DWG writer neither writes nor reads: read from any file.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
@@ -380,6 +379,68 @@ pub(crate) fn transparency_from_dxf(v: i64) -> Option<u8> {
     u8::try_from(100u32.saturating_sub(opaque).min(90)).ok()
 }
 
+/// The application AutoCAD keeps a hatch's background colour under: `1001`, `1071` (the packed colour of [`pack_color`]), then
+/// two empty `1000` strings.
+pub(crate) const HATCH_BACKGROUND_APP: &str = "HATCHBACKGROUNDCOLOR";
+
+/// The `1071` value of AutoCAD's "no colour" (method byte 0xC8).
+const PACKED_NO_COLOR: i64 = 0xC800_0000_u32 as i32 as i64;
+
+/// AutoCAD's packed colour (an int32): the method in the high byte (0xC0 ByLayer, 0xC1 ByBlock, 0xC2 RGB, 0xC3 index), the value below.
+fn pack_color(c: Color) -> i64 {
+    let packed: u32 = match c {
+        Color::ByLayer => 0xC000_0000,
+        Color::ByBlock => 0xC100_0000,
+        Color::True(Rgb(r, g, b)) => 0xC200_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
+        Color::Index(i) => 0xC300_0000 | u32::from(i),
+    };
+    i64::from(packed as i32)
+}
+
+/// The colour of a packed value; `None` for "no colour" and for a value that is not a colour.
+fn unpack_color(v: i64) -> Option<Color> {
+    let packed = u32::try_from(v).ok().or_else(|| i32::try_from(v).ok().map(|n| n as u32))?;
+    let low = packed & 0x00FF_FFFF;
+    match packed >> 24 {
+        0xC0 if low == 0 => Some(Color::ByLayer),
+        0xC1 if low == 0 => Some(Color::ByBlock),
+        0xC2 => Some(Color::True(Rgb((low >> 16) as u8, (low >> 8) as u8, low as u8))),
+        0xC3 => u8::try_from(low).ok().filter(|i| *i >= 1).map(Color::Index),
+        _ => None,
+    }
+}
+
+/// A hatch's `HATCHBACKGROUNDCOLOR` xdata among the groups of an entity: `None` when it has none, else its colour (`None` inside for
+/// "no colour"). An older CADCraft's `HATCH` xdata is read only when there is none.
+pub(crate) fn hatch_background(tags: &[Tag]) -> Option<Option<Color>> {
+    if !tags.iter().any(|t| t.code == 1001 && t.str().trim().eq_ignore_ascii_case(HATCH_BACKGROUND_APP)) {
+        return None;
+    }
+    Some(xdata(tags, HATCH_BACKGROUND_APP).iter().find(|t| t.code == 1071).and_then(|t| unpack_color(t.i64())))
+}
+
+/// The `HATCHBACKGROUNDCOLOR` application of kept (foreign) xdata: `None` when the hatch has none, else its colour (`None` inside
+/// for "no colour").
+fn kept_hatch_background(kept: &[cadcraft_doc::RawTag]) -> Option<Option<Color>> {
+    let at = kept.iter().position(|t| t.code == 1001 && t.value.trim().eq_ignore_ascii_case(HATCH_BACKGROUND_APP))?;
+    let run = kept.get(at + 1..).unwrap_or(&[]);
+    let run = run.get(..run.iter().position(|t| t.code == 1001).unwrap_or(run.len())).unwrap_or(&[]);
+    let packed = run.iter().find(|t| t.code == 1071).and_then(|t| t.value.trim().parse::<i64>().ok());
+    Some(packed.and_then(unpack_color))
+}
+
+/// What a save writes for a hatch's background colour: AutoCAD's `HATCHBACKGROUNDCOLOR` xdata, only when the xdata the hatch kept
+/// from its file (which a save writes as read) does not already say it.
+pub(crate) fn hatch_background_xdata(background: Option<Color>, kept: &[cadcraft_doc::RawTag]) -> Vec<Tag> {
+    let packed = match (background, kept_hatch_background(kept)) {
+        (Some(c), None) => pack_color(c),
+        (Some(c), Some(was)) if was != Some(c) => pack_color(c),
+        (None, Some(Some(_))) => PACKED_NO_COLOR,
+        _ => return Vec::new(),
+    };
+    vec![Tag::s(1001, HATCH_BACKGROUND_APP), Tag::i(1071, packed), Tag::s(1000, ""), Tag::s(1000, "")]
+}
+
 /// An xdata string cut to the 255 bytes a `1000` group may hold, at a character boundary.
 pub(crate) fn xdata_str(s: &str) -> &str {
     let mut end = s.len().min(255);
@@ -614,7 +675,9 @@ pub(crate) fn read_arclen(tags: &[Tag]) -> Option<cadcraft_geom::Vec3> {
     Some(cadcraft_geom::Vec3::new(g(1010)?, g(1020)?, g(1030).unwrap_or(0.0)))
 }
 
-/// A viewport's frozen layer names as CADCraft xdata: `1000 VPFROZEN`, `1002 {`, one `1000` per layer, `1002 }`.
+/// A viewport's frozen layer names as CADCraft xdata: `1000 VPFROZEN`, `1002 {`, one `1000` per layer, `1002 }`: what
+/// files saved before the native group 331 held, for the tests of the reader.
+#[cfg(test)]
 pub(crate) fn frozen_xdata(layers: &[String]) -> Vec<Tag> {
     let mut v = vec![Tag::s(1000, "VPFROZEN"), Tag::s(1002, "{")];
     v.extend(layers.iter().map(|l| Tag::s(1000, l.clone())));

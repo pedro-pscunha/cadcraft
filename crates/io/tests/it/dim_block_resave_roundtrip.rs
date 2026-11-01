@@ -164,16 +164,18 @@ fn hostile_handle_seed_does_not_panic() {
     let mut d = Drawing::new_metric();
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(linear([0.0, 0.0], [10.0, 0.0], [5.0, 3.0]))).unwrap();
     let p = pairs(&cadcraft_io::write_dxf(&d));
-    // The dictionary entry names the XRECORD; its group 1 holds the seed.
-    let key = p.iter().position(|(c, v)| *c == 3 && v == "CADCRAFT_HANDSEED").unwrap();
-    let h = p[key + 1].1.clone();
-    let rec = p.iter().position(|(c, v)| *c == 5 && *v == h).unwrap();
-    let at = rec + p[rec..].iter().position(|(c, _)| *c == 1).unwrap();
-    assert_eq!(p[at].1, format!("{:X}", d.handseed));
+    // The header's $HANDSEED is the only seed a file holds.
+    let key = p.iter().position(|(c, v)| *c == 9 && v == "$HANDSEED").unwrap();
+    let at = key + 1;
     for bad in ["FFFFFFFFFFFFFFFF", "not-hex", "", "-1"] {
         let mut q = p.clone();
         q[at].1 = bad.to_string();
         let text: String = q.iter().map(|(c, v)| format!("{c}\r\n{v}\r\n")).collect();
+        // A seed at the largest handle leaves no handle above it: the read fails (see `handle_exhaustion_fails_the_read_and_the_save`).
+        if bad == "FFFFFFFFFFFFFFFF" {
+            assert!(cadcraft_io::read_dxf(text.as_bytes()).is_err());
+            continue;
+        }
         let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
         let again = cadcraft_io::write_dxf(&back);
         assert_eq!(dim_blocks(&again).len(), 1, "{bad}");

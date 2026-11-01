@@ -558,6 +558,7 @@ mod native {
             return dxf;
         }
         let Some(end) = dxf.windows(END.len()).position(|w| w == END).map(|p| p + 2) else { return dxf };
+        let end = end.saturating_sub(lower_handseed(&mut dxf, end));
         let section = dxf.get(..end).unwrap_or_default();
         let mut add = String::new();
         for (name, code, value) in unwritten_header_vars(h) {
@@ -568,6 +569,23 @@ mod native {
         }
         dxf.splice(end..end, add.into_bytes());
         dxf
+    }
+
+    /// The DXF text of a DWG gives `$HANDSEED` one above the DWG header's next handle (acadrust counts the handles it writes, from
+    /// the highest handle in use or the header's seed, then adds one), so a DWG saved and read again would raise its seed by one each
+    /// time. The text gets the DWG's own next handle, which is the first one past every handle and every handle the text takes
+    /// for itself. Returns how many bytes the header lost, when it changed.
+    fn lower_handseed(dxf: &mut Vec<u8>, header_end: usize) -> usize {
+        const NAME: &[u8] = b"  9\r\n$HANDSEED\r\n  5\r\n";
+        let Some(at) = dxf.get(..header_end).and_then(|h| h.windows(NAME.len()).position(|w| w == NAME)).map(|p| p + NAME.len()) else { return 0 };
+        let Some(len) = dxf.get(at..).and_then(|rest| rest.windows(2).position(|w| w == b"\r\n")) else { return 0 };
+        let Some(seed) = dxf.get(at..at + len).and_then(|v| std::str::from_utf8(v).ok()).and_then(|v| u64::from_str_radix(v.trim(), 16).ok()) else {
+            return 0;
+        };
+        let lowered = format!("{:X}", seed.saturating_sub(1));
+        let before = len;
+        dxf.splice(at..at + len, lowered.into_bytes());
+        before.saturating_sub(dxf.get(at..).and_then(|rest| rest.windows(2).position(|w| w == b"\r\n")).unwrap_or(before))
     }
 
     /// Collects the DXF text and fails the write once it would grow past `limit`.
@@ -762,15 +780,18 @@ mod native {
         // The variables AutoCAD writes for a drawing with default styles and a 1:1 annotation
         // scale. DIMASSOC and HIDETEXT keep the drawing's own header values; LAYEREVAL and
         // LAYERNOTIFY have no DXF header variable.
-        let variables = [
-            ("CMLEADERSTYLE", name_or_default(&doc.header.current_mleader_style_name, "Standard")),
+        // The current multileader style is a variable only from R2004 (acadrust writes it there); before, the file has the style in an
+        // XRECORD, and a "Standard" here would read as the file's own record of it.
+        let mleader_style = (doc.version >= acadrust::DxfVersion::AC1018)
+            .then(|| ("CMLEADERSTYLE", name_or_default(&doc.header.current_mleader_style_name, "Standard")));
+        let variables = mleader_style.into_iter().chain([
             ("CTABLESTYLE", name_or_default(&doc.header.current_table_style_name, "Standard")),
             ("CANNOSCALE", name_or_default(&doc.header.current_annotation_scale, "1:1")),
             ("DIMASSOC", variable_value(doc.header.dimension_associativity, &[0, 1, 2], 2)),
             ("HIDETEXT", variable_value(doc.header.hide_text, &[0, 1], 1)),
             ("LAYEREVAL", "0".to_string()),
             ("LAYERNOTIFY", "0".to_string()),
-        ];
+        ]);
         let dictionary_handle = doc.allocate_handle();
         let mut dictionary = Dictionary::new();
         dictionary.handle = dictionary_handle;

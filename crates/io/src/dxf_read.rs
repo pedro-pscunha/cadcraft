@@ -293,10 +293,10 @@ fn read_core(
     // Every handle another program's file already uses is taken before anything gets a new one:
     // its $HANDSEED can be lower than its handles, and entities made while reading (the faces of
     // a polyface mesh) would otherwise get handles that records further on still have. A file
-    // CADCraft wrote names its own next handle, above which its rebuilt records are numbered
-    // (#495), so it is left to that.
-    let ours = secs.iter().any(|s| s.name == "OBJECTS" && s.tags.iter().any(|t| t.code == 3 && t.str() == crate::dxf_ext::HANDSEED_KEY));
-    reserve_instance_handles(&mut secs, &mut d, ours);
+    // CADCraft wrote keeps its table records' and objects' handles (`source_symbols.handles`), and a
+    // new handle is above the file's `$HANDSEED`.
+    reserve_instance_handles(&mut secs, &mut d);
+    require_handle_room(&d)?;
     let mut skipped = BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
@@ -314,9 +314,6 @@ fn read_core(
             _ => {}
         }
     }
-    // A file CADCraft wrote names its own next handle (#495): its table records and objects
-    // are numbered above it and rebuilt on save, so following $HANDSEED would drift every save.
-    let own_seed = objs.xrecord_text(crate::dxf_ext::HANDSEED_KEY).and_then(|t| Handle::parse_hex(t.trim()));
     let raw_blocks: Vec<_> =
         rx.raw_block_handles.iter().filter_map(|handle| rx.brs.get(&handle.hex()).map(|name| name.to_ascii_uppercase())).collect();
     rx.inserted.extend(raw_blocks);
@@ -330,11 +327,6 @@ fn read_core(
     objs.apply(&mut d, &rx)?;
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
-    // Keep handles unique against the header's seed.
-    let seed = d.header.str("HANDSEED", "");
-    if let Some(h) = own_seed.or_else(|| Handle::parse_hex(&seed)) {
-        d.bump_handseed(Handle(h.0.saturating_sub(1)));
-    }
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
@@ -348,7 +340,8 @@ fn read_core(
     }
     d.allocate_missing_attribute_handles();
     d.remember_raw_dimassocs();
-    d.skipped_records = skipped;
+    require_handle_room(&d)?;
+    d.skipped_records.extend(skipped);
     keep_block_previews(&mut d, rx.block_previews);
     keep_table_graphics(&mut d, &rx.table_blocks, rx.table_graphics);
     Ok((d, read_report))
@@ -375,10 +368,31 @@ fn keep_table_graphics(d: &mut Drawing, names: &HashMap<String, Handle>, mut gra
     }
 }
 
-/// Reserve persistent child identities even in CADCraft files with a private handseed. A
-/// colliding input identity is omitted before raw-data reading, so its dictionary cannot be
-/// attached to whichever different record already owns the handle.
-fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
+/// A file whose handles leave no room above them (a `$HANDSEED` or a record at or near the largest handle) is not read: a handle is
+/// never given twice, and never starts again from a low one.
+fn require_handle_room(d: &Drawing) -> crate::Result<()> {
+    if d.has_handle_room() {
+        Ok(())
+    } else {
+        Err(IoError::Format(format!(
+            "the file's handles reach {:X}, with no room above them for the handles of new objects",
+            d.handseed.saturating_sub(1)
+        )))
+    }
+}
+
+/// Take every handle the file uses, and reserve its persistent child identities. A colliding input
+/// identity is omitted before raw-data reading, so its dictionary cannot be attached to whichever
+/// different record already owns the handle.
+fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing) {
+    // The file's next handle first: a record without a handle is given one while the sections are read, and the handles above the
+    // highest one in use but below the file's `$HANDSEED` are the ones its erased objects had.
+    for section in secs.iter().filter(|s| s.name == "HEADER") {
+        if let Some(seed) = section.tags.windows(2).find(|w| w[0].code == 9 && w[0].str() == "$HANDSEED").and_then(|w| Handle::parse_hex(&w[1].str()))
+        {
+            d.bump_handseed(Handle(seed.0.saturating_sub(1)));
+        }
+    }
     let mut used = HashSet::new();
     for section in secs.iter().filter(|s| s.name != "HEADER") {
         let mut kind = String::new();
@@ -390,9 +404,7 @@ fn reserve_instance_handles(secs: &mut [Section], d: &mut Drawing, ours: bool) {
             } else if !kind.is_empty() && !matches!(kind.as_str(), "ATTRIB" | "VERTEX" | "SEQEND") && matches!(t.code, 5 | 105) && !seen {
                 if let Some(h) = Handle::parse_hex(&t.str()) {
                     used.insert(h);
-                    if !ours {
-                        d.bump_handseed(h);
-                    }
+                    d.bump_handseed(h);
                 }
                 seen = true;
             }

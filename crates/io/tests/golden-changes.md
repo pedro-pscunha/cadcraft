@@ -354,3 +354,58 @@ Proof: the outputs of fc6836ca and of the fix were written again from two source
 | rt7_Tear_Incorporadora-Alvorada.dwg.dxf | 18AE |
 | rt7_Toledo_Ferrari-HBR51.dwg.dwg | 65 |
 | rt7_Toledo_Ferrari-HBR51.dwg.dxf | 65 |
+# Golden refresh for the private copies of native values (b1fec9b3)
+
+A save writes CADCraft's private copy of a value only where the target release has no native home for it (commit "a save writes the CADCRAFT
+private copy of a value only where the release cannot store it"). Every output of the corpus (63 drawings, DXF and DWG) differs from the
+baseline of the previous refresh, because the table records and objects are numbered above the entities' handles instead of above the
+drawing's next handle (`$HANDSEED`, which the reader no longer follows): G1 keys a record by its handle, so every record numbered by the
+writer drifts in the check. Compared with the handles set aside (every handle-valued group replaced by a mark, the DXF baseline of
+`/tmp/cad/activation/golden` against the new one), the records that differ are only these:
+
+| record | cause | drawings | records |
+|---|---|---|---|
+| OBJECTS/XRECORD | the CADCRAFT_HANDSEED XRECORD is gone (the numbers above the entities need no seed); the DXF baseline is R2000, so CADCRAFT_MLEADERSTYLE stays | 63 | 63 |
+| OBJECTS/DICTIONARY | the named object dictionary lost its CADCRAFT_HANDSEED entry | 63 | 63 |
+| TABLES/APPID | the CADCRAFT APPID is registered only when some xdata names it (the 23 drawings without a table style) | 23 | 23 |
+| TABLES/TABLE | the APPID table's count of those 23 | 23 | 23 |
+| TABLES/STYLE | the built-in font is the file `txt`, with no `CADCRAFT` FONT xdata | 38 | 38 |
+| ENTITIES/VIEWPORT, BLOCKS/VIEWPORT | no `VPFROZEN` xdata: the native group 331 is the whole list | 13 | 101 |
+| BLOCKS/HATCH | no `HATCH` origin xdata: the origin is in the pattern lines' base points (43/44), as AutoCAD keeps it (the R2000 baseline keeps the gradient as xdata, before R2004) | 1 | 1220 |
+
+The DWG baselines differ for the same causes (read as DXF) and the handles; the CADCRAFT_MLEADERSTYLE XRECORD stays in a DWG. The r5 and r6 raw
+fixtures move for the same causes (their handles and the missing records). The legacy-writer fingerprints (`growing_extents`,
+`displacement_tests`) are recaptured: 431 bytes fewer (the two XRECORDs' handle and dictionary entry, the APPID, and the seed).
+
+# Golden refresh for the handle seed, the hatch background and the current multileader style (cf0c6635, 29b31a67)
+
+The previous refresh (b1fec9b3, above) is the reference. Every output of the corpus (63 drawings, DXF and DWG) differs from it again, and the cause is
+numbering only: `$HANDSEED` is the next handle above the handles written (a file's records keep the handles it gave them, and a new one is above the
+file's own `$HANDSEED`), and the writer takes two more handles for the variable dictionary of the current multileader style, in every release. G1 keys
+a record by its handle, so every record numbered by the writer drifts in the check. Compared with the handles set aside (the DXF baseline of the
+previous refresh against the new one), the records that differ are only these:
+
+| record | cause | drawings | records |
+|---|---|---|---|
+| OBJECTS/XRECORD | `CADCRAFT_MLEADERSTYLE` (the DXF baseline is R2000, so the XRECORD stays) holds `Linha_MEDIO`, not `Standard`: the AutoCAD file keeps the current multileader style in the variable CMLEADERSTYLE of its variable dictionary, which the reader takes now (and acadrust 6735e35 for a DWG) | 4 | 4 |
+
+The R2000 DXF baseline holds no variable (a release before R2004 keeps the style in the XRECORD) and no `$CMLEADERSTYLE` (AutoCAD's DXF has none; the
+header variable is not written at any release now, the reader still reads it). The records of a hatch with a background colour change in no drawing of the corpus
+(none has one; a background is AutoCAD's `HATCHBACKGROUNDCOLOR` xdata now, kept as read when a file has it). The DWG baselines differ for the same causes
+(read as DXF) and the handles. From R2004 a DXF and a DWG hold the current style in the variable CMLEADERSTYLE only; the corpus baselines are R2000 for the
+DXF, and the DWG's variable dictionary is the one the file had. The r5 and r6 raw fixtures move for the numbering (two more handles). The legacy-writer
+fingerprints (`growing_extents`, `displacement_tests`) are recaptured: the seed value, and 36 bytes fewer (no `$CMLEADERSTYLE` in the header).
+
+# Golden refresh for the merge of the private-copies fix into the integration branch
+
+The merge joins the cell-style fix (above, from the integration branch) with the private-copies, handle-seed and multileader-style fixes (the two
+sections above, from `arterra/no-private-copies` at 30b9e448). The reference is the golden of 30b9e448 alone. Compared record by record with the handles set
+aside, 71 of 126 outputs are equal, 6 differ in handles only, and the others differ only by the cause of the cell-style section:
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| OBJECTS/TABLESTYLE | the CADCRAFT `CELLSTYLES` xdata of an unedited native style is not written | dxf, dwg | 24 | 1 each (2 in Even-Manuel_de_Nobrega) |
+| TABLES/APPID | `clockwise_arc_edge` keeps no CADCRAFT data at all now, so its `CADCRAFT` application record (and one count of the APPID table) goes | dxf, dwg | 1 | 1 |
+
+The cell-style section says the CADCRAFT application record stays because other CADCRAFT xdata remain. After the private-copies fix that holds only where a
+drawing still has private data; in `clockwise_arc_edge` the cell styles were the last.

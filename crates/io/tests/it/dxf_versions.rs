@@ -78,6 +78,20 @@ fn first_table(d: &Drawing) -> Option<Table> {
     d.model.iter().find_map(|e| if let EntityKind::Table(t) = &e.kind { Some(t.clone()) } else { None })
 }
 
+/// An R2000 DXF with the handle of the current multileader style's XRECORD and the next handle masked: a file before R2007
+/// has that XRECORD with its own handle, a newer file has none, so it gets a new handle when the file is read and saved.
+fn without_the_style_record_handle(dxf: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().collect();
+    let handle = lines.windows(4).find(|w| w[0].trim() == "3" && w[1].trim() == "CADCRAFT_MLEADERSTYLE").map(|w| w[3].trim().to_string());
+    let seed = lines.iter().position(|l| l.trim() == "$HANDSEED").map(|i| i + 2);
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| if Some(i) == seed || Some(l.trim()) == handle.as_deref() { "XR" } else { l.trim_end() })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// ASCII and binary DXF at every version declare it, encode text the version's way and read
 /// back to the same drawing as the R2000 file.
 #[test]
@@ -98,7 +112,7 @@ fn dxf_at_every_version_reads_back_the_same() {
             let back = read(&bytes, "x.dxf").unwrap();
             assert_eq!(first_text(&back).as_deref(), Some(INTL), "{what}");
             assert_eq!(save_version(&back), v, "{what}: the file's version is remembered");
-            assert_eq!(write_dxf(&back), reference, "{what}");
+            assert_eq!(without_the_style_record_handle(&write_dxf(&back)), without_the_style_record_handle(&reference), "{what}");
         }
     }
 }
