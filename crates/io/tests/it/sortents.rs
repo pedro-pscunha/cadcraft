@@ -73,6 +73,7 @@ fn block_dxf_with(entries: &str) -> String {
         "10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n12\n0\n22\n1\n32\n0\n14\n-0.5\n24\n-0.5\n14\n9.5\n24\n-0.5\n14\n9.5\n24\n9.5\n14\n-0.5\n24\n9.5\n",
     ));
     s.push_str("0\nENDBLK\n5\n2C\n330\n2A\n8\n0\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nSECTION\n2\nOBJECTS\n");
+    s.push_str("0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n");
     s.push_str("0\nDICTIONARY\n5\nB1\n330\n2A\n100\nAcDbDictionary\n3\nACAD_SORTENTS\n360\nB0\n");
     s.push_str("0\nSORTENTSTABLE\n5\nB0\n330\nB1\n100\nAcDbSortentsTable\n330\n2A\n");
     s.push_str(entries);
@@ -143,4 +144,33 @@ fn two_unlisted_block_entities_each_sort_by_their_own_handle() {
     let dwg = cadcraft_dwg::dxf_to_dwg(dxf.as_bytes()).unwrap();
     let back = cadcraft_io::read_dxf(&cadcraft_dwg::dwg_to_dxf(&dwg).unwrap()).unwrap();
     assert_eq!(block_kinds(&back), want, "DWG");
+}
+
+/// A save that leaves the draw order as read keeps a table whose entry has sort handle 0 as the file had it: the writer orders a source table the
+/// way the reader does (0 last), so it does not replace it with finite keys, which would let a later entity draw above it.
+#[test]
+fn an_unchanged_save_keeps_a_zero_sort_handle() {
+    // Only the horizontal line (the lowest handle) is listed, with key 0: it draws last, the others by their own handles.
+    let dxf = block_dxf_with("331\n25B\n5\n0\n");
+    let mut d = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
+    // An edit of another entity's properties leaves the draw order as read.
+    let block = std::sync::Arc::make_mut(d.blocks.get_mut("MASKED_B").unwrap());
+    let circle = block.entities.iter().find(|e| matches!(e.kind, cadcraft_doc::EntityKind::Circle(_))).unwrap().handle;
+    block.entities.modify(circle, |e| e.common.layer = "Other".into()).unwrap();
+    let saved = cadcraft_io::write_dxf(&d);
+    let tags = cadcraft_dxf::parse(saved.as_bytes()).unwrap();
+    let tables: Vec<_> = cadcraft_dxf::sections(&tags)
+        .into_iter()
+        .flat_map(|section| cadcraft_dxf::records(&section.tags))
+        .filter(|(kind, _)| kind == "SORTENTSTABLE")
+        .map(|(_, groups)| groups)
+        .collect();
+    assert_eq!(tables.len(), 1, "one table for the block");
+    let table = &tables[0];
+    let pairs: Vec<(String, String)> = table
+        .windows(2)
+        .filter(|w| w[0].code == 331 && w[1].code == 5)
+        .map(|w| (w[0].str().trim().to_string(), w[1].str().trim().to_string()))
+        .collect();
+    assert_eq!(pairs, [("25B".to_string(), "0".to_string())], "the source table, as read");
 }

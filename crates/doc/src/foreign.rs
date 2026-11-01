@@ -210,8 +210,13 @@ impl SortTable {
     pub fn draw_order(entries: &[(Handle, u64)], members: &BTreeSet<Handle>) -> Vec<Handle> {
         let keys: BTreeMap<Handle, u64> = entries.iter().copied().collect();
         let mut order: Vec<Handle> = members.iter().copied().collect();
-        order.sort_by_key(|h| (keys.get(h).copied().unwrap_or(h.0), *h));
+        order.sort_by_key(|h| (Self::draw_key(keys.get(h).copied().unwrap_or(h.0)), *h));
         order
+    }
+
+    /// The order key of a sort handle: by its value, except that 0 draws last (ezdxf `reorder`, which notes AutoCAD defines it).
+    pub fn draw_key(sort: u64) -> (bool, u64) {
+        (sort == 0, sort)
     }
 }
 
