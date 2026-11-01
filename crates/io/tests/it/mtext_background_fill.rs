@@ -1,10 +1,16 @@
 //! The background fill of an MTEXT (groups 90, 63, 421, 45 and 441 of its AcDbMText subclass) and the visual style pointer of a layer
 //! (348) are not modelled and come back as the file had them.
 
-use super::foreign_passthrough::{dxf, saved_twice, section, val};
+use super::foreign_passthrough::{dxf, section, val};
 
+/// An R2018 file: a DXF before R2004 has no background fill (AutoCAD's reader refuses the groups there; `dxf_write`'s release test).
 fn source() -> String {
     let groups: Vec<(i32, &str)> = vec![
+        (0, "SECTION"),
+        (2, "HEADER"),
+        (9, "$ACADVER"),
+        (1, "AC1032"),
+        (0, "ENDSEC"),
         (0, "SECTION"),
         (2, "TABLES"),
         (0, "TABLE"),
@@ -47,7 +53,11 @@ fn source() -> String {
 #[test]
 fn the_background_fill_and_the_layer_pointer_come_back() {
     let d = cadcraft_io::read_dxf(source().as_bytes()).unwrap();
-    for (what, text) in ["DXF", "DWG"].into_iter().zip(saved_twice(&d)) {
+    // Saves in the file's release (`write_dxf` writes R2000, which has no fill); the DWG as the DXF of the drawing read from it.
+    let in_release = |d: &cadcraft_doc::Drawing| String::from_utf8(cadcraft_io::write(d, "x.dxf").unwrap()).unwrap();
+    let dxf = in_release(&d);
+    let dwg = in_release(&cadcraft_io::read(&cadcraft_io::write(&d, "x.dwg").unwrap(), "x.dwg").unwrap());
+    for (what, text) in [("DXF", dxf), ("DWG", dwg)] {
         let (_, mtext) = section(&text, "ENTITIES").into_iter().find(|(k, _)| k == "MTEXT").unwrap();
         // A DWG keeps the fill setting, colour and scale; the ACI colour (63) is only in a DXF.
         for (code, want) in [(90, "3"), (421, "13158600"), (45, "1.1")] {

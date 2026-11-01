@@ -26,6 +26,7 @@ mod header;
 mod layout;
 mod objects;
 mod raw;
+mod release_groups;
 mod sections;
 mod sortents;
 #[cfg(test)]

@@ -518,10 +518,18 @@ fn a_pattern_hatch_keeps_its_held_gradient_in_the_dwg_bridge_only() {
     let hatch = |name: &str, solid: u8| {
         format!(
             "0\nHATCH\n5\n20{solid}\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\n{name}\n70\n{solid}\n71\n0\n91\n1\n92\n7\n72\n0\n73\n1\n93\n4\n10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n97\n0\n75\n0\n76\n1\n{}98\n0\n450\n0\n451\n0\n460\n1.5707963267948966\n461\n0.0\n452\n0\n462\n0.0\n453\n2\n463\n0.0\n63\n5\n421\n255\n463\n1.0\n63\n2\n421\n16776960\n470\nLINEAR\n",
-            if solid == 0 { "52\n0\n41\n1\n77\n0\n78\n1\n53\n45\n43\n0\n44\n0\n45\n-0.0883883476483184\n46\n0.0883883476483184\n79\n0\n" } else { "" }
+            if solid == 0 {
+                "52\n0\n41\n1\n77\n0\n78\n1\n53\n45\n43\n0\n44\n0\n45\n-0.0883883476483184\n46\n0.0883883476483184\n79\n0\n"
+            } else {
+                ""
+            }
         )
     };
-    let text = format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{}{}0\nENDSEC\n0\nEOF\n", hatch("ANSI31", 0), hatch("SOLID", 1));
+    let text = format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{}{}0\nENDSEC\n0\nEOF\n",
+        hatch("ANSI31", 0),
+        hatch("SOLID", 1)
+    );
     let d = crate::read_dxf(text.as_bytes()).unwrap();
     let hatches = |tags: &[Tag]| -> Vec<(i64, Vec<i64>)> {
         cadcraft_dxf::records(tags)
@@ -538,4 +546,40 @@ fn a_pattern_hatch_keeps_its_held_gradient_in_the_dwg_bridge_only() {
     assert_eq!(public, vec![(0, vec![]), (1, gradient.clone())], "public DXF");
     let bridge = hatches(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018).bytes).unwrap());
     assert_eq!(bridge, vec![(0, gradient.clone()), (1, gradient)], "DWG bridge");
+}
+
+/// AutoCAD LT 2025 discards a DXF of an older release that has the groups of a newer one: an MTEXT background fill before R2004
+/// ("Falta código de grupo DXF: 90") and a solid's history subclass (AcDb3dSolid, from R2007; "Fim prematuro do objeto"). The text
+/// frame (bit 0x10 of group 90) exists from R2018. The records read from a DWG carry them all (Eztec Firenze as an R2000 DXF).
+#[test]
+fn an_old_release_dxf_leaves_out_the_mtext_fill_and_solid_groups_it_lacks() {
+    let text = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
+                0\nMTEXT\n5\n30\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n41\n10\n71\n1\n72\n1\n1\nFRAME\n73\n1\n44\n1\n90\n16\n63\n256\n45\n1.5\n441\n0\n\
+                0\nMTEXT\n5\n31\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n41\n10\n71\n1\n72\n1\n1\nFILL\n73\n1\n44\n1\n90\n17\n63\n5\n45\n1.5\n441\n0\n\
+                0\n3DSOLID\n5\n32\n100\nAcDbEntity\n8\n0\n100\nAcDbModelerGeometry\n70\n1\n1\n\n100\nAcDb3dSolid\n350\n0\n\
+                0\nARC_DIMENSION\n5\n33\n100\nAcDbEntity\n8\n0\n100\nAcDbDimension\n280\n0\n2\n*D1\n10\n0\n20\n0\n30\n0\n11\n0\n21\n0\n31\n0\n70\n37\n71\n5\n42\n1\n73\n0\n74\n0\n75\n0\n3\nStandard\n100\nAcDbArcDimension\n13\n0\n23\n0\n33\n0\n14\n1\n24\n0\n34\n0\n15\n0\n25\n1\n35\n0\n70\n0\n40\n0\n41\n0\n71\n0\n0\nENDSEC\n0\nEOF\n";
+    let d = crate::read_dxf(text.as_bytes()).unwrap();
+    let groups = |tags: &[Tag], kind: &str, handle: &str, codes: &[i32]| -> Vec<(i32, String)> {
+        cadcraft_dxf::records(tags)
+            .into_iter()
+            .find(|(k, t)| k == kind && t.iter().any(|t| t.code == 5 && t.str() == handle))
+            .map(|(_, t)| t.iter().take_while(|t| t.code < 1000).filter(|t| codes.contains(&t.code)).map(|t| (t.code, t.str())).collect())
+            .unwrap_or_default()
+    };
+    let fill = [90, 63, 421, 45, 441];
+    let g = |code: i32, value: &str| (code, value.to_string());
+    for (version, frame, own) in [
+        (Version::R2000, vec![], vec![]),
+        (Version::R2010, vec![], vec![g(90, "1"), g(63, "5"), g(45, "1.5"), g(441, "0")]),
+        (Version::R2018, vec![g(90, "16"), g(63, "256"), g(45, "1.5"), g(441, "0")], vec![g(90, "17"), g(63, "5"), g(45, "1.5"), g(441, "0")]),
+    ] {
+        let public = tags(&d, version);
+        assert_eq!(groups(&public, "MTEXT", "30", &fill), frame, "{version:?} frame");
+        assert_eq!(groups(&public, "MTEXT", "31", &fill), own, "{version:?} fill");
+        let history = groups(&public, "3DSOLID", "32", &[100, 350]).iter().any(|(_, v)| v == "AcDb3dSolid");
+        assert_eq!(history, version >= Version::R2007, "{version:?} AcDb3dSolid");
+        let codes: Vec<i32> = groups(&public, "ARC_DIMENSION", "33", &[73, 74, 75, 280]).into_iter().map(|(c, _)| c).collect();
+        let expected: Vec<i32> = if version == Version::R2000 { vec![] } else { vec![280, 73, 74, 75] };
+        assert_eq!(codes, expected, "{version:?} ARC_DIMENSION");
+    }
 }

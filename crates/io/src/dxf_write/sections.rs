@@ -1410,6 +1410,7 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     if !dwg_bridge {
         super::block_names::anonymize_refused(&mut w.t);
+        super::release_groups::strip(&mut w.t, target);
     }
     // The next handle is above every handle written and the drawing's own next handle (the file's `$HANDSEED`: the handles between
     // the highest in use and the seed are an erased object's, and are never given again, in a DWG too): a record that kept its
