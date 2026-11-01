@@ -6,9 +6,27 @@ use cadcraft_doc::{
 };
 use cadcraft_geom::Mat4;
 
+/// Which block children and attributes a traversal takes: the ones the drawing displays (a layer that is off or frozen hides
+/// them), or the ones its extents count (AutoCAD 2024's ZOOM Extents and EXTMIN/EXTMAX count a layer that is off, not a frozen one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Layers {
+    Display,
+    Extents,
+}
+
+impl Layers {
+    fn hides(self, drawing: &Drawing, layer: &str) -> bool {
+        layer != "0"
+            && drawing.layer(layer).is_some_and(|layer| match self {
+                Layers::Display => !layer.visible(),
+                Layers::Extents => layer.frozen,
+            })
+    }
+}
+
 /// Canonical WCS geometry with the same local layouts that the drawing displays.
 pub fn entity_world_geometry(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<WorldGeometry> {
-    entity_world_geometry_visiting(drawing, entity, parent, &mut |_, _| Ok(()))
+    entity_world_geometry_visiting(drawing, entity, parent, Layers::Display, &mut |_, _| Ok(()))
 }
 
 /// Visit source entities with their complete parents during the same bounded geometry expansion.
@@ -16,10 +34,11 @@ pub(crate) fn entity_world_geometry_visiting(
     drawing: &Drawing,
     entity: &Entity,
     parent: &Mat4,
+    layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     let mut remaining = crate::MAX_BLOCK_EXPANSION;
-    geometry_in(drawing, entity, parent, 0, &mut remaining, visitor)
+    geometry_in(drawing, entity, parent, 0, &mut remaining, layers, visitor)
 }
 
 pub(crate) fn dimension_picture_transform(entity: &Entity, dimension: &cadcraft_doc::Dimension, parent: &Mat4) -> cadcraft_doc::Result<Mat4> {
@@ -45,6 +64,7 @@ fn geometry_in(
     parent: &Mat4,
     depth: usize,
     remaining: &mut usize,
+    layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     if entity.geometry_revision == GeometryRevision::LegacyProjectedV1 {
@@ -62,7 +82,7 @@ fn geometry_in(
     spend(remaining, 1, entity.handle)?;
     visitor(entity, parent)?;
     match &entity.kind {
-        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining, visitor),
+        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining, layers, visitor),
         EntityKind::MLeader(leader) => {
             let block = leader.block.as_ref().and_then(|insert| drawing.block(&insert.block));
             let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
@@ -79,7 +99,7 @@ fn geometry_in(
             let mut primitives = world.primitives;
             if let (Some(block), Some(matrix)) = (block, world.block) {
                 spend(remaining, 1, entity.handle)?;
-                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives, visitor)?;
+                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives, layers, visitor)?;
             }
             WorldGeometry::from_primitives(entity.handle, primitives)
         }
@@ -87,7 +107,7 @@ fn geometry_in(
             if let Some(block) = dimension.block.as_ref().and_then(|name| drawing.block(name)) {
                 let picture = dimension_picture_transform(entity, dimension, parent)?;
                 let mut primitives = Vec::new();
-                append_block_geometry(drawing, block, &picture, depth, remaining, &mut primitives, visitor)?;
+                append_block_geometry(drawing, block, &picture, depth, remaining, &mut primitives, layers, visitor)?;
                 WorldGeometry::from_primitives(entity.handle, primitives)
             } else {
                 let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
@@ -118,17 +138,18 @@ fn append_block_geometry(
     depth: usize,
     remaining: &mut usize,
     primitives: &mut Vec<WorldPrimitive>,
+    layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<()> {
     for child in block.entities.iter() {
         // Definitions are replaced by instances; unknown records have no modeled display geometry.
         if (matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || child.unresolved_display().is_some())
             || !child.common.visible
-            || (child.common.layer != "0" && drawing.layer(&child.common.layer).is_some_and(|layer| !layer.visible()))
+            || layers.hides(drawing, &child.common.layer)
         {
             continue;
         }
-        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining, visitor)?;
+        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining, layers, visitor)?;
         primitives.extend_from_slice(geometry.primitives());
     }
     Ok(())
@@ -148,6 +169,7 @@ fn insert_geometry(
     parent: &Mat4,
     depth: usize,
     remaining: &mut usize,
+    layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     let mut primitives: Vec<WorldPrimitive> = Vec::new();
@@ -166,7 +188,7 @@ fn insert_geometry(
                     .world_transform(entity.common.extrusion, block.base, column, row)
                     .map_err(|error| if matches!(error, DocError::NonFinite(_)) { DocError::NonFinite(entity.handle) } else { error })?;
                 let complete = parent.mul(&local);
-                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives, visitor)?;
+                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives, layers, visitor)?;
             }
         }
     }
@@ -182,7 +204,7 @@ fn insert_geometry(
                 .find(|entity| matches!(&entity.kind, EntityKind::AttDef(definition) if definition.tag.eq_ignore_ascii_case(&attribute.tag)))
         });
         let layer = attribute.props.layer.as_deref().or_else(|| definition.map(|entity| entity.common.layer.as_str())).unwrap_or("0");
-        if definition.is_some_and(|entity| !entity.common.visible) || (layer != "0" && drawing.layer(layer).is_some_and(|layer| !layer.visible())) {
+        if definition.is_some_and(|entity| !entity.common.visible) || layers.hides(drawing, layer) {
             continue;
         }
         if attribute.geometry_revision != GeometryRevision::CanonicalV2

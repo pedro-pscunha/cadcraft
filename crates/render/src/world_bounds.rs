@@ -5,15 +5,25 @@ use cadcraft_doc::{
 };
 use cadcraft_geom::{Bounds2, Mat4, bulge_to_arc};
 
+use crate::world_geometry::Layers;
 use crate::{WorldShaped, WorldTextLayout, layout_world_text};
 
 /// Bounds in the XY view after the complete spatial parent, or an explicit geometry refusal.
 pub fn entity_world_bounds(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<Bounds2> {
+    bounds_with(drawing, entity, parent, Layers::Display)
+}
+
+/// [`entity_world_bounds`] with the block children and attributes the drawing's extents count (a layer that is off counts).
+pub(crate) fn entity_extent_bounds(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<Bounds2> {
+    bounds_with(drawing, entity, parent, Layers::Extents)
+}
+
+fn bounds_with(drawing: &Drawing, entity: &Entity, parent: &Mat4, layers: Layers) -> cadcraft_doc::Result<Bounds2> {
     if entity.unresolved_display().is_some() {
         return Ok(Bounds2::EMPTY);
     }
     let mut envelopes = Bounds2::EMPTY;
-    let geometry = crate::world_geometry::entity_world_geometry_visiting(drawing, entity, parent, &mut |source, complete_parent| {
+    let geometry = crate::world_geometry::entity_world_geometry_visiting(drawing, entity, parent, layers, &mut |source, complete_parent| {
         if source.geometry_revision == GeometryRevision::CanonicalV2
             && let EntityKind::LwPolyline(polyline) = &source.kind
         {

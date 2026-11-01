@@ -79,7 +79,7 @@ pub fn space_extents(drawing: &Drawing, space: &Space) -> Result<Bounds2, Extent
             if matches!(entity.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
                 Ok(Bounds2::EMPTY)
             } else {
-                entity_world_bounds(drawing, entity, &Mat4::IDENTITY)
+                crate::world_bounds::entity_extent_bounds(drawing, entity, &Mat4::IDENTITY)
             }
         } else {
             cadcraft_doc::legacy_extent_bounds(drawing, entity)

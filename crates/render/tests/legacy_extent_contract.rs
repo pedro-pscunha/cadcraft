@@ -325,6 +325,42 @@ fn wide_arc_segment_extents_reach_the_outer_edge() {
     }
 }
 
+/// A canonical insert counts the same block children and attributes as a legacy one: on a layer turned off they count, on a
+/// frozen one they do not (the canonical traversal had kept the display rule, which hides both).
+#[test]
+fn canonical_inserts_count_children_and_attributes_on_layers_turned_off() {
+    let canonical = |mut e: Entity| {
+        e.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+        e
+    };
+    let mut d = Drawing::new_imperial();
+    for (name, on, frozen) in [("BOFF", false, false), ("BFRZ", true, true), ("AOFF", false, false)] {
+        let mut l = Layer::new(name);
+        (l.on, l.frozen) = (on, frozen);
+        d.layers.push(l);
+    }
+    let mut blk = Block::new("BX");
+    blk.entities.push(canonical(on_layer("0", line((0.0, 0.0), (1.0, 1.0)), 1)));
+    blk.entities.push(canonical(on_layer("BOFF", line((0.0, 0.0), (50.0, 0.0)), 2)));
+    blk.entities.push(canonical(on_layer("BFRZ", line((0.0, 0.0), (0.0, 70.0)), 3)));
+    d.blocks.insert("BX".into(), std::sync::Arc::new(blk));
+    let ins = match plain_insert("BX") {
+        EntityKind::Insert(i) => {
+            let mut a = plain_attrib("OFF");
+            a.text.insert = Vec3::new(0.0, -40.0, 0.0);
+            a.props.layer = Some("AOFF".into());
+            a.geometry_revision = cadcraft_doc::GeometryRevision::CanonicalV2;
+            EntityKind::Insert(Insert { insert: Vec3::new(1000.0, 1000.0, 0.0), attribs: vec![a], ..i })
+        }
+        k => k,
+    };
+    d.model.push(canonical(Entity::new(Handle(0x300), ins)));
+    let (min, max) = extents_pair(&d);
+    assert_eq!(max.x, 1050.0, "the child on a layer turned off counts: {min:?} {max:?}");
+    assert!(min.y < 965.0, "the attribute on a layer turned off counts: {min:?} {max:?}");
+    assert!(max.y < 1050.0, "the child on a frozen layer does not: {min:?} {max:?}");
+}
+
 fn plain_insert(block: &str) -> EntityKind {
     EntityKind::Insert(Insert {
         block: block.into(),
