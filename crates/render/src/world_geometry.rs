@@ -24,6 +24,12 @@ impl Layers {
     }
 }
 
+/// The state of one bounded expansion: the block entities it may still visit, and the layer rule it applies.
+pub(crate) struct Walk {
+    remaining: usize,
+    layers: Layers,
+}
+
 /// Canonical WCS geometry with the same local layouts that the drawing displays.
 pub fn entity_world_geometry(drawing: &Drawing, entity: &Entity, parent: &Mat4) -> cadcraft_doc::Result<WorldGeometry> {
     entity_world_geometry_visiting(drawing, entity, parent, Layers::Display, &mut |_, _| Ok(()))
@@ -37,8 +43,8 @@ pub(crate) fn entity_world_geometry_visiting(
     layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
-    let mut remaining = crate::MAX_BLOCK_EXPANSION;
-    geometry_in(drawing, entity, parent, 0, &mut remaining, layers, visitor)
+    let mut walk = Walk { remaining: crate::MAX_BLOCK_EXPANSION, layers };
+    geometry_in(drawing, entity, parent, 0, &mut walk, visitor)
 }
 
 pub(crate) fn dimension_picture_transform(entity: &Entity, dimension: &cadcraft_doc::Dimension, parent: &Mat4) -> cadcraft_doc::Result<Mat4> {
@@ -63,8 +69,7 @@ fn geometry_in(
     entity: &Entity,
     parent: &Mat4,
     depth: usize,
-    remaining: &mut usize,
-    layers: Layers,
+    walk: &mut Walk,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     if entity.geometry_revision == GeometryRevision::LegacyProjectedV1 {
@@ -79,10 +84,10 @@ fn geometry_in(
     if depth > cadcraft_doc::MAX_BLOCK_DEPTH {
         return Err(DocError::Invalid("The canonical block references nest too deeply.".into()));
     }
-    spend(remaining, 1, entity.handle)?;
+    spend(&mut walk.remaining, 1, entity.handle)?;
     visitor(entity, parent)?;
     match &entity.kind {
-        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, remaining, layers, visitor),
+        EntityKind::Insert(insert) => insert_geometry(drawing, entity, insert, parent, depth, walk, visitor),
         EntityKind::MLeader(leader) => {
             let block = leader.block.as_ref().and_then(|insert| drawing.block(&insert.block));
             let base = block.map_or(cadcraft_geom::Vec3::ZERO, |block| block.base);
@@ -98,8 +103,8 @@ fn geometry_in(
             let world = cadcraft_doc::mleader_primitives(&visible, base, &arrow, parent)?;
             let mut primitives = world.primitives;
             if let (Some(block), Some(matrix)) = (block, world.block) {
-                spend(remaining, 1, entity.handle)?;
-                append_block_geometry(drawing, block, &matrix, depth, remaining, &mut primitives, layers, visitor)?;
+                spend(&mut walk.remaining, 1, entity.handle)?;
+                append_block_geometry(drawing, block, &matrix, depth, walk, &mut primitives, visitor)?;
             }
             WorldGeometry::from_primitives(entity.handle, primitives)
         }
@@ -107,7 +112,7 @@ fn geometry_in(
             if let Some(block) = dimension.block.as_ref().and_then(|name| drawing.block(name)) {
                 let picture = dimension_picture_transform(entity, dimension, parent)?;
                 let mut primitives = Vec::new();
-                append_block_geometry(drawing, block, &picture, depth, remaining, &mut primitives, layers, visitor)?;
+                append_block_geometry(drawing, block, &picture, depth, walk, &mut primitives, visitor)?;
                 WorldGeometry::from_primitives(entity.handle, primitives)
             } else {
                 let layout = crate::dimension_layout(drawing, dimension, entity.common.extrusion)?;
@@ -136,20 +141,19 @@ fn append_block_geometry(
     block: &cadcraft_doc::Block,
     parent: &Mat4,
     depth: usize,
-    remaining: &mut usize,
+    walk: &mut Walk,
     primitives: &mut Vec<WorldPrimitive>,
-    layers: Layers,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<()> {
     for child in block.entities.iter() {
         // Definitions are replaced by instances; unknown records have no modeled display geometry.
         if (matches!(child.kind, EntityKind::AttDef(_) | EntityKind::Unknown(_)) || child.unresolved_display().is_some())
             || !child.common.visible
-            || layers.hides(drawing, &child.common.layer)
+            || walk.layers.hides(drawing, &child.common.layer)
         {
             continue;
         }
-        let geometry = geometry_in(drawing, child, parent, depth + 1, remaining, layers, visitor)?;
+        let geometry = geometry_in(drawing, child, parent, depth + 1, walk, visitor)?;
         primitives.extend_from_slice(geometry.primitives());
     }
     Ok(())
@@ -168,8 +172,7 @@ fn insert_geometry(
     insert: &Insert,
     parent: &Mat4,
     depth: usize,
-    remaining: &mut usize,
-    layers: Layers,
+    walk: &mut Walk,
     visitor: &mut impl FnMut(&Entity, &Mat4) -> cadcraft_doc::Result<()>,
 ) -> cadcraft_doc::Result<WorldGeometry> {
     let mut primitives: Vec<WorldPrimitive> = Vec::new();
@@ -178,17 +181,17 @@ fn insert_geometry(
             return Err(DocError::Invalid(format!("Entity {} needs positive INSERT row and column counts.", entity.handle.hex())));
         }
         let copies = u64::from(insert.cols) * u64::from(insert.rows);
-        if copies > *remaining as u64 {
+        if copies > walk.remaining as u64 {
             return Err(DocError::Invalid(format!("Entity {} exceeds the canonical block expansion limit.", entity.handle.hex())));
         }
-        spend(remaining, copies as usize, entity.handle)?;
+        spend(&mut walk.remaining, copies as usize, entity.handle)?;
         for row in 0..insert.rows {
             for column in 0..insert.cols {
                 let local = insert
                     .world_transform(entity.common.extrusion, block.base, column, row)
                     .map_err(|error| if matches!(error, DocError::NonFinite(_)) { DocError::NonFinite(entity.handle) } else { error })?;
                 let complete = parent.mul(&local);
-                append_block_geometry(drawing, block, &complete, depth, remaining, &mut primitives, layers, visitor)?;
+                append_block_geometry(drawing, block, &complete, depth, walk, &mut primitives, visitor)?;
             }
         }
     }
@@ -204,7 +207,7 @@ fn insert_geometry(
                 .find(|entity| matches!(&entity.kind, EntityKind::AttDef(definition) if definition.tag.eq_ignore_ascii_case(&attribute.tag)))
         });
         let layer = attribute.props.layer.as_deref().or_else(|| definition.map(|entity| entity.common.layer.as_str())).unwrap_or("0");
-        if definition.is_some_and(|entity| !entity.common.visible) || layers.hides(drawing, layer) {
+        if definition.is_some_and(|entity| !entity.common.visible) || walk.layers.hides(drawing, layer) {
             continue;
         }
         if attribute.geometry_revision != GeometryRevision::CanonicalV2
@@ -212,7 +215,7 @@ fn insert_geometry(
         {
             return Err(DocError::Invalid(format!("Entity {} has a legacy attribute payload that needs recovery.", entity.handle.hex())));
         }
-        spend(remaining, 1, attribute.handle.unwrap_or(entity.handle))?;
+        spend(&mut walk.remaining, 1, attribute.handle.unwrap_or(entity.handle))?;
         // Instance text owns its plane and is already placed in its containing space, outside the INSERT matrix.
         primitives.extend(attrib_primitives(attribute, parent)?);
     }
