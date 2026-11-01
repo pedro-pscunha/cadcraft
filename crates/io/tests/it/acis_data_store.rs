@@ -122,3 +122,53 @@ fn a_record_bound_to_a_layout_is_kept() {
     let bound: Vec<String> = tags.iter().skip_while(|t| !(t.code == 2 && t.str() == "ACDSDATA")).filter(|t| t.code == 320).map(|t| t.str()).collect();
     assert_eq!(bound, ["31"], "{out}");
 }
+
+/// A real body (a unit cube) as SAB, in hex: what a file of R2013 or later keeps in its data store.
+fn cube_sab_hex() -> String {
+    let vertices =
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]];
+    let faces = vec![vec![0, 3, 2, 1], vec![4, 5, 6, 7], vec![0, 1, 5, 4], vec![1, 2, 6, 5], vec![2, 3, 7, 6], vec![3, 0, 4, 7]];
+    let doc = acadrust::entities::acis::primitives::build_planar_body(&vertices, &faces).expect("cube builds");
+    acadrust::entities::acis::SabWriter::write(&doc).iter().map(|b| format!("{b:02X}")).collect()
+}
+
+/// Before R2013 a solid holds its ACIS data itself, as SAT text (group 70 = 1, then groups 1 and 3); AutoCAD LT 2025 discards a
+/// DXF of those releases whose solid has the newer groups 290 and 2 and no data (Eztec Firenze as an R2000 DXF). The data store's
+/// data is written into the solid for a DXF and for a DWG of those releases.
+#[test]
+fn a_file_before_2013_holds_the_data_store_data_in_the_solid() {
+    let sab = cube_sab_hex();
+    let source = dxf().replace(SAB_HEX, &sab).replace(&format!("94\n{}\n", SAB_HEX.len() / 2), &format!("94\n{}\n", sab.len() / 2));
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    for version in [cadcraft_io::Version::R2000, cadcraft_io::Version::R2010] {
+        let options = cadcraft_io::SaveOptions { version: Some(version), binary: false };
+        let (bytes, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &options).unwrap();
+        assert!(notes.iter().all(|n| !n.contains("ACIS")), "{version:?}: {notes:?}");
+        let tags = cadcraft_dxf::parse(&bytes).unwrap();
+        let solids: Vec<Vec<cadcraft_dxf::Tag>> = cadcraft_dxf::records(&tags).into_iter().filter(|(k, _)| k == "3DSOLID").map(|(_, t)| t).collect();
+        assert_eq!(solids.len(), 2, "{version:?}");
+        for solid in &solids {
+            assert!(solid.iter().any(|t| t.code == 70 && t.i64() == 1), "{version:?}: {solid:?}");
+            assert!(!solid.iter().any(|t| matches!(t.code, 290 | 2)), "{version:?}: the R2013 groups stay out");
+            let text: Vec<String> = solid.iter().filter(|t| t.code == 1).map(|t| acadrust::entities::AcisData::decode_sat(&t.str())).collect();
+            assert!(text.iter().any(|line| line.contains("body ")), "{version:?}: {text:?}");
+            assert_eq!(text.last().map(String::as_str), Some("End-of-ACIS-data"), "{version:?}");
+        }
+        assert!(!String::from_utf8_lossy(&bytes).contains("ACDSDATA"), "{version:?}");
+    }
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false };
+    let dwg = cadcraft_io::write_with(&d, "x.dwg", &options).unwrap();
+    let stored = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+    let solids: Vec<_> = stored.entities().filter_map(|e| if let acadrust::EntityType::Solid3D(s) = e { Some(s) } else { None }).collect();
+    assert_eq!(solids.len(), 2);
+    assert!(solids.iter().all(|s| s.acis_data.has_data()), "an R2010 DWG keeps the solids' geometry");
+}
+
+/// Data that does not read as ACIS cannot become SAT text: the solid is written without it, and the save says so.
+#[test]
+fn data_that_does_not_convert_is_named_in_a_save_note() {
+    let d = cadcraft_io::read_dxf(dxf().as_bytes()).unwrap();
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2000), binary: false };
+    let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &options).unwrap();
+    assert_eq!(notes.iter().filter(|n| n.contains("ACIS data could not be converted")).count(), 2, "{notes:?}");
+}

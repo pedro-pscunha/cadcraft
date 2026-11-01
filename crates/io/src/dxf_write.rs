@@ -291,7 +291,8 @@ fn save_extents(d: &Drawing) -> SaveExtents {
     result
 }
 
-/// Save notes for repaired handles, refused extents, and pre-R2007 multileaders without a valid source graphics cache.
+/// Save notes for repaired handles, refused extents, pre-R2007 multileaders without a valid source graphics cache, and pre-R2013
+/// modeler entities whose ACIS data does not convert.
 pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
     let mut notes: Vec<String> = d
         .committed()
@@ -325,6 +326,9 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
         if (target < Version::R2007 || source_cache) && crate::dxf_mleader_proxy::eligible(d, entity).is_none() {
             notes.push(format!("MULTILEADER {}: no proxy graphics cache was written. The native MULTILEADER is preserved. An application that needs proxy graphics requires a regenerated cache to display it.", entity.handle.hex()));
         }
+    }
+    if target < Version::R2013 {
+        notes.extend(crate::dxf_raw::sat_notes(d));
     }
     notes
 }

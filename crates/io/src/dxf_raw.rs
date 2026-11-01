@@ -1515,7 +1515,11 @@ const MAX_DATA_STORE_GROUPS: usize = 1 << 26;
 /// too. Nothing is written when no record's entity remains.
 pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
     let ds = &d.foreign.data_store;
-    if !modern || ds.is_empty() {
+    if !modern {
+        inline_sat(tags, d);
+        return;
+    }
+    if ds.is_empty() {
         return;
     }
     let written: HashSet<String> = tags.iter().filter(|t| t.code == 5).map(|t| norm(&t.str())).collect();
@@ -1542,6 +1546,73 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
     out.push(Tag::s(0, "ENDSEC"));
     let at = tags.iter().rposition(|t| t.code == 0 && t.str() == "EOF").unwrap_or(tags.len());
     tags.splice(at..at, out);
+}
+
+/// The ACIS binary data of each ASM_Data record of the kept data store, by the handle of the entity it belongs to.
+pub(crate) fn data_store_sab(d: &Drawing) -> HashMap<String, Vec<u8>> {
+    let ds = &d.foreign.data_store;
+    let mut out = HashMap::new();
+    let mut i = 0;
+    while i < ds.len() {
+        let end = ds.iter().skip(i + 1).position(|t| t.code == 0).map_or(ds.len(), |k| i + 1 + k);
+        let rec = ds.get(i..end).unwrap_or(&[]);
+        let is_record = rec.first().is_some_and(|t| t.value.trim().eq_ignore_ascii_case("ACDSRECORD"));
+        let owner = rec.iter().find(|t| t.code == 320).map(|t| norm(&t.value));
+        if let (true, Some(owner), Some(at)) = (is_record, owner, rec.iter().position(|t| t.code == 2 && t.value.trim() == "ASM_Data")) {
+            let data = rec.get(at + 1..).unwrap_or(&[]).iter().take_while(|t| t.code != 2);
+            let size = data.clone().find(|t| t.code == 94).and_then(|t| t.value.trim().parse::<usize>().ok());
+            let mut bytes = cadcraft_dxf::hex_bytes(&data.filter(|t| t.code == 310).map(|t| t.value.trim()).collect::<String>());
+            if let Some(size) = size {
+                bytes.truncate(size);
+            }
+            out.insert(owner, bytes);
+        }
+        i = end;
+    }
+    out
+}
+
+/// Before R2013 a solid, region or body holds its ACIS data itself, as SAT text after group 70 = 1 (DXF Reference,
+/// AcDbModelerGeometry); a file of R2013 or later keeps it in the data store, and its records carry the newer groups 290 and 2
+/// instead. Write the data store's data into each such record that is written, for a DXF and for the DWG bridge of an older
+/// release (AutoCAD LT 2025 discards a pre-2013 DXF whose modeler entity has no data: "Os dados estendidos não foram lidos").
+/// A record whose data does not convert keeps no data; [`sat_notes`] names it.
+fn inline_sat(tags: &mut Vec<Tag>, d: &Drawing) {
+    let sab = data_store_sab(d);
+    if sab.is_empty() {
+        return;
+    }
+    let starts: Vec<usize> = tags.iter().enumerate().filter(|(_, t)| t.code == 0).map(|(i, _)| i).collect();
+    // From the last record back, so the indices of the ones before stay right.
+    for (n, &start) in starts.iter().enumerate().rev() {
+        let end = starts.get(n + 1).copied().unwrap_or(tags.len());
+        let Some(bytes) = tags.get(start + 1..end).and_then(|r| r.iter().find(|t| t.code == 5)).and_then(|t| sab.get(&norm(&t.str()))) else {
+            continue;
+        };
+        let Some(marker) = (start + 1..end).find(|&i| tags[i].code == 100 && tags[i].str().trim() == "AcDbModelerGeometry") else { continue };
+        let subclass_end = (marker + 1..end).find(|&i| tags[i].code == 100 || tags[i].code >= 1000).unwrap_or(end);
+        if (marker + 1..subclass_end).any(|i| tags[i].code == 70) {
+            continue;
+        }
+        let mut groups = vec![Tag::i(70, 1)];
+        groups
+            .extend(cadcraft_dwg::sat_groups(bytes).unwrap_or_else(|| vec![(1, String::new())]).into_iter().map(|(code, value)| Tag::s(code, value)));
+        let kept: Vec<Tag> = tags[marker + 1..subclass_end].iter().filter(|t| !matches!(t.code, 290 | 2)).cloned().collect();
+        groups.extend(kept);
+        tags.splice(marker + 1..subclass_end, groups);
+    }
+}
+
+/// Save notes for the modeler entities whose ACIS data a file before R2013 cannot hold (the data store's data does not convert to
+/// SAT text): they are written without their geometry.
+pub(crate) fn sat_notes(d: &Drawing) -> Vec<String> {
+    let mut notes: Vec<String> = data_store_sab(d)
+        .into_iter()
+        .filter(|(_, bytes)| cadcraft_dwg::sat_groups(bytes).is_none())
+        .map(|(handle, _)| format!("Entity {handle}: its ACIS data could not be converted to the SAT text of a file before AutoCAD 2013, so it is saved without its solid geometry. Save as AutoCAD 2013 or later to keep it."))
+        .collect();
+    notes.sort();
+    notes
 }
 
 /// An entity of a type CADCraft doesn't model, as read, with its handle, owner, space and layer

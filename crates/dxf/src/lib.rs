@@ -590,7 +590,7 @@ fn binary(tags: &[Tag], strings: Strings) -> Vec<u8> {
 }
 
 /// The bytes of hex text, two digits each; anything that isn't a pair of hex digits is skipped.
-fn hex_bytes(s: &str) -> Vec<u8> {
+pub fn hex_bytes(s: &str) -> Vec<u8> {
     let digits: Vec<u8> = s.bytes().filter_map(|b| char::from(b).to_digit(16).and_then(|d| u8::try_from(d).ok())).collect();
     digits.as_chunks::<2>().0.iter().map(|[hi, lo]| (hi << 4) | lo).collect()
 }
