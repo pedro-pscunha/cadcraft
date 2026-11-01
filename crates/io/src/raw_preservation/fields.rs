@@ -310,6 +310,17 @@ pub(crate) fn for_dxf_release(fields: Fields, kind: &str, release: Version, bloc
             if field.application.is_none() && !holds(kind, &field.class, field.code, release) {
                 return None;
             }
+            // A subclass marker is a header field (no class): it goes with the subclass it opens. It is the record's last, so the
+            // markers before it keep their places.
+            if let Value::Text(marker) = &value
+                && field.code == 100
+                && field.class.is_empty()
+                && field.groups.is_empty()
+                && field.application.is_none()
+                && !holds(kind, marker.trim(), 100, release)
+            {
+                return None;
+            }
             let value = match &value {
                 Value::Text(name) if names_block(&field) => {
                     block_names.get(&name.to_ascii_uppercase()).map_or(value.clone(), |new| Value::Text(new.clone()))

@@ -641,3 +641,38 @@ fn raw_records_take_the_release_rules_and_block_renames_through_the_save_check()
         assert!(insert.starts_with("*U"), "{version:?}: the INSERT names the renamed block, not {insert}");
     }
 }
+
+/// A Raw solid's history subclass (AcDb3dSolid, from R2007) is left out of an older DXF, its marker too, and the Raw save check
+/// compares the solid through the same rule.
+#[test]
+fn a_raw_solid_loses_its_history_subclass_before_2007_through_the_save_check() {
+    use cadcraft_doc::{RawCompound, RawRecord, RawTag};
+    let tag = |code: i32, value: &str| RawTag { code, value: value.into() };
+    let record = RawRecord::new(
+        "3DSOLID".into(),
+        vec![
+            tag(5, "2C0"),
+            tag(330, "1F"),
+            tag(100, "AcDbEntity"),
+            tag(8, "0"),
+            tag(100, "AcDbModelerGeometry"),
+            tag(70, "1"),
+            tag(1, "kkk n m o"),
+            tag(100, "AcDb3dSolid"),
+            tag(350, "0"),
+        ],
+    )
+    .unwrap();
+    let unit = RawCompound::new(record, Vec::new(), Common::default(), "a solid kept as read".into()).unwrap();
+    let mut d = Drawing::new_metric();
+    d.model.push(Entity::from_raw(unit));
+    for (version, history) in [(Version::R2000, false), (Version::R2010, true)] {
+        let options = crate::SaveOptions { version: Some(version), binary: false };
+        let bytes = crate::write_with(&d, "x.dxf", &options).unwrap_or_else(|e| panic!("{version:?}: {e}"));
+        let tags = cadcraft_dxf::parse(&bytes).unwrap();
+        let solid = cadcraft_dxf::records(&tags).into_iter().find(|(k, _)| k == "3DSOLID").map(|(_, t)| t).unwrap();
+        assert_eq!(solid.iter().any(|t| t.code == 100 && t.str() == "AcDb3dSolid"), history, "{version:?}");
+        assert_eq!(solid.iter().any(|t| t.code == 350), history, "{version:?}");
+        assert!(solid.iter().any(|t| t.code == 1 && t.str() == "kkk n m o"), "{version:?}: the SAT text stays");
+    }
+}
