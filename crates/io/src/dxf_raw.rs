@@ -285,6 +285,12 @@ struct Head {
     has_reactors: bool,
 }
 
+/// The named object dictionary: the first object of the section (DXF Reference), a dictionary that no object owns. In a file without
+/// one the first object can be an extension dictionary, whose entries are not named objects.
+pub(crate) fn is_root_dictionary(kind: &str, tags: &[Tag]) -> bool {
+    is_dictionary(kind) && head(tags).owner.is_none_or(|owner| owner == "0")
+}
+
 fn head(tags: &[Tag]) -> Head {
     let mut h = Head { owner: cadcraft_doc::foreign::object_owner(tags.iter().map(|t| (t.code, t.str()))).map(Handle::hex), ..Head::default() };
     let mut group: Option<String> = None;
@@ -377,7 +383,7 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             _ => {}
         }
     }
-    let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) else { return out };
+    let Some((_, _, root)) = objects.first().filter(|(k, _, t)| is_root_dictionary(k, t)) else { return out };
     put(head(root).handle, ("NOD".into(), String::new()));
     let by_handle: HashMap<String, (&str, &[Tag])> = objects.iter().filter_map(|(k, _, t)| Some((head(t).handle?, (k.as_str(), *t)))).rev().collect();
     for (key, h) in entries(root) {
@@ -1051,8 +1057,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             by_handle.entry(h).or_insert(i);
         }
     }
-    let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
-    let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
+    let root = objects.first().filter(|(k, _, t)| is_root_dictionary(k, t)).and_then(|(_, _, t)| head(t).handle);
+    let root_entries = objects.first().filter(|(k, _, t)| is_root_dictionary(k, t)).map(|(_, _, t)| entries(t)).unwrap_or_default();
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
     let viewports: HashSet<String> =
         blocks.iter().chain(&entities).filter(|(k, _, _)| k == "VIEWPORT").filter_map(|(_, _, t)| head(t).handle).collect();
@@ -1405,7 +1411,7 @@ impl Scan<'_> {
 /// Determine which objects belong to unmodelled dictionary entries or owners.
 fn retained_objects(scan: &Scan) -> HashMap<usize, bool> {
     let Scan { objects, entities, root_entries, by_handle, modelled_assoc, .. } = *scan;
-    let root = objects.first().filter(|(kind, _, _)| is_dictionary(kind)).and_then(|(_, _, tags)| head(tags).handle);
+    let root = objects.first().filter(|(kind, _, tags)| is_root_dictionary(kind, tags)).and_then(|(_, _, tags)| head(tags).handle);
     let root_key = |handle: &str| root_entries.iter().find(|(_, entry_handle)| entry_handle == handle).map(|(key, _)| key);
     let is_xdict = |index: usize| scan.is_xdict(index);
     let modelled_entry = |tags: &[Tag], handle: &str| {
@@ -2225,7 +2231,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
             written.extend(head(t.get(1..).unwrap_or(&[])).handle);
         }
     }
-    let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, s, _)| *s);
+    let root = objects.first().filter(|(k, _, t)| is_root_dictionary(k, t)).map(|(_, s, _)| *s);
     let root_keys: HashSet<String> =
         objects.iter().find(|(_, s, _)| Some(*s) == root).map(|(_, _, t)| entries(t).into_iter().map(|(k, _)| up(&k)).collect()).unwrap_or_default();
     let objs: HashMap<String, &ForeignObject> = f.objects.iter().chain(&f.table_records).map(|o| (o.handle.hex(), o)).collect();

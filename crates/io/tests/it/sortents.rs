@@ -174,3 +174,16 @@ fn an_unchanged_save_keeps_a_zero_sort_handle() {
         .collect();
     assert_eq!(pairs, [("25B".to_string(), "0".to_string())], "the source table, as read");
 }
+
+/// A file without a named object dictionary (the root `C` that every AutoCAD file has) still gets one table per block: the
+/// save writes the source table once, under the block's extension dictionary, and adds no second one.
+#[test]
+fn a_file_without_a_root_dictionary_keeps_one_table_per_block() {
+    let dxf = block_dxf_with("331\n25B\n5\n0\n").replace("0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n", "");
+    let d = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
+    for saved in [cadcraft_io::write_dxf(&d), cadcraft_io::write_dxf(&cadcraft_io::read_dxf(cadcraft_io::write_dxf(&d).as_bytes()).unwrap())] {
+        let tags = cadcraft_dxf::parse(saved.as_bytes()).unwrap();
+        let tables: Vec<_> = cadcraft_dxf::records(&tags).into_iter().filter(|(kind, _)| kind == "SORTENTSTABLE").collect();
+        assert_eq!(tables.len(), 1, "one table for the block: {tables:?}");
+    }
+}

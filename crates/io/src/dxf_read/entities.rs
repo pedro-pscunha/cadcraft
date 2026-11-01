@@ -543,7 +543,7 @@ pub(super) fn plot_style_names(secs: &[cadcraft_dxf::Section]) -> HashMap<String
         }
         v
     };
-    let Some((_, root)) = recs.iter().find(|(k, _)| k == "DICTIONARY") else { return out };
+    let Some((_, root)) = recs.iter().find(|(k, t)| crate::dxf_raw::is_root_dictionary(k, t)) else { return out };
     let Some((_, dict)) = entries(root).into_iter().find(|(n, _)| n.eq_ignore_ascii_case(crate::dxf_ext::PLOT_STYLE_NAMES_KEY)) else {
         return out;
     };
