@@ -274,21 +274,13 @@ pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Optio
     }
 }
 
-/// A record's fields as a user DXF of `release` writes them (`dxf_write::release_groups`, `dxf_write::block_names`): the groups of
-/// newer releases left out, an MTEXT fill's flags as that release holds them, and a renamed block's new name where a record names
-/// it by group 2. Applied to the source only: the decoded output must equal it, so an output that missed a rule (or a rename) differs.
-pub(crate) fn for_dxf_release(fields: Fields, kind: &str, release: Version, block_names: &BTreeMap<String, String>) -> Fields {
-    use crate::dxf_write::release_groups::{holds, mtext_fill, mtext_fill_colour};
+/// A record's fields with a renamed block's new name where the record names it by group 2 (`dxf_write::block_names`). Applied to
+/// the source only: the decoded output must equal it, so an output that missed a rename differs.
+pub(crate) fn with_block_names(fields: Fields, kind: &str, block_names: &BTreeMap<String, String>) -> Fields {
+    if block_names.is_empty() {
+        return fields;
+    }
     let own = |field: &Field, class: &str| field.class == class && field.groups.is_empty() && field.application.is_none() && field.embedded == 0;
-    let flags = if kind == "MTEXT" {
-        fields.iter().find(|(field, _)| own(field, "AcDbMText") && field.code == 90).and_then(|(_, value)| match value {
-            Value::Integer(flags) => Some(mtext_fill(*flags, release)),
-            _ => None,
-        })
-    } else {
-        None
-    };
-    let colour = flags.is_none_or(|flags| mtext_fill_colour(flags, release));
     let names_block = |field: &Field| {
         field.code == 2
             && match kind {
@@ -299,35 +291,12 @@ pub(crate) fn for_dxf_release(fields: Fields, kind: &str, release: Version, bloc
     };
     fields
         .into_iter()
-        .filter_map(|(field, value)| {
-            if kind == "MTEXT" && own(&field, "AcDbMText") {
-                match field.code {
-                    90 => return flags.filter(|flags| *flags != 0).map(|flags| (field, Value::Integer(flags))),
-                    63 | 421 | 45 | 441 if !colour => return None,
-                    _ => {}
-                }
+        .map(|(field, value)| match &value {
+            Value::Text(name) if names_block(&field) => {
+                let value = block_names.get(&name.to_ascii_uppercase()).map_or(value.clone(), |new| Value::Text(new.clone()));
+                (field, value)
             }
-            if field.application.is_none() && !holds(kind, &field.class, field.code, release) {
-                return None;
-            }
-            // A subclass marker is a header field (no class): it goes with the subclass it opens. It is the record's last, so the
-            // markers before it keep their places.
-            if let Value::Text(marker) = &value
-                && field.code == 100
-                && field.class.is_empty()
-                && field.groups.is_empty()
-                && field.application.is_none()
-                && !holds(kind, marker.trim(), 100, release)
-            {
-                return None;
-            }
-            let value = match &value {
-                Value::Text(name) if names_block(&field) => {
-                    block_names.get(&name.to_ascii_uppercase()).map_or(value.clone(), |new| Value::Text(new.clone()))
-                }
-                _ => value,
-            };
-            Some((field, value))
+            _ => (field, value),
         })
         .collect()
 }

@@ -643,7 +643,7 @@ fn raw_records_take_the_release_rules_and_block_renames_through_the_save_check()
 }
 
 /// A Raw solid's history subclass (AcDb3dSolid, from R2007) is left out of an older DXF, its marker too, and the Raw save check
-/// compares the solid through the same rule.
+/// compares the solid through the same rule; its xdata after that subclass stays.
 #[test]
 fn a_raw_solid_loses_its_history_subclass_before_2007_through_the_save_check() {
     use cadcraft_doc::{RawCompound, RawRecord, RawTag};
@@ -660,6 +660,8 @@ fn a_raw_solid_loses_its_history_subclass_before_2007_through_the_save_check() {
             tag(1, "kkk n m o"),
             tag(100, "AcDb3dSolid"),
             tag(350, "0"),
+            tag(1001, "ACAD"),
+            tag(1000, "payload"),
         ],
     )
     .unwrap();
@@ -674,5 +676,31 @@ fn a_raw_solid_loses_its_history_subclass_before_2007_through_the_save_check() {
         assert_eq!(solid.iter().any(|t| t.code == 100 && t.str() == "AcDb3dSolid"), history, "{version:?}");
         assert_eq!(solid.iter().any(|t| t.code == 350), history, "{version:?}");
         assert!(solid.iter().any(|t| t.code == 1 && t.str() == "kkk n m o"), "{version:?}: the SAT text stays");
+        assert!(
+            solid.windows(2).any(|w| w[0].code == 1001 && w[0].str() == "ACAD" && w[1].code == 1000 && w[1].str() == "payload"),
+            "{version:?}: the xdata stays"
+        );
+    }
+}
+
+/// From R2018 a DXF holds every MTEXT fill form, so a Raw MTEXT with an explicit fill setting of 0 keeps it, and the save check
+/// takes the source as it is; before R2018 group 90 = 0 is left out, as the writer leaves it out.
+#[test]
+fn a_raw_mtext_with_fill_zero_keeps_it_from_2018() {
+    use crate::activation::{Family, FamilySet, Need, ReaderMode, ReaderPolicy};
+    let text = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n100\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
+                0\nMTEXT\n5\n51\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n41\n10\n71\n1\n72\n1\n1\nNONE\n73\n1\n44\n1\n90\n0\n\
+                0\nENDSEC\n0\nEOF\n";
+    let need =
+        |view: &crate::activation::records::RecordView| if view.family == Family::MText { Need::Needs { readable: true } } else { Need::Plain };
+    let policy = ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path();
+    let d = crate::read_with_need(text.as_bytes(), "source.dxf", policy, &need).unwrap();
+    assert!(d.model.iter().any(|e| matches!(e.kind, EntityKind::Raw(_))));
+    for (version, kept) in [(Version::R2010, false), (Version::R2018, true)] {
+        let options = crate::SaveOptions { version: Some(version), binary: false };
+        let bytes = crate::write_with(&d, "x.dxf", &options).unwrap_or_else(|e| panic!("{version:?}: {e}"));
+        let tags = cadcraft_dxf::parse(&bytes).unwrap();
+        let mtext = cadcraft_dxf::records(&tags).into_iter().find(|(k, _)| k == "MTEXT").map(|(_, t)| t).unwrap();
+        assert_eq!(mtext.iter().any(|t| t.code == 90), kept, "{version:?}");
     }
 }

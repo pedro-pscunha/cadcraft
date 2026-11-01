@@ -350,15 +350,16 @@ impl<'a> RawSaveCheck<'a> {
         inspection: &OutputInventory,
         records: &Decoded<'_>,
     ) -> Result<()> {
-        let expected = fields::parse(source.tags, inspection.source_unicode_escapes)
+        // The source as a user DXF of the file's release writes it (the writer's own release pass), then parsed.
+        let source_tags = crate::dxf_write::release_groups::strip_record(source.kind, source.tags, self.release);
+        let expected = fields::parse(&source_tags, inspection.source_unicode_escapes)
             .map_err(|error| failure(unit, source.kind, source.handle, error.field, error.reason))?;
         let SourceRecord { kind, handle, mapped_identity, parent, .. } = source;
         let changed = if parent { crate::dxf_write::raw_changed_properties(unit.source, unit.entity) } else { Vec::new() };
         if inspection.unexposed.contains(&mapped_identity.0) || !inspection.handles.contains(&mapped_identity.0) {
             return Err(failure(unit, kind, handle, "semantic payload / 5", "the independent decoder cannot expose the required record"));
         }
-        let mut expected =
-            fields::for_dxf_release(fields::for_release(expected, kind, self.target), kind, self.release, &self.references.block_names);
+        let mut expected = fields::with_block_names(fields::for_release(expected, kind, self.target), kind, &self.references.block_names);
         let mut raw = Vec::with_capacity(actual.tags.len());
         for tag in actual.tags {
             if let TagValue::Real(value) = tag.value

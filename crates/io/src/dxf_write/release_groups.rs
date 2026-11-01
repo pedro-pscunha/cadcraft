@@ -3,13 +3,16 @@
 //! grupo DXF: 90") and its text frame (bit 0x10 of group 90) before R2018, a solid's history subclass (AcDb3dSolid, group 350)
 //! before R2007 ("Fim prematuro do objeto"), and a dimension's groups 73 to 75 before R2007 and 280 before R2010 ("Código de grupo
 //! DXF inesperado: 280", DP Inc and Planeta-Toulouse). The DWG bridge keeps them: acadrust's DWG writer applies the same release
-//! rules. The Raw save check compares a Raw record through the same rules ([`mtext_fill`], [`holds`]).
+//! rules. The Raw save check runs this same pass on a Raw record's source before it compares it ([`strip_record`]).
 
+use std::borrow::Cow;
+
+use cadcraft_doc::RawTag;
 use cadcraft_dxf::{Tag, Version};
 
 /// The background flags (MTEXT group 90) a DXF of `target` holds: none before R2004, without the text frame (0x10) before R2018.
 /// 0 is no group 90.
-pub(crate) fn mtext_fill(flags: i64, target: Version) -> i64 {
+fn mtext_fill(flags: i64, target: Version) -> i64 {
     if target < Version::R2004 {
         0
     } else if target < Version::R2018 {
@@ -21,12 +24,12 @@ pub(crate) fn mtext_fill(flags: i64, target: Version) -> i64 {
 
 /// Whether a fill with these (kept) flags has its colour, scale and transparency (63, 421, 45, 441): a fill of its own colour (bit
 /// 1), or from R2018 a text frame; a fill of the window colour has none.
-pub(crate) fn mtext_fill_colour(flags: i64, target: Version) -> bool {
+fn mtext_fill_colour(flags: i64, target: Version) -> bool {
     flags & 1 != 0 || (target >= Version::R2018 && flags & 0x10 != 0)
 }
 
 /// Whether a DXF of `target` holds group `code` of subclass `class` in a record of `kind` (the MTEXT fill aside: [`mtext_fill`]).
-pub(crate) fn holds(kind: &str, class: &str, code: i32, target: Version) -> bool {
+fn holds(kind: &str, class: &str, code: i32, target: Version) -> bool {
     match kind {
         "3DSOLID" if class == "AcDb3dSolid" => target >= Version::R2007,
         "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" if class == "AcDbDimension" => match code {
@@ -80,4 +83,14 @@ pub(super) fn strip(tags: &mut Vec<Tag>, target: Version) {
         out.push(t);
     }
     *tags = out;
+}
+
+/// One record's groups (`kind` and its tags, without the group 0) as [`strip`] writes them for `target`.
+pub(crate) fn strip_record<'a>(kind: &str, tags: &'a [RawTag], target: Version) -> Cow<'a, [RawTag]> {
+    if target >= Version::R2018 {
+        return Cow::Borrowed(tags);
+    }
+    let mut record: Vec<Tag> = std::iter::once(Tag::s(0, kind)).chain(tags.iter().map(|t| Tag::s(t.code, t.value.clone()))).collect();
+    strip(&mut record, target);
+    Cow::Owned(record.into_iter().skip(1).map(|t| RawTag { code: t.code, value: t.str() }).collect())
 }
