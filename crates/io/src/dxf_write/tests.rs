@@ -464,10 +464,10 @@ fn the_embedded_layout_group_stays_in_the_dwg_bridge_only() {
 fn a_pipe_in_a_block_name_is_written_as_an_anonymous_block_in_a_dxf_only() {
     let pipe = "XR-1021-A$0$XR-19354-APTO-A-RES|Janela enrolar";
     let mut d = Drawing::new_metric();
-    let mut used = Block::new("*U3");
+    let mut used = Block::new("*U0");
     used.anonymous = true;
     used.entities.push(Entity::new(d.new_handle(), EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 })));
-    d.blocks.insert("*U3".into(), std::sync::Arc::new(used));
+    d.blocks.insert("*U0".into(), std::sync::Arc::new(used));
     let mut bound = Block::new(pipe);
     bound.entities.push(Entity::new(d.new_handle(), EntityKind::Point(Point { p: Vec3::ZERO, angle: 0.0 })));
     d.blocks.insert(pipe.into(), std::sync::Arc::new(bound));
@@ -485,7 +485,7 @@ fn a_pipe_in_a_block_name_is_written_as_an_anonymous_block_in_a_dxf_only() {
         })
     };
     d.add(&Space::Model, Common::default(), insert(pipe)).unwrap();
-    d.add(&Space::Model, Common::default(), insert("*U3")).unwrap();
+    d.add(&Space::Model, Common::default(), insert("*U0")).unwrap();
     let names = |tags: &[Tag], kind: &str| -> Vec<(String, i64)> {
         cadcraft_dxf::records(tags)
             .into_iter()
@@ -501,10 +501,10 @@ fn a_pipe_in_a_block_name_is_written_as_an_anonymous_block_in_a_dxf_only() {
         for kind in ["BLOCK_RECORD", "BLOCK", "INSERT"] {
             assert!(names(&public, kind).iter().all(|(n, _)| !n.contains('|')), "{version:?} {kind}: {:?}", names(&public, kind));
         }
-        assert!(names(&public, "BLOCK_RECORD").iter().any(|(n, _)| n == "*U4"), "{version:?}: {:?}", names(&public, "BLOCK_RECORD"));
-        assert!(names(&public, "BLOCK").iter().any(|(n, f)| n == "*U4" && f & 1 == 1), "{version:?}: {:?}", names(&public, "BLOCK"));
-        assert_eq!(names(&public, "INSERT").iter().filter(|(n, _)| n == "*U4").count(), 1, "{version:?}");
-        assert_eq!(names(&public, "INSERT").iter().filter(|(n, _)| n == "*U3").count(), 1, "{version:?}");
+        assert!(names(&public, "BLOCK_RECORD").iter().any(|(n, _)| n == "*U1"), "{version:?}: {:?}", names(&public, "BLOCK_RECORD"));
+        assert!(names(&public, "BLOCK").iter().any(|(n, f)| n == "*U1" && f & 1 == 1), "{version:?}: {:?}", names(&public, "BLOCK"));
+        assert_eq!(names(&public, "INSERT").iter().filter(|(n, _)| n == "*U1").count(), 1, "{version:?}");
+        assert_eq!(names(&public, "INSERT").iter().filter(|(n, _)| n == "*U0").count(), 1, "{version:?}");
         let bridge = cadcraft_dxf::parse(&dwg_bridge(&d, version).bytes).unwrap();
         assert!(names(&bridge, "BLOCK_RECORD").iter().any(|(n, _)| n == pipe), "{version:?} bridge keeps the DWG name");
     }
