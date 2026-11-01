@@ -369,7 +369,8 @@ impl<'a> RawSaveCheck<'a> {
             raw.push(RawTag { code: tag.code, value: tag.str() });
         }
         let decoded = fields::parse(&raw, false).map_err(|error| failure(unit, kind, handle, error.field, error.reason))?;
-        let mut decoded = fields::for_dxf_release(fields::for_release(decoded, kind, self.target), kind, self.release, &self.references.block_names);
+        // The output is compared as written: only the source takes the export rules, so an output that missed one differs.
+        let mut decoded = fields::for_release(decoded, kind, self.target);
         records.check_names(unit, &source, &decoded, &inspection.handles)?;
         if parent {
             self.plot_style(unit, &decoded, inspection)?;

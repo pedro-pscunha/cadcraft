@@ -14,13 +14,13 @@ fn records(tags: &[Tag]) -> Vec<(usize, usize)> {
 
 /// The first group `code` of a record, outside its application groups (102) and before its xdata.
 fn first(tags: &[Tag], (start, end): (usize, usize), code: i32) -> Option<usize> {
-    let mut grouped = false;
+    let mut depth = 0usize;
     (start + 1..end).take_while(|&i| tags[i].code < 1000).find(|&i| {
         if tags[i].code == 102 {
-            grouped = tags[i].str().trim().starts_with('{');
+            depth = if tags[i].str().trim().starts_with('{') { depth + 1 } else { depth.saturating_sub(1) };
             return false;
         }
-        !grouped && tags[i].code == code
+        depth == 0 && tags[i].code == code
     })
 }
 

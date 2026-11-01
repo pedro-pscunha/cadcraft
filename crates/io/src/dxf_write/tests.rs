@@ -608,7 +608,8 @@ fn a_renamed_block_is_renamed_in_the_dimensions_that_draw_it() {
 }
 
 /// A Raw record goes through the same export rules as the others: an R2000 DXF save leaves out a Raw MTEXT's fill and writes a Raw
-/// INSERT of a renamed block with its new name, and the Raw save check compares it through those rules (the save succeeds).
+/// INSERT of a renamed block with its new name, and the Raw save check compares it through those rules (the save succeeds). The
+/// INSERT's application group holds a nested group and a group 2 after it, which is no block reference.
 #[test]
 fn raw_records_take_the_release_rules_and_block_renames_through_the_save_check() {
     use crate::activation::{Family, FamilySet, Need, ReaderMode, ReaderPolicy};
@@ -617,7 +618,7 @@ fn raw_records_take_the_release_rules_and_block_renames_through_the_save_check()
                 0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n41\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nA|B\n70\n0\n10\n0\n20\n0\n30\n0\n3\nA|B\n1\n\n\
                 0\nLINE\n5\n42\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n\
                 0\nENDBLK\n5\n43\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
-                0\nINSERT\n5\n50\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockReference\n2\nA|B\n10\n0\n20\n0\n30\n0\n\
+                0\nINSERT\n5\n50\n102\n{OUTER\n102\n{INNER\n102\n}\n2\n*U0\n102\n}\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockReference\n2\nA|B\n10\n0\n20\n0\n30\n0\n\
                 0\nMTEXT\n5\n51\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n41\n10\n71\n1\n72\n1\n1\nFILL\n73\n1\n44\n1\n90\n17\n63\n5\n45\n1.5\n441\n0\n\
                 0\nENDSEC\n0\nEOF\n";
     let need = |view: &crate::activation::records::RecordView| {

@@ -276,7 +276,7 @@ pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Optio
 
 /// A record's fields as a user DXF of `release` writes them (`dxf_write::release_groups`, `dxf_write::block_names`): the groups of
 /// newer releases left out, an MTEXT fill's flags as that release holds them, and a renamed block's new name where a record names
-/// it by group 2. Applied to the source and to the decode alike, so a Raw record compares through the same export rules.
+/// it by group 2. Applied to the source only: the decoded output must equal it, so an output that missed a rule (or a rename) differs.
 pub(crate) fn for_dxf_release(fields: Fields, kind: &str, release: Version, block_names: &BTreeMap<String, String>) -> Fields {
     use crate::dxf_write::release_groups::{holds, mtext_fill, mtext_fill_colour};
     let own = |field: &Field, class: &str| field.class == class && field.groups.is_empty() && field.application.is_none() && field.embedded == 0;
