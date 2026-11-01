@@ -197,7 +197,7 @@ fn a_binary_dxf_before_2013_holds_the_binary_cipher_form() {
     let ascii =
         cadcraft_io::write_with(&d, "x.dxf", &cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false }).unwrap();
     let ascii_solid = cadcraft_dxf::records(&cadcraft_dxf::parse(&ascii).unwrap()).into_iter().find(|(k, _)| k == "3DSOLID").map(|(_, t)| t).unwrap();
-    let last = |t: &[cadcraft_dxf::Tag]| t.iter().filter(|t| t.code == 1).next_back().map(|t| t.str()).unwrap();
+    let last = |t: &[cadcraft_dxf::Tag]| t.iter().rfind(|t| t.code == 1).map(|t| t.str()).unwrap();
     // The terminator End-of-ACIS-data has one A: ciphered `^` with the protective space in ASCII, without it in binary.
     assert_eq!(last(&ascii_solid).matches("^ ").count(), 1);
     assert_eq!(last(&solid).matches("^ ").count(), 0);
