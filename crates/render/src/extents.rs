@@ -76,7 +76,11 @@ pub fn space_extents(drawing: &Drawing, space: &Space) -> Result<Bounds2, Extent
         let result = if entity.unresolved_display().is_some() {
             Ok(Bounds2::EMPTY)
         } else if entity.geometry_revision == GeometryRevision::CanonicalV2 {
-            if matches!(entity.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) { Ok(Bounds2::EMPTY) } else { entity_world_bounds(drawing, entity, &Mat4::IDENTITY) }
+            if matches!(entity.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
+                Ok(Bounds2::EMPTY)
+            } else {
+                entity_world_bounds(drawing, entity, &Mat4::IDENTITY)
+            }
         } else {
             cadcraft_doc::legacy_extent_bounds(drawing, entity)
         };

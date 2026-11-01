@@ -82,22 +82,22 @@ mod hatch_groups_roundtrip;
 mod hatch_pattern_def;
 mod header_fidelity;
 mod header_pointers;
-mod helix_roundtrip;
-mod layout_paper_units;
-mod layout_plot_window;
-mod leader_vertex_elevation;
 #[cfg(not(target_arch = "wasm32"))]
 mod heavy_polyline;
+mod helix_roundtrip;
 mod image_vars_absent_in_source;
 mod insert_seqend_props;
 mod layer_transparency_alpha;
 mod layout_canonical;
 mod layout_paper_name;
+mod layout_paper_units;
 mod layout_plot_pointers;
+mod layout_plot_window;
 mod layout_without_sheet;
 mod leader_default_flags;
 mod leader_links;
 mod leader_links_roundtrip;
+mod leader_vertex_elevation;
 #[cfg(not(target_arch = "wasm32"))]
 mod legacy_text_flags;
 mod linetype_description;

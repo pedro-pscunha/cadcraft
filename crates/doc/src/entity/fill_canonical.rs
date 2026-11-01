@@ -9,8 +9,8 @@
 use cadcraft_geom::{Mat4, OcsFrame, Vec2, Vec3};
 
 use super::fill::{Hatch, HatchEdge, HatchLoop, HatchSpline};
-use super::wipeout::{Wipeout, WipeoutFrame};
 use super::text_canonical::Similarity;
+use super::wipeout::{Wipeout, WipeoutFrame};
 use crate::{DocError, Result};
 
 fn invalid(what: &str) -> DocError {
