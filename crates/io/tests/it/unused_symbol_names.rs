@@ -34,18 +34,18 @@ fn unnamed_styles_survive_without_becoming_selectable_by_name() {
     for _ in 0..2 {
         assert!(d.text_style("").is_none());
         assert!(d.dim_style("").is_none());
-        // A DWG keeps the records nameless, as AutoCAD files have them.
+        // A DWG names them too: AutoCAD's own save of such a file has them named (its open renames them, AUDIT_I_...), and its
+        // AUDIT reports a nameless record (Planeta-Toulouse: 4 errors against the source's 2).
         let dwg = cadcraft_io::write(&d, "x.dwg").unwrap();
         let back = cadcraft_dwg::dwg_to_dxf(&dwg).unwrap();
-        check_unnamed_styles(&back, false);
+        check_unnamed_styles(&back, true);
         // A user DXF names them: AutoCAD refuses a table record with an empty name.
         check_unnamed_styles(cadcraft_io::write_dxf(&d).as_bytes(), true);
         d = cadcraft_io::read_dxf(&back).unwrap();
     }
 }
 
-/// The unnamed STYLE and DIMSTYLE of `text`: nameless (a DWG), or with a name of their own, not that of
-/// another record (`named`, a user DXF).
+/// The unnamed STYLE and DIMSTYLE of `text`: nameless, or with a name of their own, not that of another record (`named`).
 fn check_unnamed_styles(text: &[u8], named: bool) {
     let tags = cadcraft_dxf::parse(text).unwrap();
     let records: Vec<_> = sections(&tags).iter().filter(|s| s.name == "TABLES").flat_map(|s| records(&s.tags)).collect();

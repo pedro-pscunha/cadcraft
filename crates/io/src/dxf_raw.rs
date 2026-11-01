@@ -2080,14 +2080,14 @@ fn allocate_table_records<'a>(
     aliases
 }
 
-/// The names a user DXF gives the nameless STYLE and DIMSTYLE records kept from a DWG: AutoCAD
-/// refuses a table record with an empty name (it renames them itself, to AUDIT_I_...). Each name is
-/// unique among the written records of its table. A DWG bridge (`dwg_bridge`) keeps the records nameless.
-/// Shape-file entries legitimately remain nameless in both formats.
-fn names_for_unnamed(f: &Foreign, tables: &Recs<'_>, dwg_bridge: bool) -> HashMap<Handle, String> {
+/// The names a save gives the nameless STYLE and DIMSTYLE records kept from a DWG. AutoCAD refuses a DXF table record with an empty
+/// name, and its AUDIT reports one in a DWG; when it opens such a DWG it renames them itself (AUDIT_I_..., Planeta-Toulouse), so its
+/// own save, DXF or DWG, has them named. Each name is unique among the written records of its table. Shape-file entries legitimately
+/// remain nameless.
+fn names_for_unnamed(f: &Foreign, tables: &Recs<'_>) -> HashMap<Handle, String> {
     let mut used: HashSet<(String, String)> = tables.iter().map(|(kind, _, t)| (kind.clone(), up(&val(t, 2).unwrap_or_default()))).collect();
     let mut out = HashMap::new();
-    for o in f.table_records.iter().filter(|o| !dwg_bridge && matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE") && !shape_style(o)) {
+    for o in f.table_records.iter().filter(|o| matches!(o.kind.as_str(), "STYLE" | "DIMSTYLE") && !shape_style(o)) {
         let n = (1..).map(|n| format!("UNNAMED_{}_{n}", o.kind)).find(|n| used.insert((o.kind.clone(), up(n)))).unwrap_or_default();
         out.insert(o.handle, n);
     }
@@ -2392,7 +2392,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
     let table_aliases = allocate_table_records(f, &roles, &tables, &mut alive, &mut taken, &mut next);
     let entities: HashSet<String> = entity_types(d).into_keys().filter(|h| written.contains(h)).collect();
     let merged_into: HashMap<_, _> = merged.iter().filter_map(|(old, new)| Some((new.clone(), *objs.get(old)?))).collect();
-    let unnamed = names_for_unnamed(f, &tables, dwg_bridge);
+    let unnamed = names_for_unnamed(f, &tables);
     let version = declared_version(tags, dwg_bridge);
     let pages = d.layouts.iter().map(|layout| (up(&layout.name), &layout.page)).collect();
     let block_attributes = d.blocks.iter().map(|(name, block)| (up(name), nonconstant_attributes(block))).collect();
