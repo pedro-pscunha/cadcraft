@@ -112,6 +112,16 @@ fn occurrence(spec: Spec, i: usize) -> usize {
 
 /// The geometry groups of a source record of `kind`, each subclass after a `100` marker group;
 /// `None` for a type without a snapshot or a record that lacks one of the subclasses.
+/// The part of a subclass that holds its geometry groups: an MTEXT's legacy column groups (75 on) use 50 for the column
+/// heights, which are the model's, not the rotation.
+fn geometry_range(kind: &str, tags: &[Tag], range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    if kind != "MTEXT" {
+        return range;
+    }
+    let end = tags.get(range.clone()).and_then(|groups| groups.iter().position(|t| t.code == 75)).map_or(range.end, |p| range.start + p);
+    range.start..end
+}
+
 pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
     if kind == "HATCH" {
         return hatch_capture(tags);
@@ -123,7 +133,7 @@ pub(crate) fn capture(kind: &str, tags: &[Tag]) -> Option<Vec<RawTag>> {
     let spec = spec(kind, tags)?;
     let mut out = Vec::new();
     for (i, (marker, codes)) in spec.iter().enumerate() {
-        let range = subclass(tags, marker, occurrence(spec, i))?;
+        let range = geometry_range(kind, tags, subclass(tags, marker, occurrence(spec, i))?);
         out.push(RawTag { code: 100, value: (*marker).to_string() });
         // AutoCAD writes no oblique angle (52) of a dimension for extension lines perpendicular to its line and refuses a DXF that has one.
         let perpendicular = |t: &Tag| kind == "DIMENSION" && t.code == 52 && (t.f64().rem_euclid(180.0) - 90.0).abs() < 1e-9;
@@ -168,7 +178,7 @@ pub(crate) fn restore(kind: &str, generated: &[Tag], kept: &[RawTag], version: u
     // the writer made, else the end of the subclass), its geometry codes and the kept groups.
     let mut edits = Vec::new();
     for (i, (marker, codes)) in spec.iter().enumerate() {
-        let range = subclass(generated, marker, occurrence(spec, i))?;
+        let range = geometry_range(kind, generated, subclass(generated, marker, occurrence(spec, i))?);
         let at = generated.get(range.clone())?.iter().position(|t| codes.contains(&t.code)).map_or(range.end, |p| range.start + p);
         edits.push((range, at, *codes, parts.next()?));
     }
