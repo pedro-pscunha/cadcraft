@@ -416,3 +416,19 @@ The 8 `/tmp/cad/rc2` drawings (`cyrela-field`, `cyrela-field-group`, `plaenge-an
 `group-bridge`) were deleted from the machine in a disk cleanup, and the probe that made them was never committed, so they cannot be made again. Their
 8 entries leave `corpus.toml` and their 16 outputs leave `golden.sha256`; no other output changes. The drawings they were derived from
 (`Cyrela-Aura_Moema`, `Plaenge-Altier`, `Skr-Ayya`, `Tear_Incorporadora-Alvorada`) stay in the corpus from `/tmp/cad/rt7`.
+
+# Golden refresh for the merge of upstream 0.15.1 and its follow-up fixes
+
+The reference is the golden of the integration head before the merge (3856cc88, with the 8 rc2 outputs, which left the
+corpus in 3ca8d677). Compared record by record with the handles set aside, 79 of 110 outputs are equal; every DWG output is
+byte-identical; the 31 DXF outputs that differ differ only by these causes:
+
+| record | cause | format | drawings | groups |
+|---|---|---|---|---|
+| HEADER | `$PSTYLEMODE` is written as read (upstream 0ab812c1, #2400); AutoCAD's own saves of the corpus have it | dxf | 31 | +2 each |
+| ENTITIES/MTEXT | an MTEXT with columns written with the legacy column groups (R2000 baseline) gets its height count and heights (group 50 after 75): the geometry snapshot no longer takes and drops the column 50s (0bb44bef), and the count comes before the heights (upstream #2247) | dxf | 14 | +13391 groups 50 |
+| TABLES/DIMSTYLE | `dim1-mleader-2004` (an R2004 DWG) loses the private DIMVARS (DIMFXL 0, DIMJOGANG 5 degrees): those values were acadrust reading a pre-2007 DWG with zeros; its styles now read AutoCAD's defaults (acadrust 6ae5547), which need no private copy | dxf | 1 | -9 groups per style, 2 styles |
+
+No record is lost or added. The code page change (pre-2007 text of a saved file in its code page, `write_with`) changes no
+output here: the DXF baseline is `write_dxf`, a string, whose pre-2007 text stays `\U+` escapes (Firenze: 11845 escapes, no
+byte above 127); `long_gradient_name_is_cut_only_in_xdata` checks the file save's ANSI_1252 bytes.
