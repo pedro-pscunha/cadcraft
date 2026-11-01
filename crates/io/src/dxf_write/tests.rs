@@ -509,3 +509,33 @@ fn a_pipe_in_a_block_name_is_written_as_an_anonymous_block_in_a_dxf_only() {
         assert!(names(&bridge, "BLOCK_RECORD").iter().any(|(n, _)| n == pipe), "{version:?} bridge keeps the DWG name");
     }
 }
+
+/// A DWG stores the gradient fields on every hatch, and acadrust's DXF of it gives a pattern hatch that last had a gradient the
+/// groups 450 to 470 with 450 = 0. AutoCAD's own DXF writes them on a solid fill only, and AutoCAD LT 2025 discards a DXF whose
+/// pattern hatch has them ("Fim prematuro do objeto", DP Inc and Planeta-Toulouse). The DWG bridge keeps them for the DWG.
+#[test]
+fn a_pattern_hatch_keeps_its_held_gradient_in_the_dwg_bridge_only() {
+    let hatch = |name: &str, solid: u8| {
+        format!(
+            "0\nHATCH\n5\n20{solid}\n100\nAcDbEntity\n8\n0\n100\nAcDbHatch\n10\n0\n20\n0\n30\n0\n210\n0\n220\n0\n230\n1\n2\n{name}\n70\n{solid}\n71\n0\n91\n1\n92\n7\n72\n0\n73\n1\n93\n4\n10\n0\n20\n0\n10\n10\n20\n0\n10\n10\n20\n10\n10\n0\n20\n10\n97\n0\n75\n0\n76\n1\n{}98\n0\n450\n0\n451\n0\n460\n1.5707963267948966\n461\n0.0\n452\n0\n462\n0.0\n453\n2\n463\n0.0\n63\n5\n421\n255\n463\n1.0\n63\n2\n421\n16776960\n470\nLINEAR\n",
+            if solid == 0 { "52\n0\n41\n1\n77\n0\n78\n1\n53\n45\n43\n0\n44\n0\n45\n-0.0883883476483184\n46\n0.0883883476483184\n79\n0\n" } else { "" }
+        )
+    };
+    let text = format!("0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{}{}0\nENDSEC\n0\nEOF\n", hatch("ANSI31", 0), hatch("SOLID", 1));
+    let d = crate::read_dxf(text.as_bytes()).unwrap();
+    let hatches = |tags: &[Tag]| -> Vec<(i64, Vec<i64>)> {
+        cadcraft_dxf::records(tags)
+            .into_iter()
+            .filter(|(k, _)| k == "HATCH")
+            .map(|(_, t)| {
+                let solid = t.iter().find(|t| t.code == 70).map_or(-1, Tag::i64);
+                (solid, t.iter().filter(|t| matches!(t.code, 450..=470 | 421)).map(|t| i64::from(t.code)).collect())
+            })
+            .collect()
+    };
+    let gradient = vec![450, 451, 460, 461, 452, 462, 453, 463, 421, 463, 421, 470];
+    let public = hatches(&tags(&d, Version::R2018));
+    assert_eq!(public, vec![(0, vec![]), (1, gradient.clone())], "public DXF");
+    let bridge = hatches(&cadcraft_dxf::parse(&dwg_bridge(&d, Version::R2018).bytes).unwrap());
+    assert_eq!(bridge, vec![(0, gradient.clone()), (1, gradient)], "DWG bridge");
+}

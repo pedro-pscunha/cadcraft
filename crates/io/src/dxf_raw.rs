@@ -1658,6 +1658,8 @@ struct Map<'a> {
     version: u32,
     /// The actual save target, which can differ from the DWG bridge's DXF declaration.
     target: cadcraft_dxf::Version,
+    /// The records go to the DWG bridge, not to a user's DXF.
+    dwg_bridge: bool,
     pages: HashMap<String, &'a cadcraft_doc::PageSetup>,
     block_attributes: HashMap<String, bool>,
     table_aliases: HashMap<String, &'a ForeignObject>,
@@ -2339,6 +2341,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing, dwg_bridge: bool, target:
         geometry,
         version,
         target,
+        dwg_bridge,
         pages,
         block_attributes,
         table_aliases,
@@ -2559,7 +2562,11 @@ fn record(
     let dictionary = is_dictionary(&r.kind);
     let boundary = matches!(r.kind.as_str(), "BLOCK" | "ENDBLK");
     let attributes = (r.kind == "BLOCK").then(|| val(b, 2).and_then(|name| map.block_attributes.get(&up(&name)).copied())).flatten();
-    let replaces_gradient = r.kind == "HATCH" && (map.target < cadcraft_dxf::Version::R2004 || b.iter().any(|t| t.code == 450 && t.i64() != 0));
+    // A DWG stores the gradient fields on every hatch; AutoCAD's DXF has them on a solid fill only, and its DXF reader discards a file
+    // whose pattern hatch has them ("Fim prematuro do objeto"). The DWG bridge keeps them.
+    let pattern = r.kind == "HATCH" && !map.dwg_bridge && b.iter().find(|t| t.code == 70).is_some_and(|t| t.i64() == 0);
+    let replaces_gradient =
+        r.kind == "HATCH" && (map.target < cadcraft_dxf::Version::R2004 || pattern || b.iter().any(|t| t.code == 450 && t.i64() != 0));
     let regenerated_dimension = r.kind == "DIMENSION" && geometry.is_none() && h.handle.as_ref().is_some_and(|handle| map.canonical.contains(handle));
     let replay = |p: &RawTag| {
         let dimension_field_supported = r.kind != "DIMENSION"
