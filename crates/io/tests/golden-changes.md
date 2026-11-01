@@ -432,3 +432,20 @@ byte-identical; the 31 DXF outputs that differ differ only by these causes:
 No record is lost or added. The code page change (pre-2007 text of a saved file in its code page, `write_with`) changes no
 output here: the DXF baseline is `write_dxf`, a string, whose pre-2007 text stays `\U+` escapes (Firenze: 11845 escapes, no
 byte above 127); `long_gradient_name_is_cut_only_in_xdata` checks the file save's ANSI_1252 bytes.
+
+# Golden refresh for the DXF files AutoCAD discarded (331b362f)
+
+The reference is the golden of b6972a0a. Compared record by record with the handles set aside, 98 of 110 outputs are equal; 11
+DXF outputs and one DWG differ, only by these causes. The golden DXF is `write_dxf` (R2000), so the release rules show; the
+pattern-hatch gradient rule (R2004 and later) and the binary SAT form do not.
+
+| record | cause | format | drawings | records |
+|---|---|---|---|---|
+| ENTITIES/MTEXT, BLOCKS/MTEXT | no background fill groups (90, 63, 421, 45, 441) before R2004 (`release_groups`) | dxf | 8 | 2950 |
+| ARC_DIMENSION, LARGE_RADIAL_DIMENSION | no groups 73 to 75 (R2007) and 280 (R2010) | dxf | 5 | 110 |
+| REGION, 3DSOLID, SURFACE | the data store's SAB written as SAT text in the entity (70 = 1, groups 1 and 3) before R2013, in place of 290 and 2 (`dxf_raw::inline_sat`); 3DSOLID also loses AcDb3dSolid before R2007 | dxf | 4 | 116 |
+| TABLES/BLOCK_RECORD, BLOCKS/BLOCK | Firenze's three `…|Janela enrolar` blocks written as `*U0`, `*U1`, `*U2` with flag 1 (`block_names`) | dxf | 1 | 6 |
+| DWG (binary) | Planeta-Toulouse's nameless STYLE and DIMSTYLE written `UNNAMED_STYLE_1` / `UNNAMED_DIMSTYLE_1` in the DWG too | dwg | 1 | 2 |
+
+No record is lost or added. The root-dictionary and draw-order fix changes no output of the corpus (every corpus file has a root
+dictionary).
