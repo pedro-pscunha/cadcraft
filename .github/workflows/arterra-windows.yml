@@ -1,0 +1,48 @@
+# Arterra fork only: the Windows x64 portable zip and MSI of a fork commit, unsigned, for the Arterra PCs.
+# Upstream's release.yml cannot build the fork (its git dependencies must come from storytold; the fork
+# pins acadrust from pedro-pscunha). Push a tag `arterra-win-<anything>` to run it; the zip, the MSI and
+# SHA256SUMS.txt are the run's artifact.
+name: Arterra Windows build
+
+on:
+  push:
+    tags: ['arterra-win-*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust 1.95 with the MSVC x64 target
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.95 --profile minimal --target x86_64-pc-windows-msvc
+          rustup default 1.95
+      - name: WiX v5 and its UI extension
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+      - name: Package
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: ./packaging/windows/package.ps1 -Arch x64
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist/release -File | Where-Object { $_.Extension -in '.zip', '.msi' }
+          $files | ForEach-Object { '{0}  {1}' -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii dist/release/SHA256SUMS.txt
+          Get-Content dist/release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cadcraft-windows-x64
+          path: |
+            dist/release/*.zip
+            dist/release/*.msi
+            dist/release/SHA256SUMS.txt
+          if-no-files-found: error
