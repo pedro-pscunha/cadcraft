@@ -409,3 +409,10 @@ aside, 71 of 126 outputs are equal, 6 differ in handles only, and the others dif
 
 The cell-style section says the CADCRAFT application record stays because other CADCRAFT xdata remain. After the private-copies fix that holds only where a
 drawing still has private data; in `clockwise_arc_edge` the cell styles were the last.
+
+# Corpus: the rc2 copies leave the corpus
+
+The 8 `/tmp/cad/rc2` drawings (`cyrela-field`, `cyrela-field-group`, `plaenge-anon`, `skr-property`, `tear-native`, `tear-raw`, `tear-autocad-saved`,
+`group-bridge`) were deleted from the machine in a disk cleanup, and the probe that made them was never committed, so they cannot be made again. Their
+8 entries leave `corpus.toml` and their 16 outputs leave `golden.sha256`; no other output changes. The drawings they were derived from
+(`Cyrela-Aura_Moema`, `Plaenge-Altier`, `Skr-Ayya`, `Tear_Incorporadora-Alvorada`) stay in the corpus from `/tmp/cad/rt7`.
