@@ -43,6 +43,9 @@ pub(crate) struct RawSaveCheck<'a> {
     owned: BTreeMap<Handle, Vec<(Handle, usize)>>,
     /// The release the DWG is written at: what it cannot store, it holds no value for.
     target: Version,
+    /// The release a user DXF is written at: the groups of newer releases it leaves out (`dxf_write::release_groups`). An ASCII
+    /// DXF's text could hold them all, but AutoCAD's reader refuses them. [`DXF_TEXT`] (R2018) for the DWG bridge.
+    release: Version,
 }
 
 fn failure(unit: &Unit<'_>, kind: &str, handle: Handle, field: impl Into<String>, reason: impl Into<String>) -> IoError {
@@ -84,7 +87,7 @@ pub(crate) const DXF_TEXT: Version = Version::R2018;
 
 /// Check the original identities and Common before any writer repairs handles.
 pub(crate) fn preflight(drawing: &Drawing) -> Result<()> {
-    RawSaveCheck::new(drawing, &WrittenReferences::default(), DXF_TEXT).map(|_| ())
+    RawSaveCheck::new(drawing, &WrittenReferences::default(), DXF_TEXT, DXF_TEXT).map(|_| ())
 }
 
 fn descendants(roots: impl Iterator<Item = Handle>, index: &BTreeMap<Handle, Vec<(Handle, usize)>>) -> std::result::Result<Vec<usize>, FieldError> {
@@ -112,7 +115,7 @@ fn descendants(roots: impl Iterator<Item = Handle>, index: &BTreeMap<Handle, Vec
 }
 
 impl<'a> RawSaveCheck<'a> {
-    pub(crate) fn new(drawing: &'a Drawing, references: &'a WrittenReferences, target: Version) -> Result<Self> {
+    pub(crate) fn new(drawing: &'a Drawing, references: &'a WrittenReferences, target: Version, release: Version) -> Result<Self> {
         let mut units = Vec::new();
         collect(&drawing.model, "*Model_Space", &mut units);
         for (owner, layout) in drawing.paper_space_blocks() {
@@ -161,7 +164,7 @@ impl<'a> RawSaveCheck<'a> {
             }
             foreign.extend(drawing.foreign.targets.keys().copied());
         }
-        let check = Self { drawing, references, units, identities, foreign, owned, target };
+        let check = Self { drawing, references, units, identities, foreign, owned, target, release };
         for unit in &check.units {
             if unit.entity.geometry_revision != GeometryRevision::RawSource || unit.entity.handle != unit.source.parent().handle() {
                 return Err(failure(
@@ -354,7 +357,8 @@ impl<'a> RawSaveCheck<'a> {
         if inspection.unexposed.contains(&mapped_identity.0) || !inspection.handles.contains(&mapped_identity.0) {
             return Err(failure(unit, kind, handle, "semantic payload / 5", "the independent decoder cannot expose the required record"));
         }
-        let mut expected = fields::for_release(expected, kind, self.target);
+        let mut expected =
+            fields::for_dxf_release(fields::for_release(expected, kind, self.target), kind, self.release, &self.references.block_names);
         let mut raw = Vec::with_capacity(actual.tags.len());
         for tag in actual.tags {
             if let TagValue::Real(value) = tag.value
@@ -365,7 +369,7 @@ impl<'a> RawSaveCheck<'a> {
             raw.push(RawTag { code: tag.code, value: tag.str() });
         }
         let decoded = fields::parse(&raw, false).map_err(|error| failure(unit, kind, handle, error.field, error.reason))?;
-        let mut decoded = fields::for_release(decoded, kind, self.target);
+        let mut decoded = fields::for_dxf_release(fields::for_release(decoded, kind, self.target), kind, self.release, &self.references.block_names);
         records.check_names(unit, &source, &decoded, &inspection.handles)?;
         if parent {
             self.plot_style(unit, &decoded, inspection)?;

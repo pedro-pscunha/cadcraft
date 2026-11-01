@@ -26,7 +26,7 @@ mod header;
 mod layout;
 mod objects;
 mod raw;
-mod release_groups;
+pub(crate) mod release_groups;
 mod sections;
 mod sortents;
 #[cfg(test)]
@@ -205,12 +205,12 @@ pub fn write(d: &Drawing) -> String {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`.
 pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
-    tags_for(d, version, version, false).0
+    tags_for(d, version, version, false, false).0
 }
 
-/// [`tags`] for a save: it fails when the drawing has no handle left above the ones it uses.
+/// [`tags`] for a binary DXF save: it fails when the drawing has no handle left above the ones it uses.
 pub(crate) fn checked_tags(d: &Drawing, version: Version) -> crate::Result<Vec<Tag>> {
-    let (tags, references) = tags_for(d, version, version, false);
+    let (tags, references) = tags_for(d, version, version, false, true);
     require_handle_room(&references)?;
     Ok(tags)
 }
@@ -228,7 +228,7 @@ pub(crate) fn require_handle_room(references: &crate::dxf_raw::WrittenReferences
 /// The save path checks Raw identities before repair and the final values and references after remapping.
 pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<u8>> {
     crate::raw_preservation::preflight(d)?;
-    let (tags, references) = tags_for(d, version, version, false);
+    let (tags, references) = tags_for(d, version, version, false, false);
     require_handle_room(&references)?;
     // Before 2007 the text is in the code page the header declares.
     let bytes = if version.utf8() {
@@ -236,7 +236,7 @@ pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<
     } else {
         cadcraft_dxf::write_ascii_in(&tags, &code_page(d, version))
     };
-    crate::raw_preservation::RawSaveCheck::new(d, &references, crate::raw_preservation::DXF_TEXT)?.verify_dxf(&bytes)?;
+    crate::raw_preservation::RawSaveCheck::new(d, &references, crate::raw_preservation::DXF_TEXT, version)?.verify_dxf(&bytes)?;
     Ok(bytes)
 }
 
@@ -328,9 +328,7 @@ pub(crate) fn omitted_notes(d: &Drawing, target: Version) -> Vec<String> {
             notes.push(format!("MULTILEADER {}: no proxy graphics cache was written. The native MULTILEADER is preserved. An application that needs proxy graphics requires a regenerated cache to display it.", entity.handle.hex()));
         }
     }
-    if target < Version::R2013 {
-        notes.extend(crate::dxf_raw::sat_notes(d));
-    }
+    notes.extend(crate::dxf_raw::sat_notes(d, target));
     notes
 }
 
@@ -343,7 +341,7 @@ pub(crate) struct DwgBridge {
 }
 
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> DwgBridge {
-    let (mut tags, references) = tags_for(d, Version::R2000, dwg, true);
+    let (mut tags, references) = tags_for(d, Version::R2000, dwg, true, false);
     let page = cadcraft_dxf::single_byte_code_page(&d.header.str("DWGCODEPAGE", "ANSI_1252"));
     bridge_code_page(&mut tags, page);
     DwgBridge { bytes: cadcraft_dxf::ascii_to_code_page(&cadcraft_dxf::write_ascii(&tags), page), references }

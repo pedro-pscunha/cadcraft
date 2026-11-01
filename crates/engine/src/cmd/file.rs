@@ -117,6 +117,17 @@ pub fn set_write_noted(h: WriteNotedHook) {
     let _ = WRITE_NOTED.set(h);
 }
 
+/// The modeler entities whose ACIS geometry a save to a release keeps (the writer's rule, a lower layer:
+/// `cadcraft_io::modeler_geometry_kept`).
+pub type GeometryKeptHook = fn(&Drawing, Version) -> std::collections::BTreeSet<cadcraft_doc::Handle>;
+
+static GEOMETRY_KEPT: OnceLock<GeometryKeptHook> = OnceLock::new();
+
+/// Install the writer's rule for the modeler geometry a save keeps. Without it, a data store record keeps it from 2013 only.
+pub fn set_geometry_kept(h: GeometryKeptHook) {
+    let _ = GEOMETRY_KEPT.set(h);
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")
@@ -751,16 +762,19 @@ pub fn not_saved(d: &Drawing) -> std::collections::BTreeMap<String, usize> {
     not_saved_as(d, v)
 }
 
-/// Solid modeler entities whose ACIS geometry a file of AutoCAD 2013 and later keeps in its data
-/// store section, which is written back with the drawing (`Foreign::data_store`).
+/// Solid modeler entities, whose ACIS geometry a save keeps when the installed rule lists them ([`set_geometry_kept`]).
 const MODELER_TYPES: [&str; 10] =
     ["3DSOLID", "REGION", "BODY", "SURFACE", "PLANESURFACE", "EXTRUDEDSURFACE", "LOFTEDSURFACE", "REVOLVEDSURFACE", "SWEPTSURFACE", "NURBSURFACE"];
 
-/// [`not_saved`] for a file saved as `version`. From 2013 on, a modeler entity with a data-store
-/// record keeps its geometry and is not counted.
+/// [`not_saved`] for a file saved as `version`. A modeler entity whose geometry the save keeps (from 2013 its data-store record,
+/// before it the SAT text it gets) is not counted.
 pub fn not_saved_as(d: &Drawing, version: Version) -> std::collections::BTreeMap<String, usize> {
     let mut out: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    let stored = if version >= Version::R2013 { d.foreign.data_store_entities() } else { Default::default() };
+    let stored = match GEOMETRY_KEPT.get() {
+        Some(kept) => kept(d, version),
+        None if version >= Version::R2013 => d.foreign.data_store_entities(),
+        None => Default::default(),
+    };
     let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
     for e in stores.flat_map(|s| s.iter()) {
         if let cadcraft_doc::EntityKind::Unknown(u) = &e.kind {

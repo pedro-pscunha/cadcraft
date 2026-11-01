@@ -12,14 +12,21 @@ fn records(tags: &[Tag]) -> Vec<(usize, usize)> {
     starts.iter().enumerate().map(|(n, &s)| (s, starts.get(n + 1).copied().unwrap_or(tags.len()))).collect()
 }
 
-/// The first group `code` of a record, before its xdata.
+/// The first group `code` of a record, outside its application groups (102) and before its xdata.
 fn first(tags: &[Tag], (start, end): (usize, usize), code: i32) -> Option<usize> {
-    (start + 1..end).take_while(|&i| tags[i].code < 1000).find(|&i| tags[i].code == code)
+    let mut grouped = false;
+    (start + 1..end).take_while(|&i| tags[i].code < 1000).find(|&i| {
+        if tags[i].code == 102 {
+            grouped = tags[i].str().trim().starts_with('{');
+            return false;
+        }
+        !grouped && tags[i].code == code
+    })
 }
 
 /// Write every block whose name AutoCAD's DXF reader refuses as an anonymous `*U<n>` block with the lowest free numbers, and
-/// rename the INSERTs and DIMENSIONs that use it. A source can number its anonymous blocks above 2^32 (Firenze: `*U7260417301`).
-pub(super) fn anonymize_refused(tags: &mut [Tag]) {
+/// rename the records that use it. The renames, by upper-case old name (the Raw save check compares a Raw record through them). A source can number its anonymous blocks above 2^32 (Firenze: `*U7260417301`).
+pub(super) fn anonymize_refused(tags: &mut [Tag]) -> HashMap<String, String> {
     let records = records(tags);
     let kind = |tags: &[Tag], r: (usize, usize)| tags[r.0].str();
     let mut refused = Vec::new();
@@ -34,7 +41,7 @@ pub(super) fn anonymize_refused(tags: &mut [Tag]) {
         }
     }
     if refused.is_empty() {
-        return;
+        return HashMap::new();
     }
     let free = (0u64..).filter(|n| !taken.contains(n));
     let renamed: HashMap<String, String> = refused.into_iter().zip(free).map(|(old, n)| (old, format!("*U{n}"))).collect();
@@ -47,7 +54,8 @@ pub(super) fn anonymize_refused(tags: &mut [Tag]) {
     };
     for &r in &records {
         match kind(tags, r).as_str() {
-            "BLOCK_RECORD" | "INSERT" | "DIMENSION" => rename(tags, first(tags, r, 2)),
+            // The records that name a block by group 2: an insert, a table's graphics block, and every dimension's.
+            "BLOCK_RECORD" | "INSERT" | "ACAD_TABLE" | "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" => rename(tags, first(tags, r, 2)),
             "BLOCK" => {
                 let at = first(tags, r, 2);
                 if at.is_some_and(|i| renamed.contains_key(&tags[i].str().to_ascii_uppercase())) {
@@ -61,4 +69,5 @@ pub(super) fn anonymize_refused(tags: &mut [Tag]) {
             _ => {}
         }
     }
+    renamed
 }

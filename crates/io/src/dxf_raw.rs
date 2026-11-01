@@ -1513,10 +1513,10 @@ const MAX_DATA_STORE_GROUPS: usize = 1 << 26;
 /// records of entities that are no longer written. Only for files of AutoCAD 2013 and later
 /// (`modern`), whose solids, regions and bodies keep their geometry there; the DWG bridge reads it
 /// too. Nothing is written when no record's entity remains.
-pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
+pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool, binary: bool) {
     let ds = &d.foreign.data_store;
     if !modern {
-        inline_sat(tags, d);
+        inline_sat(tags, d, binary);
         return;
     }
     if ds.is_empty() {
@@ -1572,12 +1572,44 @@ pub(crate) fn data_store_sab(d: &Drawing) -> HashMap<String, Vec<u8>> {
     out
 }
 
+/// Whether a modeler record's own AcDbModelerGeometry subclass holds SAT text (a group 1 or 3 with a value): a file before R2013
+/// keeps it there. A group 70 with an empty group 1 is a placeholder (the release reform of a surface writes one) and holds none.
+fn holds_sat<S: AsRef<str>>(groups: impl IntoIterator<Item = (i32, S)>) -> bool {
+    let mut modeler = false;
+    for (code, value) in groups.into_iter().take_while(|(code, _)| *code < 1000) {
+        match code {
+            100 => modeler = value.as_ref().trim() == "AcDbModelerGeometry",
+            1 | 3 if modeler && !value.as_ref().trim().is_empty() => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// The entities of `d` that hold modeler (ACIS) data a save to `version` keeps: from R2013 the data store's, before it SAT text
+/// in the entity, its own or the data store's converted (see [`inline_sat`]).
+pub(crate) fn modeler_geometry_kept(d: &Drawing, version: cadcraft_dxf::Version) -> std::collections::BTreeSet<Handle> {
+    if version >= cadcraft_dxf::Version::R2013 {
+        return d.foreign.data_store_entities();
+    }
+    let sab = data_store_sab(d);
+    all_entities(d)
+        .filter_map(|e| if let EntityKind::Unknown(u) = &e.kind { Some((e.handle, u)) } else { None })
+        .filter(|(handle, u)| {
+            holds_sat(u.tags.iter().map(|t| (t.code, t.value.as_str())))
+                || sab.get(&norm(&handle.hex())).is_some_and(|bytes| cadcraft_dwg::sat_groups(bytes, false).is_some())
+        })
+        .map(|(handle, _)| handle)
+        .collect()
+}
+
 /// Before R2013 a solid, region or body holds its ACIS data itself, as SAT text after group 70 = 1 (DXF Reference,
 /// AcDbModelerGeometry); a file of R2013 or later keeps it in the data store, and its records carry the newer groups 290 and 2
-/// instead. Write the data store's data into each such record that is written, for a DXF and for the DWG bridge of an older
-/// release (AutoCAD LT 2025 discards a pre-2013 DXF whose modeler entity has no data: "Os dados estendidos não foram lidos").
-/// A record whose data does not convert keeps no data; [`sat_notes`] names it.
-fn inline_sat(tags: &mut Vec<Tag>, d: &Drawing) {
+/// instead. Write the data store's data into each such record that is written and holds no SAT text of its own, for a DXF and for
+/// the DWG bridge of an older release (AutoCAD LT 2025 discards a pre-2013 DXF whose modeler entity has no data: "Os dados
+/// estendidos não foram lidos"). `binary` is a binary DXF (its cipher form). A record whose data does not convert keeps none;
+/// [`sat_notes`] names it.
+fn inline_sat(tags: &mut Vec<Tag>, d: &Drawing, binary: bool) {
     let sab = data_store_sab(d);
     if sab.is_empty() {
         return;
@@ -1591,25 +1623,30 @@ fn inline_sat(tags: &mut Vec<Tag>, d: &Drawing) {
         };
         let Some(marker) = (start + 1..end).find(|&i| tags[i].code == 100 && tags[i].str().trim() == "AcDbModelerGeometry") else { continue };
         let subclass_end = (marker + 1..end).find(|&i| tags[i].code == 100 || tags[i].code >= 1000).unwrap_or(end);
-        if (marker + 1..subclass_end).any(|i| tags[i].code == 70) {
+        if holds_sat(tags[marker..subclass_end].iter().map(|t| (t.code, t.str()))) {
             continue;
         }
         let mut groups = vec![Tag::i(70, 1)];
-        groups
-            .extend(cadcraft_dwg::sat_groups(bytes).unwrap_or_else(|| vec![(1, String::new())]).into_iter().map(|(code, value)| Tag::s(code, value)));
-        let kept: Vec<Tag> = tags[marker + 1..subclass_end].iter().filter(|t| !matches!(t.code, 290 | 2)).cloned().collect();
+        groups.extend(
+            cadcraft_dwg::sat_groups(bytes, binary).unwrap_or_else(|| vec![(1, String::new())]).into_iter().map(|(code, value)| Tag::s(code, value)),
+        );
+        let kept: Vec<Tag> = tags[marker + 1..subclass_end].iter().filter(|t| !matches!(t.code, 70 | 1 | 3 | 290 | 2)).cloned().collect();
         groups.extend(kept);
         tags.splice(marker + 1..subclass_end, groups);
     }
 }
 
-/// Save notes for the modeler entities whose ACIS data a file before R2013 cannot hold (the data store's data does not convert to
-/// SAT text): they are written without their geometry.
-pub(crate) fn sat_notes(d: &Drawing) -> Vec<String> {
-    let mut notes: Vec<String> = data_store_sab(d)
-        .into_iter()
-        .filter(|(_, bytes)| cadcraft_dwg::sat_groups(bytes).is_none())
-        .map(|(handle, _)| format!("Entity {handle}: its ACIS data could not be converted to the SAT text of a file before AutoCAD 2013, so it is saved without its solid geometry. Save as AutoCAD 2013 or later to keep it."))
+/// Save notes for the modeler entities of a file before R2013 that lose their ACIS data: the data store's data does not convert to
+/// SAT text, and the entity holds none of its own.
+pub(crate) fn sat_notes(d: &Drawing, version: cadcraft_dxf::Version) -> Vec<String> {
+    let sab = data_store_sab(d);
+    if version >= cadcraft_dxf::Version::R2013 || sab.is_empty() {
+        return Vec::new();
+    }
+    let kept = modeler_geometry_kept(d, version);
+    let mut notes: Vec<String> = all_entities(d)
+        .filter(|e| matches!(e.kind, EntityKind::Unknown(_)) && sab.contains_key(&norm(&e.handle.hex())) && !kept.contains(&e.handle))
+        .map(|e| format!("Entity {}: its ACIS data could not be converted to the SAT text of a file before AutoCAD 2013, so it is saved without its solid geometry. Save as AutoCAD 2013 or later to keep it.", e.handle.hex()))
         .collect();
     notes.sort();
     notes
@@ -1695,6 +1732,8 @@ pub(crate) struct WrittenReferences {
     pub roles: BTreeMap<ForeignKey, Handle>,
     /// The writer found no handle above the ones it gave (see `dxf_write::require_handle_room`).
     pub handles_exhausted: bool,
+    /// Blocks a user DXF writes under another name (a `|` AutoCAD's DXF reader refuses): upper-case old name → new name.
+    pub block_names: BTreeMap<String, String>,
 }
 
 impl WrittenReferences {
@@ -1745,7 +1784,7 @@ impl Map<'_> {
             self.alive.iter().filter_map(|(old, new)| Some((Handle::parse_hex(old)?, Handle::parse_hex(new)?))).collect();
         handles.extend(self.f.targets.keys().filter_map(|old| Some((*old, Handle::parse_hex(&self.get(&old.hex())?)?))));
         let roles = self.roles.iter().filter_map(|(role, value)| Some((role.clone(), Handle::parse_hex(value)?))).collect();
-        WrittenReferences { handles, roles, handles_exhausted: false }
+        WrittenReferences { handles, roles, handles_exhausted: false, block_names: BTreeMap::new() }
     }
 
     fn write_record(

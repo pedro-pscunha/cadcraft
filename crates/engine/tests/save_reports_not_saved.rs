@@ -127,6 +127,6 @@ fn solids_whose_geometry_the_data_store_keeps_are_not_reported_from_2013() {
     d.foreign = std::sync::Arc::new(foreign);
     // The solid with a data store record keeps its geometry from 2013 on; the others don't.
     assert_eq!(not_saved_as(&d, Version::R2018), [("3DSOLID".to_string(), 1), ("REGION".to_string(), 1)].into_iter().collect());
-    // Before 2013 a file has no data store: every solid loses its geometry.
+    // Before 2013 a solid keeps its geometry as SAT text, which the stand-in data `00` cannot become: every solid loses it.
     assert_eq!(not_saved_as(&d, Version::R2010), [("3DSOLID".to_string(), 2), ("REGION".to_string(), 1)].into_iter().collect());
 }

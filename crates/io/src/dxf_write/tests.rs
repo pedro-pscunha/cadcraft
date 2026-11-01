@@ -583,3 +583,60 @@ fn an_old_release_dxf_leaves_out_the_mtext_fill_and_solid_groups_it_lacks() {
         assert_eq!(codes, expected, "{version:?} ARC_DIMENSION");
     }
 }
+
+/// The block an arc dimension or a large radial dimension draws (its group 2) is renamed with the block it names.
+#[test]
+fn a_renamed_block_is_renamed_in_the_dimensions_that_draw_it() {
+    let text = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n70\n1\n\
+                0\nBLOCK_RECORD\n5\n40\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\nA|B\n0\nENDTAB\n0\nENDSEC\n\
+                0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n41\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nA|B\n70\n0\n10\n0\n20\n0\n30\n0\n3\nA|B\n1\n\n\
+                0\nLINE\n5\n42\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n\
+                0\nENDBLK\n5\n43\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
+                0\nARC_DIMENSION\n5\n50\n100\nAcDbEntity\n8\n0\n100\nAcDbDimension\n2\nA|B\n10\n0\n20\n0\n30\n0\n11\n0\n21\n0\n31\n0\n70\n37\n71\n5\n42\n1\n3\nStandard\n100\nAcDbArcDimension\n13\n0\n23\n0\n33\n0\n14\n1\n24\n0\n34\n0\n15\n0\n25\n1\n35\n0\n70\n0\n40\n0\n41\n0\n71\n0\n0\nENDSEC\n0\nEOF\n";
+    let d = crate::read_dxf(text.as_bytes()).unwrap();
+    let public = tags(&d, Version::R2018);
+    let name = |kind: &str| {
+        cadcraft_dxf::records(&public).into_iter().find(|(k, _)| k == kind).and_then(|(_, t)| t.iter().find(|t| t.code == 2).map(Tag::str))
+    };
+    let renamed = cadcraft_dxf::records(&public)
+        .into_iter()
+        .filter(|(k, _)| k == "BLOCK_RECORD")
+        .filter_map(|(_, t)| t.iter().find(|t| t.code == 2).map(Tag::str))
+        .find(|n| n.starts_with("*U"));
+    assert!(renamed.is_some(), "the block is renamed");
+    assert_eq!(name("ARC_DIMENSION"), renamed, "the arc dimension names the renamed block");
+}
+
+/// A Raw record goes through the same export rules as the others: an R2000 DXF save leaves out a Raw MTEXT's fill and writes a Raw
+/// INSERT of a renamed block with its new name, and the Raw save check compares it through those rules (the save succeeds).
+#[test]
+fn raw_records_take_the_release_rules_and_block_renames_through_the_save_check() {
+    use crate::activation::{Family, FamilySet, Need, ReaderMode, ReaderPolicy};
+    let text = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1032\n9\n$HANDSEED\n5\n100\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n70\n1\n\
+                0\nBLOCK_RECORD\n5\n40\n330\n0\n100\nAcDbSymbolTableRecord\n100\nAcDbBlockTableRecord\n2\nA|B\n0\nENDTAB\n0\nENDSEC\n\
+                0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n5\n41\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockBegin\n2\nA|B\n70\n0\n10\n0\n20\n0\n30\n0\n3\nA|B\n1\n\n\
+                0\nLINE\n5\n42\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n0\n30\n0\n11\n1\n21\n0\n31\n0\n\
+                0\nENDBLK\n5\n43\n330\n40\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockEnd\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n\
+                0\nINSERT\n5\n50\n100\nAcDbEntity\n8\n0\n100\nAcDbBlockReference\n2\nA|B\n10\n0\n20\n0\n30\n0\n\
+                0\nMTEXT\n5\n51\n100\nAcDbEntity\n8\n0\n100\nAcDbMText\n10\n0\n20\n0\n30\n0\n40\n1\n41\n10\n71\n1\n72\n1\n1\nFILL\n73\n1\n44\n1\n90\n17\n63\n5\n45\n1.5\n441\n0\n\
+                0\nENDSEC\n0\nEOF\n";
+    let need = |view: &crate::activation::records::RecordView| {
+        if matches!(view.family, Family::Insert | Family::MText) { Need::Needs { readable: true } } else { Need::Plain }
+    };
+    let policy = ReaderPolicy::new(ReaderMode::Off, FamilySet::NONE).with_raw_path();
+    let d = crate::read_with_need(text.as_bytes(), "source.dxf", policy, &need).unwrap();
+    assert_eq!(d.model.iter().filter(|e| matches!(e.kind, EntityKind::Raw(_))).count(), 2, "both records are Raw");
+    for (version, fill) in
+        [(Version::R2000, vec![]), (Version::R2010, vec![(90, "1".to_string()), (63, "5".into()), (45, "1.5".into()), (441, "0".into())])]
+    {
+        let options = crate::SaveOptions { version: Some(version), binary: false };
+        let bytes = crate::write_with(&d, "x.dxf", &options).unwrap_or_else(|e| panic!("{version:?}: {e}"));
+        let tags = cadcraft_dxf::parse(&bytes).unwrap();
+        let record = |kind: &str| cadcraft_dxf::records(&tags).into_iter().find(|(k, _)| k == kind).map(|(_, t)| t).unwrap();
+        let got: Vec<(i32, String)> =
+            record("MTEXT").iter().filter(|t| matches!(t.code, 90 | 63 | 421 | 45 | 441)).map(|t| (t.code, t.str().trim().to_string())).collect();
+        assert_eq!(got, fill, "{version:?} MTEXT fill");
+        let insert = record("INSERT").iter().find(|t| t.code == 2).map(Tag::str).unwrap();
+        assert!(insert.starts_with("*U"), "{version:?}: the INSERT names the renamed block, not {insert}");
+    }
+}

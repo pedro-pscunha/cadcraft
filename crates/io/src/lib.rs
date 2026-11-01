@@ -204,7 +204,7 @@ fn write_dwg_with(
     raw_preservation::preflight(drawing)?;
     let bridge = dxf_write::dwg_bridge(drawing, version);
     dxf_write::require_handle_room(&bridge.references)?;
-    let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references, version)?;
+    let check = raw_preservation::RawSaveCheck::new(drawing, &bridge.references, version, raw_preservation::DXF_TEXT)?;
     let page = drawing.header.str("DWGCODEPAGE", "ANSI_1252");
     let page = page.trim();
     let source_page = (!page.is_empty() && page.is_ascii() && page.len() <= 32).then_some(page);
@@ -298,6 +298,12 @@ pub fn png_view(extents: &Bounds2, width: u32, height: u32, window: Option<Bound
         Some(w) => cadcraft_render::raster::View::fit(&w, width, height, 0.0),
         None => cadcraft_render::raster::View::fit(extents, width, height, 0.05),
     }
+}
+
+/// The modeler entities (3D solids, regions, bodies, surfaces) whose ACIS data a save to `version` keeps: from R2013 those with a
+/// data store record, before R2013 those whose data becomes the SAT text of the entity.
+pub fn modeler_geometry_kept(d: &Drawing, version: Version) -> std::collections::BTreeSet<cadcraft_doc::Handle> {
+    dxf_raw::modeler_geometry_kept(d, version)
 }
 
 pub fn read_dxf(bytes: &[u8]) -> Result<Drawing> {

@@ -1057,7 +1057,14 @@ fn block_slots(
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
 /// file ends up in: `version`, or the DWG version the bridge writes) has.
-pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridge: bool) -> (Vec<Tag>, crate::dxf_raw::WrittenReferences) {
+/// `binary` is a binary DXF save (the SAT text of a modeler entity before R2013 has its cipher form).
+pub(super) fn tags_for(
+    d: &Drawing,
+    version: Version,
+    target: Version,
+    dwg_bridge: bool,
+    binary: bool,
+) -> (Vec<Tag>, crate::dxf_raw::WrittenReferences) {
     let (committed, unrepairable) = written_drawing(d);
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
@@ -1407,9 +1414,9 @@ pub(super) fn tags_for(d: &Drawing, version: Version, target: Version, dwg_bridg
     crate::dxf_raw::order_image_definition_reactors(&mut w.t, d);
     crate::dxf_raw::list_dim_styles(&mut w.t, d);
     // After the handles are the file's: the data store's records name their owners (the layouts, the solids) by the file's handles.
-    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
+    crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013, binary);
     if !dwg_bridge {
-        super::block_names::anonymize_refused(&mut w.t);
+        references.block_names = super::block_names::anonymize_refused(&mut w.t).into_iter().collect();
         super::release_groups::strip(&mut w.t, target);
     }
     // The next handle is above every handle written and the drawing's own next handle (the file's `$HANDSEED`: the handles between

@@ -273,3 +273,50 @@ pub(crate) fn default_value(kind: &str, field: &Field, source: &Fields) -> Optio
         _ => None,
     }
 }
+
+/// A record's fields as a user DXF of `release` writes them (`dxf_write::release_groups`, `dxf_write::block_names`): the groups of
+/// newer releases left out, an MTEXT fill's flags as that release holds them, and a renamed block's new name where a record names
+/// it by group 2. Applied to the source and to the decode alike, so a Raw record compares through the same export rules.
+pub(crate) fn for_dxf_release(fields: Fields, kind: &str, release: Version, block_names: &BTreeMap<String, String>) -> Fields {
+    use crate::dxf_write::release_groups::{holds, mtext_fill, mtext_fill_colour};
+    let own = |field: &Field, class: &str| field.class == class && field.groups.is_empty() && field.application.is_none() && field.embedded == 0;
+    let flags = if kind == "MTEXT" {
+        fields.iter().find(|(field, _)| own(field, "AcDbMText") && field.code == 90).and_then(|(_, value)| match value {
+            Value::Integer(flags) => Some(mtext_fill(*flags, release)),
+            _ => None,
+        })
+    } else {
+        None
+    };
+    let colour = flags.is_none_or(|flags| mtext_fill_colour(flags, release));
+    let names_block = |field: &Field| {
+        field.code == 2
+            && match kind {
+                "INSERT" | "ACAD_TABLE" => own(field, "AcDbBlockReference"),
+                "DIMENSION" | "ARC_DIMENSION" | "LARGE_RADIAL_DIMENSION" => own(field, "AcDbDimension"),
+                _ => false,
+            }
+    };
+    fields
+        .into_iter()
+        .filter_map(|(field, value)| {
+            if kind == "MTEXT" && own(&field, "AcDbMText") {
+                match field.code {
+                    90 => return flags.filter(|flags| *flags != 0).map(|flags| (field, Value::Integer(flags))),
+                    63 | 421 | 45 | 441 if !colour => return None,
+                    _ => {}
+                }
+            }
+            if field.application.is_none() && !holds(kind, &field.class, field.code, release) {
+                return None;
+            }
+            let value = match &value {
+                Value::Text(name) if names_block(&field) => {
+                    block_names.get(&name.to_ascii_uppercase()).map_or(value.clone(), |new| Value::Text(new.clone()))
+                }
+                _ => value,
+            };
+            Some((field, value))
+        })
+        .collect()
+}

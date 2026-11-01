@@ -156,6 +156,9 @@ fn a_file_before_2013_holds_the_data_store_data_in_the_solid() {
         }
         assert!(!String::from_utf8_lossy(&bytes).contains("ACDSDATA"), "{version:?}");
     }
+    // The save reports no loss for them (the engine's not-saved list reads the same rule).
+    let both: std::collections::BTreeSet<_> = d.model.iter().map(|e| e.handle).collect();
+    assert_eq!(cadcraft_io::modeler_geometry_kept(&d, cadcraft_io::Version::R2010), both);
     let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false };
     let dwg = cadcraft_io::write_with(&d, "x.dwg", &options).unwrap();
     let stored = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
@@ -167,8 +170,68 @@ fn a_file_before_2013_holds_the_data_store_data_in_the_solid() {
 /// Data that does not read as ACIS cannot become SAT text: the solid is written without it, and the save says so.
 #[test]
 fn data_that_does_not_convert_is_named_in_a_save_note() {
-    let d = cadcraft_io::read_dxf(dxf().as_bytes()).unwrap();
+    let mut d = cadcraft_io::read_dxf(dxf().as_bytes()).unwrap();
     let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2000), binary: false };
     let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &options).unwrap();
     assert_eq!(notes.iter().filter(|n| n.contains("ACIS data could not be converted")).count(), 2, "{notes:?}");
+    // A deleted solid is not written, so no note names it (its data store record stays until the save leaves it out).
+    let h = d.model.iter().find(|e| e.handle.hex() == "2B").map(|e| e.handle).unwrap();
+    d.remove_entity(h).unwrap();
+    let (_, notes) = cadcraft_io::write_with_noted(&d, "x.dxf", &options).unwrap();
+    let named: Vec<&String> = notes.iter().filter(|n| n.contains("ACIS data could not be converted")).collect();
+    assert_eq!(named.len(), 1, "{notes:?}");
+    assert!(named[0].contains("Entity 2A"), "{named:?}");
+}
+
+/// A binary DXF writes the SAT cipher without the space an ASCII DXF puts after each ciphered `A` (a caret there escapes the next
+/// character): the binary reader takes every byte as it is.
+#[test]
+fn a_binary_dxf_before_2013_holds_the_binary_cipher_form() {
+    let sab = cube_sab_hex();
+    let source = dxf().replace(SAB_HEX, &sab).replace(&format!("94\n{}\n", SAB_HEX.len() / 2), &format!("94\n{}\n", sab.len() / 2));
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: true };
+    let bytes = cadcraft_io::write_with(&d, "x.dxf", &options).unwrap();
+    let tags = cadcraft_dxf::parse(&bytes).unwrap();
+    let solid = cadcraft_dxf::records(&tags).into_iter().find(|(k, _)| k == "3DSOLID").map(|(_, t)| t).unwrap();
+    let ascii =
+        cadcraft_io::write_with(&d, "x.dxf", &cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false }).unwrap();
+    let ascii_solid = cadcraft_dxf::records(&cadcraft_dxf::parse(&ascii).unwrap()).into_iter().find(|(k, _)| k == "3DSOLID").map(|(_, t)| t).unwrap();
+    let last = |t: &[cadcraft_dxf::Tag]| t.iter().filter(|t| t.code == 1).next_back().map(|t| t.str()).unwrap();
+    // The terminator End-of-ACIS-data has one A: ciphered `^` with the protective space in ASCII, without it in binary.
+    assert_eq!(last(&ascii_solid).matches("^ ").count(), 1);
+    assert_eq!(last(&solid).matches("^ ").count(), 0);
+    assert_eq!(last(&solid).len() + 1, last(&ascii_solid).len());
+}
+
+/// A record that holds a placeholder (group 70 with an empty group 1, what the release reform of a surface writes without the data
+/// store) gets the data store's SAT text; one with SAT text of its own keeps it.
+#[test]
+fn a_placeholder_gets_the_data_store_data_and_own_sat_text_stays() {
+    let sab = cube_sab_hex();
+    let solid = |h: &str, sat: &str| format!("0\nREGION\n5\n{h}\n330\n1F\n100\nAcDbEntity\n8\n0\n100\nAcDbModelerGeometry\n70\n1\n1\n{sat}\n");
+    let record =
+        |h: &str| format!("0\nACDSRECORD\n90\n1\n2\nAcDbDs::ID\n280\n10\n320\n{h}\n2\nASM_Data\n280\n15\n94\n{}\n310\n{sab}\n", sab.len() / 2);
+    let source = format!(
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1024\n9\n$HANDSEED\n5\n100\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{}{}0\nENDSEC\n\
+         0\nSECTION\n2\nOBJECTS\n0\nDICTIONARY\n5\nC\n330\n0\n100\nAcDbDictionary\n0\nENDSEC\n\
+         0\nSECTION\n2\nACDSDATA\n70\n2\n71\n2\n0\nACDSSCHEMA\n90\n1\n1\nAcDb3DSolid_ASM_Data\n2\nAcDbDs::ID\n280\n10\n91\n8\n2\nASM_Data\n280\n15\n91\n0\n{}{}0\nENDSEC\n0\nEOF\n",
+        solid("2A", ""),
+        solid("2B", "own text"),
+        record("2A"),
+        record("2B")
+    );
+    let d = cadcraft_io::read_dxf(source.as_bytes()).unwrap();
+    let options = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2010), binary: false };
+    let tags = cadcraft_dxf::parse(&cadcraft_io::write_with(&d, "x.dxf", &options).unwrap()).unwrap();
+    let lines = |handle: &str| -> Vec<String> {
+        cadcraft_dxf::records(&tags)
+            .into_iter()
+            .find(|(k, t)| k == "REGION" && t.iter().any(|t| t.code == 5 && t.str() == handle))
+            .map(|(_, t)| t.iter().filter(|t| t.code == 1).map(|t| t.str()).collect())
+            .unwrap()
+    };
+    let decoded: Vec<String> = lines("2A").iter().map(|l| acadrust::entities::AcisData::decode_sat(l)).collect();
+    assert_eq!(decoded.last().map(String::as_str), Some("End-of-ACIS-data"), "{decoded:?}");
+    assert_eq!(lines("2B"), ["own text"]);
 }

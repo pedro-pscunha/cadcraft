@@ -684,10 +684,10 @@ mod native {
 
     /// The groups 1 and 3 that hold `sab`, the ACIS binary data of a data store record (R2013 and later), in a DXF before R2013,
     /// where a solid, region or body carries its data itself after group 70 = 1: SAT text converted token for token, ciphered.
-    /// `None` when the data does not read.
-    pub fn sat_groups(sab: &[u8]) -> Option<Vec<(i32, String)>> {
+    /// `binary` is a binary DXF, whose cipher has no protective space after an `A`. `None` when the data does not read.
+    pub fn sat_groups(sab: &[u8], binary: bool) -> Option<Vec<(i32, String)>> {
         acadrust::entities::acis::SabReader::read(sab).ok()?;
-        Some(acadrust::entities::AcisData::from_sab(sab.to_vec()).dxf_sat_groups(false))
+        Some(acadrust::entities::AcisData::from_sab(sab.to_vec()).dxf_sat_groups(binary))
     }
 
     /// Oldest DWG version written; older DXF input is written as this version.
@@ -970,7 +970,7 @@ pub fn reform_object(_kind: &str, _tags: &[(i32, String)], _from: &str, _to: &st
     None
 }
 #[cfg(no_dwg_bridge)]
-pub fn sat_groups(_sab: &[u8]) -> Option<Vec<(i32, String)>> {
+pub fn sat_groups(_sab: &[u8], _binary: bool) -> Option<Vec<(i32, String)>> {
     None
 }
 #[cfg(no_dwg_bridge)]
