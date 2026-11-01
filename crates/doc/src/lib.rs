@@ -34,7 +34,7 @@ pub use cadcraft_color as color;
 pub use cadcraft_geom as geom;
 pub use constraint::*;
 pub use entity::*;
-pub use extents::{MAX_BLOCK_DEPTH, legacy_entity_bounds};
+pub use extents::{MAX_BLOCK_DEPTH, legacy_entity_bounds, legacy_extent_bounds};
 pub use family::{Family, FamilySet};
 pub use finite::has_finite_numbers;
 pub use format::Format;
@@ -531,6 +531,12 @@ impl Drawing {
     /// Whether ISOLATEOBJECTS / HIDEOBJECTS hid `h` for this session.
     pub fn is_hidden_object(&self, h: Handle) -> bool {
         !self.hidden_objects.is_empty() && self.hidden_objects.contains(&h)
+    }
+
+    /// Whether an entity counts in the extents: as AutoCAD 2024 counts it for ZOOM Extents and
+    /// EXTMIN/EXTMAX, on a layer that is off too, but not on a frozen one.
+    pub fn in_extents(&self, e: &Entity) -> bool {
+        e.common.visible && self.layer(&e.common.layer).is_none_or(|l| !l.frozen) && !self.is_hidden_object(e.handle)
     }
 
     /// Total entity count across model and paper space.

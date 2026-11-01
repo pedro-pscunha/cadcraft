@@ -201,13 +201,13 @@ pub(crate) fn insert(s: &mut Session, name: &str, at: Vec2, scale: f64, rotation
     insert_with(s, name, at, Vec2::new(scale, scale), rotation, None, values)
 }
 
-/// The block reference INSERT places: X/Y scale factors, and an optional base point (in block
+/// The block reference INSERT places: X/Y/Z scale factors, and an optional base point (in block
 /// coordinates) that lands on `at` instead of the block's own base point.
-fn insert_entity(blk: &Block, at: Vec2, scale: Vec2, rotation: f64, base: Option<Vec2>) -> Insert {
+fn insert_entity(blk: &Block, at: Vec2, scale: Vec3, rotation: f64, base: Option<Vec2>) -> Insert {
     let mut ins = Insert {
         block: blk.name.clone(),
         insert: v3(at),
-        scale: Vec3::new(scale.x, scale.y, scale.x),
+        scale,
         rotation,
         attribs: Vec::new(),
         cols: 1,
@@ -222,12 +222,26 @@ fn insert_entity(blk: &Block, at: Vec2, scale: Vec2, rotation: f64, base: Option
     ins
 }
 
-/// [`insert`] with separate X/Y scale factors and an optional base point (see [`insert_entity`]).
+/// [`insert`] with separate X/Y scale factors (Z as X) and an optional base point (see
+/// [`insert_entity`]).
 pub(crate) fn insert_with(
     s: &mut Session,
     name: &str,
     at: Vec2,
     scale: Vec2,
+    rotation: f64,
+    base: Option<Vec2>,
+    values: &serde_json::Map<String, Value>,
+) -> Result<Handle> {
+    insert_scaled(s, name, at, Vec3::new(scale.x, scale.y, scale.x), rotation, base, values)
+}
+
+/// [`insert_with`] with a Z scale factor of its own.
+fn insert_scaled(
+    s: &mut Session,
+    name: &str,
+    at: Vec2,
+    scale: Vec3,
     rotation: f64,
     base: Option<Vec2>,
     values: &serde_json::Map<String, Value>,
@@ -280,7 +294,7 @@ fn run_block(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "block": name, "insert": r.map(|h| h.hex()) }))
 }
 
-fn check_exploded_insert(s: &Session, name: &str, at: Vec2, scale: Vec2, rotation: f64, base: Option<Vec2>) -> Result<()> {
+fn check_exploded_insert(s: &Session, name: &str, at: Vec2, scale: Vec3, rotation: f64, base: Option<Vec2>) -> Result<()> {
     let d = s.doc()?;
     let block = d.block(name).ok_or_else(|| bad("insert", format!("Block \"{name}\" not found.")))?;
     let insert = insert_entity(block, at, scale, rotation, base);
@@ -315,7 +329,7 @@ fn insert_params(s: &mut Session, p: &Value) -> Result<Value> {
     let rot = f64_or(p, "rotation", 0.0).to_radians();
     let vals = p.get("attribs").and_then(Value::as_object).cloned().unwrap_or_default();
     if bool_or(p, "explode", false) {
-        check_exploded_insert(s, &name, at, scale, rot, point_param(p, "basePoint"))?;
+        check_exploded_insert(s, &name, at, Vec3::new(scale.x, scale.y, scale.x), rot, point_param(p, "basePoint"))?;
     }
     let h = insert_with(s, &name, at, scale, rot, point_param(p, "basePoint"), &vals)?;
     if bool_or(p, "explode", false) {
@@ -381,8 +395,17 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
             .collect::<cadcraft_doc::Result<Vec<_>>>()?
     };
     let mut d = super::clipboard::defs_for(src, &ents);
-    let defaults = cadcraft_doc::Drawing::new_imperial();
-    d.header = defaults.header.clone();
+    let mut defaults = cadcraft_doc::Drawing::new_imperial();
+    // The source's active and standard styles keep their values, not the imperial template's.
+    defaults.text_styles = src.text_styles.clone();
+    defaults.dim_styles = src.dim_styles.clone();
+    defaults.mleader_styles = src.mleader_styles.clone();
+    defaults.table_styles = src.table_styles.clone();
+    defaults.mline_styles = src.mline_styles.clone();
+    defaults.linetypes = src.linetypes.clone();
+    // Keep the source header and scales while filtering blocks and foreign objects through the export graph.
+    d.scales = src.scales.clone();
+    d.header.set("INSBASE", cadcraft_doc::HVal::Point(Vec3::ZERO));
     d.layouts = defaults.layouts.clone();
     d.handseed = src.handseed;
     d.foreign = src.foreign.clone();
@@ -392,12 +415,12 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
         }
         d.model.push(entity);
     }
+    // Keep source styles before the export graph collects their owned metadata and dependencies.
+    let _ = super::clipboard::merge(&mut d, &defaults, cadcraft_doc::DuplicationSource::OtherDrawing)?;
     d.prepare_export(str_param(p, "name"));
     if let Some(name) = str_param(p, "name") {
         d.rename_block_foreign_records(name, "*Model_Space");
     }
-    // New databases keep their standard symbols, without importing unused source definitions.
-    let _ = super::clipboard::merge(&mut d, &defaults, cadcraft_doc::DuplicationSource::OtherDrawing)?;
     let (bytes, notes) = super::file::write_document(&d, "wblock", &path, &super::file::SaveAs::default())?;
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;
@@ -578,17 +601,23 @@ enum InsStage {
     /// A file whose block already exists: redefine it from the file?
     Redefine,
     Point,
-    /// Basepoint: a new base point, picked on the block shown at its definition position.
+    /// Basepoint: a new base point, picked on the block dropped where it was (at the cursor).
     BasePoint,
     /// Scale preset before the insertion point.
     PresetScale,
+    /// X, Y or Z scale preset (0, 1, 2) before the insertion point: that axis alone.
+    PresetAxis(usize),
     /// Rotate preset before the insertion point.
     PresetRotation,
     XScale,
     Corner,
     YScale,
+    /// XYZ: the Z scale factor, after X and Y.
+    ZScale,
     Rotation,
     Attribs,
+    /// A Verify attribute asked again.
+    Verify,
 }
 
 #[derive(Default)]
@@ -599,9 +628,21 @@ struct InsertM {
     base: Option<Vec2>,
     x_scale: Option<f64>,
     scale: Option<Vec2>,
+    /// The Z scale factor when given (a preset or XYZ); otherwise the X factor's size. AutoCAD
+    /// keeps a Z factor typed at XYZ's Z prompt as given, and stores the size of any other.
+    z_scale: Option<f64>,
+    /// X/Y/Z presets given so far.
+    axes: [Option<f64>; 3],
+    /// XYZ at the X scale prompt: X, Y and Z are asked in turn.
+    xyz: bool,
+    /// Where the block was dropped to pick a Basepoint on it.
+    dropped: Option<Vec2>,
     rotation: Option<f64>,
-    attdefs: Vec<(String, String, String)>,
+    /// The attributes asked for: tag, prompt, default value, and Verify (asked again).
+    attdefs: Vec<(String, String, String, bool)>,
     values: serde_json::Map<String, Value>,
+    /// Verify attributes asked again so far.
+    verified: usize,
     /// `*name`: insert the block's objects (one uniform scale factor, no attribute values).
     explode: bool,
     /// The file waiting for the Redefine answer.
@@ -618,14 +659,25 @@ impl InsertM {
         } else {
             InsStage::Attribs
         };
+        if self.stage == InsStage::Attribs && self.values.is_empty() && !self.attdefs.is_empty() {
+            s.echo("Enter attribute values");
+        }
+        // Then the Verify attributes are asked again, with the values typed.
+        if self.stage == InsStage::Attribs && self.values.len() >= self.attdefs.len() && self.verified < self.verifying().len() {
+            if self.verified == 0 {
+                s.echo("Verify attribute values");
+            }
+            self.stage = InsStage::Verify;
+            return Ok(Step::Continue);
+        }
         if self.stage == InsStage::Attribs
             && self.values.len() >= self.attdefs.len()
             && let (Some(n), Some(a), Some(sc), Some(r)) = (self.name.clone(), self.at, self.scale, self.rotation)
         {
             if self.explode {
-                check_exploded_insert(s, &n, a, sc, r, self.base)?;
+                check_exploded_insert(s, &n, a, self.scale3(sc), r, self.base)?;
             }
-            let h = insert_with(s, &n, a, sc, r, self.base, &self.values)?;
+            let h = insert_scaled(s, &n, a, self.scale3(sc), r, self.base, &self.values)?;
             if self.explode {
                 insert_file::explode_insert(s, h)?;
             }
@@ -634,20 +686,26 @@ impl InsertM {
         Ok(Step::Continue)
     }
 
-    /// Block `name` chosen: collect its attribute prompts and ask for the insertion point.
+    /// The Verify attributes asked for.
+    fn verifying(&self) -> Vec<&(String, String, String, bool)> {
+        self.attdefs.iter().filter(|a| a.3).collect()
+    }
+
+    /// Block `name` chosen: collect its attribute prompts and ask for the insertion point. Constant
+    /// and Preset attributes take their values without asking, and so do all of them with ATTREQ 0.
     fn choose(&mut self, s: &mut Session, name: &str) -> Result<()> {
         let Some(b) = s.doc()?.block(name).cloned() else {
             s.echo(format!("Block \"{name}\" not found."));
             return Ok(());
         };
-        self.attdefs = if self.explode {
+        self.attdefs = if self.explode || !s.settings.attreq {
             Vec::new()
         } else {
             b.entities
                 .iter()
                 .filter_map(|e| {
                     if let EntityKind::AttDef(a) = &e.kind {
-                        (!a.constant).then(|| (a.tag.clone(), a.prompt.clone(), a.text.value.clone()))
+                        (!a.constant && !a.modes.preset).then(|| (a.tag.clone(), a.prompt.clone(), a.text.value.clone(), a.modes.verify))
                     } else {
                         None
                     }
@@ -669,6 +727,23 @@ impl InsertM {
                 Ok(())
             }
         }
+    }
+
+    /// X/Y scale factors with Z: as given, else the X factor's size (AutoCAD 2024: X -1 with Y
+    /// as X stores Z +1).
+    /// X and Y from a corner: XYZ still asks Z, which defaults to the size of X.
+    fn corner_scale(&mut self, s: &mut Session, sc: Vec2) -> Result<Step> {
+        self.scale = Some(sc);
+        if self.xyz {
+            self.x_scale = Some(sc.x);
+            self.stage = InsStage::ZScale;
+            return Ok(Step::Continue);
+        }
+        self.advance(s)
+    }
+
+    fn scale3(&self, sc: Vec2) -> Vec3 {
+        Vec3::new(sc.x, sc.y, self.z_scale.unwrap_or(sc.x.abs()))
     }
 
     /// Scale factors from an opposite corner: the X and Y distances from the insertion point.
@@ -701,19 +776,27 @@ impl Interactive for InsertM {
                 let name = self.file.as_ref().map(|f| f.name.clone()).unwrap_or_default();
                 Prompt::new(format!("Block \"{name}\" already exists. Redefine it?"), super::curves::KW).kw(&["Yes", "No"]).default("N")
             }
-            InsStage::Point => Prompt::new("Specify insertion point", Accept::POINT).kw(&["Basepoint", "Scale", "Rotate"]),
+            InsStage::Point => Prompt::new("Specify insertion point", Accept::POINT).kw(&["Basepoint", "Scale", "X", "Y", "Z", "Rotate"]),
             InsStage::BasePoint => Prompt::new("Specify base point", Accept::POINT),
             InsStage::PresetScale => Prompt::new("Specify scale factor for XYZ axes", Accept::NUMBER).default("1"),
+            InsStage::PresetAxis(i) => Prompt::new(format!("Specify {} scale factor", ["X", "Y", "Z"][i.min(2)]), Accept::NUMBER).default("1"),
             InsStage::PresetRotation => Prompt::new("Specify rotation angle", Accept::NUMBER).default("0"),
+            InsStage::XScale if self.xyz => Prompt::new("Specify X scale factor", Accept::POINT_OR_NUMBER).kw(&["Corner"]).default("1").base(at),
             InsStage::XScale => {
-                Prompt::new("Enter X scale factor, specify opposite corner", Accept::POINT_OR_NUMBER).kw(&["Corner"]).default("1").base(at)
+                Prompt::new("Enter X scale factor, specify opposite corner", Accept::POINT_OR_NUMBER).kw(&["Corner", "XYZ"]).default("1").base(at)
             }
             InsStage::Corner => Prompt::new("Specify opposite corner", Accept::POINT).base(at),
             InsStage::YScale => Prompt::new("Enter Y scale factor", Accept::NUMBER).default("use X scale factor"),
+            InsStage::ZScale => Prompt::new("Specify Z scale factor or", Accept::NUMBER).default("use X scale factor"),
             InsStage::Rotation => Prompt::new("Specify rotation angle", Accept::POINT_OR_NUMBER).default("0").base(at),
             InsStage::Attribs => {
-                let (_, prompt, default) = self.attdefs.get(self.values.len()).cloned().unwrap_or_default();
+                let (_, prompt, default, _) = self.attdefs.get(self.values.len()).cloned().unwrap_or_default();
                 Prompt::new(if prompt.is_empty() { "Enter attribute value".into() } else { prompt }, Accept::TEXT).default(default)
+            }
+            InsStage::Verify => {
+                let (tag, prompt) = self.verifying().get(self.verified).map(|a| (a.0.clone(), a.1.clone())).unwrap_or_default();
+                let typed = self.values.get(&tag).and_then(Value::as_str).unwrap_or_default().to_string();
+                Prompt::new(if prompt.is_empty() { "Enter attribute value".into() } else { prompt }, Accept::TEXT).default(typed)
             }
         }
     }
@@ -757,14 +840,25 @@ impl Interactive for InsertM {
                     self.at = Some(p);
                     return self.advance(s);
                 }
-                Input::Keyword(k) if k == "Basepoint" => self.stage = InsStage::BasePoint,
+                Input::Keyword(k) if k == "Basepoint" => {
+                    // AutoCAD drops the block where it is being dragged, at the cursor (the origin
+                    // in a script: 2024 inserted (15, 5) for base point (612350.678, 2398770.432)
+                    // and insertion point (612365.678, 2398775.432)).
+                    self.dropped = Some(s.cursor);
+                    self.stage = InsStage::BasePoint;
+                }
                 Input::Keyword(k) if k == "Scale" => self.stage = InsStage::PresetScale,
+                Input::Keyword(k) if k == "X" => self.stage = InsStage::PresetAxis(0),
+                Input::Keyword(k) if k == "Y" => self.stage = InsStage::PresetAxis(1),
+                Input::Keyword(k) if k == "Z" => self.stage = InsStage::PresetAxis(2),
                 Input::Keyword(k) if k == "Rotate" => self.stage = InsStage::PresetRotation,
                 _ => {}
             },
             InsStage::BasePoint => {
                 if let Input::Point(p) = i {
-                    self.base = Some(p);
+                    // From the dropped block to its own coordinates.
+                    let def = s.doc()?.block(self.name.as_deref().unwrap_or_default()).map_or(Vec2::ZERO, |b| b.base.xy());
+                    self.base = Some(def + (p - self.dropped.unwrap_or(def)));
                     self.stage = InsStage::Point;
                 }
             }
@@ -775,10 +869,28 @@ impl Interactive for InsertM {
                     _ => return Ok(Step::Continue),
                 };
                 self.scale = Some(Vec2::new(f, f));
+                self.z_scale = Some(f.abs());
+                // An axis preset after it changes that axis alone (Scale -3 then X 2: 2/-3/3).
+                self.axes = [Some(f), Some(f), Some(f.abs())];
                 // Exploded insertion asks its one scale factor after the insertion point.
                 if self.at.is_some() {
                     return self.advance(s);
                 }
+                self.stage = InsStage::Point;
+            }
+            // One axis preset: the others are 1, and no scale factors are asked after the point.
+            InsStage::PresetAxis(ax) => {
+                let f = match i {
+                    Input::Text(t) => nonzero(&t)?,
+                    Input::Enter => 1.0,
+                    _ => return Ok(Step::Continue),
+                };
+                if let Some(a) = self.axes.get_mut(ax) {
+                    *a = Some(f);
+                }
+                let [x, y, z] = self.axes.map(|a| a.unwrap_or(1.0));
+                self.scale = Some(Vec2::new(x, y));
+                self.z_scale = Some(z.abs());
                 self.stage = InsStage::Point;
             }
             InsStage::PresetRotation => {
@@ -791,9 +903,10 @@ impl Interactive for InsertM {
             }
             InsStage::XScale => match i {
                 Input::Keyword(k) if k == "Corner" => self.stage = InsStage::Corner,
+                Input::Keyword(k) if k == "XYZ" => self.xyz = true,
                 Input::Point(p) => {
-                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p)?);
-                    return self.advance(s);
+                    let sc = Self::corner(self.at.unwrap_or_default(), p)?;
+                    return self.corner_scale(s, sc);
                 }
                 Input::Text(t) => {
                     self.x_scale = Some(nonzero(&t)?);
@@ -807,8 +920,8 @@ impl Interactive for InsertM {
             },
             InsStage::Corner => {
                 if let Input::Point(p) = i {
-                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p)?);
-                    return self.advance(s);
+                    let sc = Self::corner(self.at.unwrap_or_default(), p)?;
+                    return self.corner_scale(s, sc);
                 }
             }
             InsStage::YScale => {
@@ -819,6 +932,18 @@ impl Interactive for InsertM {
                     _ => return Ok(Step::Continue),
                 };
                 self.scale = Some(Vec2::new(x, y));
+                if self.xyz {
+                    self.stage = InsStage::ZScale;
+                    return Ok(Step::Continue);
+                }
+                return self.advance(s);
+            }
+            InsStage::ZScale => {
+                self.z_scale = Some(match i {
+                    Input::Text(t) => nonzero(&t)?,
+                    Input::Enter => self.x_scale.unwrap_or(1.0).abs(),
+                    _ => return Ok(Step::Continue),
+                });
                 return self.advance(s);
             }
             InsStage::Rotation => {
@@ -831,12 +956,26 @@ impl Interactive for InsertM {
                 return self.advance(s);
             }
             InsStage::Attribs => {
-                let (tag, _, default) = self.attdefs.get(self.values.len()).cloned().unwrap_or_default();
+                let (tag, _, default, _) = self.attdefs.get(self.values.len()).cloned().unwrap_or_default();
                 let v = match i {
                     Input::Text(t) => t,
                     _ => default,
                 };
                 self.values.insert(tag, Value::String(v));
+                return self.advance(s);
+            }
+            // Enter keeps the value typed.
+            InsStage::Verify => {
+                let tag = self.verifying().get(self.verified).map(|a| a.0.clone()).unwrap_or_default();
+                match i {
+                    Input::Text(t) => {
+                        self.values.insert(tag, Value::String(t));
+                    }
+                    Input::Enter => {}
+                    // A click or anything else is no answer: the value is asked for again.
+                    _ => return Ok(Step::Continue),
+                }
+                self.verified += 1;
                 return self.advance(s);
             }
         }
@@ -847,7 +986,7 @@ impl Interactive for InsertM {
         let Some(b) = d.block(n) else { return Vec::new() };
         // Picking a new base point: the block sits at its definition position.
         if self.stage == InsStage::BasePoint {
-            return vec![EntityKind::Insert(insert_entity(b, b.base.xy(), Vec2::new(1.0, 1.0), 0.0, None))];
+            return vec![EntityKind::Insert(insert_entity(b, self.dropped.unwrap_or(b.base.xy()), Vec3::new(1.0, 1.0, 1.0), 0.0, None))];
         }
         let at = self.at.unwrap_or(c);
         let scale = self.scale.unwrap_or_else(|| match (self.stage, self.x_scale) {
@@ -856,7 +995,7 @@ impl Interactive for InsertM {
             _ => Vec2::new(1.0, 1.0),
         });
         let rot = self.rotation.unwrap_or(if self.stage == InsStage::Rotation { at.angle_to(c) } else { 0.0 });
-        vec![EntityKind::Insert(insert_entity(b, at, scale, rot, self.base))]
+        vec![EntityKind::Insert(insert_entity(b, at, self.scale3(scale), rot, self.base))]
     }
 }
 

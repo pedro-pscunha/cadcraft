@@ -887,6 +887,10 @@ fn saving_twice_writes_the_same_records() {
     assert_eq!(a.counts(), b.counts());
 }
 
+/// CLASS group 91, the instance count, came with the 2004 format (DXF Reference, CLASSES). A
+/// 2004+ save counts the records of every class, generated and kept; an R2000 save has none,
+/// even for a kept class whose record had one (AutoCAD LT 2026 stops responding on an R2000 file
+/// whose CLASS records carry a 91).
 #[test]
 fn class_records_have_instance_counts_for_generated_and_preserved_records() {
     let (_, a, b) = saves_2004(&fixture());

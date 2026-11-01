@@ -1,3 +1,4 @@
+-array	template=0	legacy=works	canonical=works	raw=works
 -attedit	template=123	legacy=works	canonical=works	raw=works
 -block	template=44	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 -group	template=0	legacy=works	canonical=works	raw=works
@@ -24,6 +25,8 @@ break	template=28	legacy=works	canonical=refused: This canonical geometry payloa
 breakatpoint	template=85	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
 burst	template=0	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 chamfer	template=80	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LWPOLYLINE object 105 is read-only: The source has no exact geometry adapter.
+change	template=126	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=works
+chprop	template=0	legacy=works	canonical=works	raw=works
 chspace	template=0	legacy=works	canonical=works	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.
 circle.ttr	template=95	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw LINE object 102 is read-only: The source has no exact geometry adapter.
 circle.ttt	template=100	legacy=works	canonical=refused: This canonical geometry payload has no implementation for this edit.	raw=refused: Raw CIRCLE object 100 is read-only: The source has no exact geometry adapter.

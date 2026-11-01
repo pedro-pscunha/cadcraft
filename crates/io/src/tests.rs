@@ -2035,13 +2035,14 @@ fn long_gradient_name_is_cut_only_in_xdata() {
         g.name = name.clone();
     }
     d.add(&Space::Model, Common::default(), EntityKind::Hatch(h)).unwrap();
-    let text = dxf_at(&d, Version::R2004);
-    // Non-ASCII text is written as \U+ escapes (files before 2007 are ANSI).
-    assert!(text.lines().any(|l| l == "\\U+00C4".repeat(200)));
-    let back = read_dxf(text.as_bytes()).unwrap();
+    // Before 2007 the text is in the file's code page: in ANSI_1252, Ä is the byte C4.
+    let bytes_at = |version| write_with(&d, "x.dxf", &SaveOptions { version: Some(version), binary: false }).unwrap();
+    let has_line = |bytes: &[u8], n: usize| bytes.split(|b| *b == b'\n').any(|l| l.strip_suffix(b"\r").unwrap_or(l) == vec![0xC4u8; n].as_slice());
+    let bytes = bytes_at(Version::R2004);
+    assert!(has_line(&bytes, 200));
+    let back = read_dxf(&bytes).unwrap();
     assert_eq!(hatches(&back).into_iter().next().and_then(|h| h.gradient).unwrap().name, name);
-    let before_2004 = dxf_at(&d, Version::R2000);
-    assert!(before_2004.lines().any(|l| l == "\\U+00C4".repeat(127)));
+    assert!(has_line(&bytes_at(Version::R2000), 127));
 }
 
 #[test]

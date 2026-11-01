@@ -317,7 +317,7 @@ fn stretch_grip_legacy(kind: &EntityKind, index: usize, to: Vec2, segs: usize) -
             v.width = w;
             v.height = h;
         }
-        EntityKind::Wipeout(w) => *w.boundary.get_mut(index)? = to,
+        EntityKind::Wipeout(w) => w.set_vertex(index, to)?,
         EntityKind::Unknown(_) | EntityKind::Raw(_) => return None,
     }
     Some(k)

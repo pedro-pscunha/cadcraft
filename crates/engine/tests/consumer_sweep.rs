@@ -152,6 +152,7 @@ const TEMPLATES: &[&str] = &[
     r#"{"find":"*","replace":"x"}"#,
     r#"{"code":"(+ 1 2)"}"#,
     r#"{"handles":["<H>"],"layer":"0","clear":true}"#,
+    r#"{"handles":["<L>"],"point":[2,3]}"#,
 ];
 
 /// An invariant that a command breaks on purpose, with the reason. Empty: every command keeps all four.

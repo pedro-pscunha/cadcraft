@@ -25,6 +25,10 @@ pub struct LastUsed {
     pub mleader_block: String,
     /// BREAKLINE's Block, Size and Extension.
     pub breakline: cmd::BreaklineOptions,
+    /// -ARRAY's type: Polar instead of Rectangular.
+    pub classic_array_polar: bool,
+    /// RECTANG's chamfer, fillet, width, elevation, thickness and rotation.
+    pub rectang: RectangModes,
 }
 
 impl Default for LastUsed {
@@ -39,8 +43,25 @@ impl Default for LastUsed {
             mleader: MLeaderOptions::default(),
             mleader_block: String::new(),
             breakline: cmd::BreaklineOptions::default(),
+            classic_array_polar: false,
+            rectang: RectangModes::default(),
         }
     }
+}
+
+/// The modes RECTANG keeps from one rectangle to the next, as AutoCAD 2024 does. Chamfer and
+/// fillet exclude each other: setting one clears the other.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RectangModes {
+    /// First and second chamfer distances.
+    pub chamfer: (f64, f64),
+    pub fillet: f64,
+    pub width: f64,
+    /// An explicit rectangle elevation, or the drawing's current ELEVATION when unset.
+    pub elevation: Option<f64>,
+    pub thickness: f64,
+    /// Radians.
+    pub rotation: f64,
 }
 
 /// Which part of a multileader MLEADER places first.

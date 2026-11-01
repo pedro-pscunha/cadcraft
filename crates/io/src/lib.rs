@@ -170,9 +170,15 @@ pub fn write_with_noted(d: &Drawing, name: impl AsRef<Path>, opts: &SaveOptions)
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match Format::from_path(name) {
         Some(Format::Dxf) => {
+            // Before 2007 the text is in the code page the header declares.
             let bytes = if opts.binary {
                 raw_preservation::require_ascii(d)?;
-                cadcraft_dxf::write_binary(&dxf_write::checked_tags(d, version)?, version.utf8())
+                let tags = dxf_write::checked_tags(d, version)?;
+                if version.utf8() {
+                    cadcraft_dxf::write_binary(&tags, true)
+                } else {
+                    cadcraft_dxf::write_binary_in(&tags, &dxf_write::code_page(d, version))
+                }
             } else {
                 dxf_write::checked_ascii(d, version)?
             };

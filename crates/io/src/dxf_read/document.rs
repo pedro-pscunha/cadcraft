@@ -412,7 +412,11 @@ pub(super) fn apply_sortents(
         let keys = table.keys(&members);
         let entries = table.valid_entries(&members).into_iter().collect();
         tables.insert(key, cadcraft_doc::foreign::SortTable { entries, place: objects.sortents_place(linked) });
-        store.sort_by_key(|entity| keys.get(&entity.handle).copied().unwrap_or(entity.handle.0));
+        // A sort handle of 0 draws last (ezdxf `reorder`, which notes AutoCAD defines it, undocumented).
+        store.sort_by_key(|entity| {
+            let k = keys.get(&entity.handle).copied().unwrap_or(entity.handle.0);
+            (k == 0, k)
+        });
         if linked.handle != table.handle || keys.len() != table.entries.len() {
             notes.push(format!(
                 "SORTENTSTABLE {} for block {} repaired using {}: {} dead/duplicate entries dropped",

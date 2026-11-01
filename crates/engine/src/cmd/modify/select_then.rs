@@ -1,6 +1,6 @@
 use super::break_join::join;
 use super::explode::explode;
-use super::transform::{erase, transform_entities};
+use super::transform::{at_elevation, erase, scale_entities, transform_entities};
 use super::{
     Accept, EngineError, Entity, EntityKind, Handle, Input, Interactive, Mat3, Prompt, Result, SelOutcome, SelectPhase, Session, Step, Vec2, line,
     number,
@@ -239,7 +239,7 @@ impl SelectThen {
         let f = require_length(Some(f))?;
         // The next SCALE offers this factor.
         s.last_used.scale_factor = f;
-        transform_entities(s, &self.objs, &Mat3::scale_about(base, f), self.copy_mode)?;
+        scale_entities(s, &self.objs, at_elevation(s, base), f, self.copy_mode)?;
         s.set_selection(Vec::new());
         Ok(Step::Done)
     }
@@ -436,13 +436,13 @@ impl Interactive for SelectThen {
                 };
                 if f > 1e-12 && f.is_finite() {
                     s.last_used.scale_factor = f;
-                    transform_entities(s, &self.objs, &Mat3::scale_about(self.pts[0], f), self.copy_mode)?;
+                    scale_entities(s, &self.objs, at_elevation(s, self.pts[0]), f, self.copy_mode)?;
                 }
                 s.set_selection(Vec::new());
                 Ok(Step::Done)
             }
             (Op::Mirror, 1, Input::Point(p)) => {
-                if p.near(self.pts[0], 1e-12) {
+                if p.near(self.pts[0], cadcraft_geom::EPS) {
                     return Err(EngineError::Other("Mirror line points must differ.".into()));
                 }
                 self.pts.push(p);
@@ -480,6 +480,9 @@ impl Interactive for SelectThen {
             .take(500)
             .filter_map(|h| d.entity(*h))
             .filter_map(|entity| {
+                if self.op == Op::Scale {
+                    return super::transform::scaled_entity(entity, at_elevation(s, base), m.a.hypot(m.b)).ok();
+                }
                 let matrix = super::world_map(entity, &m);
                 if self.op == Op::Mirror { super::mirror::candidate(d, entity, &matrix).ok() } else { entity.transformed(&matrix).ok() }
             })
@@ -488,7 +491,8 @@ impl Interactive for SelectThen {
         out
     }
     fn drag(&self, s: &Session, c: Vec2) -> Option<crate::prompt::Drag> {
-        if (self.op == Op::Rotate && self.reference) || !self.sel.done {
+        // A 2D drag matrix cannot carry SCALE's base Z or its legacy height edits.
+        if self.op == Op::Scale || (self.op == Op::Rotate && self.reference) || !self.sel.done {
             return None;
         }
         let base = self.pts.first().copied()?;

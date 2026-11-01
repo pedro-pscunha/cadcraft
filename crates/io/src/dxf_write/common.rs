@@ -294,9 +294,11 @@ fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
         upside_down: ts.upside_down,
     };
     let q = cadcraft_fonts::baseline_start(&cadcraft_fonts::TextFont::resolve(&ts.font), &t.value, &p);
-    if q.is_finite() { Vec3::new(q.x, q.y, a.z) } else { t.insert }
+    // Justification recalculates the baseline in XY; group 10 keeps its own elevation.
+    if q.is_finite() { Vec3::new(q.x, q.y, t.insert.z) } else { t.insert }
 }
 
+/// `attdef_prompt` is `Some` for an ATTDEF (its prompt, which may be empty) and `None` for an ATTRIB.
 /// `plane` is the normal of a canonical text's plane (the entity's, or the attribute's own): with it the text also writes
 /// its normal (210, 220, 230), which the legacy text does not keep. The generation flags (group 71) are written for both.
 pub(super) fn text_tags(
@@ -308,7 +310,19 @@ pub(super) fn text_tags(
     plane: Option<Vec3>,
     read: Option<&cadcraft_doc::TextAsRead>,
 ) {
-    w.p(10, text_insert(d, t, read));
+    let attdef = attdef_prompt.is_some();
+    // An attribute definition with no default value is drawn as its tag, whatever its prompt: the
+    // baseline start AutoCAD stored is judged against the tag's width too. A stored point that is
+    // close to the empty text's own start is kept as it is, so the font's width of the tag never
+    // moves it. A text kept as read (`read`) keeps its stored point.
+    let own = text_insert(d, t, read);
+    let insert = match attrib {
+        Some((a, _)) if attdef && read.is_none() && t.value.is_empty() && own != t.insert => {
+            text_insert(d, &Text { value: a.tag.clone(), ..t.clone() }, None)
+        }
+        _ => own,
+    };
+    w.p(10, insert);
     w.f(40, t.height);
     w.s(1, &t.value);
     if t.rotation != 0.0 {
@@ -352,7 +366,7 @@ pub(super) fn text_tags(
     }
     match attrib {
         Some((a, target)) => {
-            w.s(100, if attdef_prompt.is_some() { "AcDbAttributeDefinition" } else { "AcDbAttribute" });
+            w.s(100, if attdef { "AcDbAttributeDefinition" } else { "AcDbAttribute" });
             if target >= Version::R2010 {
                 w.i(280, 0);
             }

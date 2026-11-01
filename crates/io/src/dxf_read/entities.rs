@@ -176,15 +176,17 @@ pub(super) fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_lef
         }
         "DIMENSION" => EntityKind::Dimension(dimension_from(&t, if c.extrusion.z < 0.0 { Some(c.extrusion) } else { None })),
         "LEADER" => EntityKind::Leader(Leader {
-            // The vertices are WCS points: their Z stays when the record has one for each.
-            vertices: {
-                let (xs, ys, zs) = (t.all_f(10), t.all_f(20), t.all_f(30));
-                if xs.len() == ys.len() && xs.len() == zs.len() {
-                    xs.into_iter().zip(ys).zip(zs).map(|((x, y), z)| Vec3::new(x, y, z)).collect()
-                } else {
-                    t.pts(10).into_iter().map(|p| p.to3(0.0)).collect()
-                }
-            },
+            // Each group 10 starts a vertex. Scope Y/Z to it so an omitted Z cannot
+            // shift a later vertex's elevation onto this one.
+            vertices: t
+                .all_f(10)
+                .into_iter()
+                .zip(tags.split(|tag| tag.code == 10).skip(1))
+                .map(|(x, vertex)| {
+                    let v = T(vertex);
+                    Vec3::new(x, v.fd(20, 0.0), v.fd(30, 0.0))
+                })
+                .collect(),
             arrow: t.i(71).unwrap_or(1) != 0,
             spline: t.i(72).unwrap_or(0) != 0,
             style: t.s(3).unwrap_or_else(|| "Standard".into()),
@@ -739,6 +741,7 @@ pub(super) fn insert_attribs(recs: &[(String, Vec<Tag>)], i: &mut usize, rx: &Rx
             attribs.push(Attrib {
                 handle: tt.s(5).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0),
                 invisible: own.i(70).unwrap_or(0) & 1 != 0,
+                constant: own.i(70).unwrap_or(0) & 2 != 0,
                 props: attrib_props(&tt, entity_plot_style(t2, rx)),
                 multiline,
                 modes: attrib_modes(own.0),

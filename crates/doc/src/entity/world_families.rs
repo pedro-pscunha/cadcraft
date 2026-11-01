@@ -10,7 +10,8 @@ use cadcraft_geom::{Mat4, OcsFrame, Spline, Vec2, Vec3, bulge_to_arc};
 use super::block::Attrib;
 use super::curves::{Arc, Circle, LwPolyline, Solid};
 use super::dim::{Dimension, Leader};
-use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop, Wipeout};
+use super::fill::{Gradient, Hatch, HatchEdge, HatchLoop};
+use super::wipeout::Wipeout;
 use super::helix::Helix;
 use super::layout::Table;
 use super::mleader::MLeader;
@@ -480,7 +481,7 @@ pub fn mline_primitives(mline: &MLine, normal: Vec3, parent: &Mat4) -> Result<Ve
 mod tests {
     use cadcraft_geom::{PolyVertex, Vec2};
 
-    use super::super::fill::WipeoutFrame;
+    use super::super::wipeout::WipeoutFrame;
     use super::*;
 
     const EX: Vec3 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };

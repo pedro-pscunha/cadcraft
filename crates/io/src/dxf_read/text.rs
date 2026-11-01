@@ -57,6 +57,13 @@ pub(super) fn multiline_attrib(own: &[Tag], embedded: Option<&[Tag]>, c: &Common
 
 /// Multiline text from MTEXT groups (an MTEXT entity's, or a multiline attribute's embedded ones).
 pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
+    // The MTEXT's own groups: an embedded object (group 101) reuses their codes (44 is its
+    // column width, not the line spacing factor).
+    // The columns are groups of the MTEXT (75...), its embedded object (101, from R2018) or its ACAD
+    // extended data (2007 to 2017).
+    let columns = mtext_dxf::read_columns(tags).or_else(|| mtext_dxf::acad_xdata(tags).and_then(mtext_dxf::read_xdata_columns));
+    let all = tags;
+    let tags = mtext_dxf::own(tags);
     let t = T(tags);
     // Contents: code 3 chunks followed by code 1.
     let mut contents = String::new();
@@ -65,11 +72,6 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     }
     contents.push_str(&t.s(1).unwrap_or_default());
     let contents = mtext_dxf::decode_contents(&contents);
-    // The columns are groups of the MTEXT (75...), its embedded object (101, from R2018) or its ACAD
-    // extended data (2007 to 2017).
-    let columns = mtext_dxf::read_columns(tags)
-        .or_else(|| mtext_dxf::read_embedded_columns(tags))
-        .or_else(|| mtext_dxf::acad_xdata(tags).and_then(mtext_dxf::read_xdata_columns));
     // The direction comes from the MTEXT's own groups only: in an R2018+ embedded object
     // (group 101), 11 is the insertion point, not the X-axis direction (#667, as in #834).
     let own = T(mtext_dxf::before_columns(tags));
@@ -92,7 +94,8 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     let mut text = MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
-        // The text's width is the column width; the rectangle's (41) is the whole text's.
+        // An MTEXT's width is one column's: with columns, the column width (48, or 44 of the
+        // embedded object) rather than 41, which ZWCAD and AutoCAD write as the total width.
         width: match &columns {
             Some((_, w)) if *w > 0.0 => *w,
             _ => t.fd(41, 0.0).max(0.0),
@@ -107,7 +110,7 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         direction: None,
         drawing_direction: own.i(72).and_then(|v| u8::try_from(v).ok()),
     };
-    if let Some((w, h)) = mtext_dxf::read_embedded_extents(tags) {
+    if let Some((w, h)) = mtext_dxf::read_embedded_extents(all) {
         text.set_column_extents(w, h);
     }
     text

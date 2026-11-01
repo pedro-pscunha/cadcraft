@@ -67,11 +67,23 @@ pub fn entities_extents<'a>(drawing: &Drawing, entities: impl IntoIterator<Item 
     if refusals.is_empty() { Ok(bounds) } else { Err(ExtentsRefusal { bounds, refusals }) }
 }
 
-/// Extents of the visible entities in a space. Refused objects never receive a projected fallback box.
+/// Extents of the entities in a space that count in its extents ([`Drawing::in_extents`]: a layer that is off counts, a frozen one
+/// does not, as AutoCAD 2024 counts them). Refused objects never receive a projected fallback box.
 pub fn space_extents(drawing: &Drawing, space: &Space) -> Result<Bounds2, ExtentsRefusal> {
-    entities_extents(
-        drawing,
-        drawing.space(space).into_iter().flat_map(|store| store.iter()).filter(|entity| drawing.is_visible(entity)).map(|entity| entity.as_ref()),
-        0,
-    )
+    let mut bounds = Bounds2::EMPTY;
+    let mut refusals = Vec::new();
+    for entity in drawing.space(space).into_iter().flat_map(|store| store.iter()).filter(|entity| drawing.in_extents(entity)) {
+        let result = if entity.unresolved_display().is_some() {
+            Ok(Bounds2::EMPTY)
+        } else if entity.geometry_revision == GeometryRevision::CanonicalV2 {
+            if matches!(entity.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) { Ok(Bounds2::EMPTY) } else { entity_world_bounds(drawing, entity, &Mat4::IDENTITY) }
+        } else {
+            cadcraft_doc::legacy_extent_bounds(drawing, entity)
+        };
+        match result {
+            Ok(entity_bounds) => bounds = bounds.union(&entity_bounds),
+            Err(error) => refusals.push(GeometryRefusal { handle: entity.handle, reason: error.to_string() }),
+        }
+    }
+    if refusals.is_empty() { Ok(bounds) } else { Err(ExtentsRefusal { bounds, refusals }) }
 }

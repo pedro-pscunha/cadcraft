@@ -97,6 +97,7 @@ pub use world_families::{
     mline_primitives, mtext_primitives, solid_primitives, spline_primitives, table_primitives, text_primitives, tolerance_primitives,
     wipeout_primitives,
 };
+mod wipeout;
 
 pub use block::{Attrib, AttribModes, AttribPlane, AttribProps, Insert, MultilineAttrib, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
@@ -105,7 +106,7 @@ pub use curves::{
     PolylineRecords, RayLine, Solid,
 };
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, LeaderFrame, LeaderLinks};
-pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline, Wipeout, WipeoutDisplay, WipeoutFrame};
+pub use fill::{Gradient, GradientSource, Hatch, HatchEdge, HatchLoop, HatchSpline};
 pub use geometry::{DimensionAsRead, GeometryRecord, GeometrySnapshot, TextAsRead, attrib_geometry_key, geometry_key};
 pub use layout::{Image, ImageDefinition, Table, TableCell, TableCellBlock, TableOverrides, Viewport, ViewportStatus};
 pub use mesh::{MeshKind, MeshVertex, PolylineMesh};
@@ -115,6 +116,7 @@ pub use mleader::{
 pub use mline_canonical::MLineLayout;
 pub use text::{ColumnExtents, HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use text_canonical::{Similarity, TextFrame, TextMirror};
+pub use wipeout::{Wipeout, WipeoutDisplay, WipeoutFrame};
 /// Borrowed display limitation of an opaque source entity. The source unit owns its reason and tags.
 #[derive(Clone, Copy, Debug)]
 pub struct UnresolvedDisplay<'a> {
@@ -305,11 +307,7 @@ impl EntityKind {
                 h.loops.iter().flat_map(|l| Polyline { vertices: l.vertices.clone(), closed: true }.segments()).map(Prim::Seg).collect()
             }
             EntityKind::Wipeout(w) => {
-                let mut pts = w.boundary.clone();
-                if let Some(f) = pts.first().copied() {
-                    pts.push(f);
-                }
-                pts.windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(*w.first()?, *w.get(1)?))))).collect()
+                w.closed_boundary().windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(*w.first()?, *w.get(1)?))))).collect()
             }
             EntityKind::Viewport(v) => {
                 let c = v.center.xy();
@@ -598,6 +596,95 @@ impl EntityKind {
         Ok(())
     }
 
+    /// Scale every height of the object by `f` about the height `base_z`: the Z of its points,
+    /// its elevation. With [`EntityKind::transform`] scaling about the base point's XY this is a
+    /// uniform 3D scale about the base point, as AutoCAD 2024's SCALE makes it. Sizes `transform`
+    /// already scales (text and helix heights, an insert's Z scale) are left alone; splines,
+    /// regions and wipeouts lie in the XY plane.
+    pub fn scale_heights(&mut self, base_z: f64, f: f64) {
+        let scale = |h: &mut f64| *h = base_z + (*h - base_z) * f;
+        let z = |p: &mut Vec3| scale(&mut p.z);
+        let text_z = |t: &mut Text| {
+            z(&mut t.insert);
+            if let Some(a) = &mut t.align_pt {
+                z(a);
+            }
+        };
+        let attribs_z = |attribs: &mut Vec<Attrib>| {
+            for a in attribs {
+                text_z(&mut a.text);
+                if let Some(ml) = &mut a.multiline {
+                    z(&mut ml.mtext.insert);
+                }
+            }
+        };
+        match self {
+            EntityKind::Line(l) => {
+                z(&mut l.a);
+                z(&mut l.b);
+            }
+            EntityKind::Point(p) => z(&mut p.p),
+            EntityKind::Circle(c) => z(&mut c.center),
+            EntityKind::Arc(a) => z(&mut a.center),
+            EntityKind::Ellipse(e) => z(&mut e.center),
+            EntityKind::LwPolyline(p) => scale(&mut p.elevation),
+            EntityKind::Polyline3d(p) => p.points.iter_mut().for_each(z),
+            EntityKind::Helix(h) => z(&mut h.center),
+            EntityKind::Ray(r) | EntityKind::XLine(r) => z(&mut r.base),
+            EntityKind::Text(t) => text_z(t),
+            EntityKind::AttDef(a) => {
+                text_z(&mut a.text);
+                if let Some(ml) = &mut a.multiline {
+                    z(&mut ml.mtext.insert);
+                }
+            }
+            EntityKind::MText(t) => z(&mut t.insert),
+            EntityKind::Insert(i) => {
+                z(&mut i.insert);
+                attribs_z(&mut i.attribs);
+            }
+            EntityKind::Dimension(d) => {
+                for p in [&mut d.defpt, &mut d.text_mid, &mut d.p13, &mut d.p14, &mut d.p15, &mut d.p16] {
+                    z(p);
+                }
+                if let Some(j) = &mut d.marks.jog_line {
+                    z(j);
+                }
+                if let Some(j) = &mut d.marks.jogged {
+                    z(&mut j.center);
+                    z(&mut j.jog);
+                }
+                d.marks.breaks.iter_mut().for_each(|b| z(&mut b.at));
+                d.block = None;
+            }
+            EntityKind::MLine(ml) => ml.vertices.iter_mut().for_each(|v| z(&mut v.p)),
+            EntityKind::Leader(l) => l.vertices.iter_mut().for_each(z),
+            EntityKind::MLeader(ml) => {
+                for root in &mut ml.roots {
+                    z(&mut root.landing);
+                    root.branches.iter_mut().flat_map(|b| b.vertices.iter_mut()).for_each(z);
+                }
+                if let Some(t) = &mut ml.text {
+                    z(&mut t.insert);
+                }
+                if let Some(b) = &mut ml.block {
+                    z(&mut b.insert);
+                    attribs_z(&mut b.attribs);
+                }
+            }
+            EntityKind::Hatch(h) => scale(&mut h.elevation),
+            EntityKind::Solid(so) | EntityKind::Trace(so) => so.corners.iter_mut().for_each(z),
+            EntityKind::Face3d(fc) => fc.corners.iter_mut().for_each(z),
+            EntityKind::Viewport(v) => z(&mut v.center),
+            EntityKind::Image(i) => z(&mut i.insert),
+            EntityKind::Table(t) => z(&mut t.insert),
+            EntityKind::Tolerance(t) => z(&mut t.insert),
+            EntityKind::Spline(_) | EntityKind::Region(_) | EntityKind::Wipeout(_) | EntityKind::Unknown(_) | EntityKind::Raw(_) => {}
+            // A mesh's vertices are 3D points: the legacy transform already scales their Z.
+            EntityKind::PolylineMesh(_) => {}
+        }
+    }
+
     /// Grip points (editable defining points), in display order.
     pub fn grips(&self) -> Vec<Vec2> {
         // A broken table has a grip for each part.
@@ -675,7 +762,7 @@ impl EntityKind {
                 Bounds2::new(c - h, c + h).corners().to_vec()
             }
             EntityKind::Image(i) => vec![i.insert.xy()],
-            EntityKind::Wipeout(w) => w.boundary.clone(),
+            EntityKind::Wipeout(w) => w.vertices().to_vec(),
             EntityKind::Table(t) => vec![t.insert.xy()],
             EntityKind::Tolerance(t) => vec![t.insert.xy()],
             EntityKind::Unknown(_) | EntityKind::Raw(_) => Vec::new(),

@@ -39,6 +39,7 @@ pub(crate) use blocks::{is_generated_arrow, table_graphics_key};
 use ctx::Ctx;
 use entity::entity;
 pub(crate) use raw::{changed_properties as raw_changed_properties, remap_raw_references};
+pub(crate) use header::code_page;
 use sections::tags_for;
 
 #[derive(Default)]
@@ -227,7 +228,12 @@ pub(crate) fn checked_ascii(d: &Drawing, version: Version) -> crate::Result<Vec<
     crate::raw_preservation::preflight(d)?;
     let (tags, references) = tags_for(d, version, version, false);
     require_handle_room(&references)?;
-    let bytes = cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes();
+    // Before 2007 the text is in the code page the header declares.
+    let bytes = if version.utf8() {
+        cadcraft_dxf::write_ascii_as(&tags, true).into_bytes()
+    } else {
+        cadcraft_dxf::write_ascii_in(&tags, &code_page(d, version))
+    };
     crate::raw_preservation::RawSaveCheck::new(d, &references, crate::raw_preservation::DXF_TEXT)?.verify_dxf(&bytes)?;
     Ok(bytes)
 }

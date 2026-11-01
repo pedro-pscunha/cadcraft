@@ -63,7 +63,7 @@ pub(crate) fn encoded_chunks(contents: &str) -> Vec<String> {
 }
 
 /// The MTEXT's own tags: up to an embedded object (group 101), whose groups reuse MTEXT's codes.
-fn own(tags: &[Tag]) -> &[Tag] {
+pub(crate) fn own(tags: &[Tag]) -> &[Tag] {
     let end = tags.iter().position(|t| t.code == 101).unwrap_or(tags.len());
     tags.get(..end).unwrap_or(tags)
 }
@@ -81,16 +81,22 @@ fn finite(v: f64) -> f64 {
 
 /// The columns of an MTEXT, and the column width (group 48) when there are columns.
 pub(crate) fn read_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
-    let tags = own(tags);
-    let start = tags.iter().position(|t| t.code == 75)?;
-    let kind = match tags.get(start).map(Tag::i64) {
+    // An application-defined group in the record may hold any code, 50 included.
+    let own_tags: Vec<&Tag> = super::common::outside_app(own(tags)).map(|(_, t)| t).collect();
+    let Some(start) = own_tags.iter().position(|t| t.code == 75) else { return read_embedded_columns(tags) };
+    let tags = own_tags;
+    let kind = match tags.get(start).map(|t| t.i64()) {
         Some(1) => MTextColumnType::Static,
         Some(2) => MTextColumnType::Dynamic,
         _ => return None,
     };
     let cols = tags.get(start..).unwrap_or_default();
-    let first = |code: i32| cols.iter().find(|t| t.code == code);
-    let heights: Vec<f64> = cols.iter().filter(|t| t.code == 50).take(MAX_COLUMNS).map(|t| finite(t.f64()).max(0.0)).collect();
+    let first = |code: i32| cols.iter().find(|t| t.code == code).copied();
+    // The first 50 is the number of heights that follow, unless the file predates the count
+    // (CADCraft up to f536bf4 wrote the n heights of group 76 alone).
+    let fifties = cols.iter().filter(|t| t.code == 50);
+    let counted = first(76).is_some_and(|t| fifties.clone().count() as i64 - 1 == t.i64());
+    let heights: Vec<f64> = fifties.skip(usize::from(counted)).take(MAX_COLUMNS).map(|t| finite(t.f64()).max(0.0)).collect();
     let count = first(76).map(Tag::i64).unwrap_or(heights.len() as i64).clamp(1, MAX_COLUMNS as i64);
     let auto_height = first(79).map(Tag::i64).unwrap_or(0) != 0;
     let defined = tags.iter().find(|t| t.code == 46).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0);
@@ -126,9 +132,22 @@ pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)>
     let manual = kind == MTextColumnType::Dynamic && !auto_height;
     let heights: Vec<f64> = block.iter().filter(|t| t.code == 46).take(MAX_COLUMNS).map(|t| finite(t.f64()).max(0.0)).collect();
     let negated: Vec<bool> = block.iter().filter(|t| t.code == 46).take(MAX_COLUMNS).map(|t| finite(t.f64()) < 0.0).collect();
-    let count = first(72).map(|t| t.i64()).unwrap_or(heights.len() as i64).clamp(1, MAX_COLUMNS as i64);
+    // A dynamic auto-height object stores 0 columns in 72: the count follows from the total width
+    // (42 = n * 44 + (n - 1) * 45).
+    let [width, gutter, total] = [44, 45, 42].map(|g| first(g).map_or(0.0, |t| finite(t.f64())));
+    let count = match first(72).map(|t| t.i64()) {
+        Some(n) if n > 0 => n,
+        Some(_) if width + gutter > 0.0 && total > 0.0 => ((total + gutter) / (width + gutter)).round() as i64,
+        Some(_) => 1,
+        None => heights.len() as i64,
+    }
+    .clamp(1, MAX_COLUMNS as i64);
     let rect = first(41).map(|t| finite(t.f64()).max(0.0)).unwrap_or(0.0);
-    let height = if manual { heights.iter().copied().fold(0.0, f64::max) } else { rect };
+    // The column height: the entity's own 46 (defined height, where AutoCAD and ezdxf write it), else the object's 41
+    // or first 46.
+    let own_46 = own(tags).iter().find(|t| t.code == 46).map(|t| finite(t.f64()).max(0.0));
+    let defined = [own_46, Some(rect), heights.first().copied()].into_iter().flatten().find(|h| *h > 0.0).unwrap_or(0.0);
+    let height = if manual { heights.iter().copied().fold(0.0, f64::max) } else { defined };
     let c = MTextColumns {
         kind,
         count: u16::try_from(count).unwrap_or(1),
@@ -339,6 +358,10 @@ pub(crate) fn column_tags(t: &MText) -> Vec<Tag> {
         Tag::f(48, t.width),
         Tag::f(49, c.gutter),
     ];
+    // No count for an empty list: a lone 50 = 0 would read back as one height of 0.
+    if !heights.is_empty() {
+        v.push(Tag::i(50, heights.len() as i64));
+    }
     v.extend(heights.into_iter().map(|h| Tag::f(50, h)));
     v
 }

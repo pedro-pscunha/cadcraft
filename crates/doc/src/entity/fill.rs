@@ -1,5 +1,5 @@
 use super::common::Handle;
-use super::{Color, Deserialize, PolyVertex, Serialize, Vec2, Vec3, one};
+use super::{Color, Deserialize, PolyVertex, Serialize, Vec2, one};
 
 /// A hatch boundary loop: closed polyline with bulges.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -211,65 +211,4 @@ pub struct GradientSource {
     pub color_mode: i64,
     pub tint: f64,
     pub aci: [Option<(i16, cadcraft_color::Rgb)>; 2],
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Wipeout {
-    pub boundary: Vec<Vec2>,
-    /// The image display settings of the record (groups 70, 280, 281, 282, 283), as read.
-    #[serde(default)]
-    pub display: WipeoutDisplay,
-    /// The source image frame and clip of a canonical wipeout (see [`WipeoutFrame`]). When it is set the wipeout is
-    /// `CanonicalV2`, `boundary` is empty and [`Wipeout::world_boundary`] gives the outline.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub frame: Option<WipeoutFrame>,
-    /// A legacy wipeout's source image frame (origin, pixel vectors, size, clip type and clip) as its record held it. It
-    /// describes the wipeout only while `boundary` is still the outline of its clip (see [`Wipeout::source_image`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<WipeoutFrame>,
-}
-
-impl Wipeout {
-    /// The source image frame while it still describes the boundary: the boundary is the clip's outline in the frame's place.
-    pub fn source_image(&self) -> Option<&WipeoutFrame> {
-        let image = self.image.as_ref()?;
-        let outline = image.legacy_outline();
-        let same = outline.len() == self.boundary.len()
-            && outline.iter().zip(&self.boundary).all(|(a, b)| a.dist(*b) <= 1e-9 * (1.0 + a.len().max(b.len())));
-        same.then_some(image)
-    }
-}
-
-/// The display settings a WIPEOUT record keeps like an image: the display flags (70: 1 show image, 2 show when not aligned with the
-/// screen, 4 use the clipping boundary, 8 transparency on), whether clipping is on (280), and the brightness, contrast and fade
-/// (281, 282, 283). The defaults are what a wipeout made in CADCraft has.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WipeoutDisplay {
-    pub flags: i64,
-    pub clipping: i64,
-    pub brightness: i64,
-    pub contrast: i64,
-    pub fade: i64,
-}
-
-impl Default for WipeoutDisplay {
-    fn default() -> Self {
-        WipeoutDisplay { flags: 7, clipping: 1, brightness: 50, contrast: 50, fade: 0 }
-    }
-}
-
-/// The image frame of a canonical WIPEOUT as its record holds it: the origin and the per-pixel U and V vectors in WCS
-/// (groups 10, 11, 12), the image size in pixels (13), and the clip (71, 14) in pixel space, whose origin is the image's
-/// top-left corner with y pointing down.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WipeoutFrame {
-    pub origin: Vec3,
-    pub u: Vec3,
-    pub v: Vec3,
-    pub size: Vec2,
-    /// 1 rectangular (two corners), 2 polygonal.
-    pub clip_type: u8,
-    pub clip: Vec<Vec2>,
 }

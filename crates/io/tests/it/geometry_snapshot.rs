@@ -139,7 +139,10 @@ fn a_property_edit_keeps_the_geometry_and_a_geometry_edit_drops_it() {
     })
     .unwrap();
     let got = record(&cadcraft_io::write_dxf(&d), "LINE");
-    assert!(!got.iter().any(|t| t.code == 210), "a geometry edit writes the model: {got:?}");
+    // The model keeps the LINE's extrusion (unit length), as AutoCAD keeps it after an endpoint edit.
+    let normal: Vec<f64> = [210, 220, 230].iter().flat_map(|c| bits(&got, *c)).map(f64::from_bits).collect();
+    assert_eq!(normal.len(), 3, "a geometry edit writes the model's extrusion: {got:?}");
+    assert!((normal.iter().map(|v| v * v).sum::<f64>().sqrt() - 1.0).abs() < 1e-12, "{normal:?}");
     assert_eq!(bits(&got, 11), vec![5.0f64.to_bits()]);
 }
 

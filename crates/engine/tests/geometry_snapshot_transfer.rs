@@ -72,11 +72,15 @@ fn import_keeps_the_source_geometry() {
     s.open_drawing(cadcraft_doc::Drawing::new_imperial(), "target.dxf", None);
     s.execute("import", &json!({"data": base64(SOURCE.as_bytes()), "name": "source.dxf"})).unwrap();
     assert_planes(&s, "IMPORT");
-    // Imported at another place, the geometry is changed and the plane is not replayed.
+    // Imported at another place, the geometry is changed and the plane is not replayed: the LINE writes its model
+    // extrusion (unit length), as AutoCAD keeps it after a move.
     let mut moved = session();
     moved.open_drawing(cadcraft_doc::Drawing::new_imperial(), "target.dxf", None);
     moved.execute("import", &json!({"data": base64(SOURCE.as_bytes()), "name": "source.dxf", "at": [10, 0]})).unwrap();
-    assert!(bits(&moved, "LINE", 210).is_empty());
+    let normal: Vec<f64> = [210, 220, 230].iter().flat_map(|c| bits(&moved, "LINE", *c)).map(f64::from_bits).collect();
+    assert_eq!(normal.len(), 3);
+    assert!((normal.iter().map(|v| v * v).sum::<f64>().sqrt() - 1.0).abs() < 1e-12, "{normal:?}");
+    assert_ne!(bits(&moved, "LINE", 210), bits(&s, "LINE", 210), "the source plane is not replayed");
 }
 
 #[test]

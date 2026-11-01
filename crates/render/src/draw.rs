@@ -144,6 +144,13 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<
             if !b.opts.text {
                 return Ok(());
             }
+            let upright;
+            let t = if e.common.matches_layout_orientation() && t.rotation != 0.0 {
+                upright = cadcraft_doc::Text { rotation: 0.0, ..t.clone() };
+                &upright
+            } else {
+                t
+            };
             let (sh, _) = place_text_entity(ctx.d, t, &t.value);
             b.shaped(ctx, rgb, lw, &sh);
         }
@@ -155,7 +162,11 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) -> cadcraft_doc::Result<
             if !b.opts.text {
                 return Ok(());
             }
-            mtext(b, ctx, t, rgb, lw);
+            if e.common.matches_layout_orientation() && t.rotation != 0.0 {
+                mtext(b, ctx, &cadcraft_doc::MText { rotation: 0.0, ..t.clone() }, rgb, lw);
+            } else {
+                mtext(b, ctx, t, rgb, lw);
+            }
         }
         EntityKind::Insert(ins) => insert(b, ctx, e, ins, rgb),
         EntityKind::Dimension(dm) => draw_dimension(b, ctx, e, dm, lw, lt.as_ref(), ltscale)?,
@@ -311,11 +322,7 @@ fn draw_wipeout(b: &mut Builder, ctx: &Ctx, w: &cadcraft_doc::Wipeout, rgb: Ink,
         _ => true,
     };
     if frame {
-        let mut pts = w.boundary.clone();
-        if let Some(f) = pts.first().copied() {
-            pts.push(f);
-        }
-        b.polyline(ctx, rgb, lw, &pts);
+        b.polyline(ctx, rgb, lw, &w.closed_boundary());
     }
 }
 

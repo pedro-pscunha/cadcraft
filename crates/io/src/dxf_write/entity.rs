@@ -174,7 +174,11 @@ fn write_basic_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper: b
             thickness(w, e);
             w.p(10, l.a);
             w.p(11, l.b);
-            canonical_normal(w, e);
+            if canonical_plane(e).is_some() {
+                canonical_normal(w, e);
+            } else {
+                extrusion(w, e);
+            }
         }
         EntityKind::Point(p) => {
             w.s(0, "POINT");
@@ -1082,14 +1086,9 @@ fn write_wipeout_entity(w: &mut W, _d: &Drawing, e: &Entity, owner: &str, paper:
         // brightness, contrast and fade.
         wipeout_display(w, &wo.display);
         w.i(71, 2);
-        let mut pts = wo.boundary.clone();
-        if let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied())
-            && first != last
-        {
-            pts.push(first);
-        }
+        let pts = wo.closed_boundary();
         w.i(91, pts.len() as i64);
-        for q in pts {
+        for q in pts.iter() {
             w.p2(14, Vec2::new((q.x - o.x) / sx - 0.5, 0.5 - (q.y - o.y) / sy));
         }
     }
@@ -1232,5 +1231,23 @@ pub(super) fn canonical_plane(e: &Entity) -> Option<Vec3> {
 fn thickness(w: &mut W, e: &Entity) {
     if e.common.thickness != 0.0 {
         w.f(39, e.common.thickness);
+    }
+}
+
+/// The extrusion (210) of an entity whose points are world coordinates, when it is not the Z axis.
+fn extrusion(w: &mut W, e: &Entity) {
+    // Zero and non-finite vectors are not a direction: nothing is written. `Vec3::normalized` would
+    // also drop a tiny one (its zero threshold is the drawing tolerance) and turn infinity into NaN.
+    let v = e.common.extrusion;
+    let max = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !v.is_finite() || max == 0.0 {
+        return;
+    }
+    // Scaled by the largest component first: the length of a huge one would overflow to infinity.
+    let v = Vec3::new(v.x / max, v.y / max, v.z / max);
+    let len = v.len();
+    let n = Vec3::new(v.x / len, v.y / len, v.z / len);
+    if n != Vec3::Z {
+        w.p(210, n);
     }
 }

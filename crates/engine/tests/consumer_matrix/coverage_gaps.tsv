@@ -4,6 +4,11 @@
 # A covered coarse tuple still needs its plane, parameter branch and interactive/UI obligations.
 # The sweep's works/refused result never counts as a curated numeric or typed-refusal row.
 # command	role	revision	status
+-array	Unreviewed	Canonical	role_unreviewed
+-array	Unreviewed	CanonicalFirst	role_unreviewed
+-array	Unreviewed	Legacy	role_unreviewed
+-array	Unreviewed	LegacyFirst	role_unreviewed
+-array	Unreviewed	Raw	role_unreviewed
 -attedit	Unreviewed	Canonical	role_unreviewed
 -attedit	Unreviewed	CanonicalFirst	role_unreviewed
 -attedit	Unreviewed	Legacy	role_unreviewed
@@ -170,6 +175,16 @@ chamfer	Unreviewed	CanonicalFirst	role_unreviewed
 chamfer	Unreviewed	Legacy	role_unreviewed
 chamfer	Unreviewed	LegacyFirst	role_unreviewed
 chamfer	Unreviewed	Raw	role_unreviewed
+change	Unreviewed	Canonical	role_unreviewed
+change	Unreviewed	CanonicalFirst	role_unreviewed
+change	Unreviewed	Legacy	role_unreviewed
+change	Unreviewed	LegacyFirst	role_unreviewed
+change	Unreviewed	Raw	role_unreviewed
+chprop	Unreviewed	Canonical	role_unreviewed
+chprop	Unreviewed	CanonicalFirst	role_unreviewed
+chprop	Unreviewed	Legacy	role_unreviewed
+chprop	Unreviewed	LegacyFirst	role_unreviewed
+chprop	Unreviewed	Raw	role_unreviewed
 chspace	Unreviewed	Canonical	role_unreviewed
 chspace	Unreviewed	CanonicalFirst	role_unreviewed
 chspace	Unreviewed	Legacy	role_unreviewed

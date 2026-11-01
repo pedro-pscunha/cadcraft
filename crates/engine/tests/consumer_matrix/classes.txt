@@ -1,8 +1,10 @@
+-array operand
 -attedit operand
 -block operand
 -group operand
 -linetype n/a
 -plottermanager n/a
+-units n/a
 -vports n/a
 -xref n/a
 3dorbit n/a
@@ -64,6 +66,8 @@ bsaveas n/a
 burst operand
 cal n/a
 chamfer operand
+change operand
+chprop operand
 chspace operand
 circle.cd n/a
 circle.ttr operand
@@ -315,6 +319,7 @@ setvar n/a
 shapes operand
 share n/a
 snap n/a
+solid n/a
 spline.cv n/a
 splinedit operand
 status n/a
