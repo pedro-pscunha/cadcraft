@@ -62,16 +62,21 @@ pub(crate) fn encoded_chunks(contents: &str) -> Vec<String> {
     chars.chunks(250).map(|chunk| encode_contents(&chunk.iter().collect::<String>())).collect()
 }
 
+/// Where the embedded object (group 101) of a record starts: a 101 inside an application-defined group (`102 {` to `102 }`)
+/// is the application's.
+pub(crate) fn embedded_at(tags: &[Tag]) -> Option<usize> {
+    super::common::outside_app(tags).find(|(_, t)| t.code == 101).map(|(i, _)| i)
+}
+
 /// The MTEXT's own tags: up to an embedded object (group 101), whose groups reuse MTEXT's codes.
 pub(crate) fn own(tags: &[Tag]) -> &[Tag] {
-    let end = tags.iter().position(|t| t.code == 101).unwrap_or(tags.len());
-    tags.get(..end).unwrap_or(tags)
+    tags.get(..embedded_at(tags).unwrap_or(tags.len())).unwrap_or(tags)
 }
 
 /// The tags before the column groups (where group 50 is the rotation angle).
 pub(crate) fn before_columns(tags: &[Tag]) -> &[Tag] {
     let tags = own(tags);
-    let end = tags.iter().position(|t| t.code == 75).unwrap_or(tags.len());
+    let end = super::common::outside_app(tags).find(|(_, t)| t.code == 75).map_or(tags.len(), |(i, _)| i);
     tags.get(..end).unwrap_or(tags)
 }
 
@@ -120,7 +125,7 @@ pub(crate) fn read_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
 /// (71), count (72), width (44), gutter (45), auto height (73), flow (74), and a height (46) per column
 /// of manual columns; the rectangle width (40) and height (41). Returns them with the column width.
 pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)> {
-    let at = tags.iter().position(|t| t.code == 101)?;
+    let at = embedded_at(tags)?;
     let block: Vec<&Tag> = tags.get(at + 1..)?.iter().take_while(|t| t.code < 1000 && t.code != 0 && t.code != 100).collect();
     let first = |code: i32| block.iter().find(|t| t.code == code).copied();
     let kind = match first(71).map(|t| t.i64()) {
@@ -164,7 +169,7 @@ pub(crate) fn read_embedded_columns(tags: &[Tag]) -> Option<(MTextColumns, f64)>
 
 /// The laid-out extents (42, 43) of the embedded object of an R2018+ MTEXT.
 pub(crate) fn read_embedded_extents(tags: &[Tag]) -> Option<(f64, f64)> {
-    let at = tags.iter().position(|t| t.code == 101)?;
+    let at = embedded_at(tags)?;
     let block: Vec<&Tag> = tags.get(at + 1..)?.iter().take_while(|t| t.code < 1000 && t.code != 0 && t.code != 100).collect();
     let get = |code: i32| block.iter().find(|t| t.code == code).map(|t| finite(t.f64()).max(0.0));
     Some((get(42)?, get(43)?))

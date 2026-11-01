@@ -267,6 +267,8 @@ fn markers_inside_an_application_group_do_not_end_the_entity_groups() {
         Tag::s(102, "{ACME_APP"),
         Tag::s(100, "AcmeMarker"),
         Tag::s(101, "AcmeObject"),
+        Tag::s(8, "Internal"),
+        Tag::i(62, 1),
         Tag::s(102, "}"),
         Tag::s(100, "AcDbEntity"),
         Tag::s(8, "Walls"),
@@ -278,6 +280,34 @@ fn markers_inside_an_application_group_do_not_end_the_entity_groups() {
         Tag::f(21, 0.0),
     ];
     let Some((common, _)) = entity_from_groups("LINE", &tags) else { panic!("LINE was not read") };
+    assert_eq!(common.layer, "Walls");
+    assert_eq!(common.color, cadcraft_color::Color::from_aci(3));
+}
+
+#[test]
+fn an_application_group_does_not_end_an_mtext_or_supply_its_properties() {
+    // A 101 inside an application group is the application's, not the MTEXT's embedded object; a layer or colour there is the
+    // application's too: the text, its place and its own properties come after it.
+    let tags = [
+        Tag::s(5, "A2"),
+        Tag::s(102, "{ACME_APP"),
+        Tag::s(101, "AcmeObject"),
+        Tag::s(8, "Internal"),
+        Tag::i(62, 1),
+        Tag::s(102, "}"),
+        Tag::s(100, "AcDbEntity"),
+        Tag::s(8, "Walls"),
+        Tag::i(62, 3),
+        Tag::s(100, "AcDbMText"),
+        Tag::f(10, 4.0),
+        Tag::f(20, 5.0),
+        Tag::f(30, 0.0),
+        Tag::f(40, 2.5),
+        Tag::s(1, "Hello"),
+    ];
+    let Some((common, EntityKind::MText(t))) = entity_from_groups("MTEXT", &tags) else { panic!("MTEXT was not read") };
+    assert_eq!(t.contents, "Hello");
+    assert_eq!((t.insert.x, t.insert.y, t.height), (4.0, 5.0, 2.5));
     assert_eq!(common.layer, "Walls");
     assert_eq!(common.color, cadcraft_color::Color::from_aci(3));
 }

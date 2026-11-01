@@ -33,7 +33,7 @@ pub(super) fn attrib_modes(own: &[Tag]) -> AttribModes {
 /// An ATTRIB's or ATTDEF's groups split at its embedded multiline text (`101 Embedded Object`):
 /// the attribute's own groups and, for a multiline attribute, the MTEXT groups after the marker.
 pub(super) fn split_embedded(tags: &[Tag]) -> (&[Tag], Option<&[Tag]>) {
-    match tags.iter().position(|t| t.code == 101) {
+    match mtext_dxf::embedded_at(tags) {
         Some(i) => (tags.get(..i).unwrap_or(tags), tags.get(i + 1..)),
         None => (tags, None),
     }

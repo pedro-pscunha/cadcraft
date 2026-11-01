@@ -58,16 +58,17 @@ pub(super) fn outside_app(tags: &[Tag]) -> impl Iterator<Item = (usize, &Tag)> {
 /// of it in files without markers, and in lists with no AcDbEntity marker, whose layer and colour
 /// may follow the entity's marker), or up to an embedded object (101). Later groups reuse the
 /// codes: an MTEXT's column width is 48. Markers inside an application-defined group (`102 {`
-/// to `102 }`, whose codes are the application's) do not count.
-fn entity_groups(tags: &[Tag]) -> &[Tag] {
-    let outside_app = || outside_app(tags);
-    let marked = outside_app().any(|(_, t)| t.code == 100 && t.str() == "AcDbEntity");
-    let end = outside_app().find(|(_, t)| (marked && t.code == 100 && t.str() != "AcDbEntity") || t.code == 101).map_or(tags.len(), |(i, _)| i);
-    tags.get(..end).unwrap_or(tags)
+/// to `102 }`, whose codes are the application's) do not count, and neither do their values.
+fn entity_groups(tags: &[Tag]) -> Vec<Tag> {
+    let outside = || outside_app(tags);
+    let marked = outside().any(|(_, t)| t.code == 100 && t.str() == "AcDbEntity");
+    let end = outside().find(|(_, t)| (marked && t.code == 100 && t.str() != "AcDbEntity") || t.code == 101).map_or(tags.len(), |(i, _)| i);
+    outside_app(tags.get(..end).unwrap_or(tags)).map(|(_, t)| t.clone()).collect()
 }
 
 pub(super) fn common(t: &T) -> Common {
-    let e = T(entity_groups(t.0));
+    let groups = entity_groups(t.0);
+    let e = T(&groups);
     let mut c = Common { layer: e.s(8).unwrap_or_else(|| "0".into()), linetype: e.s(6).unwrap_or_else(|| "ByLayer".into()), ..Common::default() };
     if let Some(v) = e.i(62) {
         c.color = Color::from_aci(v as i16);
