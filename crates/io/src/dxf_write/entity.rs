@@ -57,16 +57,23 @@ pub(super) fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: boo
         write_other_entity(w, d, e, owner, paper, cx);
     }
     let mut top_level = false;
-    let mut handles = Vec::new();
+    let mut records: Vec<(Handle, bool)> = Vec::new();
     for tag in w.t.get(start..).unwrap_or_default() {
         if tag.code == 0 {
             top_level = !matches!(tag.str().as_str(), "VERTEX" | "ATTRIB" | "SEQEND");
         } else if top_level && tag.code == 5 {
-            handles.extend(Handle::parse_hex(&tag.str()));
+            records.extend(Handle::parse_hex(&tag.str()).map(|h| (h, false)));
             top_level = false;
+        } else if tag.code == 1000
+            && tag.str() == dxf_ext::PAPER_VIEW
+            && let Some(last) = records.last_mut()
+        {
+            last.1 = true;
         }
     }
-    w.emitted.insert(e.handle, handles);
+    // The paper-space viewport (id 1) CADCraft adds is no member of the drawing (the reader leaves it implicit), so no
+    // draw-order table lists it.
+    w.emitted.insert(e.handle, records.into_iter().filter(|(_, paper_view)| !paper_view).map(|(h, _)| h).collect());
 }
 
 fn heavy_polyline(w: &mut W, e: &Entity, owner: &str, paper: bool, p: &cadcraft_doc::LwPolyline) {
